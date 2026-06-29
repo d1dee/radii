@@ -1,0 +1,116 @@
+import {
+    XHRResultError,
+    XHRResultSuccess,
+    fetchXHR,
+} from '../../libs/utils/fetch.ts';
+
+import { Signal } from '../libs/hooks/useSignal.ts';
+import { StatusQuotas } from '../../../types/index.d.ts';
+import { writeLog } from '../../libs/utils/log.ts';
+import { dayjs } from '../../libs/utils/utils.ts';
+import fetch from 'better-fetch';
+
+export function timeRemaining(duration: plugin.Duration) {
+    return duration
+        .format(
+            'YYYY [year]-MM [month]-DD [day]-HH [hour]-mm [minute]-ss [second]',
+        )
+        .replace(/(?:\s|-){0,}(?:0{2,}\s[a-z]+)/g, '')
+        .split('-')
+        .map((v) => {
+            const duration = Number(v.split(' ')[0] || 0);
+
+            if (duration > 7 && v.split(' ')[1] === 'day') {
+                return `${Math.floor(duration)} week${Math.floor(duration) > 1 ? 's' : ''} ${
+                    duration % 7 == 0
+                        ? ''
+                        : `${duration % 7} day${duration % 7 > 1 ? 's' : ''}`
+                }`;
+            }
+            return duration === 0 ? '' : duration > 1 ? v + 's' : v;
+        })
+        .join(' ');
+}
+
+export async function checkQuotaStatus(
+    signal: Signal<Partial<StatusQuotas[number]> & { width: string }>,
+) {
+    try {
+        const res = await fetchXHR(location.pathname, { status: true });
+        if (!res || res.success === false) return;
+
+        const results = res as
+            | XHRResultError
+            | (XHRResultSuccess & { data: StatusQuotas });
+
+        if (results.success === false || !results.data) {
+            writeLog().warn('Error fetching package status');
+            return;
+        }
+
+        const data = results.data;
+        // Pick the highest if no token belongs to this devices
+        const deviceQuota =
+            data?.find((v) => v.thisDevice) || (data && data[0]);
+
+        signal.value = {
+            ...signal.value,
+            ...deviceQuota,
+            width:
+                Math.max(
+                    0,
+                    Math.min(
+                        100,
+                        (dayjs
+                            .duration(
+                                signal.value?.remainingSessionLength || 0,
+                                'm',
+                            )
+                            .asSeconds() *
+                            100) /
+                            dayjs
+                                .duration(
+                                    signal.value?.initialSessionLength || 0,
+                                    'm',
+                                )
+                                .asSeconds(),
+                    ),
+                ) + '%',
+            initialSessionLength: dayjs
+                .duration(deviceQuota?.initialSessionLength || 0, 'm')
+                .asSeconds(),
+            remainingSessionLength: dayjs
+                .duration(deviceQuota?.remainingSessionLength || 0, 'm')
+                .asSeconds(),
+        };
+
+        return data;
+    } catch (err) {
+        console.warn('Error checking package status', err);
+    }
+}
+
+export async function checkOnlineStatus() {
+    try {
+        const abort = new AbortController();
+        // timeout out 5 seconds
+        const timeoutId = setTimeout(
+            () => abort.abort('Request timed out.'),
+            5e3,
+        );
+
+        const res = await fetch('https://catfact.ninja/fact', {
+            method: 'GET',
+            cache: 'no-store',
+            signal: abort.signal,
+        });
+
+        console.log('Random cat ping fact: ', (await res.json())?.fact);
+        clearTimeout(timeoutId);
+
+        return res.status === 200;
+    } catch (err) {
+        console.warn('Error checking online status', err);
+        return false;
+    }
+}
