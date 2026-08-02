@@ -1,136 +1,57 @@
-import { useContext, useEffect } from 'react';
-import { XHRResultSuccess, fetchXHR } from '../../../libs/utils/fetch.ts';
-import { ModalContext, OrderContext, XHRResponse } from '../../Main.tsx';
+import { useEffect, useRef, useState } from 'react';
+import { Button, Loader, Stack, Text } from '@mantine/core';
+import type { FlowStatus, PaymentXHR } from '../paymentTypes.ts';
 
-import { AiOutlineClose } from 'react-icons/ai';
 import { IoMdRefresh } from 'react-icons/io';
-import { useSignal } from '../../libs/hooks/useSignal.ts';
 
-export function PendingPayment() {
-    const XHRSignal = useContext(XHRResponse);
-    const orderSignal = useContext(OrderContext);
+export function PendingPayment({
+    orderId: _orderId,
+    onStatusChange: _onStatusChange,
+    onRetry,
+}: {
+    orderId: string;
+    onStatusChange: (status: FlowStatus, xhr: PaymentXHR | undefined) => void;
+    onRetry: () => void;
+}) {
+    const [tick, setTick] = useState(0);
 
-    const modalSignal = useContext(ModalContext);
-    const complete = useSignal(false);
+    const tickRef = useRef(0);
 
-    const tick = useSignal(0);
     useEffect(() => {
-        const interval = setInterval(async () => {
-            try {
-                tick.value++;
-                // Check transaction status every 5 seconds
-                if (tick.value % 5 === 0 || complete.value) {
-                    const XHRResponse = await fetchXHR(`/nds/order`, {
-                        method: 'status',
-                        paymentId: orderSignal.peek().orderId,
-                    });
-                    XHRSignal.value = XHRResponse;
-                    if (!XHRResponse) return;
-                    const result = XHRResponse as XHRResultSuccess & {
-                        data: { paymentId: string; state: 'pending' };
-                    };
-                    const data = result?.data;
-
-                    if (data?.state === 'pending') return;
-
-                    orderSignal.value = {
-                        ...orderSignal.value,
-                        status: data?.state || 'pending',
-                    };
-                    XHRSignal.value = XHRResponse;
-                }
-            } catch (err) {
-                console.log(err);
-                orderSignal.value = {
-                    ...orderSignal.value,
-                    status: 'errored',
-                };
-            }
-        }, 2e3);
+        const interval = setInterval(() => {
+            tickRef.current++;
+            setTick(tickRef.current);
+        }, 500);
 
         return () => clearInterval(interval);
     }, []);
 
     return (
-        <div className='flex w-full flex-col items-center gap-8 p-4'>
-            <div className='text-xl font-semibold text-gray-800'>
-                <p className='inline-block w-fit'> Processing Payment</p>
-                <span className='inline-block w-[30px]'>
-                    {'.'.repeat((tick.value % 3) + 1)}
-                </span>
-            </div>
+        <Stack align="center" gap="lg" p="md">
+            <Text size="xl" fw={600} c="gray.8">
+                Processing Payment{'.'.repeat((tick % 3) + 1)}
+            </Text>
 
-            <div className='flex h-fit w-fit rounded-full bg-purple-50'>
-                <div className='m-6 rounded-full bg-purple-100'>
-                    <div className='m-6 rounded-full bg-purple-200'>
-                        <LoadingSVG i={tick.value} />
-                    </div>
-                </div>
-            </div>
+            <Loader size="xl" color="grape" />
 
-            <div className='text-center text-sm text-gray-600'>
-                <p className='text-red-400'>
+            <Stack align="center" gap="xs" ta="center">
+                <Text size="sm" c="red.4">
                     Please do not close this window while we process your
                     payment.
-                </p>
-                <p className='mt-2'>This may take a few seconds.</p>
-            </div>
+                </Text>
+                <Text size="sm" c="gray.6">
+                    This may take a few seconds.
+                </Text>
+            </Stack>
 
-            <div className='flex w-full gap-4'>
-                <button
-                    className='btn btn-outline btn-primary flex-grow shadow-lg hover:bg-purple-200'
-                    onClick={() => (modalSignal.value = 'payment')}
-                >
-                    <span className='flex gap-4 align-middle'>
-                        <span className='h-full'>
-                            <IoMdRefresh />
-                        </span>
-                        <span>Retry</span>
-                    </span>
-                </button>
-                <button
-                    className={`btn btn-outline ${complete.value ? 'btn-disabled cursor-not-allowed' : 'btn-success'} flex-grow shadow-lg`}
-                    onClick={() => (complete.value = true)}
-                >
-                    <span className='flex gap-4 align-middle'>
-                        <span className='h-full'>
-                            <AiOutlineClose />
-                        </span>
-                        <span>Continue</span>
-                    </span>
-                </button>
-            </div>
-        </div>
-    );
-}
-
-function LoadingSVG({ i }: { i: number }) {
-    return (
-        <svg
-            className='h-48 w-48 p-8 text-purple-500'
-            viewBox='0 0 24 24'
-            fill='  #a855f7'
-            xmlns='http://www.w3.org/2000/svg'
-        >
-            <g id='arc3' className={i % 3 >= 2 ? '' : 'hidden'}>
-                <path d='M1.33309 8.07433C0.92156 8.44266 0.886539 9.07485 1.25487 9.48638C1.62319 9.89791 2.25539 9.93293 2.66691 9.5646L1.33309 8.07433Z' />
-                <path d='M21.3331 9.5646C21.7446 9.93293 22.3768 9.89791 22.7451 9.48638C23.1135 9.07485 23.0784 8.44266 22.6669 8.07433L21.3331 9.5646Z' />
-                <path d='M2.66691 9.5646C5.14444 7.34716 8.41371 6 12 6V4C7.90275 4 4.16312 5.54138 1.33309 8.07433L2.66691 9.5646Z' />
-                <path d='M12 6C15.5863 6 18.8556 7.34716 21.3331 9.5646L22.6669 8.07433C19.8369 5.54138 16.0972 4 12 4V6Z' />
-            </g>
-            <g id='arc2' className={i % 3 >= 1 ? '' : 'hidden'}>
-                <path d='M18.0539 13.3403C18.4624 13.7119 19.0949 13.682 19.4665 13.2734C19.8381 12.8649 19.8082 12.2324 19.3997 11.8608L18.0539 13.3403Z' />
-                <path d='M4.60034 11.8608C4.19179 12.2324 4.16185 12.8649 4.53348 13.2734C4.90511 13.682 5.53756 13.7119 5.94611 13.3403L4.60034 11.8608Z' />
-                <path d='M12 11C14.3319 11 16.4546 11.8855 18.0539 13.3403L19.3997 11.8608C17.4466 10.0842 14.8487 9 12 9V11Z' />
-                <path d='M5.94611 13.3403C7.54544 11.8855 9.66815 11 12 11V9C9.15127 9 6.55344 10.0842 4.60034 11.8608L5.94611 13.3403Z' />
-            </g>
-            <g id='arc1' className={i % 3 >= 0 ? '' : 'hidden'}>
-                <path d='M7.96372 15.5605C7.55517 15.9322 7.52524 16.5646 7.89687 16.9732C8.2685 17.3817 8.90095 17.4116 9.3095 17.04L7.96372 15.5605Z' />
-                <path d='M14.6905 17.04C15.099 17.4116 15.7315 17.3817 16.1031 16.9732C16.4748 16.5646 16.4448 15.9322 16.0363 15.5605L14.6905 17.04Z' />
-                <path d='M12 16C13.0367 16 13.9793 16.3931 14.6905 17.04L16.0363 15.5605C14.9713 14.5918 13.5536 14 12 14Z' />
-                <path d='M9.3095 17.04C10.0207 16.3931 10.9633 16 12 16V14C10.4464 14 9.02872 14.5918 7.96372 15.5605L9.3095 17.04Z' />
-            </g>
-            <circle r='1' cx='12' cy='20' />
-        </svg>
+            <Button
+                variant="outline"
+                fullWidth
+                onClick={onRetry}
+                leftSection={<IoMdRefresh />}
+            >
+                Retry
+            </Button>
+        </Stack>
     );
 }

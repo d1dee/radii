@@ -1,72 +1,139 @@
-import { Signal, useSignal } from "../libs/hooks/useSignal.ts";
-import { createContext, createRef, RefObject, useContext, useEffect } from "react";
-import { ModalContext, OrderContext } from "../Main.tsx";
-import { InputPin, VerifyPin } from "./PinInput.tsx";
+import { Button, Input, PinInput, Stack, Text } from '@mantine/core';
+import { schemaResolver, useForm } from '@mantine/form';
+import { loginSchema, signUpSchema } from '@radii/shared';
+import { PhoneNumberInput } from '@radii/ui';
+import { useContext, useState } from 'react';
+import { login, register } from '../../lib/api.ts';
+import { useSession } from '../../lib/auth.ts';
+import { ModalActionsContext } from '../Main.tsx';
 
-import { PhoneNumber } from "./PhoneNumber.tsx";
-import { Terms } from "./Terms.tsx";
-import { validateForm } from "./functions.ts";
-
-export interface FormErrors {
-    pin: string;
-    "verify-pin": string;
-    terms: string;
+type FormValues = {
     phoneNumber: string;
-}
-export const showPassword = createContext<boolean>(false);
-export const FormErrors = createContext<Signal<FormErrors>>(null!);
-export const FormRef = createContext<RefObject<HTMLFormElement>>(null!);
+    pin: string;
+    verifyPin: string;
+};
 
-export function RegisterForm() {
-    const order = useContext(OrderContext);
-    const modal = useContext(ModalContext);
-    const ref = createRef<HTMLFormElement>();
+export function RegisterForm({
+    mode,
+    packageId,
+    price,
+    onClose,
+}: {
+    mode: 'register' | 'login';
+    packageId: string;
+    price: string;
+    onClose: () => void;
+}) {
+    const { startBuy } = useContext(ModalActionsContext);
+    const [submitting, setSubmitting] = useState(false);
+    const [formError, setFormError] = useState<string | null>(null);
+    const { refetch } = useSession();
+    const form = useForm<FormValues>({
+        mode: 'controlled',
+        initialValues: { phoneNumber: '', pin: '', verifyPin: '' },
+        validate: schemaResolver(
+            mode === 'register' ? signUpSchema : loginSchema,
+            { sync: true },
+        ),
+    });
 
-    const errors = useSignal({ phoneNumber: "", pin: "", "verify-pin": "", terms: "" });
+    async function handleSubmit(values: FormValues) {
+        setFormError(null);
+        setSubmitting(true);
 
-    useEffect(() => {
-        errors.value = { phoneNumber: "", pin: "", "verify-pin": "", terms: "" };
-    }, [modal.value]);
+        if (packageId && packageId !== 'null') {
+            localStorage.setItem('packageId', packageId);
+        }
+
+        const result =
+            mode === 'register' ? await register(values) : await login(values);
+
+        setSubmitting(false);
+
+        if (!result.success) {
+            if (result.fieldErrors) form.setErrors(result.fieldErrors);
+            else
+                setFormError(
+                    result.message ?? 'Authentication error, contact support',
+                );
+            return;
+        }
+
+        // The backend set the session cookie; refresh the client-side
+        // session so `useSession` (and the /me loader) react to it.
+        await refetch();
+        onClose();
+
+        if (packageId && packageId !== 'null') {
+            startBuy({ packageId, price });
+            localStorage.removeItem('packageId');
+        }
+    }
 
     return (
-        <FormErrors.Provider value={errors}>
-            <FormRef.Provider value={ref}>
-                <form ref={ref} className="form-control text-sm sm:gap-4 gap-2 sm:space-y-4">
-                    <input
-                        className="hidden"
-                        name="packageId"
-                        value={order.value?.packageId || "null"}
+        <form onSubmit={form.onSubmit(handleSubmit)}>
+            <Stack gap='md'>
+                <PhoneNumberInput
+                    label='Phone number:'
+                    autoComplete='tel'
+                    placeholder='712 345 678'
+                    value={form.values.phoneNumber}
+                    onChange={(value) =>
+                        form.setFieldValue('phoneNumber', value ?? '')
+                    }
+                    error={form.errors.phoneNumber}
+                />
+
+                <Input.Wrapper label='PIN:' error={form.errors.pin}>
+                    <PinInput
+                        value={form.values.pin}
+                        onChange={(value) => form.setFieldValue('pin', value)}
+                        error={!!form.errors.pin}
+                        length={4}
+                        type='number'
+                        inputMode='numeric'
+                        placeholder='•'
+                        getInputProps={() => ({
+                            autoComplete:
+                                mode === 'register'
+                                    ? 'new-password'
+                                    : 'current-password',
+                        })}
                     />
-                    <input className="hidden" name="type" value={modal.value} />
-                    <input className="hidden" name="pin" type="number" value="" />
-                    <input className="hidden" name="verify-pin" type="number" value="" />
-                    <PhoneNumber />
-                    <InputPin />
-                    {modal.value === "register"
-                        ? (
-                            <>
-                                <VerifyPin />
-                                <Terms />
-                            </>
-                        )
-                        : null}
+                </Input.Wrapper>
 
-                    <button
-                        className="btn btn-primary shadow-lg flex-grow mt-4"
-                        onClick={(e) => {
-                            e.preventDefault();
-
-                            validateForm(
-                                ref,
-                                modal.value as "register" | "login",
-                                errors,
-                            );
-                        }}
+                {mode === 'register' ? (
+                    <Input.Wrapper
+                        label='Verify PIN:'
+                        error={form.errors.verifyPin}
                     >
-                        Submit
-                    </button>
-                </form>
-            </FormRef.Provider>
-        </FormErrors.Provider>
+                        <PinInput
+                            value={form.values.verifyPin}
+                            onChange={(value) =>
+                                form.setFieldValue('verifyPin', value)
+                            }
+                            error={!!form.errors.verifyPin}
+                            length={4}
+                            type='number'
+                            inputMode='numeric'
+                            placeholder='•'
+                            getInputProps={() => ({
+                                autoComplete: 'new-password',
+                            })}
+                        />
+                    </Input.Wrapper>
+                ) : null}
+
+                {formError ? (
+                    <Text size='sm' c='red'>
+                        {formError}
+                    </Text>
+                ) : null}
+
+                <Button type='submit' loading={submitting} mt='sm'>
+                    {submitting ? 'Please wait…' : 'Submit'}
+                </Button>
+            </Stack>
+        </form>
     );
 }

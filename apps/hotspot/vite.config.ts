@@ -19,6 +19,11 @@ export default defineConfig(({ mode }) => {
                 '@': path.resolve(__dirname, './src'),
                 '@shared': path.resolve(__dirname, '../shared/src'),
             },
+            // Force a single React/React-DOM instance across the bundle.
+            // Without this, workspace deps like `better-auth` (installed via
+            // bun's .bun cache) can resolve their own React copy, producing
+            // duplicate instances and "Invalid hook call" errors.
+            dedupe: ['react', 'react-dom'],
         },
         server: {
             port: APP_PORT,

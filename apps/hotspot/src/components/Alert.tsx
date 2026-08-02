@@ -1,4 +1,5 @@
-import { useSignal } from "../libs/hooks/useSignal.ts";
+import { Alert } from "@mantine/core";
+import { useState } from "react";
 import type { ReactNode } from "react";
 
 export type T_Alert = {
@@ -7,22 +8,27 @@ export type T_Alert = {
     message: string | ReactNode;
 };
 
+const COLOR_MAP: Record<T_Alert["type"], string> = {
+    "alert-info": "blue",
+    "alert-success": "green",
+    "alert-warning": "yellow",
+    "alert-error": "red",
+};
+
 export function Toast({ values }: { values: T_Alert }) {
-    const isShown = useSignal(true);
-    setTimeout(() => isShown.value = false, 3e3);
+    const [isShown, setIsShown] = useState(true);
+    setTimeout(() => setIsShown(false), 3e3);
+
+    if (!isShown) return null;
+
     return (
-        isShown.value
-            ? (
-                <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-50 w-full max-w-2xl">
-                    <div className="toast toast-top toast-center w-full">
-                        <div
-                            className={`alert min-w-full ${values.style} ${values.type}`}
-                        >
-                            {values.message}
-                        </div>
-                    </div>
-                </div>
-            )
-            : null
+        <Alert
+            color={COLOR_MAP[values.type]}
+            variant="light"
+            radius="md"
+            mt="sm"
+        >
+            {values.message}
+        </Alert>
     );
 }

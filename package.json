@@ -1,0 +1,5 @@
+{
+  "name": "radii",
+  "private": true,
+  "workspaces": ["apps/*"]
+}

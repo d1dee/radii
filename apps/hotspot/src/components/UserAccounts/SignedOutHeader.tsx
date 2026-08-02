@@ -1,35 +1,33 @@
-import { useContext } from "react";
-import { ModalContext } from "../Main.tsx";
+import { Anchor, Button, Group, Stack, Text } from '@mantine/core';
+import { useContext } from 'react';
+import { ModalActionsContext } from '../Main.tsx';
 
 export function SigninSignup() {
-    const modal = useContext(ModalContext);
+    const { openRegister, openLogin } = useContext(ModalActionsContext);
     return (
-        <div className="w-full">
-            <h2 className="text-xl font-semibold mb-2">Hello,</h2>
-            <p className="text-sm text-gray-300 pb-4">
-                Sign in or{" "}
-                <a
-                    className="link"
-                    onClick={() => {
-                        modal.value = "register";
-                    }}
-                >
-                    create an account
-                </a>{" "}
-                to continue.
-            </p>
-            <div className="flex flex-col items-end">
-                <div
-                    className="btn "
-                    onClick={() => {
-                        modal.value = "login";
-                    }}
-                >
-                    <span className="mx-4">
-                        Sign in
-                    </span>
-                </div>
-            </div>
-        </div>
+        <Stack gap='sm' w='100%'>
+            <Stack gap='sm'>
+                <Text size='xl' fw={600}>
+                    Hello,
+                </Text>
+                <Text size='sm' c='gray.3'>
+                    Sign in or{' '}
+                    <Anchor
+                        component='button'
+                        type='button'
+                        c='gray.1'
+                        onClick={() => openRegister()}
+                    >
+                        create an account
+                    </Anchor>{' '}
+                    to continue.
+                </Text>
+            </Stack>
+            <Group justify='flex-end'>
+                <Button variant='filled' onClick={() => openLogin()}>
+                    Sign in
+                </Button>
+            </Group>
+        </Stack>
     );
 }

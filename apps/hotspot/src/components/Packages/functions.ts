@@ -1,23 +1,16 @@
-import {
-    XHRResultError,
-    XHRResultSuccess,
-    fetchXHR,
-} from '../../libs/utils/fetch.ts';
+import type { Dispatch, SetStateAction } from 'react';
+import type { StatusQuotas } from '../../types/index.ts';
+import { dayjs } from '../../lib/dayjs.ts';
+import { getStatus } from '../../lib/api.ts';
 
-import { Signal } from '../libs/hooks/useSignal.ts';
-import { StatusQuotas } from '../../../types/index.d.ts';
-import { writeLog } from '../../libs/utils/log.ts';
-import { dayjs } from '../../libs/utils/utils.ts';
-import fetch from 'better-fetch';
-
-export function timeRemaining(duration: plugin.Duration) {
+export function timeRemaining(duration: ReturnType<typeof dayjs.duration>) {
     return duration
         .format(
             'YYYY [year]-MM [month]-DD [day]-HH [hour]-mm [minute]-ss [second]',
         )
         .replace(/(?:\s|-){0,}(?:0{2,}\s[a-z]+)/g, '')
         .split('-')
-        .map((v) => {
+        .map((v: string) => {
             const duration = Number(v.split(' ')[0] || 0);
 
             if (duration > 7 && v.split(' ')[1] === 'day') {
@@ -33,28 +26,19 @@ export function timeRemaining(duration: plugin.Duration) {
 }
 
 export async function checkQuotaStatus(
-    signal: Signal<Partial<StatusQuotas[number]> & { width: string }>,
+    setValue: Dispatch<
+        SetStateAction<Partial<StatusQuotas[number]> & { width: string }>
+    >,
 ) {
     try {
-        const res = await fetchXHR(location.pathname, { status: true });
-        if (!res || res.success === false) return;
+        const data = await getStatus();
+        if (!data) return;
 
-        const results = res as
-            | XHRResultError
-            | (XHRResultSuccess & { data: StatusQuotas });
-
-        if (results.success === false || !results.data) {
-            writeLog().warn('Error fetching package status');
-            return;
-        }
-
-        const data = results.data;
         // Pick the highest if no token belongs to this devices
-        const deviceQuota =
-            data?.find((v) => v.thisDevice) || (data && data[0]);
+        const deviceQuota = data?.find((v) => v.thisDevice) || data[0];
 
-        signal.value = {
-            ...signal.value,
+        setValue((prev) => ({
+            ...prev,
             ...deviceQuota,
             width:
                 Math.max(
@@ -62,17 +46,11 @@ export async function checkQuotaStatus(
                     Math.min(
                         100,
                         (dayjs
-                            .duration(
-                                signal.value?.remainingSessionLength || 0,
-                                'm',
-                            )
+                            .duration(prev?.remainingSessionLength || 0, 'm')
                             .asSeconds() *
                             100) /
                             dayjs
-                                .duration(
-                                    signal.value?.initialSessionLength || 0,
-                                    'm',
-                                )
+                                .duration(prev?.initialSessionLength || 0, 'm')
                                 .asSeconds(),
                     ),
                 ) + '%',
@@ -82,7 +60,7 @@ export async function checkQuotaStatus(
             remainingSessionLength: dayjs
                 .duration(deviceQuota?.remainingSessionLength || 0, 'm')
                 .asSeconds(),
-        };
+        }));
 
         return data;
     } catch (err) {

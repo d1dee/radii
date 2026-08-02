@@ -1,43 +1,56 @@
+import { Box, Group, Paper, Progress, Stack, Text } from '@mantine/core';
+import { useContext, useEffect, useState } from 'react';
 import { IoMdArrowDown, IoMdArrowUp } from 'react-icons/io';
-import { useContext, useEffect } from 'react';
-import { checkOnlineStatus, checkQuotaStatus, timeRemaining } from './functions.ts';
+import {
+    checkOnlineStatus,
+    checkQuotaStatus,
+    timeRemaining,
+} from './functions.ts';
 
-import { useSignal } from '../libs/hooks/useSignal.ts';
 import humanFormat from 'human-format';
-import { StatusQuotas } from '../../../types/index.d.ts';
-import { dayjs } from '../../libs/utils/utils.ts';
+import { dayjs } from '../../lib/dayjs.ts';
+import type { StatusQuotas } from '../../types/index.ts';
 import { Toast } from '../Alert.tsx';
 import { QuotaContext } from '../Main.tsx';
 import { ConnectedDevice } from './ConnectedDevices.tsx';
 import { dataScale } from './PackagePricing.tsx';
 
 export function CurrentPackage() {
-    const onlineStatus = useSignal<{
+    const [onlineStatus, setOnlineStatus] = useState<{
         state: 'online' | 'offline' | '';
         prevState: 'online' | 'offline' | '';
     }>({ state: '', prevState: '' });
-    const statusQuotasSignal = useContext(QuotaContext);
+    const [statusQuotas, setStatusQuotas] = useContext(QuotaContext);
 
     // Pick the highest if no token belongs to this devices
     const deviceQuota =
-        statusQuotasSignal.value?.find((v) => v.thisDevice) ||
-        (statusQuotasSignal.value && statusQuotasSignal.value[0]);
+        statusQuotas?.find((v) => v.thisDevice) ||
+        (statusQuotas && statusQuotas[0]);
 
-    const signal = useSignal<Partial<StatusQuotas[number]> & { width: string }>({
+    const [signal, setSignal] = useState<
+        Partial<StatusQuotas[number]> & { width: string }
+    >({
         ...deviceQuota,
         width:
-            !deviceQuota?.initialSessionLength || !deviceQuota?.remainingSessionLength
+            !deviceQuota?.initialSessionLength ||
+            !deviceQuota?.remainingSessionLength
                 ? '0%'
                 : Math.max(
                       0,
                       Math.min(
                           100,
                           (dayjs
-                              .duration(deviceQuota?.remainingSessionLength || 0, 'm')
+                              .duration(
+                                  deviceQuota?.remainingSessionLength || 0,
+                                  'm',
+                              )
                               .asSeconds() *
                               100) /
                               dayjs
-                                  .duration(deviceQuota?.initialSessionLength || 0, 'm')
+                                  .duration(
+                                      deviceQuota?.initialSessionLength || 0,
+                                      'm',
+                                  )
                                   .asSeconds(),
                       ),
                   ) + '%',
@@ -52,8 +65,8 @@ export function CurrentPackage() {
     /* Run quota status check every 10 seconds */
     useEffect(() => {
         const statusCheck = async () => {
-            const statusQuotas = await checkQuotaStatus(signal);
-            statusQuotas && (statusQuotasSignal.value = statusQuotas);
+            const newStatusQuotas = await checkQuotaStatus(setSignal);
+            newStatusQuotas && setStatusQuotas(newStatusQuotas);
         };
 
         const interval = setInterval(statusCheck, 10e3);
@@ -68,9 +81,15 @@ export function CurrentPackage() {
 
             // update online status
             if (isOnline) {
-                onlineStatus.value = { prevState: onlineStatus.value.state, state: 'online' };
+                setOnlineStatus((prev) => ({
+                    prevState: prev.state,
+                    state: 'online',
+                }));
             } else {
-                onlineStatus.value = { prevState: onlineStatus.value.state, state: 'offline' };
+                setOnlineStatus((prev) => ({
+                    prevState: prev.state,
+                    state: 'offline',
+                }));
             }
         };
         // use exponensial backoff for online status check and update online status after three attempts
@@ -82,101 +101,148 @@ export function CurrentPackage() {
         return () => clearInterval(interval);
     }, []);
 
-    const { downloadRate, uploadRate, width, remainingSessionLength, deviceQuotaId } = signal.value;
+    const {
+        downloadRate,
+        uploadRate,
+        width,
+        remainingSessionLength,
+        deviceQuotaId,
+    } = signal;
+
+    const progressValue = Math.max(0, Math.min(100, parseFloat(width) || 0));
 
     return (
-        <div className='w-full rounded-2xl bg-white px-4 py-6 shadow-xl'>
-            <h3 className='text-lg font-semibold'>Active Package Details</h3>
-            <div className='mt-4'>
-                <div className='flex items-center justify-between'>
-                    <p className='text-sm font-medium'>Time remaining</p>
-                    <p className='text-sm font-medium'>
-                        {timeRemaining(dayjs.duration(remainingSessionLength || 0, 's'))}
-                    </p>
-                </div>
-                <div className='relative my-2 h-2 rounded-full bg-red-200'>
-                    <div
-                        className={`absolute left-0 top-0 h-2 rounded-full bg-purple-500`}
-                        style={{ width: width }}
-                    ></div>
-                </div>
-                <div className='space-y-2'>
-                    <div className='flex items-center justify-between gap-2 text-sm text-gray-500'>
-                        <div className='flex items-center'>
-                            Devices: {statusQuotasSignal.value?.length || ' _'}
-                        </div>
-                        <div className='flex items-center'>
+        <Paper shadow='xl' radius='lg' p='lg' mt='md'>
+            <Stack gap='md'>
+                <Text size='lg' fw={600}>
+                    Active Package Details
+                </Text>
+
+                <Group justify='space-between'>
+                    <Text size='sm' fw={500}>
+                        Time remaining
+                    </Text>
+                    <Text size='sm' fw={500}>
+                        {timeRemaining(
+                            dayjs.duration(remainingSessionLength || 0, 's'),
+                        )}
+                    </Text>
+                </Group>
+
+                <Progress
+                    value={progressValue}
+                    size='sm'
+                    radius='xl'
+                    color='grape'
+                />
+
+                <Stack gap='xs'>
+                    <Group justify='space-between' gap='sm'>
+                        <Text size='sm' c='dimmed'>
+                            Devices: {statusQuotas?.length || ' _'}
+                        </Text>
+                        <Text size='sm' c='dimmed'>
                             Package info:{' '}
                             {deviceQuota?.downloadRate
                                 ? `${humanFormat(deviceQuota.downloadRate, {
                                       scale: dataScale,
                                   })} - Ksh ${deviceQuota.price.toLocaleString()}`
                                 : ' _'}
-                        </div>
-                        <div className='flex items-center gap-2'>
-                            <div className='inline-flex items-center gap-2'>
+                        </Text>
+                        <Group gap='sm'>
+                            <Group gap='xs'>
                                 <IoMdArrowDown />
-                                <p>
+                                <Text size='sm' c='dimmed'>
                                     {downloadRate && downloadRate !== 0
-                                        ? humanFormat(downloadRate, { scale: dataScale })
+                                        ? humanFormat(downloadRate, {
+                                              scale: dataScale,
+                                          })
                                         : ' _'}
-                                </p>
-                            </div>
-                            <div className='inline-flex items-center gap-2'>
+                                </Text>
+                            </Group>
+                            <Group gap='xs'>
                                 <IoMdArrowUp />
-                                <p>
+                                <Text size='sm' c='dimmed'>
                                     {uploadRate && uploadRate !== 0
-                                        ? humanFormat(uploadRate, { scale: dataScale })
+                                        ? humanFormat(uploadRate, {
+                                              scale: dataScale,
+                                          })
                                         : ' _'}
-                                </p>
-                            </div>
-                        </div>
-                    </div>
-                    <div className='flex flex-wrap items-center justify-between gap-2 text-sm text-gray-500'>
-                        <div className='flex items-center'>Quota ID: {deviceQuotaId || ' _'}</div>
-                        <div className='flex items-center'>
-                            Parent Quota: {deviceQuota?.parentQuotaId || ' _'}
-                        </div>
-                    </div>
-                    <ConnectedDevice />
-                </div>
-            </div>
-            {/* <button className="w-full mt-4 border border-gray-300 py-2 rounded-lg text-gray-700 hover:bg-gray-100">
-                Sign
-            </button> */}
-            {onlineStatus.value.state === 'online' ? <OnlineAlert /> : null}
+                                </Text>
+                            </Group>
+                        </Group>
+                    </Group>
 
-            {onlineStatus.value.state === 'offline' ? (
-                <OfflineAlert
-                    hasSession={!!(remainingSessionLength && remainingSessionLength > 0)}
-                />
-            ) : null}
-        </div>
+                    <Group justify='space-between' gap='sm'>
+                        <Text size='sm' c='dimmed'>
+                            Quota ID: {deviceQuotaId || ' _'}
+                        </Text>
+                        <Text size='sm' c='dimmed'>
+                            Parent Quota: {deviceQuota?.parentQuotaId || ' _'}
+                        </Text>
+                    </Group>
+
+                    <Box>
+                        <ConnectedDevice />
+                    </Box>
+                </Stack>
+
+                {onlineStatus.state === 'online' ? <OnlineAlert /> : null}
+
+                {onlineStatus.state === 'offline' ? (
+                    <OfflineAlert
+                        hasSession={
+                            !!(
+                                remainingSessionLength &&
+                                remainingSessionLength > 0
+                            )
+                        }
+                    />
+                ) : null}
+            </Stack>
+        </Paper>
     );
 }
 
 function OnlineAlert() {
-    const msg = (
-        <div>
-            <h3 className='font-bold'>You are back online.</h3>
-            <div className='text-xs'>You can now surf the internet.</div>
-        </div>
+    return (
+        <Toast
+            values={{
+                message: (
+                    <Stack gap={0}>
+                        <Text fw={700}>You are back online.</Text>
+                        <Text size='xs'>You can now surf the internet.</Text>
+                    </Stack>
+                ),
+                style: 'alert-soft',
+                type: 'alert-success',
+            }}
+        />
     );
-    return <Toast values={{ message: msg, style: 'alert-soft', type: 'alert-success' }} />;
 }
 
 function OfflineAlert({ hasSession }: { hasSession: boolean }) {
-    const msg = (
-        <div>
-            <h3 className='font-bold'>You are offline.</h3>
-            {hasSession ? (
-                <div className='text-xs'>Turn your wifi off and on again.</div>
-            ) : (
-                <div className='text-xs'>
-                    Purchase one of the packages below to access the internet.
-                </div>
-            )}
-        </div>
+    return (
+        <Toast
+            values={{
+                message: (
+                    <Stack gap={0}>
+                        <Text fw={700}>You are offline.</Text>
+                        {hasSession ? (
+                            <Text size='xs'>
+                                Turn your wifi off and on again.
+                            </Text>
+                        ) : (
+                            <Text size='xs'>
+                                Purchase one of the packages below to access the
+                                internet.
+                            </Text>
+                        )}
+                    </Stack>
+                ),
+                style: 'alert-soft',
+                type: 'alert-error',
+            }}
+        />
     );
-    return <Toast values={{ message: msg, style: 'alert-soft', type: 'alert-error' }} />;
 }

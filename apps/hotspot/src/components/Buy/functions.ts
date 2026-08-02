@@ -1,20 +1,27 @@
-import { z } from "zod";
-import { parseServiceProvider } from "../../libs/utils/serviceProviderParser.ts";
-import { zPhoneNumber } from "../RegisterForm/zod.ts";
+import { z } from 'zod';
+import { parseServiceProvider } from '@radii/shared';
+
+const zPhoneNumber = z
+    .string()
+    .min(1, 'Phone number is required')
+    .transform((v) => {
+        const provider = parseServiceProvider(v);
+        return provider instanceof Error ? v : provider.phoneNumber;
+    });
 
 export function zValidate(data: unknown) {
-    return z.object({
-        phoneNumber: zPhoneNumber,
-        packageId: z.string().max(16).min(8),
-    })
+    return z
+        .object({
+            phoneNumber: zPhoneNumber,
+            packageId: z.string().max(32).min(8),
+        })
         .superRefine((v, ctx) => {
             const provider = parseServiceProvider(v.phoneNumber);
-
-            if (provider?.name !== "safaricom") {
+            if (provider instanceof Error || provider.name !== 'safaricom') {
                 ctx.addIssue({
-                    path: ["phoneNumber"],
+                    path: ['phoneNumber'],
                     code: z.ZodIssueCode.custom,
-                    message: "Only M-Pesa payment is supported at the moment.",
+                    message: 'Only M-Pesa payment is supported at the moment.',
                 });
             }
         })
@@ -22,12 +29,11 @@ export function zValidate(data: unknown) {
 }
 
 export function validateForm(data: unknown) {
-    console.log("formData", data);
-
     const results = zValidate(data);
     if (!results.success) {
-        return new Error(results.error.formErrors.fieldErrors?.phoneNumber?.shift() || "");
-    } else {
-        return { ...results.data, method: "order" };
+        return new Error(
+            results.error.flatten().fieldErrors?.phoneNumber?.shift() || '',
+        );
     }
+    return { ...results.data, method: 'order' };
 }

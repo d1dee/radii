@@ -1,15 +1,15 @@
-import { dayjs, upperFirstCase } from '../../libs/utils/utils.ts';
+import { upperFirstCase } from '@radii/shared';
+import { Button, Card, Group, SimpleGrid, Stack, Text } from '@mantine/core';
+import { dayjs } from '../../lib/dayjs.ts';
 import {
-    ModalContext,
-    OrderContext,
+    ModalActionsContext,
     PackagesContext,
     SessionContext,
 } from '../Main.tsx';
 
-import { useSignal } from '../libs/hooks/useSignal.ts';
 import humanFormat from 'human-format';
-import { useContext } from 'react';
-import { Package } from '../../../types/index.d.ts';
+import { useContext, useState } from 'react';
+import type { Package } from '../../types/index.ts';
 
 type Packages = [string, Array<Package>];
 
@@ -29,92 +29,96 @@ function getPackages(title: string, packages: Array<Packages>) {
 export function PackagePricing() {
     const pkgContext = useContext(PackagesContext);
 
-    const stateSignal = useSignal({
+    const [state, setState] = useState({
         selectedTitle: pkgContext[0][0],
         packages: pkgContext[0][1],
     });
 
-    const modal = useContext(ModalContext);
+    const { startBuy, openLogin } = useContext(ModalActionsContext);
     const session = useContext(SessionContext);
-    const order = useContext(OrderContext);
-    const { selectedTitle, packages } = stateSignal.value;
+    const { selectedTitle, packages } = state;
 
-    function initiateOrderFlow(pkg: Required<Package>) {
-        order.value = {
-            ...order.value,
+    function initiateOrderFlow(pkg: Package) {
+        const seed = {
             packageId: pkg.packageId,
             price: String(pkg.price),
         };
 
-        if (session && session.expiresAt > Date.now()) modal.value = 'payment';
-        else modal.value = 'login';
+        if (session && session.expiresAt > Date.now()) startBuy(seed);
+        else openLogin(pkg.packageId, String(pkg.price));
     }
 
     return (
-        <div className='mb-4 w-full rounded-2xl bg-white shadow-xl'>
-            <div className='p-4'>
-                <h3 className='mb-4 w-full justify-center text-lg font-semibold'>
-                    Our Packages
-                </h3>
-                {/* <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,_minmax(min(100%,_calc(100%/5)),_1fr))]">
-                 */}
-                <div className='mx-auto grid max-w-xl gap-4 [grid-template-columns:repeat(auto-fit,_minmax(min(100%,_calc(100%/5)),_1fr))]'>
-                    {pkgContext.map(([title, _]) => (
-                        <div
-                            className={`btn hover:text-primary min-w-fit rounded-lg bg-gray-100 hover:bg-purple-100 ${
-                                title.toLowerCase() ===
-                                    selectedTitle.toLowerCase() &&
-                                'btn-outline bg-purple-200'
-                            }`}
+        <Stack gap="md" mt="md">
+            <Text size="lg" fw={600}>
+                Our Packages
+            </Text>
+
+            <SimpleGrid
+                cols={{ base: 2, xs: 3, sm: 4, md: 5 }}
+                spacing="md"
+            >
+                {pkgContext.map(([title, _]) => {
+                    const active =
+                        title.toLowerCase() ===
+                        selectedTitle.toLowerCase();
+                    return (
+                        <Button
+                            key={title}
+                            variant={active ? 'filled' : 'light'}
+                            color={active ? 'grape' : 'gray'}
                             onClick={() => {
-                                stateSignal.value = {
+                                setState({
                                     selectedTitle: title,
                                     packages: getPackages(title, pkgContext),
-                                };
+                                });
                             }}
                         >
                             {upperFirstCase(title)}
-                        </div>
-                    ))}
-                </div>
-            </div>
+                        </Button>
+                    );
+                })}
+            </SimpleGrid>
 
-            {packages.map((pkg) => (
-                <div className='card m-4 rounded-2xl bg-gray-100 shadow hover:bg-purple-100'>
-                    <div className='p-4'>
-                        <div className='flex items-center justify-between'>
-                            <div className='flex flex-col justify-between gap-3'>
-                                <p className='text-gray-500'>{pkg.title}</p>
+            <Stack gap="md">
+                {packages.map((pkg) => (
+                    <Card key={pkg.packageId} shadow="sm" radius="lg" withBorder>
+                        <Stack gap="md">
+                            <Group justify="space-between" align="flex-start">
+                                <Stack gap="xs">
+                                    <Text c="dimmed">{pkg.title}</Text>
+                                    <Text size="32px" fw={700}>
+                                        {humanFormat(pkg.downloadRate, {
+                                            scale: dataScale,
+                                        })}
+                                    </Text>
+                                </Stack>
 
-                                <h2 className='max-w-fit text-4xl font-bold'>
-                                    {humanFormat(pkg.downloadRate, {
-                                        scale: dataScale,
-                                    })}
-                                </h2>
-                            </div>
+                                <Stack gap="xs" align="flex-end">
+                                    <Text size="sm" c="dimmed">
+                                        {dayjs
+                                            .duration(
+                                                pkg.initialSessionLength,
+                                                'm',
+                                            )
+                                            .humanize()}
+                                    </Text>
+                                    <Text size="xl" fw={700}>
+                                        Ksh {pkg.price.toLocaleString()}
+                                    </Text>
+                                </Stack>
+                            </Group>
 
-                            <div className='flex flex-col items-end justify-between gap-3'>
-                                <p className='text-sm text-gray-500'>
-                                    {dayjs
-                                        .duration(pkg.initialSessionLength, 'm')
-                                        .humanize()}
-                                </p>
-
-                                <p className='text-2xl font-bold'>
-                                    Ksh {pkg.price.toLocaleString()}
-                                </p>
-                            </div>
-                        </div>
-
-                        <div
-                            className='btn mt-4 w-full rounded-lg bg-purple-600 px-4 py-2 text-white hover:bg-purple-700'
-                            onClick={() => initiateOrderFlow(pkg as Package)}
-                        >
-                            Buy Now
-                        </div>
-                    </div>
-                </div>
-            ))}
-        </div>
+                            <Button
+                                fullWidth
+                                onClick={() => initiateOrderFlow(pkg)}
+                            >
+                                Buy Now
+                            </Button>
+                        </Stack>
+                    </Card>
+                ))}
+            </Stack>
+        </Stack>
     );
 }

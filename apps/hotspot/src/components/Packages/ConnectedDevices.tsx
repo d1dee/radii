@@ -1,15 +1,16 @@
-import { AiOutlineCheckCircle, AiOutlineExclamationCircle } from "react-icons/ai";
-import { ModalContext, QuotaContext } from "../Main.tsx";
+import { Alert, Button, Stack } from '@mantine/core';
+import { AiOutlineCheckCircle, AiOutlineExclamationCircle } from 'react-icons/ai';
+import { ModalActionsContext, QuotaContext } from '../Main.tsx';
 
-import { useContext } from "react";
+import { useContext } from 'react';
 
 export function ConnectedDevice() {
-    const modal = useContext(ModalContext);
-    const statusQuotasSignal = useContext(QuotaContext);
-    const isThisDevice = !!statusQuotasSignal.value?.some((v) => v.thisDevice);
+    const { openConnectedDevices } = useContext(ModalActionsContext);
+    const [statusQuotas] = useContext(QuotaContext);
+    const isThisDevice = !!statusQuotas?.some((v) => v.thisDevice);
     const quotaMap = new Map();
 
-    statusQuotasSignal.value?.forEach((v) => {
+    statusQuotas?.forEach((v) => {
         if (quotaMap.has(v.parentQuotaId)) {
             quotaMap.set(v.parentQuotaId, [...quotaMap.get(v.parentQuotaId), v]);
         } else {
@@ -17,103 +18,94 @@ export function ConnectedDevice() {
         }
     });
 
-    const canConnect = Array.from(quotaMap.entries()).some(([_, v]) => v.length < v[0]?.maxDevices);
+    const canConnect = Array.from(quotaMap.entries()).some(
+        ([_, v]) => v.length < v[0]?.maxDevices,
+    );
 
-    if (Array.isArray(statusQuotasSignal.value)) {
-        // At if we don't have an entry with this device set to true but the list is not empty, assume device limit has been reached
-        if (statusQuotasSignal.value.length > 0) {
-            // If this device has not quota assume the limit has been reached
+    if (Array.isArray(statusQuotas)) {
+        if (statusQuotas.length > 0) {
             if (!isThisDevice) {
                 return (
-                    <>
-                        <div className=" flex justify-between  items-center  gap-4 p-4 bg-purple-50 border border-red-200 rounded-xl">
-                            <div className="gap-4 flex  items-center ">
-                                <AiOutlineExclamationCircle size={24} className="text-red-500" />
+                    <Alert
+                        color="red"
+                        variant="light"
+                        icon={<AiOutlineExclamationCircle size={24} />}
+                        title={
+                            canConnect
+                                ? "This device doesn't have an active quota"
+                                : 'Maximum devices reached'
+                        }
+                        mt="md"
+                    >
+                        <Stack gap="sm">
+                            <span>
                                 {canConnect
-                                    ? (
-                                        <div>
-                                            <h3 className="font-bold ">
-                                                This device doesn't have an active quota
-                                            </h3>
-                                            <span className="text-xs ">
-                                                Disconnect and connect wifi to activate with an
-                                                existing quota.
-                                            </span>
-                                        </div>
-                                    )
-                                    : (
-                                        <div>
-                                            <h3 className="font-bold ">Maximum devices reached</h3>
-                                            <span className="text-xs ">
-                                                All Packages are full, buy a new package or
-                                                disconect an existing device.
-                                            </span>
-                                        </div>
-                                    )}
-                            </div>
-                            <button
-                                className="btn hover:bg-red-200"
-                                onClick={() => modal.value = "connectedDevices"}
+                                    ? 'Disconnect and connect wifi to activate with an existing quota.'
+                                    : 'All Packages are full, buy a new package or disconect an existing device.'}
+                            </span>
+                            <Button
+                                variant="light"
+                                color="red"
+                                onClick={openConnectedDevices}
+                                size="xs"
                             >
                                 See Connected
-                            </button>
-                        </div>
-                    </>
+                            </Button>
+                        </Stack>
+                    </Alert>
                 );
             } else {
                 return (
-                    <>
-                        <div className=" flex justify-between  items-center  gap-4 p-4 bg-green-50 border border-green-200 rounded-xl">
-                            <div className="gap-4 flex  items-center ">
-                                <AiOutlineCheckCircle size={24} className="text-green-500" />
-                                <div>
-                                    <h3 className="font-bold ">This device is active.</h3>
-                                    <span className="text-xs ">
-                                        You can manage your connected devices here.
-                                    </span>
-                                </div>
-                            </div>
-                            <button
-                                className="btn hover:bg-green-100"
-                                onClick={() => modal.value = "connectedDevices"}
+                    <Alert
+                        color="green"
+                        variant="light"
+                        icon={<AiOutlineCheckCircle size={24} />}
+                        title="This device is active."
+                        mt="md"
+                    >
+                        <Stack gap="sm">
+                            <span>
+                                You can manage your connected devices here.
+                            </span>
+                            <Button
+                                variant="light"
+                                color="green"
+                                onClick={openConnectedDevices}
+                                size="xs"
                             >
                                 See Connected
-                            </button>
-                        </div>
-                    </>
+                            </Button>
+                        </Stack>
+                    </Alert>
                 );
             }
         }
-        if (statusQuotasSignal.value?.length === 0) {
+        if (statusQuotas?.length === 0) {
             return (
-                <div className=" flex justify-between  items-center  gap-4 p-4 bg-purple-50 border border-red-200 rounded-xl">
-                    <div className="gap-4 flex  items-center ">
-                        <AiOutlineExclamationCircle size={24} className="text-red-500" />
-                        <div>
-                            <h3 className="font-bold ">No active package found</h3>
-                            <span className="text-xs ">
-                                Buy a new package below to be able to browse the internet.
-                            </span>
-                        </div>
-                    </div>
-                </div>
+                <Alert
+                    color="red"
+                    variant="light"
+                    icon={<AiOutlineExclamationCircle size={24} />}
+                    title="No active package found"
+                    mt="md"
+                >
+                    Buy a new package below to be able to browse the internet.
+                </Alert>
             );
         }
         return null;
     } else {
         return (
-            <div className=" flex justify-between  items-center  gap-4 p-4 bg-purple-50 border border-red-200 rounded-xl">
-                <div className="gap-4 flex  items-center ">
-                    <AiOutlineExclamationCircle size={24} className="text-red-500" />
-                    <div>
-                        <h3 className="font-bold ">User not logged in</h3>
-                        <span className="text-xs ">
-                            Login with your username and pin to be able to see you active quota
-                            status.
-                        </span>
-                    </div>
-                </div>
-            </div>
+            <Alert
+                color="red"
+                variant="light"
+                icon={<AiOutlineExclamationCircle size={24} />}
+                title="User not logged in"
+                mt="md"
+            >
+                Login with your username and pin to be able to see you active
+                quota status.
+            </Alert>
         );
     }
 }

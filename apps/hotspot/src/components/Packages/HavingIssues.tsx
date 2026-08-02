@@ -1,115 +1,132 @@
-import { useSignal } from '../libs/hooks/useSignal.ts';
+import { useState } from 'react';
+import { Button, Paper, Stack, Text, TextInput } from '@mantine/core';
 
 import { AdminContacts } from '../../components/AdminContacts.tsx';
-import { fetchXHR } from '../../libs/utils/fetch.ts';
+
+type VerifyResponse = {
+    success: boolean;
+    data?: { status?: string; message?: string };
+    error?: string;
+};
+
+async function verifyTransactionRequest(
+    transactionId: string,
+): Promise<VerifyResponse | undefined> {
+    try {
+        const res = await fetch('/api/hotspot/verify-transaction', {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ transactionId }),
+        });
+        return (await res.json()) as VerifyResponse;
+    } catch {
+        return undefined;
+    }
+}
 
 export function HavingIssues({
     adminContacts,
 }: {
     adminContacts: { ADMIN_TEL: string; ADMIN_WHATSAPP: string };
 }) {
-    const message = useSignal(undefined) as import('../libs/hooks/useSignal.ts').Signal<
+    const [message, setMessage] = useState<
         | {
               success?: true;
               message: string;
               data?: Record<PropertyKey, unknown>;
           }
         | undefined
-    >;
+    >(undefined);
+    const [value, setValue] = useState('');
 
-    const verifyTransaction = (e: HTMLFormElement) => {
-        const value = new FormData(e).get('transactionMessage') as string;
-        // Parse first word (M-pesa transaction ID is usually the first word)
+    const verifyTransaction = (e: React.FormEvent<HTMLFormElement>) => {
+        e.preventDefault();
         const transactionId = value.trim().split(/\s+/)[0];
         console.log('Transaction ID:', transactionId);
 
-        // validate transaction ID format
         const isValidTransactionId = /^[0-9A-Z]{10}$/i.test(transactionId);
         if (!isValidTransactionId) {
-            message.value = { message: 'Invalid transaction ID format' };
-
+            setMessage({ message: 'Invalid transaction ID format' });
             return;
         } else {
-            message.value = {
-                success: true,
-                message: 'Processing...',
-            };
+            setMessage({ success: true, message: 'Processing...' });
         }
-
-        // Call the API to verify the transaction
 
         const interval = setInterval(async () => {
             try {
-                const res = await fetchXHR('/nds/verify-transaction', {
-                    transactionId: transactionId,
-                });
+                const res = await verifyTransactionRequest(transactionId);
                 if (!res || res.success === false) {
                     clearInterval(interval);
-                    message.value = {
-                        message:
-                            res?.message || 'Transaction verification failed',
-                    };
+                    setMessage({
+                        message: res?.error || 'Transaction verification failed',
+                    });
                 } else {
-                    if (res.message === 'pending') {
-                        message.value = {
-                            success: true,
-                            message: 'Processing...',
-                        };
+                    const status =
+                        res.data?.status || res.data?.message || 'pending';
+                    if (status === 'pending') {
+                        setMessage({ success: true, message: 'Processing...' });
                     } else {
                         clearInterval(interval);
-                        message.value = {
-                            success: true,
-                            message: res.message,
-                        };
+                        setMessage({ success: true, message: status });
                     }
                 }
             } catch (error) {
                 console.error('Error verifying transaction:', error);
-                message.value = { message: 'Error verifying transaction.' };
+                setMessage({ message: 'Error verifying transaction.' });
             }
         }, 3e3);
     };
 
     return (
-        <div className='flex w-full flex-col gap-4 rounded-2xl bg-white px-4 py-6 shadow-xl'>
-            <h3 className='text-lg font-semibold'>Having Issues?</h3>
+        <Stack gap="md" mt="md">
+            <Paper shadow="xl" radius="lg" p="lg">
+                <Stack gap="md">
+                    <Text size="lg" fw={600}>
+                        Having Issues?
+                    </Text>
 
-            {/* Transaction Verification Section */}
-            <div className='flex flex-col gap-3 rounded-2xl bg-purple-100 p-4'>
-                <h4 className='font-medium'>Verify Transaction:</h4>
+                    <Paper bg="grape.1" radius="lg" p="md">
+                        <Stack gap="sm">
+                            <Text fw={500}>Verify Transaction:</Text>
 
-                <form
-                    onSubmit={(e) => {
-                        e.preventDefault();
-                        verifyTransaction(e.currentTarget);
-                    }}
-                    className='form-control'
-                >
-                    <div className={`flex gap-4`}>
-                        <input
-                            type='text'
-                            placeholder='Enter transaction ID or paste your M-pesa message here'
-                            className={`input flex-1 rounded-lg text-sm ${!message.value ? 'input-primary' : message.value.success ? 'input-success' : 'input-error'}`}
-                            name='transactionMessage'
-                            required
-                        />
-                        <button
-                            className='btn btn-primary px-4 py-2 text-sm'
-                            type='submit'
-                        >
-                            Verify
-                        </button>
-                    </div>
+                            <form onSubmit={verifyTransaction}>
+                                <Stack gap="xs">
+                                    <TextInput
+                                        placeholder="Enter transaction ID or paste your M-pesa message here"
+                                        name="transactionMessage"
+                                        value={value}
+                                        onChange={(e) =>
+                                            setValue(e.currentTarget.value)
+                                        }
+                                        error={
+                                            message && !message.success
+                                                ? message.message
+                                                : undefined
+                                        }
+                                    />
+                                    <Button type="submit">Verify</Button>
 
-                    <label
-                        className={`label-text label ${message.value?.success ? 'text-success' : 'text-error'} text-sm`}
-                        htmlFor='transactionMessage'
-                    >
-                        {message.value?.message}
-                    </label>
-                </form>
-            </div>
-            <AdminContacts adminContacts={adminContacts} />
-        </div>
+                                    {message ? (
+                                        <Text
+                                            size="sm"
+                                            c={
+                                                message.success
+                                                    ? 'green'
+                                                    : 'red'
+                                            }
+                                        >
+                                            {message.message}
+                                        </Text>
+                                    ) : null}
+                                </Stack>
+                            </form>
+                        </Stack>
+                    </Paper>
+
+                    <AdminContacts adminContacts={adminContacts} />
+                </Stack>
+            </Paper>
+        </Stack>
     );
 }

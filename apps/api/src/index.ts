@@ -2,76 +2,58 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
 import { auth } from './auth';
-import hotspot from './routes/hotspot';
+import { env } from './env';
+import routes from './routes';
+import type { AppVariables } from './types';
 
-const app = new Hono<{
-	Variables: {
-		user: typeof auth.$Infer.Session.user | null;
-		session: typeof auth.$Infer.Session.session | null;
-	};
-}>();
+const app = new Hono<{ Variables: AppVariables }>();
 
-const BASE_URL = process.env.BASE_URL || 'http://localhost:3000';
-const PORT = parseInt(process.env.PORT || '3000');
-const FRONTEND_URLS = (process.env.FRONTEND_URLS || 'http://localhost:5174,http://localhost:5175').split(',');
+if (!env.frontendUrls.length) {
+    throw new Error('FRONTEND_URLS must contain at least one origin');
+}
 
 app.use(logger());
 
-// CORS for auth endpoints
+// CORS — applied to all API routes (auth + REST).
 app.use(
-	'/api/auth/*',
-	cors({
-		origin: FRONTEND_URLS,
-		allowHeaders: ['Content-Type', 'Authorization'],
-		allowMethods: ['POST', 'GET', 'OPTIONS', 'PUT', 'DELETE'],
-		exposeHeaders: ['Content-Length'],
-		maxAge: 600,
-		credentials: true,
-	}),
+    '/api/*',
+    cors({
+        origin: env.frontendUrls,
+        allowHeaders: ['Content-Type', 'Authorization'],
+        allowMethods: ['POST', 'GET', 'OPTIONS', 'PUT', 'DELETE'],
+        exposeHeaders: ['Content-Length'],
+        maxAge: 600,
+        credentials: true,
+    }),
 );
 
-// CORS for general API
-app.use(
-	'/api/*',
-	cors({
-		origin: FRONTEND_URLS,
-		allowHeaders: ['Content-Type', 'Authorization'],
-		allowMethods: ['POST', 'GET', 'OPTIONS', 'PUT', 'DELETE'],
-		exposeHeaders: ['Content-Length'],
-		maxAge: 600,
-		credentials: true,
-	}),
-);
-
-// Session middleware: attach user/session to all routes
+// Session middleware: resolve the better-auth session for every request and
+// attach it (or null) to the context for downstream handlers.
 app.use('*', async (c, next) => {
-	const session = await auth.api.getSession({
-		headers: c.req.raw.headers,
-	});
-
-	if (!session) {
-		c.set('user', null);
-		c.set('session', null);
-		await next();
-		return;
-	}
-
-	c.set('user', session.user);
-	c.set('session', session.session);
-	await next();
+    const session = await auth.api.getSession({ headers: c.req.raw.headers });
+    c.set('user', session ? session.user : null);
+    c.set('session', session ? session.session : null);
+    await next();
 });
 
-// Better Auth handler
-app.on(['POST', 'GET'], '/api/auth/*', (c) => {
-	return auth.handler(c.req.raw);
-});
+// Better Auth handler.
+app.on(['POST', 'GET'], '/api/auth/*', (c) => auth.handler(c.req.raw));
 
-// Hotspot routes
-app.route('/api/hotspot', hotspot);
+// Hotspot REST routes (mounted at /api/hotspot).
+app.route('/api', routes);
 
 app.get('/health', (c) => c.json({ status: 'ok' }));
 
+// Global error fallback.
+app.notFound((c) => c.json({ success: false, error: 'Not found' }, 404));
+app.onError((err, c) => {
+    console.error(err);
+    return c.json({ success: false, error: 'Internal server error' }, 500);
+});
+
+console.log(`API listening on http://localhost:${env.port}`);
+
 export default {
-	port: PORT,
-	fetch: app.fetch,
+    port: env.port,
+    fetch: app.fetch,
 };

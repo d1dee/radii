@@ -1,38 +1,52 @@
-import { useContext } from "react";
-import { ModalContext } from "../Main.tsx";
-import Modal from "../Modal.tsx";
-import { RegisterForm } from "./Form.tsx";
+import { Button, Divider, Modal, Stack, Text } from '@mantine/core';
+import { RegisterForm } from './Form.tsx';
 
-export default function RegisterModal() {
-    const modal = useContext(ModalContext);
-
-    function switchModal() {
-        modal.value = modal.value === "register" ? "login" : "register";
+export function RegisterModal({
+    opened,
+    onClose,
+    mode,
+    onModeChange,
+    packageId,
+    price,
+}: {
+    opened: boolean;
+    onClose: () => void;
+    mode: 'register' | 'login';
+    onModeChange: (mode: 'register' | 'login') => void;
+    packageId: string;
+    price: string;
+}) {
+    function switchMode() {
+        onModeChange(mode === 'register' ? 'login' : 'register');
     }
 
-    return ((modal.value === "register" || modal.value === "login")
-        ? (
-            <Modal>
-                <div className="flex flex-col gap-2">
-                    <div className="">
-                        <h3 className="text-xl font-bold ">Welcome!</h3>
-                        <p className="text-sm text-slate-500 font-extralight">
-                            {modal.value === "register" ? " Create an " : "Login to your "}
-                            account to manage your service anytime.
-                        </p>
-                    </div>
-                    <RegisterForm />
+    return (
+        <Modal
+            opened={opened}
+            onClose={onClose}
+            title={mode === 'register' ? 'Welcome!' : 'Welcom back!'}
+            size='md'
+            centered
+        >
+            <Stack gap='sm'>
+                <Text size='sm' c='dimmed'>
+                    {mode === 'register' ? ' Create an ' : 'Login to your '}
+                    account to manage your service anytime.
+                </Text>
+                <RegisterForm
+                    key={mode}
+                    mode={mode}
+                    packageId={packageId}
+                    price={price}
+                    onClose={onClose}
+                />
 
-                    <div className="divider italic text-sm sm:m-2 sm:p-2">or</div>
+                <Divider label='or' />
 
-                    <button
-                        className="btn shadow-lg flex-grow"
-                        onClick={switchModal}
-                    >
-                        {modal.value === "login" ? "Register" : "Login"}
-                    </button>
-                </div>
-            </Modal>
-        )
-        : null);
+                <Button variant='default' onClick={switchMode}>
+                    {mode === 'login' ? 'Register' : 'Login'}
+                </Button>
+            </Stack>
+        </Modal>
+    );
 }

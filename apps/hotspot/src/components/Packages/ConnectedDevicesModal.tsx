@@ -1,117 +1,121 @@
-import { useContext, useEffect } from "react";
-import fetch from 'better-fetch';
+import { useEffect, useState } from 'react';
+import { Anchor, Box, Modal, Stack, Table, Text } from '@mantine/core';
 
-import { FaSpinner } from "react-icons/fa";
-import { useSignal } from "../libs/hooks/useSignal.ts";
-import humanFormat from "human-format";
-import { dayjs } from "../../libs/utils/utils.ts";
-import { QuotaContext } from "../Main.tsx";
-import Modal from "../Modal.tsx";
-import { timeRemaining } from "./functions.ts";
-import { dataScale } from "./PackagePricing.tsx";
+import humanFormat from 'human-format';
+import { FaSpinner } from 'react-icons/fa';
+import { deauthDevice } from '../../lib/api.ts';
+import { dayjs } from '../../lib/dayjs.ts';
+import type { StatusQuotas } from '../../types/index.ts';
+import { timeRemaining } from './functions.ts';
+import { dataScale } from './PackagePricing.tsx';
 
-export function ConnectedDevicesModal() {
-    const statusQuotasSignal = useContext(QuotaContext);
-    const deviceId = useSignal<string>("");
-    const pendingDeauth = useSignal<Array<string>>([]);
+export function ConnectedDevicesModal({
+    opened,
+    onClose,
+    quotas,
+}: {
+    opened: boolean;
+    onClose: () => void;
+    quotas: StatusQuotas | undefined;
+}) {
+    const [deviceId, setDeviceId] = useState<string>('');
+    const [pendingDeauth, setPendingDeauth] = useState<Array<string>>([]);
 
     useEffect(() => {
         const deauth = async () => {
-            if (deviceId.value) {
-                pendingDeauth.value = [...pendingDeauth.value, deviceId.value];
-                const params = new URLSearchParams(location.search);
-                params.set("deauth", deviceId.value);
-
-                const res = await fetch(`nds?${params.toString()}`, {
-                    method: "get",
-                });
+            if (deviceId) {
+                setPendingDeauth((prev) => [...prev, deviceId]);
+                try {
+                    await deauthDevice(deviceId);
+                } catch (err) {
+                    console.warn('Deauth failed', err);
+                }
             }
         };
         deauth();
-    }, [deviceId.value]);
+    }, [deviceId]);
+
+    const rows = quotas
+        ?.toSorted((v) => (v.thisDevice ? -1 : 1))
+        .map((v, i) => (
+            <Table.Tr
+                key={v.deviceQuotaId}
+                bg={v.thisDevice ? 'grape.0' : undefined}
+            >
+                <Table.Td>{i + 1}</Table.Td>
+                <Table.Td>
+                    <Stack gap={0}>
+                        <span>{v.deviceQuotaId}</span>
+                        <Text size="xs" c="dimmed" opacity={0.5}>
+                            {v.clientMac}
+                        </Text>
+                    </Stack>
+                </Table.Td>
+                <Table.Td>
+                    <Stack gap={0}>
+                        <span>
+                            {humanFormat(v.downloadRate, {
+                                scale: dataScale,
+                            })}{' '}
+                            - Ksh {v.price.toLocaleString()}
+                        </span>
+                        <Text size="xs" c="dimmed" opacity={0.5}>
+                            {v.parentQuotaId}
+                        </Text>
+                    </Stack>
+                </Table.Td>
+                <Table.Td style={{ maxWidth: 130 }}>
+                    {timeRemaining(
+                        dayjs.duration(v.remainingSessionLength || 0, 'm'),
+                    )}
+                </Table.Td>
+                <Table.Td>
+                    {!pendingDeauth?.includes(v.deviceQuotaId) ? (
+                        <Anchor
+                            component="button"
+                            type="button"
+                            size="sm"
+                            c="red"
+                            onClick={() => setDeviceId(v.deviceQuotaId)}
+                        >
+                            Disconnect
+                        </Anchor>
+                    ) : (
+                        <Box c="red" style={{ cursor: 'wait' }}>
+                            <FaSpinner className="animate-spin" />
+                        </Box>
+                    )}
+                </Table.Td>
+            </Table.Tr>
+        ));
 
     return (
-        <Modal>
-            <div className="space-y-4">
-                <div className="space-y-2">
-                    <h3 className="text-xl font-bold ">Connected Devices</h3>
-                    <p className="text-sm text-slate-500 font-extralight">
-                        Manage your connected devices below.
-                    </p>
-                </div>
-                <div className="overflow-auto mt-4">
-                    <table className="table table-sm">
-                        <thead>
-                            <tr>
-                                <th>S/N</th>
-                                <th>Device</th>
-                                <th>Package</th>
-                                <th>Time Left</th>
-                                <th>Action</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {statusQuotasSignal.value?.toSorted((v) => v.thisDevice ? -1 : 1).map(
-                                (v, i) => {
-                                    return (
-                                        <tr
-                                            key={v.deviceQuotaId}
-                                            className={v.thisDevice ? "bg-purple-50" : ""}
-                                        >
-                                            <td>{i + 1}</td>
-                                            <td>
-                                                <div>
-                                                    <p>{v.deviceQuotaId}</p>
-                                                    <p className="font-thin text-xs opacity-50">
-                                                        {v.clientMac}
-                                                    </p>
-                                                </div>
-                                            </td>
-                                            <td>
-                                                <div>
-                                                    <p className="text-wrap">
-                                                        {humanFormat(v.downloadRate, {
-                                                            scale: dataScale,
-                                                        })} - Ksh {v.price.toLocaleString()}
-                                                    </p>
-                                                    <p className="font-thin text-xs opacity-50">
-                                                        {v.parentQuotaId}
-                                                    </p>
-                                                </div>
-                                            </td>
-                                            <td className="text-wrap max-w-[130px]">
-                                                {timeRemaining(
-                                                    dayjs.duration(
-                                                        v.remainingSessionLength || 0,
-                                                        "m",
-                                                    ),
-                                                )}
-                                            </td>
-                                            <td>
-                                                {!pendingDeauth.value?.includes(v.deviceQuotaId)
-                                                    ? (
-                                                        <button
-                                                            className="link link-error btn-link underline-offset-2"
-                                                            onClick={() =>
-                                                                deviceId.value = v.deviceQuotaId}
-                                                        >
-                                                            Disconnect
-                                                        </button>
-                                                    )
-                                                    : (
-                                                        <div className=" items-center text-error cursor-wait">
-                                                            <FaSpinner className="animate-spin" />
-                                                        </div>
-                                                    )}
-                                            </td>
-                                        </tr>
-                                    );
-                                },
-                            )}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
+        <Modal
+            opened={opened}
+            onClose={onClose}
+            title="Connected Devices"
+            size="md"
+            centered
+        >
+            <Stack gap="md">
+                <Text size="sm" c="dimmed" fw={300}>
+                    Manage your connected devices below.
+                </Text>
+                <Table.ScrollContainer minWidth={500}>
+                    <Table striped highlightOnHover>
+                        <Table.Thead>
+                            <Table.Tr>
+                                <Table.Th>S/N</Table.Th>
+                                <Table.Th>Device</Table.Th>
+                                <Table.Th>Package</Table.Th>
+                                <Table.Th>Time Left</Table.Th>
+                                <Table.Th>Action</Table.Th>
+                            </Table.Tr>
+                        </Table.Thead>
+                        <Table.Tbody>{rows}</Table.Tbody>
+                    </Table>
+                </Table.ScrollContainer>
+            </Stack>
         </Modal>
     );
 }
