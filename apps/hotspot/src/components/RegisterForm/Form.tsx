@@ -51,7 +51,11 @@ export function RegisterForm({
         setSubmitting(false);
 
         if (!result.success) {
-            if (result.fieldErrors) form.setErrors(result.fieldErrors);
+            if (
+                result.message === 'form error' &&
+                typeof result.error === 'object'
+            )
+                form.setErrors(result.error);
             else
                 setFormError(
                     result.message ?? 'Authentication error, contact support',

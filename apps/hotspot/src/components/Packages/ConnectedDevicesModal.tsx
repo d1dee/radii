@@ -1,22 +1,20 @@
-import { useEffect, useState } from 'react';
 import { Anchor, Box, Modal, Stack, Table, Text } from '@mantine/core';
+import { useEffect, useState } from 'react';
 
+import type { Quota } from '@radii/shared';
 import humanFormat from 'human-format';
 import { FaSpinner } from 'react-icons/fa';
-import { deauthDevice } from '../../lib/api.ts';
+import { deauthDevice, getStatus } from '../../lib/api.ts';
 import { dayjs } from '../../lib/dayjs.ts';
-import type { StatusQuotas } from '../../types/index.ts';
 import { timeRemaining } from './functions.ts';
 import { dataScale } from './PackagePricing.tsx';
 
 export function ConnectedDevicesModal({
     opened,
     onClose,
-    quotas,
 }: {
     opened: boolean;
     onClose: () => void;
-    quotas: StatusQuotas | undefined;
 }) {
     const [deviceId, setDeviceId] = useState<string>('');
     const [pendingDeauth, setPendingDeauth] = useState<Array<string>>([]);
@@ -34,8 +32,16 @@ export function ConnectedDevicesModal({
         };
         deauth();
     }, [deviceId]);
+    const [quota, setQuota] = useState<Array<Quota>>();
 
-    const rows = quotas
+    useEffect(() => {
+        (async () => {
+            const quota = await getStatus();
+            setQuota(quota.data);
+        })();
+    });
+
+    const rows = quota
         ?.toSorted((v) => (v.thisDevice ? -1 : 1))
         .map((v, i) => (
             <Table.Tr
@@ -46,7 +52,7 @@ export function ConnectedDevicesModal({
                 <Table.Td>
                     <Stack gap={0}>
                         <span>{v.deviceQuotaId}</span>
-                        <Text size="xs" c="dimmed" opacity={0.5}>
+                        <Text size='xs' c='dimmed' opacity={0.5}>
                             {v.clientMac}
                         </Text>
                     </Stack>
@@ -59,7 +65,7 @@ export function ConnectedDevicesModal({
                             })}{' '}
                             - Ksh {v.price.toLocaleString()}
                         </span>
-                        <Text size="xs" c="dimmed" opacity={0.5}>
+                        <Text size='xs' c='dimmed' opacity={0.5}>
                             {v.parentQuotaId}
                         </Text>
                     </Stack>
@@ -72,17 +78,17 @@ export function ConnectedDevicesModal({
                 <Table.Td>
                     {!pendingDeauth?.includes(v.deviceQuotaId) ? (
                         <Anchor
-                            component="button"
-                            type="button"
-                            size="sm"
-                            c="red"
+                            component='button'
+                            type='button'
+                            size='sm'
+                            c='red'
                             onClick={() => setDeviceId(v.deviceQuotaId)}
                         >
                             Disconnect
                         </Anchor>
                     ) : (
-                        <Box c="red" style={{ cursor: 'wait' }}>
-                            <FaSpinner className="animate-spin" />
+                        <Box c='red' style={{ cursor: 'wait' }}>
+                            <FaSpinner className='animate-spin' />
                         </Box>
                     )}
                 </Table.Td>
@@ -93,12 +99,12 @@ export function ConnectedDevicesModal({
         <Modal
             opened={opened}
             onClose={onClose}
-            title="Connected Devices"
-            size="md"
+            title='Connected Devices'
+            size='md'
             centered
         >
-            <Stack gap="md">
-                <Text size="sm" c="dimmed" fw={300}>
+            <Stack gap='md'>
+                <Text size='sm' c='dimmed' fw={300}>
                     Manage your connected devices below.
                 </Text>
                 <Table.ScrollContainer minWidth={500}>

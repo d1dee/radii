@@ -1,19 +1,17 @@
 import { useDisclosure } from '@mantine/hooks';
-import type { Dispatch, SetStateAction } from 'react';
 import {
     createContext,
     useCallback,
     useEffect,
     useMemo,
-    useRef,
     useState,
 } from 'react';
+import { getClientData, getPackages, type Client } from '../lib/api.ts';
 import type {
-    Client,
     MainPageProps,
     Package,
+    Packages,
     Session,
-    StatusQuotas,
 } from '../types/index.ts';
 import { PaymentFlow } from './Buy/PaymentFlow.tsx';
 import { ConnectedDevicesModal } from './Packages/ConnectedDevicesModal.tsx';
@@ -28,12 +26,6 @@ export const ClientContext = createContext<Client | undefined>(null!);
 export const PackagesContext = createContext<Array<[string, Array<Package>]>>(
     null!,
 );
-export const QuotaContext = createContext<
-    [
-        StatusQuotas | undefined,
-        Dispatch<SetStateAction<StatusQuotas | undefined>>,
-    ]
->(null!);
 
 export type ModalActions = {
     /** Open the buy/payment flow for a package */
@@ -69,8 +61,18 @@ export default function Index({
     data: MainPageProps;
     adminContacts: { ADMIN_TEL: string; ADMIN_WHATSAPP: string };
 }) {
-    const [quota, setQuota] = useState<StatusQuotas | undefined>(data.quotas);
     const [havingIssues, setHavingIssues] = useState(false);
+    const [clientData, setClientData] = useState<Client | undefined>();
+    const [packages, setPackages] = useState<Packages | undefined>();
+
+    useEffect(() => {
+        (async () => {
+            const clientData = await getClientData();
+            const packages = await getPackages();
+            setClientData(clientData.data);
+            setPackages(packages.data);
+        })();
+    });
 
     // Resume an interrupted purchase on first load (e.g. after a login
     // redirect). localStorage is synchronous, so the initial modal state can
@@ -88,7 +90,7 @@ export default function Index({
         resumeBuy && storedPackageId
             ? {
                   packageId: storedPackageId,
-                  price: pkgPrice(data.dbPackages, storedPackageId),
+                  price: pkgPrice(packages, storedPackageId),
               }
             : null,
     );
@@ -103,16 +105,6 @@ export default function Index({
 
     const [connectedOpened, { open: openConnected, close: closeConnected }] =
         useDisclosure(false);
-    const [quotaSnapshot, setQuotaSnapshot] = useState<
-        StatusQuotas | undefined
-    >(data.quotas);
-
-    // Keep a ref to the latest quotas so the connected-devices modal captures
-    // a snapshot at open time without forcing every consumer to re-render.
-    const quotaRef = useRef(quota);
-    useEffect(() => {
-        quotaRef.current = quota;
-    }, [quota]);
 
     const startBuy = useCallback(
         (pkg: { packageId: string; price: string }) => {
@@ -141,7 +133,6 @@ export default function Index({
         [openAuth],
     );
     const openConnectedDevices = useCallback(() => {
-        setQuotaSnapshot(quotaRef.current);
         openConnected();
     }, [openConnected]);
 
@@ -158,19 +149,19 @@ export default function Index({
     return (
         <ModalActionsContext.Provider value={modalActions}>
             <SessionContext.Provider value={data.session}>
-                <ClientContext.Provider value={data.client}>
+                <ClientContext.Provider value={clientData}>
                     <UserAccount
                         havingIssues={[havingIssues, setHavingIssues]}
                     />
-                    <QuotaContext.Provider value={[quota, setQuota]}>
-                        {havingIssues ? (
-                            <HavingIssues adminContacts={adminContacts} />
-                        ) : (
-                            <CurrentPackage />
-                        )}
-                    </QuotaContext.Provider>
-                    {data?.dbPackages?.length ? (
-                        <PackagesContext.Provider value={data.dbPackages}>
+
+                    {havingIssues ? (
+                        <HavingIssues adminContacts={adminContacts} />
+                    ) : (
+                        <CurrentPackage />
+                    )}
+
+                    {packages?.length ? (
+                        <PackagesContext.Provider value={packages}>
                             <PackagePricing />
                         </PackagesContext.Provider>
                     ) : (
@@ -199,7 +190,6 @@ export default function Index({
                     <ConnectedDevicesModal
                         opened={connectedOpened}
                         onClose={closeConnected}
-                        quotas={quotaSnapshot}
                     />
                 </ClientContext.Provider>
             </SessionContext.Provider>

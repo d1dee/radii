@@ -18,7 +18,7 @@ export type Package = {
 };
 
 // A single device-quota entry returned by the status endpoint.
-export type StatusQuota = {
+export type Quota = {
     remainingSessionLength: number;
     initialSessionLength: number;
     deviceQuotaId: string;
@@ -34,24 +34,15 @@ export type StatusQuota = {
     expiresAt?: string;
 };
 
-export type StatusQuotas = StatusQuota[];
-
-export type Client = {
-    userId: string;
-    phoneNumber: string;
-    prevPaymentMethods: string[];
-};
-
 export type Session = {
     expiresAt: number;
     sessionKey?: string;
 };
 
+export type Packages = Array<[string, Array<Package>]>;
+
 // Aggregated page payload consumed by the main hotspot component.
 export interface MainPageProps {
-    dbPackages: Array<[string, Array<Package>]>;
     initPackageId?: string;
     session?: Session;
-    client?: Client;
-    quotas: StatusQuotas | undefined;
 }

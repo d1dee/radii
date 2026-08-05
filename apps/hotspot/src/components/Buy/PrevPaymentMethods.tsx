@@ -1,6 +1,6 @@
 import { Group, Paper, Radio, Stack, Text } from '@mantine/core';
-import { useContext } from 'react';
 import { parseServiceProvider } from '@radii/shared';
+import { useContext } from 'react';
 import { ClientContext } from '../Main.tsx';
 import { RadioContext } from './Form.tsx';
 
@@ -12,10 +12,12 @@ function isSafaricom(phone: string) {
 export function PrevPaymentMethods() {
     const [selectedPhone, setSelectedPhone] = useContext(RadioContext);
     const client = useContext(ClientContext);
-    const prevPaymentMethods = client?.prevPaymentMethods || [];
+    const prevPaymentMethods = client?.prevPaymentMethods
+        ? [...client?.prevPaymentMethods, client.phoneNumber]
+        : [];
 
     return (
-        <Stack gap="sm">
+        <Stack gap='sm'>
             {prevPaymentMethods.map((prevPhoneNumber, i) => {
                 const provider = parseServiceProvider(prevPhoneNumber);
                 const providerError = provider instanceof Error;
@@ -31,36 +33,39 @@ export function PrevPaymentMethods() {
                         <Paper
                             key={i}
                             p={{ base: 'sm', md: 'md' }}
-                            radius="lg"
+                            radius='lg'
                             withBorder
                             style={{
                                 cursor: 'pointer',
-                                background:
-                                    'var(--mantine-color-gray-0)',
+                                background: 'var(--mantine-color-gray-0)',
                             }}
                             onClick={() => setSelectedPhone(prevPhoneNumber)}
                         >
                             <Stack
-                                gap="xs"
-                                align="stretch"
-                                justify="space-between"
+                                gap='xs'
+                                align='stretch'
+                                justify='space-between'
                             >
-                                <Radio
-                                    checked={inputChecked}
-                                    onChange={() =>
-                                        setSelectedPhone(prevPhoneNumber)
-                                    }
-                                    value={prevPhoneNumber}
-                                    size="md"
-                                />
-                                <Group justify="space-between" wrap="nowrap">
-                                    <Text size="md" fw={500}>
-                                        {prevPhoneNumber}
-                                    </Text>
+                                <Group justify='space-between' wrap='nowrap'>
+                                    <Group gap='md'>
+                                        <Radio
+                                            checked={inputChecked}
+                                            onChange={() =>
+                                                setSelectedPhone(
+                                                    prevPhoneNumber,
+                                                )
+                                            }
+                                            value={prevPhoneNumber}
+                                            size='md'
+                                        />
+                                        <Text size='md' fw={500}>
+                                            {prevPhoneNumber}
+                                        </Text>{' '}
+                                    </Group>
                                     {providerLogo ? (
                                         <img
                                             src={providerLogo}
-                                            alt="Logo"
+                                            alt='Logo'
                                             style={{
                                                 height: '1.5rem',
                                                 objectFit: 'contain',
@@ -74,39 +79,64 @@ export function PrevPaymentMethods() {
                 }
 
                 return (
-                    <Paper
-                        key={i}
-                        p={{ base: 'sm', md: 'md' }}
-                        radius="lg"
-                        withBorder
-                        bg="red.0"
-                        style={{ opacity: 0.7 }}
-                    >
-                        <Stack gap="xs" justify="space-between">
-                            <Radio disabled size="md" />
-                            <Group justify="space-between" wrap="nowrap">
-                                <Text size="md" fw={500}>
-                                    {prevPhoneNumber}
-                                </Text>
-                                {providerLogo ? (
-                                    <img
-                                        src={providerLogo}
-                                        alt="Logo"
-                                        style={{
-                                            height: '1.5rem',
-                                            objectFit: 'contain',
-                                            mixBlendMode:
-                                                providerName === 'telkom'
-                                                    ? 'exclusion'
-                                                    : undefined,
-                                        }}
-                                    />
-                                ) : null}
-                            </Group>
+                    <Paper shadow='sm' radius='md' p='lg' withBorder>
+                        <Stack gap='md'>
+                            <Text fw={600}>Saved Numbers:</Text>
+                            <Paper
+                                key={i}
+                                p={{ base: 'sm', md: 'md' }}
+                                radius='lg'
+                                withBorder
+                                bg='red.0'
+                                style={{ opacity: 0.7 }}
+                            >
+                                <Stack gap='xs' justify='space-between'>
+                                    <Group
+                                        justify='space-between'
+                                        wrap='nowrap'
+                                    >
+                                        <Radio disabled size='md' />
+                                        <Text size='md' fw={500}>
+                                            {prevPhoneNumber}
+                                        </Text>
+                                        {providerLogo ? (
+                                            <img
+                                                src={providerLogo}
+                                                alt='Logo'
+                                                style={{
+                                                    height: '1.5rem',
+                                                    objectFit: 'contain',
+                                                    mixBlendMode:
+                                                        providerName ===
+                                                        'telkom'
+                                                            ? 'exclusion'
+                                                            : undefined,
+                                                }}
+                                            />
+                                        ) : null}
+                                    </Group>
+                                </Stack>
+                            </Paper>{' '}
                         </Stack>
                     </Paper>
                 );
             })}
         </Stack>
+    );
+}
+
+function NoPrevPaymentMethod() {
+    return (
+        <Paper
+            bg='red.0'
+            p='lg'
+            radius='md'
+            withBorder
+            style={{ borderColor: 'var(--mantine-color-red-4)' }}
+        >
+            <Text size='sm' c='dimmed'>
+                No valid payment method
+            </Text>
+        </Paper>
     );
 }

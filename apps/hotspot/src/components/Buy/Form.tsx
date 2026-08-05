@@ -1,21 +1,15 @@
+import { Button, Divider, Paper, Stack, TextInput } from '@mantine/core';
+import { parseServiceProvider } from '@radii/shared';
 import type { Dispatch, SetStateAction } from 'react';
 import { createContext, useContext, useState } from 'react';
-import {
-    Button,
-    Divider,
-    Paper,
-    Stack,
-    TextInput,
-} from '@mantine/core';
-import { parseServiceProvider } from '@radii/shared';
 import { createOrder } from '../../lib/api.ts';
 import { ClientContext } from '../Main.tsx';
-import type { PaymentData, PaymentXHR } from './paymentTypes.ts';
 import { validateForm } from './functions.ts';
-import { PreviousNumbers } from './PrevNumbers.tsx';
+import type { PaymentData, PaymentXHR } from './paymentTypes.ts';
 
 import { AiOutlineLoading } from 'react-icons/ai';
 import { FaPhone } from 'react-icons/fa';
+import { PrevPaymentMethods } from './PrevPaymentMethods.tsx';
 
 export const RadioContext = createContext<
     [string, Dispatch<SetStateAction<string>>]
@@ -45,12 +39,14 @@ export function BuyForm({
 
         setBtnDisabled(true);
 
-        const phoneNo = selectedPhone ||
+        const phoneNo =
+            selectedPhone ||
             prevPaymentMethods.find(
                 (v) =>
                     !(parseServiceProvider(v) instanceof Error) &&
                     parseServiceProvider(v).name === 'safaricom',
-            ) || '';
+            ) ||
+            '';
 
         const data = validateForm({
             phoneNumber: phoneNo,
@@ -70,9 +66,7 @@ export function BuyForm({
             });
 
             const paymentData: PaymentData = {
-                paymentId: result.paymentId,
-                amount: result.amount,
-                packageId: result.packageId,
+                ...result,
                 status: 'pending',
             };
 
@@ -100,16 +94,16 @@ export function BuyForm({
     }
 
     return (
-        <Stack gap="sm" mt="md">
+        <Stack gap='sm' mt='md'>
             <RadioContext.Provider value={[selectedPhone, setSelectedPhone]}>
-                <PreviousNumbers />
+                <PrevPaymentMethods />
             </RadioContext.Provider>
-            <Divider label="or" />
-            <Paper shadow="sm" radius="md" p="md" withBorder>
+            <Divider label='or' />
+            <Paper shadow='sm' radius='md' p='md' withBorder>
                 <TextInput
-                    label="Enter phone number:"
-                    placeholder="+254712345678 / 0712345678"
-                    inputMode="numeric"
+                    label='Enter phone number:'
+                    placeholder='+254712345678 / 0712345678'
+                    inputMode='numeric'
                     error={error}
                     leftSection={<FaPhone size={14} />}
                     onChange={(e) => {

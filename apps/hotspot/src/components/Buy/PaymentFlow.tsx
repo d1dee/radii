@@ -1,5 +1,5 @@
+import { Modal, Title } from '@mantine/core';
 import { useState } from 'react';
-import { Modal } from '@mantine/core';
 import { BuyForm } from './Form.tsx';
 import { PaymentError } from './Payments/PaymentError.tsx';
 import { PendingPayment } from './Payments/PaymentPending.tsx';
@@ -30,8 +30,8 @@ export function PaymentFlow({
         <Modal
             opened={opened}
             onClose={onClose}
-            title={TITLES[status]}
-            size='md'
+            title={<Title order={3}>{TITLES[status]}</Title>}
+            size='lg'
             centered
         >
             {status === 'buy' && seed ? (

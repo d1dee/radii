@@ -1,10 +1,8 @@
 import '@mantine/core/styles.css';
 
 import { Container, MantineProvider } from '@mantine/core';
-import type { Client, MainPageProps, Session } from '@radii/shared';
-import { useEffect, useState } from 'react';
+import type { MainPageProps, Session } from '@radii/shared';
 import Index from './components/Main.tsx';
-import { getMe, getPackages } from './lib/api.ts';
 import { authClient } from './lib/auth.ts';
 
 export default function App() {
@@ -12,37 +10,10 @@ export default function App() {
     // better-auth session instead of receiving SSR props.
     const { data: sessionData } = authClient.useSession();
 
-    const [dbPackages, setDbPackages] = useState<MainPageProps['dbPackages']>(
-        [],
-    );
-    const [client, setClient] = useState<Client | undefined>(undefined);
-
     const adminContacts = {
         ADMIN_TEL: '',
         ADMIN_WHATSAPP: '',
     };
-
-    useEffect(() => {
-        getPackages()
-            .then((packages) => setDbPackages(packages))
-            .catch((err) => console.warn('Failed to load packages', err));
-    }, []);
-
-    useEffect(() => {
-        if (!sessionData) {
-            setClient(undefined);
-            return;
-        }
-        getMe()
-            .then((me) =>
-                setClient({
-                    userId: me.userId,
-                    phoneNumber: me.phoneNumber,
-                    prevPaymentMethods: me.prevPaymentMethods,
-                }),
-            )
-            .catch((err) => console.warn('Failed to load user', err));
-    }, [sessionData]);
 
     // Bridge the better-auth session into the legacy `{ expiresAt }` shape
     // expected by MainPageProps. `useSession`'s `data` is generically inferred
@@ -58,10 +29,7 @@ export default function App() {
         : undefined;
 
     const data: MainPageProps = {
-        dbPackages,
-        quotas: undefined,
         session,
-        client,
     };
 
     return (

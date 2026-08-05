@@ -1,5 +1,13 @@
+import {
+    Button,
+    Card,
+    Group,
+    Paper,
+    SimpleGrid,
+    Stack,
+    Text,
+} from '@mantine/core';
 import { upperFirstCase } from '@radii/shared';
-import { Button, Card, Group, SimpleGrid, Stack, Text } from '@mantine/core';
 import { dayjs } from '../../lib/dayjs.ts';
 import {
     ModalActionsContext,
@@ -49,76 +57,88 @@ export function PackagePricing() {
     }
 
     return (
-        <Stack gap="md" mt="md">
-            <Text size="lg" fw={600}>
-                Our Packages
-            </Text>
+        <Paper shadow='xl' radius='lg' p='lg' mt='md'>
+            <Stack gap='md' mt='md'>
+                <Text size='lg' fw={600}>
+                    Our Packages
+                </Text>
 
-            <SimpleGrid
-                cols={{ base: 2, xs: 3, sm: 4, md: 5 }}
-                spacing="md"
-            >
-                {pkgContext.map(([title, _]) => {
-                    const active =
-                        title.toLowerCase() ===
-                        selectedTitle.toLowerCase();
-                    return (
-                        <Button
-                            key={title}
-                            variant={active ? 'filled' : 'light'}
-                            color={active ? 'grape' : 'gray'}
-                            onClick={() => {
-                                setState({
-                                    selectedTitle: title,
-                                    packages: getPackages(title, pkgContext),
-                                });
-                            }}
-                        >
-                            {upperFirstCase(title)}
-                        </Button>
-                    );
-                })}
-            </SimpleGrid>
-
-            <Stack gap="md">
-                {packages.map((pkg) => (
-                    <Card key={pkg.packageId} shadow="sm" radius="lg" withBorder>
-                        <Stack gap="md">
-                            <Group justify="space-between" align="flex-start">
-                                <Stack gap="xs">
-                                    <Text c="dimmed">{pkg.title}</Text>
-                                    <Text size="32px" fw={700}>
-                                        {humanFormat(pkg.downloadRate, {
-                                            scale: dataScale,
-                                        })}
-                                    </Text>
-                                </Stack>
-
-                                <Stack gap="xs" align="flex-end">
-                                    <Text size="sm" c="dimmed">
-                                        {dayjs
-                                            .duration(
-                                                pkg.initialSessionLength,
-                                                'm',
-                                            )
-                                            .humanize()}
-                                    </Text>
-                                    <Text size="xl" fw={700}>
-                                        Ksh {pkg.price.toLocaleString()}
-                                    </Text>
-                                </Stack>
-                            </Group>
-
+                <SimpleGrid
+                    cols={{ base: 2, xs: 3, sm: 4, md: 5 }}
+                    spacing='md'
+                >
+                    {pkgContext.map(([title, _]) => {
+                        const active =
+                            title.toLowerCase() === selectedTitle.toLowerCase();
+                        return (
                             <Button
-                                fullWidth
-                                onClick={() => initiateOrderFlow(pkg)}
+                                key={title}
+                                variant={active ? 'filled' : 'light'}
+                                color={active ? 'grape' : 'gray'}
+                                onClick={() => {
+                                    setState({
+                                        selectedTitle: title,
+                                        packages: getPackages(
+                                            title,
+                                            pkgContext,
+                                        ),
+                                    });
+                                }}
                             >
-                                Buy Now
+                                {upperFirstCase(title)}
                             </Button>
-                        </Stack>
-                    </Card>
-                ))}
+                        );
+                    })}
+                </SimpleGrid>
+
+                <Stack gap='md'>
+                    {packages.map((pkg) => (
+                        <Card
+                            key={pkg.packageId}
+                            shadow='sm'
+                            radius='lg'
+                            withBorder
+                        >
+                            <Stack gap='md'>
+                                <Group
+                                    justify='space-between'
+                                    align='flex-start'
+                                >
+                                    <Stack gap='xs'>
+                                        <Text c='dimmed'>{pkg.title}</Text>
+                                        <Text size='32px' fw={700}>
+                                            {humanFormat(pkg.downloadRate, {
+                                                scale: dataScale,
+                                            })}
+                                        </Text>
+                                    </Stack>
+
+                                    <Stack gap='xs' align='flex-end'>
+                                        <Text size='sm' c='dimmed'>
+                                            {dayjs
+                                                .duration(
+                                                    pkg.initialSessionLength,
+                                                    'm',
+                                                )
+                                                .humanize()}
+                                        </Text>
+                                        <Text size='xl' fw={700}>
+                                            Ksh {pkg.price.toLocaleString()}
+                                        </Text>
+                                    </Stack>
+                                </Group>
+
+                                <Button
+                                    fullWidth
+                                    onClick={() => initiateOrderFlow(pkg)}
+                                >
+                                    Buy Now
+                                </Button>
+                            </Stack>
+                        </Card>
+                    ))}
+                </Stack>
             </Stack>
-        </Stack>
+        </Paper>
     );
 }

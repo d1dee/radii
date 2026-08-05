@@ -1,9 +1,8 @@
-import type { StatusQuotas } from '@radii/shared';
-import { loginSchema, signUpSchema } from '@radii/shared';
+import { loginSchema, Quota, signUpSchema } from '@radii/shared';
+import { APIError } from 'better-auth/api';
 import { Hono } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { z } from 'zod';
-import { APIError } from 'better-auth/api';
 import { auth } from '../auth';
 import { jsonError, jsonFieldErrors } from '../lib/error';
 import { PACKAGES } from '../lib/packages';
@@ -112,7 +111,7 @@ app.post('/login', async (c) => {
 // --- Current user -----------------------------------------------------------
 
 // Authenticated: current session + client info.
-app.get('/me', requireAuth, (c) => {
+app.get('/client', requireAuth, (c) => {
     const user = c.get('user');
     return c.json({
         success: true,
@@ -132,7 +131,7 @@ app.get('/me', requireAuth, (c) => {
 // Authenticated: current device quotas. Returns an empty list until the
 // quota/device schema is ported to drizzle.
 app.get('/status', requireAuth, (c) => {
-    const quotas: StatusQuotas = [];
+    const quotas: Array<Quota> = [];
     return c.json({ success: true, data: quotas });
 });
 
@@ -230,7 +229,9 @@ function forwardCookies(c: AppContext, headers: Headers, body: unknown) {
 // so the client can render field-specific messages.
 function respondAuthError(c: AppContext, err: unknown) {
     if (err instanceof APIError) {
-        const code = String((err as { code?: string }).code || '').toLowerCase();
+        const code = String(
+            (err as { code?: string }).code || '',
+        ).toLowerCase();
         const message = (err.message || '').toLowerCase();
         if (
             code.includes('exists') ||

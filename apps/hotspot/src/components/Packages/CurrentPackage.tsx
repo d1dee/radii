@@ -1,17 +1,13 @@
 import { Box, Group, Paper, Progress, Stack, Text } from '@mantine/core';
-import { useContext, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { IoMdArrowDown, IoMdArrowUp } from 'react-icons/io';
-import {
-    checkOnlineStatus,
-    checkQuotaStatus,
-    timeRemaining,
-} from './functions.ts';
+import { checkOnlineStatus, timeRemaining } from './functions.ts';
 
 import humanFormat from 'human-format';
+import { getStatus } from '../../lib/api.ts';
 import { dayjs } from '../../lib/dayjs.ts';
-import type { StatusQuotas } from '../../types/index.ts';
+import type { Quota } from '../../types/index.ts';
 import { Toast } from '../Alert.tsx';
-import { QuotaContext } from '../Main.tsx';
 import { ConnectedDevice } from './ConnectedDevices.tsx';
 import { dataScale } from './PackagePricing.tsx';
 
@@ -20,15 +16,21 @@ export function CurrentPackage() {
         state: 'online' | 'offline' | '';
         prevState: 'online' | 'offline' | '';
     }>({ state: '', prevState: '' });
-    const [statusQuotas, setStatusQuotas] = useContext(QuotaContext);
+
+    const [quota, setQuota] = useState<Array<Quota>>();
+
+    useEffect(() => {
+        (async () => {
+            const quota = await getStatus();
+            setQuota(quota.data);
+        })();
+    });
 
     // Pick the highest if no token belongs to this devices
-    const deviceQuota =
-        statusQuotas?.find((v) => v.thisDevice) ||
-        (statusQuotas && statusQuotas[0]);
+    const deviceQuota = quota?.find((v) => v.thisDevice) || (quota && quota[0]);
 
     const [signal, setSignal] = useState<
-        Partial<StatusQuotas[number]> & { width: string }
+        Partial<Array<Quota>[number]> & { width: string }
     >({
         ...deviceQuota,
         width:
@@ -61,18 +63,6 @@ export function CurrentPackage() {
             .duration(deviceQuota?.initialSessionLength || 0, 'm')
             .asSeconds(),
     });
-
-    /* Run quota status check every 10 seconds */
-    useEffect(() => {
-        const statusCheck = async () => {
-            const newStatusQuotas = await checkQuotaStatus(setSignal);
-            newStatusQuotas && setStatusQuotas(newStatusQuotas);
-        };
-
-        const interval = setInterval(statusCheck, 10e3);
-
-        return () => clearInterval(interval);
-    }, []);
 
     /* Run online status check every 20 seconds */
     useEffect(() => {
@@ -139,7 +129,7 @@ export function CurrentPackage() {
                 <Stack gap='xs'>
                     <Group justify='space-between' gap='sm'>
                         <Text size='sm' c='dimmed'>
-                            Devices: {statusQuotas?.length || ' _'}
+                            Devices: {quota?.length || ' _'}
                         </Text>
                         <Text size='sm' c='dimmed'>
                             Package info:{' '}
