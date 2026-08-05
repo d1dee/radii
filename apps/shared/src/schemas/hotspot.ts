@@ -4,7 +4,7 @@ export type Package = {
     packageId: string;
     title: string;
     category: string;
-    initialSessionLength: number; // minutes
+    sessionLength: number; // minutes
     price: number;
     maxDevices: number;
     noExpiry: boolean;
@@ -20,7 +20,7 @@ export type Package = {
 // A single device-quota entry returned by the status endpoint.
 export type Quota = {
     remainingSessionLength: number;
-    initialSessionLength: number;
+    sessionLength: number;
     deviceQuotaId: string;
     lastActive?: string;
     ndsToken?: string;

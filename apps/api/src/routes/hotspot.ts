@@ -22,7 +22,7 @@ app.get('/packages', (c) => {
 const createPackageSchema = z.object({
     title: z.string().min(1),
     category: z.string().min(1),
-    initialSessionLength: z.number().int().positive(),
+    sessionLength: z.number().int().positive(),
     price: z.number().nonnegative(),
     maxDevices: z.number().int().positive(),
     noExpiry: z.boolean(),

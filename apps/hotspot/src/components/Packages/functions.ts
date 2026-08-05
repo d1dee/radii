@@ -50,12 +50,12 @@ export async function checkQuotaStatus(
                             .asSeconds() *
                             100) /
                             dayjs
-                                .duration(prev?.initialSessionLength || 0, 'm')
+                                .duration(prev?.sessionLength || 0, 'm')
                                 .asSeconds(),
                     ),
                 ) + '%',
-            initialSessionLength: dayjs
-                .duration(deviceQuota?.initialSessionLength || 0, 'm')
+            sessionLength: dayjs
+                .duration(deviceQuota?.sessionLength || 0, 'm')
                 .asSeconds(),
             remainingSessionLength: dayjs
                 .duration(deviceQuota?.remainingSessionLength || 0, 'm')

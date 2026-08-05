@@ -34,8 +34,7 @@ export function CurrentPackage() {
     >({
         ...deviceQuota,
         width:
-            !deviceQuota?.initialSessionLength ||
-            !deviceQuota?.remainingSessionLength
+            !deviceQuota?.sessionLength || !deviceQuota?.remainingSessionLength
                 ? '0%'
                 : Math.max(
                       0,
@@ -50,7 +49,7 @@ export function CurrentPackage() {
                               100) /
                               dayjs
                                   .duration(
-                                      deviceQuota?.initialSessionLength || 0,
+                                      deviceQuota?.sessionLength || 0,
                                       'm',
                                   )
                                   .asSeconds(),
@@ -59,8 +58,8 @@ export function CurrentPackage() {
         remainingSessionLength: dayjs
             .duration(deviceQuota?.remainingSessionLength || 0, 'm')
             .asSeconds(),
-        initialSessionLength: dayjs
-            .duration(deviceQuota?.initialSessionLength || 0, 'm')
+        sessionLength: dayjs
+            .duration(deviceQuota?.sessionLength || 0, 'm')
             .asSeconds(),
     });
 

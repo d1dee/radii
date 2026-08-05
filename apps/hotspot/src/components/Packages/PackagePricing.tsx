@@ -117,7 +117,7 @@ export function PackagePricing() {
                                         <Text size='sm' c='dimmed'>
                                             {dayjs
                                                 .duration(
-                                                    pkg.initialSessionLength,
+                                                    pkg.sessionLength,
                                                     'm',
                                                 )
                                                 .humanize()}
