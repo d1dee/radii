@@ -19,7 +19,6 @@
     "drizzle-orm": "^0.45.2",
     "hono": "^4.12.27",
     "libphonenumber-js": "^1.13.10",
-    "pg": "^8.22.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
