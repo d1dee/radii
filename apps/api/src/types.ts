@@ -6,8 +6,8 @@ export type SessionUser = (typeof auth)['$Infer']['Session']['user'];
 export type SessionSession = (typeof auth)['$Infer']['Session']['session'];
 
 export type AppVariables = {
-    user: SessionUser | null;
-    session: SessionSession | null;
+    user: SessionUser;
+    session: SessionSession;
 };
 
 export type AppContext = Context<{ Variables: AppVariables }>;
