@@ -24,7 +24,7 @@ export function CurrentPackage() {
             const quota = await getStatus();
             setQuota(quota.data);
         })();
-    });
+    }, []);
 
     // Pick the highest if no token belongs to this devices
     const deviceQuota = quota?.find((v) => v.thisDevice) || (quota && quota[0]);

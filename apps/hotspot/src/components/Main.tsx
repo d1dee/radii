@@ -72,7 +72,7 @@ export default function Index({
             setClientData(clientData.data);
             setPackages(packages.data);
         })();
-    });
+    }, []);
 
     // Resume an interrupted purchase on first load (e.g. after a login
     // redirect). localStorage is synchronous, so the initial modal state can

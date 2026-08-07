@@ -18,7 +18,7 @@ export function ConnectedDevice() {
             const quota = await getStatus();
             setQuota(quota.data);
         })();
-    });
+    }, []);
 
     const isThisDevice = !!quota?.some((v) => v.thisDevice);
     const quotaMap = new Map();

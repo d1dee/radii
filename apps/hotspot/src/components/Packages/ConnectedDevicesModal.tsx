@@ -39,7 +39,7 @@ export function ConnectedDevicesModal({
             const quota = await getStatus();
             setQuota(quota.data);
         })();
-    });
+    }, []);
 
     const rows = quota
         ?.toSorted((v) => (v.thisDevice ? -1 : 1))
