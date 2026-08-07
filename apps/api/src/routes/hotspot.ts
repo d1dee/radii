@@ -1,11 +1,19 @@
-import { loginSchema, Quota, signUpSchema } from '@radii/shared';
+import { loginSchema, signUpSchema } from '@radii/shared';
 import { APIError } from 'better-auth/api';
+import { and, eq, gte } from 'drizzle-orm';
 import { Hono } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { z } from 'zod';
 import { auth } from '../auth';
+import { db } from '../db';
+import { activatedHotspot } from '../db/schema';
 import { jsonError, jsonFieldErrors } from '../lib/error';
-import { PACKAGES } from '../lib/packages';
+import {
+    createPackage,
+    createPayment,
+    getPackageById,
+    getPackagesGroupedByCategory,
+} from '../lib/packages';
 import { requireAdmin, requireAuth } from '../middleware/auth';
 import type { AppContext, AppVariables } from '../types';
 
@@ -13,12 +21,6 @@ const app = new Hono<{ Variables: AppVariables }>();
 
 // --- Packages ---------------------------------------------------------------
 
-// Public: list packages grouped by category.
-app.get('/packages', (c) => {
-    return c.json({ success: true, data: PACKAGES });
-});
-
-// Admin: create a package (persists once the catalog is DB-backed).
 const createPackageSchema = z.object({
     title: z.string().min(1),
     category: z.string().min(1),
@@ -35,20 +37,37 @@ const createPackageSchema = z.object({
     gateway: z.string().optional(),
 });
 
+app.get('/packages', async (c) => {
+    const packages = await getPackagesGroupedByCategory();
+    return c.json({ success: true, data: packages });
+});
+
 app.post('/packages', requireAdmin, async (c) => {
     const parsed = createPackageSchema.safeParse(await c.req.json());
     if (!parsed.success) {
         return jsonError(c, 400, 'Invalid package payload');
     }
-    // TODO: persist to DB and assign a packageId.
-    return c.json({ success: true, data: parsed.data }, 201);
+    const row = await createPackage({
+        id: crypto.randomUUID(),
+        title: parsed.data.title,
+        category: parsed.data.category,
+        sessionLength: parsed.data.sessionLength,
+        price: String(parsed.data.price),
+        maxDevices: parsed.data.maxDevices,
+        noExpiry: parsed.data.noExpiry,
+        description: parsed.data.description,
+        note: parsed.data.note,
+        uploadRate: parsed.data.uploadRate,
+        downloadRate: parsed.data.downloadRate,
+        downloadQuota: parsed.data.downloadQuota,
+        uploadQuota: parsed.data.uploadQuota,
+        gatewayId: parsed.data.gateway,
+    });
+    return c.json({ success: true, data: row }, 201);
 });
 
 // --- Authentication (phone + PIN) -------------------------------------------
 
-// Public: register a new phone-number account. Validation runs here so
-// business rules can be enforced beyond what better-auth provides; the
-// better-auth account creation itself happens server-side below.
 app.post('/register', async (c) => {
     const parsed = signUpSchema.safeParse(await c.req.json().catch(() => ({})));
     if (!parsed.success) {
@@ -64,8 +83,6 @@ app.post('/register', async (c) => {
     try {
         const { headers } = await auth.api.signUpEmail({
             body: {
-                // better-auth requires an email; derive a placeholder from
-                // the phone number since this system is phone-only.
                 email: `${normalizePhone(phoneNumber)}@hotspot.local`,
                 name: phoneNumber,
                 password: pin,
@@ -81,7 +98,6 @@ app.post('/register', async (c) => {
     }
 });
 
-// Public: log in with phone number + PIN.
 app.post('/login', async (c) => {
     const parsed = loginSchema.safeParse(await c.req.json().catch(() => ({})));
     if (!parsed.success) {
@@ -110,7 +126,6 @@ app.post('/login', async (c) => {
 
 // --- Current user -----------------------------------------------------------
 
-// Authenticated: current session + client info.
 app.get('/client', requireAuth, (c) => {
     const user = c.get('user');
     return c.json({
@@ -128,11 +143,23 @@ app.get('/client', requireAuth, (c) => {
 
 // --- Device quota status ----------------------------------------------------
 
-// Authenticated: current device quotas. Returns an empty list until the
-// quota/device schema is ported to drizzle.
-app.get('/status', requireAuth, (c) => {
-    const quotas: Array<Quota> = [];
-    return c.json({ success: true, data: quotas });
+app.get('/status', requireAuth, async (c) => {
+    try {
+        const currentUser = c.get('user');
+
+        const activeSubscriptions = await db.query.activatedHotspot.findMany({
+            where: and(
+                eq(activatedHotspot.userId, currentUser.id),
+                gte(activatedHotspot.expireAt, new Date()),
+            ),
+            with: { package: true, hotspotPayment: true },
+        });
+
+        return c.json({ success: true, data: activeSubscriptions });
+    } catch (err) {
+        console.error(err);
+        throw err;
+    }
 });
 
 // --- Orders / payments ------------------------------------------------------
@@ -142,44 +169,48 @@ const orderSchema = z.object({
     phoneNumber: z.string().min(10),
 });
 
-// Authenticated: initiate a package purchase. Returns a payment id the client
-// can poll. Payment processing (M-Pesa) will be wired in once the payments
-// schema is ported.
 app.post('/order', requireAuth, async (c) => {
     const parsed = orderSchema.safeParse(await c.req.json());
     if (!parsed.success) {
         return jsonError(c, 400, 'Invalid order payload');
     }
 
-    const pkg = PACKAGES.flatMap(([, pkgs]) => pkgs).find(
-        (p) => p.packageId === parsed.data.packageId,
-    );
+    const pkg = await getPackageById(parsed.data.packageId);
 
     if (!pkg) return jsonError(c, 404, 'Package not found');
 
+    const currentUser = c.get('user');
     const paymentId = crypto.randomUUID();
+    await createPayment({
+        id: paymentId,
+        userId: currentUser!.id,
+        packageId: pkg.id,
+        amount: Number(pkg.price),
+        phoneNumber: parsed.data.phoneNumber,
+    });
+
     return c.json({
         success: true,
         data: {
             paymentId,
             status: 'pending',
-            amount: pkg.price,
-            packageId: pkg.packageId,
+            amount: Number(pkg.price),
+            packageId: pkg.id,
         },
     });
 });
 
-// Authenticated: deauthenticate a device quota.
 app.post('/deauth/:deviceQuotaId', requireAuth, async (c) => {
     const deviceQuotaId = c.req.param('deviceQuotaId');
     if (!deviceQuotaId) return jsonError(c, 400, 'Missing device quota id');
-    // TODO: mark the device quota as deauthorized in the DB.
+
+    // call radacct deauth
+
     return c.json({ success: true, data: { deviceQuotaId } });
 });
 
 // --- Admin ------------------------------------------------------------------
 
-// Admin: list all users (delegates to the better-auth admin API).
 app.get('/users', requireAdmin, async (c) => {
     const data = await auth.api.listUsers({
         query: { limit: 100 },
@@ -190,13 +221,10 @@ app.get('/users', requireAdmin, async (c) => {
 
 // --- Auth helpers -----------------------------------------------------------
 
-// Strip non-digits from a phone number (used to derive the placeholder email
-// better-auth requires in this phone-only system).
 function normalizePhone(phone: string) {
     return phone.replace(/\D/g, '');
 }
 
-// Flatten zod issues into a { field: message } map for the client form.
 function fieldErrorsFromIssues(
     issues: Array<{ path: Array<unknown>; message: string }>,
 ): Record<string, string> {
@@ -215,8 +243,6 @@ function fieldErrorsFromIssues(
     return out;
 }
 
-// Copy the better-auth session cookies onto our JSON response so the
-// browser stores the newly issued session.
 function forwardCookies(c: AppContext, headers: Headers, body: unknown) {
     const res = c.json(body);
     for (const cookie of headers.getSetCookie()) {
@@ -225,8 +251,6 @@ function forwardCookies(c: AppContext, headers: Headers, body: unknown) {
     return res;
 }
 
-// Map a better-auth APIError onto the {success:false, fieldErrors} envelope
-// so the client can render field-specific messages.
 function respondAuthError(c: AppContext, err: unknown) {
     if (err instanceof APIError) {
         const code = String(
