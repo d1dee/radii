@@ -6,7 +6,7 @@ export type ApiEnvelope<T> = {
     error?: string | Record<string, string>;
 };
 
-const BASE = '/api/admin';
+const BASE = '/api';
 
 export async function request<T>(
     path: string,
@@ -19,7 +19,9 @@ export async function request<T>(
             method: 'GET',
             credentials: 'include',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body),
+            ...(body !== undefined && opts?.method !== 'GET'
+                ? { body: JSON.stringify(body) }
+                : {}),
             ...opts,
         });
     } catch (e) {
@@ -53,9 +55,59 @@ export function register(body: {
     pin: string;
     verifyPin: string;
 }) {
-    return request('/register', body, { method: 'POST' });
+    return request('/hotspot/register', body, { method: 'POST' });
 }
 
 export function login(body: { phoneNumber: string; pin: string }) {
-    return request('/login', body, { method: 'POST' });
+    return request('/hotspot/login', body, { method: 'POST' });
+}
+
+export type PackageType = 'hotspot' | 'pppoe';
+
+// Raw package row as returned by the admin endpoints.
+export type PackageRow = {
+    id: string;
+    title: string;
+    type: PackageType;
+    category: string;
+    sessionLength: number;
+    price: string;
+    maxDevices: number;
+    noExpiry: boolean;
+    description: string | null;
+    note: string | null;
+    uploadRate: number;
+    downloadRate: number;
+    downloadQuota: number;
+    uploadQuota: number;
+    gatewayId: string | null;
+    isActive: boolean;
+    createdAt: string;
+};
+
+export type CreatePackageInput = {
+    title: string;
+    type: PackageType;
+    category: string;
+    sessionLength: number;
+    price: number;
+    maxDevices: number;
+    noExpiry: boolean;
+    description?: string;
+    note?: string;
+    uploadRate: number;
+    downloadRate: number;
+    downloadQuota: number;
+    uploadQuota: number;
+    gateway?: string;
+};
+
+export function getAdminPackages(type?: PackageType) {
+    return request<PackageRow[]>(
+        type ? `/admin/packages?type=${type}` : '/admin/packages',
+    );
+}
+
+export function createPackage(body: CreatePackageInput) {
+    return request<PackageRow>('/admin/packages', body, { method: 'POST' });
 }

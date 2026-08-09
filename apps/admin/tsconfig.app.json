@@ -16,6 +16,12 @@
         "jsx": "react-jsx",
         "sourceMap": true,
 
+        /* Path aliases */
+        "paths": {
+            "@/*": ["./src/*"],
+            "@shared/*": ["../shared/src/*"]
+        },
+
         /* Linting */
         "noUnusedLocals": true,
         "noUnusedParameters": true,
