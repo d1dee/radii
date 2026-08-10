@@ -1,12 +1,15 @@
 import {
     Button,
     Card,
+    Center,
     Grid,
     Group,
+    Loader,
     NumberInput,
     Select,
     Stack,
     Switch,
+    Text,
     Textarea,
     TextInput,
     Title,
@@ -15,20 +18,26 @@ import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
 import { createPackageSchema } from '@shared/index';
 import { zodResolver } from 'mantine-form-zod-resolver';
-import { useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 
 import {
     createPackage,
+    getAdminPackage,
+    updateAdminPackage,
     type CreatePackageInput,
     type PackageType,
 } from '@/lib/api';
 
-export default function AddPackagePage() {
+export default function PackageFormPage() {
     const navigate = useNavigate();
+    const { id } = useParams<{ id: string }>();
+    const isEdit = !!id;
     const [params] = useSearchParams();
     const defaultType = (params.get('type') as PackageType) || 'hotspot';
     const [loading, setLoading] = useState(false);
+    const [fetching, setFetching] = useState(isEdit);
+    const [fetchError, setFetchError] = useState<string | null>(null);
 
     const form = useForm<CreatePackageInput>({
         initialValues: {
@@ -45,19 +54,54 @@ export default function AddPackagePage() {
             downloadRate: 0,
             downloadQuota: 0,
             uploadQuota: 0,
-            gateway: '',
+            nasConfigId: '',
         },
         validate: zodResolver(createPackageSchema),
     });
 
+    useEffect(() => {
+        if (!id) return;
+        (async () => {
+            const result = await getAdminPackage(id);
+            if (!result.success || !result.data) {
+                setFetchError(result.message || 'Failed to load package');
+                setFetching(false);
+                return;
+            }
+            const pkg = result.data;
+            form.setValues({
+                title: pkg.title,
+                type: pkg.type,
+                category: pkg.category,
+                sessionLength: pkg.sessionLength,
+                price: Number(pkg.price),
+                maxDevices: pkg.maxDevices,
+                noExpiry: pkg.noExpiry,
+                description: pkg.description ?? '',
+                note: pkg.note ?? '',
+                uploadRate: pkg.uploadRate,
+                downloadRate: pkg.downloadRate,
+                downloadQuota: pkg.downloadQuota,
+                uploadQuota: pkg.uploadQuota,
+                nasConfigId: pkg.nasConfigId ?? '',
+            });
+            setFetching(false);
+        })();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [id]);
+
     const handleSubmit = async (values: CreatePackageInput) => {
         setLoading(true);
-        const result = await createPackage(values);
+        const result = isEdit
+            ? await updateAdminPackage(id!, values)
+            : await createPackage(values);
         setLoading(false);
 
         if (!result.success) {
             notifications.show({
-                title: 'Failed to create package',
+                title: isEdit
+                    ? 'Failed to update package'
+                    : 'Failed to create package',
                 message: result.message || 'Try again.',
                 color: 'red',
             });
@@ -65,17 +109,35 @@ export default function AddPackagePage() {
         }
 
         notifications.show({
-            title: 'Package created',
+            title: isEdit ? 'Package updated' : 'Package created',
             message: values.title,
             color: 'green',
         });
         navigate('/packages');
     };
 
+    if (fetching) {
+        return (
+            <Card padding='lg' radius='md' maw={900}>
+                <Center py='xl'>
+                    <Loader />
+                </Center>
+            </Card>
+        );
+    }
+
+    if (fetchError) {
+        return (
+            <Card padding='lg' radius='md' maw={900}>
+                <Text c='red'>{fetchError}</Text>
+            </Card>
+        );
+    }
+
     return (
         <Card padding='lg' radius='md' maw={900}>
             <Title order={2} mb='md'>
-                Add Package
+                {isEdit ? 'Edit Package' : 'Add Package'}
             </Title>
             <form onSubmit={form.onSubmit(handleSubmit)}>
                 <Stack gap='md'>
@@ -136,8 +198,8 @@ export default function AddPackagePage() {
                         <Grid.Col span={6}>
                             <TextInput
                                 label='Gateway'
-                                placeholder='Optional'
-                                {...form.getInputProps('gateway')}
+                                placeholder='Optional NAS config ID'
+                                {...form.getInputProps('nasConfigId')}
                             />
                         </Grid.Col>
                     </Grid>
@@ -199,7 +261,7 @@ export default function AddPackagePage() {
                             Cancel
                         </Button>
                         <Button type='submit' loading={loading}>
-                            Create Package
+                            {isEdit ? 'Save Changes' : 'Create Package'}
                         </Button>
                     </Group>
                 </Stack>

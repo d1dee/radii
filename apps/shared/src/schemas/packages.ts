@@ -19,5 +19,9 @@ export const createPackageSchema = z.object({
     downloadRate: z.number().min(0, 'Must be non-negative'),
     downloadQuota: z.number().min(0, 'Must be non-negative'),
     uploadQuota: z.number().min(0, 'Must be non-negative'),
-    nasConfigId: z.uuid().optional(),
+    nasConfigId: z
+        .string()
+        .optional()
+        .transform((v) => (v?.trim() ? v.trim() : undefined))
+        .pipe(z.uuid().optional()),
 });

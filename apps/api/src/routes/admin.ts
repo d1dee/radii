@@ -2,7 +2,13 @@ import { createPackageSchema } from '@radii/shared';
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { jsonError } from '../lib/error';
-import { createPackage, getPackages } from '../lib/packages';
+import {
+    createPackage,
+    getPackageAnalytics,
+    getPackageById,
+    getPackages,
+    updatePackage,
+} from '../lib/packages';
 import { requireAdmin } from '../middleware/auth';
 import type { AppVariables } from '../types';
 
@@ -35,6 +41,40 @@ app.post('/packages', requireAdmin, async (c) => {
     });
 
     return c.json({ success: true, data: row }, 201);
+});
+
+app.get('/packages/:id', requireAdmin, async (c) => {
+    const row = await getPackageById(c.req.param('id'));
+    if (!row) {
+        return jsonError(c, 404, 'Package not found');
+    }
+    return c.json({ success: true, data: row });
+});
+
+app.get('/packages/:id/analytics', requireAdmin, async (c) => {
+    const packageId = c.req.param('id');
+    const pkg = await getPackageById(packageId);
+    if (!pkg) {
+        return jsonError(c, 404, 'Package not found');
+    }
+    const data = await getPackageAnalytics(packageId);
+    return c.json({ success: true, data });
+});
+
+app.put('/packages/:id', requireAdmin, async (c) => {
+    const parsed = createPackageSchema.safeParse(await c.req.json());
+    if (!parsed.success) {
+        return jsonError(c, 400, 'Invalid package payload');
+    }
+    const row = await updatePackage(c.req.param('id'), {
+        ...parsed.data,
+        price: String(parsed.data.price),
+        nasConfigId: parsed.data.nasConfigId ?? null,
+    });
+    if (!row) {
+        return jsonError(c, 404, 'Package not found');
+    }
+    return c.json({ success: true, data: row });
 });
 
 export default app;

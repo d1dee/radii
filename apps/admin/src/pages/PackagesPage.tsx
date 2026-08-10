@@ -1,4 +1,5 @@
 import {
+    ActionIcon,
     Badge,
     Button,
     Center,
@@ -10,11 +11,12 @@ import {
     Text,
     Title,
 } from '@mantine/core'
-import { MdAdd } from 'react-icons/md'
+import { MdAdd, MdEdit } from 'react-icons/md'
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 import { getAdminPackages, type PackageRow, type PackageType } from '@/lib/api'
+import { PackageDetailsDrawer } from '@/components/Packages/PackageDetailsDrawer'
 
 export default function PackagesPage() {
     const navigate = useNavigate()
@@ -22,6 +24,7 @@ export default function PackagesPage() {
     const [packages, setPackages] = useState<PackageRow[]>([])
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState<string | null>(null)
+    const [detailsId, setDetailsId] = useState<string | null>(null)
 
     const load = useCallback(async (type: PackageType) => {
         setLoading(true)
@@ -82,11 +85,16 @@ export default function PackagesPage() {
                                         <Table.Th>Quota Up/Down (KB)</Table.Th>
                                         <Table.Th>Expiry</Table.Th>
                                         <Table.Th>Status</Table.Th>
+                                        <Table.Th ta='right'>Actions</Table.Th>
                                     </Table.Tr>
                                 </Table.Thead>
                                 <Table.Tbody>
                                     {packages.map((pkg) => (
-                                        <Table.Tr key={pkg.id}>
+                                        <Table.Tr
+                                            key={pkg.id}
+                                            onClick={() => setDetailsId(pkg.id)}
+                                            style={{ cursor: 'pointer' }}
+                                        >
                                             <Table.Td fw={500}>{pkg.title}</Table.Td>
                                             <Table.Td>{pkg.category}</Table.Td>
                                             <Table.Td>{Number(pkg.price).toLocaleString()}</Table.Td>
@@ -110,6 +118,20 @@ export default function PackagesPage() {
                                                     {pkg.isActive ? 'Active' : 'Inactive'}
                                                 </Badge>
                                             </Table.Td>
+                                            <Table.Td>
+                                                <Group justify='flex-end' gap='xs'>
+                                                    <ActionIcon
+                                                        variant='light'
+                                                        aria-label={`Edit ${pkg.title}`}
+                                                        onClick={(e) => {
+                                                            e.stopPropagation()
+                                                            navigate(`/packages/${pkg.id}/edit`)
+                                                        }}
+                                                    >
+                                                        <MdEdit size={16} />
+                                                    </ActionIcon>
+                                                </Group>
+                                            </Table.Td>
                                         </Table.Tr>
                                     ))}
                                 </Table.Tbody>
@@ -119,6 +141,10 @@ export default function PackagesPage() {
                 </Tabs.Panel>
             </Tabs>
 
+            <PackageDetailsDrawer
+                packageId={detailsId}
+                onClose={() => setDetailsId(null)}
+            />
         </Stack>
     )
 }

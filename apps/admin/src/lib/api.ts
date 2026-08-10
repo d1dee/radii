@@ -80,7 +80,7 @@ export type PackageRow = {
     downloadRate: number;
     downloadQuota: number;
     uploadQuota: number;
-    gatewayId: string | null;
+    nasConfigId: string | null;
     isActive: boolean;
     createdAt: string;
 };
@@ -99,7 +99,7 @@ export type CreatePackageInput = {
     downloadRate: number;
     downloadQuota: number;
     uploadQuota: number;
-    gateway?: string;
+    nasConfigId?: string;
 };
 
 export function getAdminPackages(type?: PackageType) {
@@ -108,6 +108,47 @@ export function getAdminPackages(type?: PackageType) {
     );
 }
 
+export function getAdminPackage(id: string) {
+    return request<PackageRow>(`/admin/packages/${id}`);
+}
+
+export type PackagePaymentStatus = 'pending' | 'paid' | 'failed';
+
+export type PackageAnalytics = {
+    payments: {
+        total: number;
+        pending: number;
+        paid: number;
+        failed: number;
+        revenue: number;
+    };
+    buyers: {
+        unique: number;
+        repeat: number;
+    };
+    activations: {
+        total: number;
+        active: number;
+    };
+    recentPayments: Array<{
+        id: string;
+        phoneNumber: string;
+        amount: string;
+        status: PackagePaymentStatus;
+        createdAt: string;
+    }>;
+};
+
+export function getPackageAnalytics(id: string) {
+    return request<PackageAnalytics>(`/admin/packages/${id}/analytics`);
+}
+
 export function createPackage(body: CreatePackageInput) {
     return request<PackageRow>('/admin/packages', body, { method: 'POST' });
+}
+
+export function updateAdminPackage(id: string, body: CreatePackageInput) {
+    return request<PackageRow>(`/admin/packages/${id}`, body, {
+        method: 'PUT',
+    });
 }
