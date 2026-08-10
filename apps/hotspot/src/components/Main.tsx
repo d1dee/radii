@@ -23,9 +23,6 @@ import { UserAccount } from './UserAccounts/UserAccount.tsx';
 
 export const SessionContext = createContext<Session | undefined>(null!);
 export const ClientContext = createContext<Client | undefined>(null!);
-export const PackagesContext = createContext<Array<[string, Array<Package>]>>(
-    null!,
-);
 
 export type ModalActions = {
     /** Open the buy/payment flow for a package */
@@ -160,13 +157,7 @@ export default function Index({
                         <CurrentPackage />
                     )}
 
-                    {packages?.length ? (
-                        <PackagesContext.Provider value={packages}>
-                            <PackagePricing />
-                        </PackagesContext.Provider>
-                    ) : (
-                        <>This gateway has not been onborded</>
-                    )}
+                    <PackagePricing packages={packages} />
 
                     {/*
                       Modals are rendered outside the mutating QuotaContext and

@@ -2,31 +2,31 @@ import { Group, Paper, Radio, Stack, Text } from '@mantine/core';
 import { parseServiceProvider } from '@radii/shared';
 import { useContext } from 'react';
 import { ClientContext } from '../Main.tsx';
-import { RadioContext } from './Form.tsx';
 
-function isSafaricom(phone: string) {
-    const p = parseServiceProvider(phone);
-    return !(p instanceof Error) && p.name === 'safaricom';
-}
-
-export function PrevPaymentMethods() {
-    const [selectedPhone, setSelectedPhone] = useContext(RadioContext);
+export function PrevPaymentMethods({
+    phoneNumber,
+    inputMethod,
+    setPhone,
+}: {
+    phoneNumber: string;
+    inputMethod: 'radio' | 'input';
+    setPhone: (phone: string, method: 'radio' | 'input') => void;
+}) {
     const client = useContext(ClientContext);
     const prevPaymentMethods = client?.prevPaymentMethods
         ? [...client?.prevPaymentMethods, client.phoneNumber]
         : [];
 
     return (
-        <Stack gap='sm'>
+        <Stack gap='sm' pt='xs'>
             {prevPaymentMethods.map((prevPhoneNumber, i) => {
                 const provider = parseServiceProvider(prevPhoneNumber);
                 const providerError = provider instanceof Error;
                 const providerName = providerError ? null : provider.name;
                 const providerLogo = providerError ? '' : provider.logo;
 
-                const inputChecked = selectedPhone
-                    ? selectedPhone === prevPhoneNumber
-                    : prevPaymentMethods.findIndex(isSafaricom) === i;
+                const inputChecked =
+                    inputMethod === 'radio' && phoneNumber === prevPhoneNumber;
 
                 if (providerName === 'safaricom') {
                     return (
@@ -39,7 +39,7 @@ export function PrevPaymentMethods() {
                                 cursor: 'pointer',
                                 background: 'var(--mantine-color-gray-0)',
                             }}
-                            onClick={() => setSelectedPhone(prevPhoneNumber)}
+                            onClick={() => setPhone(prevPhoneNumber, 'radio')}
                         >
                             <Stack
                                 gap='xs'
@@ -51,8 +51,9 @@ export function PrevPaymentMethods() {
                                         <Radio
                                             checked={inputChecked}
                                             onChange={() =>
-                                                setSelectedPhone(
+                                                setPhone(
                                                     prevPhoneNumber,
+                                                    'radio',
                                                 )
                                             }
                                             value={prevPhoneNumber}
@@ -81,7 +82,10 @@ export function PrevPaymentMethods() {
                 return (
                     <Paper shadow='sm' radius='md' p='lg' withBorder>
                         <Stack gap='md'>
-                            <Text fw={600}>Saved Numbers:</Text>
+                            <Text fw={600}>Non-M-Pesa Number</Text>
+                            <Text size='sm' c='dimmed'>
+                                Only M-Pesa numbers can be used
+                            </Text>
                             <Paper
                                 key={i}
                                 p={{ base: 'sm', md: 'md' }}
@@ -122,21 +126,5 @@ export function PrevPaymentMethods() {
                 );
             })}
         </Stack>
-    );
-}
-
-function NoPrevPaymentMethod() {
-    return (
-        <Paper
-            bg='red.0'
-            p='lg'
-            radius='md'
-            withBorder
-            style={{ borderColor: 'var(--mantine-color-red-4)' }}
-        >
-            <Text size='sm' c='dimmed'>
-                No valid payment method
-            </Text>
-        </Paper>
     );
 }

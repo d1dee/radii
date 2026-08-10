@@ -282,6 +282,7 @@ const CountrySelect = memo(function CountrySelect({
             width={250}
             position='bottom-start'
             withArrow
+            shadow='md'
             onOptionSubmit={(val) => {
                 setCountry(countryOptionsDataMap[val]);
                 combobox.closeDropdown();
@@ -311,7 +312,7 @@ const CountrySelect = memo(function CountrySelect({
                     placeholder='Search country'
                 />
                 <Combobox.Options>
-                    <ScrollArea.Autosize mah={200} type='scroll'>
+                    <ScrollArea.Autosize mah={280} type='scroll'>
                         {options.length > 0 ? (
                             options
                         ) : (

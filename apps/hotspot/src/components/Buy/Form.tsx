@@ -1,19 +1,19 @@
-import { Button, Divider, Paper, Stack, TextInput } from '@mantine/core';
+import { Button, Divider, Input, Stack } from '@mantine/core';
 import { parseServiceProvider } from '@radii/shared';
-import type { Dispatch, SetStateAction } from 'react';
-import { createContext, useContext, useState } from 'react';
+import { schemaResolver, useForm } from '@mantine/form';
+import { PhoneNumberInput } from '@radii/ui';
+import { useContext, useState } from 'react';
 import { createOrder } from '../../lib/api.ts';
 import { ClientContext } from '../Main.tsx';
-import { validateForm } from './functions.ts';
+import { buyFormSchema, validateForm } from './functions.ts';
 import type { PaymentData, PaymentXHR } from './paymentTypes.ts';
 
 import { AiOutlineLoading } from 'react-icons/ai';
-import { FaPhone } from 'react-icons/fa';
 import { PrevPaymentMethods } from './PrevPaymentMethods.tsx';
 
-export const RadioContext = createContext<
-    [string, Dispatch<SetStateAction<string>>]
->(null!);
+type FormValues = {
+    phoneNumber: string;
+};
 
 export function BuyForm({
     packageId,
@@ -30,31 +30,40 @@ export function BuyForm({
 }) {
     const client = useContext(ClientContext);
     const prevPaymentMethods = client?.prevPaymentMethods || [];
-    const [selectedPhone, setSelectedPhone] = useState('');
-    const [error, setError] = useState<string | undefined>(undefined);
+
+    const defaultPhone =
+        prevPaymentMethods.find(
+            (v) =>
+                !(parseServiceProvider(v) instanceof Error) &&
+                parseServiceProvider(v).name === 'safaricom',
+        ) || '';
+
+    const form = useForm<FormValues>({
+        mode: 'controlled',
+        initialValues: { phoneNumber: defaultPhone },
+        validate: schemaResolver(buyFormSchema, { sync: true }),
+    });
+
+    const [inputMethod, setInputMethod] = useState<'radio' | 'input'>(
+        defaultPhone ? 'radio' : 'input',
+    );
     const [btnDisabled, setBtnDisabled] = useState(false);
 
-    async function submitOrder(e: React.MouseEvent<HTMLButtonElement>) {
-        e.preventDefault();
+    function setPhone(phone: string, method: 'radio' | 'input') {
+        form.setFieldValue('phoneNumber', phone);
+        setInputMethod(method);
+    }
 
+    async function handleSubmit(values: FormValues) {
         setBtnDisabled(true);
 
-        const phoneNo =
-            selectedPhone ||
-            prevPaymentMethods.find(
-                (v) =>
-                    !(parseServiceProvider(v) instanceof Error) &&
-                    parseServiceProvider(v).name === 'safaricom',
-            ) ||
-            '';
-
         const data = validateForm({
-            phoneNumber: phoneNo,
+            phoneNumber: values.phoneNumber,
             packageId,
         });
 
         if (data instanceof Error) {
-            setError(data.message);
+            form.setFieldError('phoneNumber', data.message);
             setBtnDisabled(false);
             return;
         }
@@ -94,33 +103,43 @@ export function BuyForm({
     }
 
     return (
-        <Stack gap='sm' mt='md'>
-            <RadioContext.Provider value={[selectedPhone, setSelectedPhone]}>
-                <PrevPaymentMethods />
-            </RadioContext.Provider>
-            <Divider label='or' />
-            <Paper shadow='sm' radius='md' p='md' withBorder>
-                <TextInput
+        <form onSubmit={form.onSubmit(handleSubmit)}>
+            <Stack gap='md' m='md'>
+                <Input.Wrapper
+                    label='Saved Numbers'
+                    description="Choose a number you've paid with before"
+                    error={form.errors.phoneNumber}
+                >
+                    <PrevPaymentMethods
+                        phoneNumber={form.values.phoneNumber}
+                        inputMethod={inputMethod}
+                        setPhone={setPhone}
+                    />
+                </Input.Wrapper>
+
+                <Divider label='or' />
+
+                <PhoneNumberInput
                     label='Enter phone number:'
-                    placeholder='+254712345678 / 0712345678'
-                    inputMode='numeric'
-                    error={error}
-                    leftSection={<FaPhone size={14} />}
-                    onChange={(e) => {
-                        setSelectedPhone(e.currentTarget.value);
-                        setError(undefined);
+                    description='We send an STK push prompt to this phone'
+                    placeholder='712 345 678'
+                    error={form.errors.phoneNumber}
+                    value={inputMethod === 'input' ? form.values.phoneNumber : ''}
+                    onChange={(value) => {
+                        setPhone(value ?? '', 'input');
                     }}
                 />
-            </Paper>
 
-            <Button
-                loading={btnDisabled}
-                loaderProps={{ children: <AiOutlineLoading /> }}
-                onClick={submitOrder}
-                fullWidth
-            >
-                Pay {price ? `Ksh ${price}` : 'for package'}
-            </Button>
-        </Stack>
+                <Button
+                    type='submit'
+                    mt='md'
+                    loading={btnDisabled}
+                    loaderProps={{ children: <AiOutlineLoading /> }}
+                    fullWidth
+                >
+                    Pay {price ? `Ksh ${price}` : 'for package'}
+                </Button>
+            </Stack>
+        </form>
     );
 }

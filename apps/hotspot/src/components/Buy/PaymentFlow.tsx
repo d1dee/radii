@@ -1,4 +1,4 @@
-import { Modal, Title } from '@mantine/core';
+import { Modal, Stack, Text, Title } from '@mantine/core';
 import { useState } from 'react';
 import { BuyForm } from './Form.tsx';
 import { PaymentError } from './Payments/PaymentError.tsx';
@@ -6,11 +6,23 @@ import { PendingPayment } from './Payments/PaymentPending.tsx';
 import { PaymentSuccess } from './Payments/PaymentSuccess.tsx';
 import type { FlowStatus, PaymentXHR } from './paymentTypes.ts';
 
-const TITLES: Record<FlowStatus, string> = {
-    buy: 'Top-Up',
-    pending: 'Processing Payment',
-    errored: 'Payment Error',
-    success: 'Payment Successful',
+const TITLES: Record<FlowStatus, { title: string; subtitle: string }> = {
+    buy: {
+        title: 'Top-Up',
+        subtitle: 'Pay for your package securely with M-Pesa',
+    },
+    pending: {
+        title: 'Processing Payment',
+        subtitle: 'Please wait while we verify your transaction',
+    },
+    errored: {
+        title: 'Payment Error',
+        subtitle: 'Something went wrong with your payment',
+    },
+    success: {
+        title: 'Payment Successful',
+        subtitle: 'Your package has been activated',
+    },
 };
 
 export function PaymentFlow({
@@ -30,7 +42,14 @@ export function PaymentFlow({
         <Modal
             opened={opened}
             onClose={onClose}
-            title={<Title order={3}>{TITLES[status]}</Title>}
+            title={
+                <Stack gap={2}>
+                    <Title order={3}>{TITLES[status].title}</Title>
+                    <Text size='sm' c='dimmed'>
+                        {TITLES[status].subtitle}
+                    </Text>
+                </Stack>
+            }
             size='lg'
             centered
         >

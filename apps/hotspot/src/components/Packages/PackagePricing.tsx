@@ -11,15 +11,12 @@ import { upperFirstCase } from '@radii/shared';
 import { dayjs } from '../../lib/dayjs.ts';
 import {
     ModalActionsContext,
-    PackagesContext,
     SessionContext,
 } from '../Main.tsx';
 
 import humanFormat from 'human-format';
 import { useContext, useState } from 'react';
-import type { Package } from '../../types/index.ts';
-
-type Packages = [string, Array<Package>];
+import type { Package, Packages } from '../../types/index.ts';
 
 export const dataScale = new humanFormat.Scale({
     Kbps: 1,
@@ -27,24 +24,29 @@ export const dataScale = new humanFormat.Scale({
     Gbps: 1e6,
 });
 
-function getPackages(title: string, packages: Array<Packages>) {
+function getPackagesByTitle(title: string, packages: Packages) {
     const h = packages.find(
         ([t, _]) => t.toLowerCase() === title.toLowerCase(),
     );
     return h ? h[1] : [];
 }
 
-export function PackagePricing() {
-    const pkgContext = useContext(PackagesContext);
-
-    const [state, setState] = useState({
-        selectedTitle: pkgContext[0][0],
-        packages: pkgContext[0][1],
-    });
+export function PackagePricing({ packages }: { packages: Packages | undefined }) {
+    const [selectedTitle, setSelectedTitle] = useState('');
 
     const { startBuy, openLogin } = useContext(ModalActionsContext);
     const session = useContext(SessionContext);
-    const { selectedTitle, packages } = state;
+
+    // A category is always selected: fall back to the first one when the
+    // selection is unset (packages still loading) or stale.
+    const activeTitle =
+        packages?.find(
+            ([t]) => t.toLowerCase() === selectedTitle.toLowerCase(),
+        )?.[0] ??
+        packages?.[0]?.[0] ??
+        '';
+
+    const activePackages = getPackagesByTitle(activeTitle, packages ?? []);
 
     function initiateOrderFlow(pkg: Package) {
         const seed = {
@@ -55,6 +57,8 @@ export function PackagePricing() {
         if (session && session.expiresAt > Date.now()) startBuy(seed);
         else openLogin(pkg.packageId, String(pkg.price));
     }
+
+    if (!packages || packages.length === 0) return null;
 
     return (
         <Paper shadow='xl' radius='lg' p='lg' mt='md'>
@@ -67,23 +71,15 @@ export function PackagePricing() {
                     cols={{ base: 2, xs: 3, sm: 4, md: 5 }}
                     spacing='md'
                 >
-                    {pkgContext.map(([title, _]) => {
+                    {packages.map(([title, _]) => {
                         const active =
-                            title.toLowerCase() === selectedTitle.toLowerCase();
+                            title.toLowerCase() === activeTitle.toLowerCase();
                         return (
                             <Button
                                 key={title}
                                 variant={active ? 'filled' : 'light'}
                                 color={active ? 'grape' : 'gray'}
-                                onClick={() => {
-                                    setState({
-                                        selectedTitle: title,
-                                        packages: getPackages(
-                                            title,
-                                            pkgContext,
-                                        ),
-                                    });
-                                }}
+                                onClick={() => setSelectedTitle(title)}
                             >
                                 {upperFirstCase(title)}
                             </Button>
@@ -92,7 +88,7 @@ export function PackagePricing() {
                 </SimpleGrid>
 
                 <Stack gap='md'>
-                    {packages.map((pkg) => (
+                    {activePackages.map((pkg) => (
                         <Card
                             key={pkg.packageId}
                             shadow='sm'
