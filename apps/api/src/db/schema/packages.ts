@@ -8,16 +8,21 @@ import {
     pgTable,
     text,
     timestamp,
+    uuid,
 } from 'drizzle-orm/pg-core';
 import { user } from './auth-schema';
+import { nasConfig } from './integrations';
 import { transaction } from './payments';
 import { radacct } from './radius';
 
-export const hotspotPackages = pgTable(
-    'hotspot_packages',
+export const packages = pgTable(
+    'packages',
     {
-        id: text('id').primaryKey(),
+        id: uuid('id').defaultRandom().primaryKey(),
         title: text('title').notNull(),
+        type: text('type', { enum: ['hotspot', 'pppoe'] })
+            .default('hotspot')
+            .notNull(),
         category: text('category').notNull(),
         sessionLength: integer('session_length').notNull(),
         price: numeric('price', { precision: 10, scale: 2 }).notNull(),
@@ -29,28 +34,29 @@ export const hotspotPackages = pgTable(
         downloadRate: integer('download_rate').notNull(),
         downloadQuota: integer('download_quota').notNull(),
         uploadQuota: integer('upload_quota').notNull(),
-        gatewayId: text('gateway_id'),
+        nasConfigId: text('nas_config_id').references(() => nasConfig.id),
         isActive: boolean('is_active').default(true).notNull(),
         createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
             .defaultNow()
             .notNull(),
     },
     (table) => [
-        index('hotspot_packages_category_idx').on(table.category),
-        index('hotspot_packages_gateway_id_idx').on(table.gatewayId),
+        index('packages_type_idx').on(table.type),
+        index('packages_category_idx').on(table.category),
+        index('packages_nas_config_id_idx').on(table.nasConfigId),
     ],
 );
 
-export const hotspotPayments = pgTable(
-    'hotspot_payments',
+export const packagePayments = pgTable(
+    'package_payments',
     {
         id: text('id').primaryKey(),
         userId: text('user_id')
             .notNull()
             .references(() => user.id, { onDelete: 'cascade' }),
-        packageId: text('package_id')
+        packageId: uuid('package_id')
             .notNull()
-            .references(() => hotspotPackages.id, { onDelete: 'restrict' }),
+            .references(() => packages.id, { onDelete: 'restrict' }),
         status: text('status', { enum: ['pending', 'paid', 'failed'] })
             .notNull()
             .default('pending'),
@@ -68,36 +74,36 @@ export const hotspotPayments = pgTable(
             .notNull(),
     },
     (table) => [
-        index('hotspot_payments_user_id_idx').on(table.userId),
-        index('hotspot_payments_package_id_idx').on(table.packageId),
+        index('package_payments_user_id_idx').on(table.userId),
+        index('package_payments_package_id_idx').on(table.packageId),
     ],
 );
 
-export const hotspotPaymentsRelations = relations(
-    hotspotPayments,
+export const packagePaymentsRelations = relations(
+    packagePayments,
     ({ one }) => ({
         user: one(user, {
-            fields: [hotspotPayments.userId],
+            fields: [packagePayments.userId],
             references: [user.id],
         }),
-        package: one(hotspotPackages, {
-            fields: [hotspotPayments.packageId],
-            references: [hotspotPackages.id],
+        package: one(packages, {
+            fields: [packagePayments.packageId],
+            references: [packages.id],
         }),
         transaction: one(transaction, {
-            fields: [hotspotPayments.transaction],
+            fields: [packagePayments.transaction],
             references: [transaction.id],
         }),
     }),
 );
 
-export const activatedHotspot = pgTable(
-    'hotspot_payment_radacct',
+export const activatedPackages = pgTable(
+    'activated_packages',
     {
         id: text('id').primaryKey(),
-        hotspotPaymentId: text('hotspot_payment_id')
+        packagePaymentId: text('package_payment_id')
             .notNull()
-            .references(() => hotspotPayments.id, { onDelete: 'cascade' }),
+            .references(() => packagePayments.id, { onDelete: 'cascade' }),
         radacctId: bigserial('radacct_id', { mode: 'bigint' })
             .notNull()
             .references(() => radacct.radacctid, { onDelete: 'restrict' }),
@@ -107,40 +113,44 @@ export const activatedHotspot = pgTable(
         createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
             .defaultNow()
             .notNull(),
-        packageId: text('package_id')
+        activatedAt: timestamp('activated_at', {
+            withTimezone: true,
+            mode: 'date',
+        })
+            .defaultNow()
+            .notNull(),
+        packageId: uuid('package_id')
             .notNull()
-            .references(() => hotspotPackages.id, { onDelete: 'restrict' }),
+            .references(() => packages.id, { onDelete: 'restrict' }),
         expireAt: timestamp('expires_at', {
             withTimezone: true,
             mode: 'date',
         }).notNull(),
     },
     (table) => [
-        index('hotspot_payment_radacct_payment_id_idx').on(
-            table.hotspotPaymentId,
-        ),
-        index('hotspot_payment_radacct_radacct_id_idx').on(table.radacctId),
-        index('hotspot_payment_radacct_user_id_idx').on(table.userId),
+        index('activated_packages_payment_id_idx').on(table.packagePaymentId),
+        index('activated_packages_radacct_id_idx').on(table.radacctId),
+        index('activated_packages_user_id_idx').on(table.userId),
     ],
 );
 
-export const activateHotspotRelation = relations(
-    activatedHotspot,
+export const activatedPackagesRelations = relations(
+    activatedPackages,
     ({ one }) => ({
-        hotspotPayment: one(hotspotPayments, {
-            fields: [activatedHotspot.hotspotPaymentId],
-            references: [hotspotPayments.id],
+        packagePayment: one(packagePayments, {
+            fields: [activatedPackages.packagePaymentId],
+            references: [packagePayments.id],
         }),
-        package: one(hotspotPackages, {
-            fields: [activatedHotspot.packageId],
-            references: [hotspotPackages.id],
+        package: one(packages, {
+            fields: [activatedPackages.packageId],
+            references: [packages.id],
         }),
         radacct: one(radacct, {
-            fields: [activatedHotspot.radacctId],
+            fields: [activatedPackages.radacctId],
             references: [radacct.radacctid],
         }),
         user: one(user, {
-            fields: [activatedHotspot.userId],
+            fields: [activatedPackages.userId],
             references: [user.id],
         }),
     }),

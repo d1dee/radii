@@ -6,10 +6,9 @@ import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { z } from 'zod';
 import { auth } from '../auth';
 import { db } from '../db';
-import { activatedHotspot } from '../db/schema';
+import { activatedPackages } from '../db/schema';
 import { jsonError, jsonFieldErrors } from '../lib/error';
 import {
-    createPackage,
     createPayment,
     getPackageById,
     getPackagesGroupedByCategory,
@@ -21,49 +20,9 @@ const app = new Hono<{ Variables: AppVariables }>();
 
 // --- Packages ---------------------------------------------------------------
 
-const createPackageSchema = z.object({
-    title: z.string().min(1),
-    category: z.string().min(1),
-    sessionLength: z.number().int().positive(),
-    price: z.number().nonnegative(),
-    maxDevices: z.number().int().positive(),
-    noExpiry: z.boolean(),
-    description: z.string().optional(),
-    note: z.string().optional(),
-    uploadRate: z.number().nonnegative(),
-    downloadRate: z.number().nonnegative(),
-    downloadQuota: z.number().nonnegative(),
-    uploadQuota: z.number().nonnegative(),
-    gateway: z.string().optional(),
-});
-
 app.get('/packages', async (c) => {
     const packages = await getPackagesGroupedByCategory();
     return c.json({ success: true, data: packages });
-});
-
-app.post('/packages', requireAdmin, async (c) => {
-    const parsed = createPackageSchema.safeParse(await c.req.json());
-    if (!parsed.success) {
-        return jsonError(c, 400, 'Invalid package payload');
-    }
-    const row = await createPackage({
-        id: crypto.randomUUID(),
-        title: parsed.data.title,
-        category: parsed.data.category,
-        sessionLength: parsed.data.sessionLength,
-        price: String(parsed.data.price),
-        maxDevices: parsed.data.maxDevices,
-        noExpiry: parsed.data.noExpiry,
-        description: parsed.data.description,
-        note: parsed.data.note,
-        uploadRate: parsed.data.uploadRate,
-        downloadRate: parsed.data.downloadRate,
-        downloadQuota: parsed.data.downloadQuota,
-        uploadQuota: parsed.data.uploadQuota,
-        gatewayId: parsed.data.gateway,
-    });
-    return c.json({ success: true, data: row }, 201);
 });
 
 // --- Authentication (phone + PIN) -------------------------------------------
@@ -147,12 +106,12 @@ app.get('/status', requireAuth, async (c) => {
     try {
         const currentUser = c.get('user');
 
-        const activeSubscriptions = await db.query.activatedHotspot.findMany({
+        const activeSubscriptions = await db.query.activatedPackages.findMany({
             where: and(
-                eq(activatedHotspot.userId, currentUser.id),
-                gte(activatedHotspot.expireAt, new Date()),
+                eq(activatedPackages.userId, currentUser.id),
+                gte(activatedPackages.expireAt, new Date()),
             ),
-            with: { package: true, hotspotPayment: true },
+            with: { package: true, packagePayment: true },
         });
 
         return c.json({ success: true, data: activeSubscriptions });

@@ -57,8 +57,8 @@ export const nasDeviceRelations = relations(nasDevice, ({ one }) => ({
     }),
 }));
 
-export const integrationConfig = pgTable(
-    'integration_config',
+export const nasConfig = pgTable(
+    'nas_config',
     {
         id: text('id').primaryKey(),
         nasDeviceId: text('nas_device_id')
@@ -79,17 +79,14 @@ export const integrationConfig = pgTable(
             .notNull(),
     },
     (table) => [
-        index('integration_config_nas_device_id_idx').on(table.nasDeviceId),
-        index('integration_config_type_idx').on(table.connectionType),
+        index('nas_config_nas_device_id_idx').on(table.nasDeviceId),
+        index('nas_config_type_idx').on(table.connectionType),
     ],
 );
 
-export const integrationConfigRelations = relations(
-    integrationConfig,
-    ({ one }) => ({
-        nasDevice: one(nasDevice, {
-            fields: [integrationConfig.nasDeviceId],
-            references: [nasDevice.id],
-        }),
+export const integrationConfigRelations = relations(nasConfig, ({ one }) => ({
+    nasDevice: one(nasDevice, {
+        fields: [nasConfig.nasDeviceId],
+        references: [nasDevice.id],
     }),
-);
+}));
