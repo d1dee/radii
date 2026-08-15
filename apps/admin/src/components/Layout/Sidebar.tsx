@@ -1,6 +1,6 @@
 import { NavLink, Stack, Text } from '@mantine/core'
 import { useLocation, Link } from 'react-router-dom'
-import { MdDashboard, MdRouter } from 'react-icons/md'
+import { MdDashboard, MdRouter, MdStorage } from 'react-icons/md'
 
 interface SidebarProps {
     onNavClick?: () => void
@@ -9,6 +9,7 @@ interface SidebarProps {
 const links = [
     { to: '/', label: 'Dashboard', icon: MdDashboard },
     { to: '/packages', label: 'Packages', icon: MdRouter },
+    { to: '/nas-devices', label: 'NAS Devices', icon: MdStorage },
 ]
 
 export function Sidebar({ onNavClick }: SidebarProps) {
@@ -26,7 +27,11 @@ export function Sidebar({ onNavClick }: SidebarProps) {
                     to={link.to}
                     label={link.label}
                     leftSection={<link.icon size={20} />}
-                    active={location.pathname === link.to}
+                    active={
+                        link.to === '/'
+                            ? location.pathname === '/'
+                            : location.pathname.startsWith(link.to)
+                    }
                     onClick={onNavClick}
                 />
             ))}

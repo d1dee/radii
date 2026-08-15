@@ -17,7 +17,7 @@ import {
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
 import { createPackageSchema } from '@shared/index';
-import { zodResolver } from 'mantine-form-zod-resolver';
+import { zod4Resolver } from 'mantine-form-zod-resolver';
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 
@@ -56,15 +56,20 @@ export default function PackageFormPage() {
             uploadQuota: 0,
             nasConfigId: '',
         },
-        validate: zodResolver(createPackageSchema),
+        validate: zod4Resolver(createPackageSchema),
     });
 
     useEffect(() => {
         if (!id) return;
         (async () => {
             const result = await getAdminPackage(id);
-            if (!result.success || !result.data) {
-                setFetchError(result.message || 'Failed to load package');
+            if (!result.success) {
+                setFetchError(result.message);
+                setFetching(false);
+                return;
+            }
+            if (!result.data) {
+                setFetchError('Failed to load package');
                 setFetching(false);
                 return;
             }
@@ -102,7 +107,7 @@ export default function PackageFormPage() {
                 title: isEdit
                     ? 'Failed to update package'
                     : 'Failed to create package',
-                message: result.message || 'Try again.',
+                message: result.message,
                 color: 'red',
             });
             return;

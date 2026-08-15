@@ -1,10 +1,11 @@
-// Envelope shared by every REST endpoint on the hotspot backend.
-export type ApiEnvelope<T> = {
-    success: boolean;
-    message: string;
-    data?: T;
-    error?: string | Record<string, string>;
-};
+import {
+    ApiErrorType,
+    type ApiEnvelope,
+    type NasDeviceOs,
+    type NasDeviceStatus,
+} from '@shared/index';
+
+export type { NasDeviceOs, NasDeviceStatus } from '@shared/index';
 
 const BASE = '/api';
 
@@ -24,28 +25,31 @@ export async function request<T>(
                 : {}),
             ...opts,
         });
-    } catch (e) {
+    } catch {
         return {
             success: false,
             message: 'Could not reach the server. Try again.',
+            type: ApiErrorType.NETWORK_ERROR,
         };
     }
 
     let json: ApiEnvelope<T>;
     try {
-        json = await res.json();
+        json = (await res.json()) as ApiEnvelope<T>;
     } catch {
         return {
             success: false,
             message: `Request to ${path} failed (${res.status})`,
+            type: ApiErrorType.NETWORK_ERROR,
         };
     }
 
     if (!json.success)
         return {
             success: false,
-            error: json?.error,
             message: json.message,
+            type: json.type,
+            data: json.data,
         };
     return json;
 }
@@ -151,4 +155,83 @@ export function updateAdminPackage(id: string, body: CreatePackageInput) {
     return request<PackageRow>(`/admin/packages/${id}`, body, {
         method: 'PUT',
     });
+}
+
+// Raw NAS device row as returned by the admin endpoints.
+export type NasDeviceRow = {
+    id: string;
+    name: string;
+    ipAddress: string;
+    macAddress: string | null;
+    model: string | null;
+    serialNumber: string | null;
+    firmwareVersion: string | null;
+    location: string | null;
+    ownerId: string;
+    status: NasDeviceStatus;
+    metadata: Record<string, unknown> | null;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type CreateNasDeviceInput = {
+    name: string;
+    os: NasDeviceOs;
+    ipAddress: string;
+    macAddress: string;
+    model: string;
+    serialNumber: string;
+    firmwareVersion: string;
+    location: string;
+    status: NasDeviceStatus;
+};
+
+export function getNasDevices() {
+    return request<NasDeviceRow[]>('/admin/nas-devices');
+}
+
+export function getNasDevice(id: string) {
+    return request<NasDeviceRow>(`/admin/nas-devices/${id}`);
+}
+
+export function createNasDevice(body: CreateNasDeviceInput) {
+    return request<NasDeviceRow>('/admin/nas-devices', body, {
+        method: 'POST',
+    });
+}
+
+export function updateNasDevice(id: string, body: CreateNasDeviceInput) {
+    return request<NasDeviceRow>(`/admin/nas-devices/${id}`, body, {
+        method: 'PUT',
+    });
+}
+
+export type NasSetupScriptStatus = 'pending' | 'applied' | 'failed';
+
+// Generated RouterOS setup script stored on the server.
+export type NasSetupScriptRow = {
+    id: string;
+    nasDeviceId: string;
+    script: string;
+    wgPublicKey: string | null;
+    wgClientIp: string;
+    wgKeyReportedAt: string | null;
+    status: NasSetupScriptStatus;
+    generatedAt: string;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export function getNasSetupScript(deviceId: string) {
+    return request<NasSetupScriptRow>(
+        `/admin/nas-devices/${deviceId}/setup-script`,
+    );
+}
+
+export function generateNasSetupScript(deviceId: string) {
+    return request<NasSetupScriptRow>(
+        `/admin/nas-devices/${deviceId}/setup-script`,
+        {},
+        { method: 'POST' },
+    );
 }

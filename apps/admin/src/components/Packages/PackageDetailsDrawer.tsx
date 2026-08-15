@@ -93,17 +93,16 @@ export function PackageDetailsDrawer({
                 getAdminPackage(packageId),
                 getPackageAnalytics(packageId),
             ]);
-            if (
-                !pkgRes.success ||
-                !pkgRes.data ||
-                !analyticsRes.success ||
-                !analyticsRes.data
-            ) {
-                setError(
-                    pkgRes.message ||
-                        analyticsRes.message ||
-                        'Failed to load package details',
-                );
+            if (!pkgRes.success) {
+                setError(pkgRes.message);
+                return;
+            }
+            if (!analyticsRes.success) {
+                setError(analyticsRes.message);
+                return;
+            }
+            if (!pkgRes.data || !analyticsRes.data) {
+                setError('Failed to load package details');
                 return;
             }
             setPkg(pkgRes.data);
