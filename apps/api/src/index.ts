@@ -1,10 +1,13 @@
+import { ApiErrorType } from '@radii/shared';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
 import { auth } from './auth';
+import { closeDb } from './db';
 import { env } from './env';
 import routes from './routes';
 import type { AppVariables } from './types';
+import { reconcileWireGuardPeers } from './lib/wgReconcile';
 
 const app = new Hono<{ Variables: AppVariables }>();
 
@@ -44,14 +47,52 @@ app.route('/api', routes);
 
 app.get('/health', (c) => c.json({ status: 'ok' }));
 
-// Global error fallback.
-app.notFound((c) => c.json({ success: false, error: 'Not found' }, 404));
+// Global error fallback — same envelope as every other error response.
+app.notFound((c) =>
+    c.json(
+        { success: false, message: 'Not found', type: ApiErrorType.NOT_FOUND },
+        404,
+    ),
+);
 app.onError((err, c) => {
     console.error(err);
-    return c.json({ success: false, error: 'Internal server error' }, 500);
+    return c.json(
+        {
+            success: false,
+            message: 'Internal server error',
+            type: ApiErrorType.INTERNAL_ERROR,
+        },
+        500,
+    );
 });
 
 console.log(`API listening on http://localhost:${env.port}`);
+
+// Converge the WireGuard interface to the database (source of truth) after
+// restarts: re-asserts known peers and prunes stale ones. Never fatal.
+void reconcileWireGuardPeers().catch((err) =>
+    console.error('[wg] reconciliation error:', err),
+);
+
+// Flush the Bun SQL connection pool on shutdown. Without this, SIGINT/SIGTERM
+// (and `bun run --watch` restarts) leave pooled Postgres connections open
+// until they time out server-side. Guarded by globalThis so `bun --hot`
+// re-evaluations of this module don't stack duplicate signal listeners.
+const shutdownFlags = globalThis as unknown as { __pgShutdownRegistered?: boolean };
+if (!shutdownFlags.__pgShutdownRegistered) {
+    shutdownFlags.__pgShutdownRegistered = true;
+    const shutdown = async (signal: string): Promise<void> => {
+        console.log(`Received ${signal}, closing database pool...`);
+        try {
+            await closeDb();
+        } catch (err) {
+            console.error('Error closing database pool:', err);
+        }
+        process.exit(0);
+    };
+    process.on('SIGINT', () => void shutdown('SIGINT'));
+    process.on('SIGTERM', () => void shutdown('SIGTERM'));
+}
 
 export default {
     port: env.port,

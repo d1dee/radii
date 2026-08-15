@@ -221,18 +221,24 @@ function respondAuthError(c: AppContext, err: unknown) {
             message.includes('already') ||
             message.includes('exist')
         ) {
-            return jsonFieldErrors(c, 409, {
-                phoneNumber: 'Phone number already registered',
-            });
+            return jsonFieldErrors(
+                c,
+                409,
+                { phoneNumber: 'Phone number already registered' },
+                'Phone number already registered',
+            );
         }
         if (
             message.includes('password') ||
             message.includes('credential') ||
             message.includes('invalid')
         ) {
-            return jsonFieldErrors(c, 401, {
-                pin: 'Invalid phone number or PIN',
-            });
+            return jsonFieldErrors(
+                c,
+                401,
+                { pin: 'Invalid phone number or PIN' },
+                'Invalid phone number or PIN',
+            );
         }
         return jsonError(
             c,
