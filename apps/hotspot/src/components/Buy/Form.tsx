@@ -74,8 +74,22 @@ export function BuyForm({
                 phoneNumber: data.phoneNumber,
             });
 
+            if (!result.success || !result.data) {
+                onOrder({
+                    orderId: '',
+                    status: 'errored',
+                    xhr: {
+                        success: false,
+                        message: result.success
+                            ? 'Could not submit your order.'
+                            : result.message,
+                    },
+                });
+                return;
+            }
+
             const paymentData: PaymentData = {
-                ...result,
+                ...result.data,
                 status: 'pending',
             };
 

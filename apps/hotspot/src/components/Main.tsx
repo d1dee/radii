@@ -65,9 +65,9 @@ export default function Index({
     useEffect(() => {
         (async () => {
             const clientData = await getClientData();
+            if (clientData.success) setClientData(clientData.data);
             const packages = await getPackages();
-            setClientData(clientData.data);
-            setPackages(packages.data);
+            if (packages.success) setPackages(packages.data);
         })();
     }, []);
 

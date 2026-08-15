@@ -22,14 +22,14 @@ export function CurrentPackage() {
     useEffect(() => {
         (async () => {
             const quota = await getStatus();
-            setQuota(quota.data);
+            if (quota.success) setQuota(quota.data);
         })();
     }, []);
 
     // Pick the highest if no token belongs to this devices
     const deviceQuota = quota?.find((v) => v.thisDevice) || (quota && quota[0]);
 
-    const [signal, setSignal] = useState<
+    const [signal] = useState<
         Partial<Array<Quota>[number]> & { width: string }
     >({
         ...deviceQuota,

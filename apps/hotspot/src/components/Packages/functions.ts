@@ -1,5 +1,5 @@
 import type { Dispatch, SetStateAction } from 'react';
-import type { StatusQuotas } from '../../types/index.ts';
+import type { Quota } from '../../types/index.ts';
 import { dayjs } from '../../lib/dayjs.ts';
 import { getStatus } from '../../lib/api.ts';
 
@@ -26,16 +26,15 @@ export function timeRemaining(duration: ReturnType<typeof dayjs.duration>) {
 }
 
 export async function checkQuotaStatus(
-    setValue: Dispatch<
-        SetStateAction<Partial<StatusQuotas[number]> & { width: string }>
-    >,
+    setValue: Dispatch<SetStateAction<Partial<Quota> & { width: string }>>,
 ) {
     try {
-        const data = await getStatus();
-        if (!data) return;
+        const result = await getStatus();
+        if (!result.success || !result.data) return;
 
         // Pick the highest if no token belongs to this devices
-        const deviceQuota = data?.find((v) => v.thisDevice) || data[0];
+        const deviceQuota =
+            result.data.find((v) => v.thisDevice) || result.data[0];
 
         setValue((prev) => ({
             ...prev,
@@ -62,7 +61,7 @@ export async function checkQuotaStatus(
                 .asSeconds(),
         }));
 
-        return data;
+        return result.data;
     } catch (err) {
         console.warn('Error checking package status', err);
     }

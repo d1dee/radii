@@ -1,17 +1,12 @@
 import { useState } from 'react';
 import { Button, Paper, Stack, Text, TextInput } from '@mantine/core';
+import type { ApiEnvelope } from '@radii/shared';
 
 import { AdminContacts } from '../../components/AdminContacts.tsx';
 
-type VerifyResponse = {
-    success: boolean;
-    data?: { status?: string; message?: string };
-    error?: string;
-};
-
 async function verifyTransactionRequest(
     transactionId: string,
-): Promise<VerifyResponse | undefined> {
+): Promise<ApiEnvelope<{ status?: string; message?: string }> | undefined> {
     try {
         const res = await fetch('/api/hotspot/verify-transaction', {
             method: 'POST',
@@ -19,7 +14,10 @@ async function verifyTransactionRequest(
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ transactionId }),
         });
-        return (await res.json()) as VerifyResponse;
+        return (await res.json()) as ApiEnvelope<{
+            status?: string;
+            message?: string;
+        }>;
     } catch {
         return undefined;
     }
@@ -59,7 +57,8 @@ export function HavingIssues({
                 if (!res || res.success === false) {
                     clearInterval(interval);
                     setMessage({
-                        message: res?.error || 'Transaction verification failed',
+                        message:
+                            res?.message || 'Transaction verification failed',
                     });
                 } else {
                     const status =

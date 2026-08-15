@@ -1,6 +1,6 @@
 import { Button, Input, PinInput, Stack, Text } from '@mantine/core';
 import { schemaResolver, useForm } from '@mantine/form';
-import { loginSchema, signUpSchema } from '@radii/shared';
+import { hasFieldErrors, loginSchema, signUpSchema } from '@radii/shared';
 import { PhoneNumberInput } from '@radii/ui';
 import { useContext, useState } from 'react';
 import { login, register } from '../../lib/api.ts';
@@ -51,14 +51,14 @@ export function RegisterForm({
         setSubmitting(false);
 
         if (!result.success) {
-            if (
-                result.message === 'form error' &&
-                typeof result.error === 'object'
-            )
-                form.setErrors(result.error);
+            // Failed responses share one envelope; per-field form errors
+            // live in `data.fieldErrors` (any type: VALIDATION_ERROR,
+            // CONFLICT for duplicates, UNAUTHORIZED for bad credentials…).
+            if (hasFieldErrors(result.data))
+                form.setErrors(result.data.fieldErrors);
             else
                 setFormError(
-                    result.message ?? 'Authentication error, contact support',
+                    result.message || 'Authentication error, contact support',
                 );
             return;
         }

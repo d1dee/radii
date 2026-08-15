@@ -1,12 +1,5 @@
-import type { Package, Quota } from '@radii/shared';
-
-// Envelope shared by every REST endpoint on the hotspot backend.
-export type ApiEnvelope<T> = {
-    success: boolean;
-    message: string;
-    data?: T;
-    error?: string | Record<string, string>;
-};
+import { ApiErrorType } from '@radii/shared';
+import type { ApiEnvelope, Package, Quota } from '@radii/shared';
 
 export type Client = {
     userId: string;
@@ -66,28 +59,31 @@ export async function request<T>(
             body: JSON.stringify(body),
             ...opts,
         });
-    } catch (e) {
+    } catch {
         return {
             success: false,
             message: 'Could not reach the server. Try again.',
+            type: ApiErrorType.NETWORK_ERROR,
         };
     }
 
     let json: ApiEnvelope<T>;
     try {
-        json = await res.json();
+        json = (await res.json()) as ApiEnvelope<T>;
     } catch {
         return {
             success: false,
-            message: `Request to ${path} failed (${res.status})`,
+            message: `Could not parse response from path ${path}`,
+            type: ApiErrorType.NETWORK_ERROR,
         };
     }
 
     if (!json.success)
         return {
             success: false,
-            error: json?.error,
             message: json.message,
+            type: json.type,
+            data: json.data,
         };
     return json;
 }

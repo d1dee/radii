@@ -16,7 +16,7 @@ export function ConnectedDevice() {
     useEffect(() => {
         (async () => {
             const quota = await getStatus();
-            setQuota(quota.data);
+            if (quota.success) setQuota(quota.data);
         })();
     }, []);
 
