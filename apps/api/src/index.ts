@@ -5,9 +5,9 @@ import { logger } from 'hono/logger';
 import { auth } from './auth';
 import { closeDb } from './db';
 import { env } from './env';
+import { reconcileWireGuardPeers } from './lib/wgReconcile';
 import routes from './routes';
 import type { AppVariables } from './types';
-import { reconcileWireGuardPeers } from './lib/wgReconcile';
 
 const app = new Hono<{ Variables: AppVariables }>();
 
@@ -34,8 +34,11 @@ app.use(
 // attach it (or null) to the context for downstream handlers.
 app.use('*', async (c, next) => {
     const session = await auth.api.getSession({ headers: c.req.raw.headers });
-    c.set('user', session ? session.user : null);
-    c.set('session', session ? session.session : null);
+    if (session) {
+        c.set('user', session.user);
+        c.set('session', session.session);
+    }
+
     await next();
 });
 
@@ -78,7 +81,9 @@ void reconcileWireGuardPeers().catch((err) =>
 // (and `bun run --watch` restarts) leave pooled Postgres connections open
 // until they time out server-side. Guarded by globalThis so `bun --hot`
 // re-evaluations of this module don't stack duplicate signal listeners.
-const shutdownFlags = globalThis as unknown as { __pgShutdownRegistered?: boolean };
+const shutdownFlags = globalThis as unknown as {
+    __pgShutdownRegistered?: boolean;
+};
 if (!shutdownFlags.__pgShutdownRegistered) {
     shutdownFlags.__pgShutdownRegistered = true;
     const shutdown = async (signal: string): Promise<void> => {
