@@ -8,7 +8,8 @@
         "start": "bun run src/index.ts",
         "typecheck": "tsc --noEmit",
         "db:generate": "drizzle-kit generate",
-        "db:migrate": "drizzle-kit migrate"
+        "db:migrate": "drizzle-kit migrate",
+        "wg:reconcile": "bun run src/scripts/reconcileWg.ts"
     },
     "dependencies": {
         "@better-auth/drizzle-adapter": "^1.6.26",

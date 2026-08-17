@@ -8,6 +8,7 @@ import {
     text,
     timestamp,
     unique,
+    uuid,
     varchar,
 } from 'drizzle-orm/pg-core';
 import { user } from './auth-schema';
@@ -171,3 +172,65 @@ export const nasSetupScriptRelations = relations(nasSetupScript, ({ one }) => ({
         references: [nasDevice.id],
     }),
 }));
+
+// External captive-portal login request. When an unauthenticated client hits
+// a NAS hotspot, the branded login page auto-submits every variable the RouterOS servlet exposes at login
+export const hotspotLoginRequest = pgTable(
+    'hotspot_login_request',
+    {
+        id: uuid('id').defaultRandom().primaryKey(),
+        nasDeviceId: text('nas_device_id')
+            .notNull()
+            .references(() => nasDevice.id, { onDelete: 'cascade' }),
+        // Client identity as reported by the NAS hotspot servlet.
+        mac: text('mac').notNull(),
+        ip: inet('ip'),
+        // Username the client typed on the NAS login page, if any.
+        username: text('username'),
+        linkLogin: text('link_login'),
+        linkLoginOnly: text('link_login_only'),
+        // the destination the client originally requested.
+        linkOrig: text('link_orig'),
+        // Error message carried over from a previous failed login attempt.
+        error: text('error'),
+        // Everything else the NAS login page reports (hostname,
+        // server-address, interface, trial, ...).
+        extra: jsonb('extra').$type<Record<string, string>>(),
+        status: text('status', { enum: ['pending', 'completed'] })
+            .default('pending')
+            .notNull(),
+        // Portal user who completed the request.
+        userId: text('user_id').references(() => user.id, {
+            onDelete: 'set null',
+        }),
+        // Hotspot username issued to the NAS on completion (the matching
+        // Cleartext-Password lives in radcheck).
+        hotspotUsername: text('hotspot_username'),
+        createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+            .defaultNow()
+            .notNull(),
+        updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+            .defaultNow()
+            .$onUpdate(() => new Date())
+            .notNull(),
+    },
+    (table) => [
+        index('hotspot_login_request_nas_device_id_idx').on(table.nasDeviceId),
+        index('hotspot_login_request_mac_idx').on(table.mac),
+        index('hotspot_login_request_status_idx').on(table.status),
+    ],
+);
+
+export const hotspotLoginRequestRelations = relations(
+    hotspotLoginRequest,
+    ({ one }) => ({
+        nasDevice: one(nasDevice, {
+            fields: [hotspotLoginRequest.nasDeviceId],
+            references: [nasDevice.id],
+        }),
+        user: one(user, {
+            fields: [hotspotLoginRequest.userId],
+            references: [user.id],
+        }),
+    }),
+);

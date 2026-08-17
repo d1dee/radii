@@ -183,7 +183,7 @@ export async function generateSetupScript(
         env.wgManagementSubnet,
         device.id,
     );
-    const hotspotDnsName = input.hotspotDnsName || `hotspot.${apiDomain}`;
+    const hotspotDnsName = input.hotspotDnsName || `hotspot.radii.lan`;
     const brandName = input.brandName || device.name;
 
     const radiusSecret = randomToken(24);

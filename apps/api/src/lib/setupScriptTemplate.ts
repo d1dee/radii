@@ -1,7 +1,7 @@
 // RouterOS setup-script template. Every {{PLACEHOLDER}} is substituted with a
 // device-specific value by renderMikrotikSetupScript(). The hotspot HTML pages
 // are composed per-device, escaped for embedding into RouterOS string literals
-// and injected as {{PAGE_*}} blocks.
+// and injected as {{PAGE_*}} blocks.\
 //
 // RouterOS quoting rules handled by rosStringLines():
 //   \  -> \\        (escape character)
@@ -10,6 +10,15 @@
 //   newline -> \n
 
 const ROS_CHUNK_SIZE = 700;
+
+function escapeHtml(value: string): string {
+    return value
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
 
 export function rosStringLines(varName: string, value: string): string {
     const escaped = value
@@ -78,63 +87,74 @@ ${body}
 
 function buildHotspotPages(
     brand: string,
-    portalUrl: string,
+    apiBaseUrl: string,
     nasId: string,
 ): Record<string, string> {
+    const b = escapeHtml(brand);
+    // External captive portal: instead of authenticating on the NAS itself,
+    // the login page auto-submits every variable the hotspot servlet exposes
+    // at login to the radii API, which stores the request and sends the
+    // client to the portal. After authenticating there, the portal posts
+    // issued credentials back to the NAS login page. No auto-submit when an
+    // error is carried over (failed external login) so the client is not
+    // bounced between portal and NAS in a loop.
     const login = pageShell(
-        `${brand} &middot; sign in`,
+        `${b} &middot; sign in`,
         '',
         `<div class='card'>
-<div class='brand'>${brand}</div>
-<p class='sub'>Sign in to get online</p>
+<div class='brand'>${b}</div>
+<p class='sub'>Taking you to sign in&hellip;</p>
 $(if error)
 <div class='alert'>$(error)</div>
 $(endif)
-<form name='login' action='$(link-login-only)' method='post' onsubmit='return doLogin()'>
-<input type='hidden' name='dst' value='$(link-orig)'>
-<input type='hidden' name='popup' value='true'>
-<input class='field' type='text' name='username' value='$(username)' placeholder='Username or voucher code' autocomplete='username' autofocus>
-<input class='field' type='password' name='password' placeholder='Password' autocomplete='current-password'>
-<button class='btn' type='submit'>Connect</button>
+<form name='redirect' action='${apiBaseUrl}/api/hotspot/login-request' method='post'>
+<input type='hidden' name='nas' value='${nasId}'>
+<input type='hidden' name='mac' value='$(mac)'>
+<input type='hidden' name='ip' value='$(ip)'>
+<input type='hidden' name='username' value='$(username)'>
+<input type='hidden' name='linkLogin' value='$(link-login)'>
+<input type='hidden' name='linkLoginOnly' value='$(link-login-only)'>
+<input type='hidden' name='linkOrig' value='$(link-orig)'>
+<input type='hidden' name='error' value='$(error)'>
+<input type='hidden' name='hostname' value='$(hostname)'>
+<input type='hidden' name='serverAddress' value='$(server-address)'>
+<input type='hidden' name='interfaceName' value='$(interface-name)'>
+<input type='hidden' name='domain' value='$(domain)'>
+<input type='hidden' name='trial' value='$(trial)'>
+<input type='hidden' name='loggedIn' value='$(logged-in)'>
+<input type='hidden' name='popup' value='$(popup)'>
+<button class='btn' type='submit'>Continue to sign in</button>
 </form>
-$(if trial == 'yes')
-<a class='link' href='$(link-login-only)?username=T-$(mac)'>Try free trial access</a>
-$(endif)
-<div class='alt-box'>
-<p>Need an account?</p>
-<a class='btn alt' href='${portalUrl}/?nas=${nasId}&mac=$(mac-esc)' style='margin-top:8px'>Buy a package</a>
+<p class='foot'>${b}</p>
 </div>
-<p class='foot'>${brand}</p>
-</div>
-<script src='/md5.js'></script>
-<script>
-function doLogin(){var f=document.login;f.password.value=hexMD5('$(chap-id)'+f.password.value+'$(chap-challenge)');return true;}
-</script>`,
+$(if error == "")
+<script>document.redirect.submit();</script>
+$(endif)`,
     );
 
     const alogin = pageShell(
-        `${brand} &middot; connected`,
+        `${b} &middot; connected`,
         `$(if popup == 'true')
 <script>window.open('$(link-status)','hotspot_status','width=420,height=560,scrollbars=yes,resizable=yes');</script>
 $(endif)
 <script>window.setTimeout(function(){window.location='$(link-orig)';},4000);</script>`,
         `<div class='card'>
-<div class='brand'>${brand}</div>
+<div class='brand'>${b}</div>
 <p class='sub'>You are connected, $(username)</p>
 <p class='foot'>You will be redirected to your destination shortly.</p>
 <a class='btn' href='$(link-orig)' style='margin-top:14px'>Continue</a>
 <a class='btn alt' href='$(link-status)' style='margin-top:8px'>Session status</a>
-<p class='foot'>${brand} &middot; $(ip)</p>
+<p class='foot'>${b} &middot; $(ip)</p>
 </div>`,
     );
 
     const status = pageShell(
-        `${brand} &middot; status`,
+        `${b} &middot; status`,
         `$(if refresh-timeout-secs != 0)
 <meta http-equiv='refresh' content='$(refresh-timeout-secs); url=$(link-status)'>
 $(endif)`,
         `<div class='card'>
-<div class='brand'>${brand}</div>
+<div class='brand'>${b}</div>
 <p class='sub'>Session status</p>
 <table class='rows'>
 <tr><td>User</td><td>$(username)</td></tr>
@@ -146,15 +166,15 @@ $(endif)`,
 <tr><td>Uploaded</td><td>$(bytes-out-nice)</td></tr>
 </table>
 <a class='btn alt' href='$(link-logout)?erase-cookie=on'>Log out</a>
-<p class='foot'>${brand}</p>
+<p class='foot'>${b}</p>
 </div>`,
     );
 
     const logout = pageShell(
-        `${brand} &middot; logged out`,
+        `${b} &middot; logged out`,
         '',
         `<div class='card'>
-<div class='brand'>${brand}</div>
+<div class='brand'>${b}</div>
 <p class='sub'>You have been logged out</p>
 <table class='rows'>
 <tr><td>User</td><td>$(username)</td></tr>
@@ -163,27 +183,27 @@ $(endif)`,
 <tr><td>Session uptime</td><td>$(uptime)</td></tr>
 </table>
 <a class='btn' href='$(link-login-only)'>Log in again</a>
-<p class='foot'>${brand}</p>
+<p class='foot'>${b}</p>
 </div>`,
     );
 
     const error = pageShell(
-        `${brand} &middot; error`,
+        `${b} &middot; error`,
         '',
         `<div class='card'>
-<div class='brand'>${brand}</div>
+<div class='brand'>${b}</div>
 <p class='sub'>Hotspot error</p>
 <div class='alert'>$(error)</div>
 <a class='btn' href='$(link-login)'>Back to login</a>
-<p class='foot'>${brand}</p>
+<p class='foot'>${b}</p>
 </div>`,
     );
 
     const radvert = pageShell(
-        `${brand}`,
+        `${b}`,
         `<meta http-equiv='refresh' content='3; url=$(link-status)'>`,
         `<div class='card'>
-<div class='brand'>${brand}</div>
+<div class='brand'>${b}</div>
 <p class='sub'>One moment please...</p>
 <a class='btn alt' href='$(link-status)'>Continue to status page</a>
 </div>`,
@@ -197,7 +217,7 @@ $(if http-status == 302)hotspot login page$(endif)
 $(if http-header == "Location")$(link-login)$(endif)
 $(endif)
 <html>
-<head><title>${brand}</title></head>
+<head><title>${b}</title></head>
 <body>
 <a href="$(if logged-in == 'yes')$(link-status)$(else)$(link-login)$(endif)">continue</a>
 </body>
@@ -214,103 +234,260 @@ const TEMPLATE = `# ============================================================
 #  RADIUS    : {{RADIUS_SERVER}}
 #  Generated : {{GENERATED_AT}}
 #
-#  RouterOS 7.x required. Safe to re-run (idempotent).
+#  RouterOS 7.x required. Idempotent: managed settings are overwritten
+#  with the values in this configuration on every run.\
 #
 #  Sections:
 #    1. Identity & NTP
-#    2. External RADIUS (radii) for hotspot/login/ppp
-#    3. RADIUS authentication for router management (Winbox/API/SSH)
-#    4. WireGuard management tunnel to the radii server
-#    5. Firewall input rules for management
-#    6. IP service lockdown (API reachable only via the WG subnet)
-#    7. Report device facts + WireGuard public key back to radii
-#    8. Hotspot authenticating against the external RADIUS
-#    9. Branded hotspot HTML pages (hotspot customisation)
+#    2. Device facts
+#    3. External RADIUS
+#    5. WireGuard management tunnel
+#    6. Firewall input rules
+#    7. IP service lockdown
+#    8. Report device facts to radii
+#    9. HotSpot + DHCP + NAT
+#   10. Walled garden
+#   11. Branded HotSpot HTML pages
 # =====================================================================
 
-:local radiiLog do={ :log info ("radii: " . $1); };
+:local radiiLog do={
+    :log info ("radii: " . $1);
+    :put ("radii: " . $1);
+};
 
-# --- 1. identity, NTP & device facts ----------------------------------
+# ---------------------------------------------------------------------
+# 1. Identity & NTP
+# ---------------------------------------------------------------------
+
 /system/identity/set name="{{NAS_IDENTITY}}";
-:do { /system/ntp/client/set enabled=yes servers={{NTP_SERVERS}}; $radiiLog "NTP client enabled"; } on-error={ $radiiLog "NTP client skipped"; };
 
-# Facts the radii server uses to fill the device record automatically,
-# instead of requiring manual entry.
+:do {
+    /system/ntp/client/set enabled=yes servers={{NTP_SERVERS}};
+    $radiiLog "NTP client configured";
+} on-error={
+    $radiiLog "WARNING - NTP client could not be configured";
+};
+
+# ---------------------------------------------------------------------
+# 2. Device facts
+# ---------------------------------------------------------------------
 :local devVersion [/system/resource/get version];
 :local devBoard [/system/resource/get board-name];
 :local devArch [/system/resource/get architecture-name];
 :local devModel $devBoard;
 :local devSerial "";
-:do {
-    :local rbModel [/system/routerboard/get model];
-    :if ([:len $rbModel] > 0) do={ :set devModel $rbModel; };
-    :local rbSerial [/system/routerboard/get serial-number];
-    :if ([:len $rbSerial] > 0) do={ :set devSerial $rbSerial; };
-} on-error={ };
-$radiiLog ("device: " . $devModel . " (s/n " . $devSerial . ") on RouterOS " . $devVersion);
 
-# --- 2. external RADIUS ----------------------------------------------
-/radius/remove [find where comment="radii managed"];
 :do {
-    :do {
-        /radius/add srv={{RADIUS_SERVER}} secret="{{RADIUS_SECRET}}" service=hotspot,login,ppp timeout=3s comment="radii managed";
-    } on-error={
-        /radius/add address={{RADIUS_SERVER}} secret="{{RADIUS_SECRET}}" service=hotspot,login,ppp timeout=3s comment="radii managed";
-    };
-    $radiiLog "RADIUS client configured ({{RADIUS_SERVER}})";
+    :set devSerial [/system/license/get software-id];
 } on-error={
-    $radiiLog "ERROR - could not add RADIUS client, check settings";
+    :do {
+        :set devSerial [/system/license/get system-id];
+    } on-error={
+        :set devSerial "";
+    };
 };
 
-# --- 3. management AAA -----------------------------------------------
-# Router logins (Winbox, API, SSH) are authenticated against RADIUS.
-# Privileges are driven by the Mikrotik-Group reply-attribute returned
-# by the radii server.
-/user/aaa/set use-radius=yes;
-$radiiLog "Router management logins can now authenticate via RADIUS";
+:if ([:len $devModel] = 0) do={
+    :set devModel $devArch;
+};
 
-# --- 4. WireGuard management tunnel ----------------------------------
-# The tunnel address is assigned at random from {{WG_ALLOWED_ADDRESS}};
-# the radii server uses it to reach this device (API/Web) later.
-/interface/wireguard/remove [find where name="wg-radii"];
-/interface/wireguard/add name="wg-radii" listen-port={{WG_LISTEN_PORT}} mtu=1420 comment="radii management tunnel";
-:delay 2s;
-:local wgPubKey [/interface/wireguard/get [find where name="wg-radii"] public-key];
-$radiiLog ("WireGuard public key: " . $wgPubKey);
-/ip/address/remove [find where interface="wg-radii"];
-/ip/address/add address={{WG_CLIENT_IP}}/{{WG_PREFIX_LEN}} interface="wg-radii" comment="radii mgmt";
-/interface/wireguard/peers/remove [find where interface="wg-radii"];
-/interface/wireguard/peers/add interface="wg-radii" endpoint-address="{{WG_ENDPOINT_HOST}}" endpoint-port={{WG_ENDPOINT_PORT}} public-key="{{WG_SERVER_PUBLIC_KEY}}" preshared-key="{{WG_PSK}}" allowed-address={{WG_ALLOWED_ADDRESS}} persistent-keepalive=25s;
+$radiiLog (    "device: " . $devModel .    " (id " . $devSerial .    ") on RouterOS " . $devVersion);
 
-# --- 5. firewall input ------------------------------------------------
-/ip/firewall/filter/remove [find where comment~"^radii:"];
-/ip/firewall/filter/add chain=input protocol=udp dst-port={{WG_LISTEN_PORT}} action=accept comment="radii: wireguard";
-/ip/firewall/filter/add chain=input src-address={{WG_ALLOWED_ADDRESS}} action=accept comment="radii: management subnet";
-{
-    :local inChain [/ip/firewall/filter/find where chain=input];
-    :if ([:len $inChain] > 2) do={
-        :local target;
-        :foreach id in=$inChain do={
-            :if (([:typeof $target] = "nil") && (([/ip/firewall/filter/get $id comment] ~ "^radii:") = false)) do={ :set target $id; };
-        };
-        :if ([:typeof $target] != "nil") do={
-            :foreach id in=[/ip/firewall/filter/find where comment~"^radii:"] do={ /ip/firewall/filter/move $id $target; };
+# ---------------------------------------------------------------------
+# 3. External RADIUS
+# ---------------------------------------------------------------------
+
+# Remove duplicate radii-managed entries, preserving exactly one.
+:local radiusIds [/radius/find where comment="radii managed"];
+:local radiusCount [:len $radiusIds];
+
+:if ($radiusCount = 0) do={
+    /radius/add \
+        address={{RADIUS_SERVER}} \
+        secret="{{RADIUS_SECRET}}" \
+        service=hotspot,ppp \
+        timeout=3s \
+        comment="radii managed";
+} else={
+    :local radiusFirst [:pick $radiusIds 0];
+
+    /radius/set $radiusFirst \
+        address={{RADIUS_SERVER}} \
+        secret="{{RADIUS_SECRET}}" \
+        service=hotspot,ppp \
+        timeout=3s \
+        disabled=no \
+        comment="radii managed";
+
+    :if ($radiusCount > 1) do={
+        :for i from=1 to=($radiusCount - 1) do={
+            /radius/remove [:pick $radiusIds $i];
         };
     };
 };
 
-# --- 6. IP service lockdown -------------------------------------------
-# Management API/WebFig/SSH become reachable only from the WireGuard
-# management subnet; unused services are disabled.
-/ip/service/set [find name="telnet"] disabled=yes;
-/ip/service/set [find name="ftp"] disabled=yes;
-/ip/service/set [find name="www"] disabled=yes;
-/ip/service/set [find name="api"] disabled=no address={{WG_ALLOWED_ADDRESS}};
-/ip/service/set [find name="api-ssl"] address={{WG_ALLOWED_ADDRESS}};
-/ip/service/set [find name="ssh"] address={{WG_ALLOWED_ADDRESS}};
-$radiiLog "IP services locked down (API bound to {{WG_ALLOWED_ADDRESS}})";
+$radiiLog ("RADIUS client configured for {{RADIUS_SERVER}}");
 
-# --- 7. report device facts & WireGuard public key --------------------
+
+# ---------------------------------------------------------------------
+# 4. WireGuard management tunnel
+# ---------------------------------------------------------------------
+
+:local wgName "wg-radii";
+:local wgIds [/interface/wireguard/find where name=$wgName];
+
+# IMPORTANT:
+# Never remove/recreate the interface here. RouterOS generates its keypair
+# when the interface is created. Keeping the interface preserves its key.
+:if ([:len $wgIds] = 0) do={
+    /interface/wireguard/add \
+        name=$wgName \
+        listen-port={{WG_LISTEN_PORT}} \
+        mtu=1420 \
+        comment="radii management tunnel";
+} else={
+    /interface/wireguard/set [:pick $wgIds 0] \
+        listen-port={{WG_LISTEN_PORT}} \
+        mtu=1420 \
+        comment="radii management tunnel" \
+        disabled=no;
+};
+
+:local wgId [/interface/wireguard/find where name=$wgName];
+:local wgPubKey [/interface/wireguard/get $wgId public-key];
+
+$radiiLog ("WireGuard public key: " . $wgPubKey);
+
+# --- WireGuard IP -----------------------------------------------------
+
+:local wgAddress "{{WG_CLIENT_IP}}/{{WG_PREFIX_LEN}}";
+:local oldWgAddresses [/ip/address/find where comment="radii mgmt"];
+
+# Remove old managed address(es) so a changed configuration is applied.
+:if ([:len $oldWgAddresses] > 0) do={
+    /ip/address/remove $oldWgAddresses;
+};
+
+:local existingWgAddress [/ip/address/find where address=$wgAddress];
+
+:if ([:len $existingWgAddress] = 0) do={
+    /ip/address/add \
+        address=$wgAddress \
+        interface=$wgName \
+        comment="radii mgmt";
+} else={
+    /ip/address/set [:pick $existingWgAddress 0] \
+        interface=$wgName \
+        comment="radii mgmt";
+};
+
+# --- WireGuard peer ---------------------------------------------------
+
+# Peer configuration is managed by comment.\
+# Recreating only the peer is safe; the interface/keypair is preserved.
+:local wgPeerIds [/interface/wireguard/peers/find where comment="radii server peer"];
+
+:if ([:len $wgPeerIds] > 0) do={
+    /interface/wireguard/peers/remove $wgPeerIds;
+};
+
+/interface/wireguard/peers/add \
+    interface=$wgName \
+    name="radii-server" \
+    endpoint-address="{{WG_ENDPOINT_HOST}}" \
+    endpoint-port={{WG_ENDPOINT_PORT}} \
+    public-key="{{WG_SERVER_PUBLIC_KEY}}" \
+    preshared-key="{{WG_PSK}}" \
+    allowed-address={{WG_ALLOWED_ADDRESS}} \
+    persistent-keepalive=25s \
+    comment="radii server peer";
+
+# ---------------------------------------------------------------------
+# 6. Firewall input rules
+# ---------------------------------------------------------------------
+
+# Remove previous managed rules so changed values never leave stale rules.
+:local oldRadiiFilter [/ip/firewall/filter/find where comment~"^radii:"];
+:if ([:len $oldRadiiFilter] > 0) do={
+    /ip/firewall/filter/remove $oldRadiiFilter;
+};
+
+:local wgFirewallId [/ip/firewall/filter/add \
+    chain=input \
+    protocol=udp \
+    dst-port={{WG_LISTEN_PORT}} \
+    action=accept \
+    comment="radii: wireguard"];
+
+:local mgmtFirewallId [/ip/firewall/filter/add \
+    chain=input \
+    src-address={{WG_ALLOWED_ADDRESS}} \
+    action=accept \
+    comment="radii: management subnet"];
+
+:do {
+    /ip/firewall/filter/move $mgmtFirewallId 0;
+    /ip/firewall/filter/move $wgFirewallId 0;
+} on-error={
+    $radiiLog "WARNING - could not move radii firewall rules";
+};
+
+$radiiLog "WireGuard firewall access rules configured";
+
+# ---------------------------------------------------------------------
+# 7. IP service lockdown
+# ---------------------------------------------------------------------
+
+# Disable legacy/unused services.
+:do { /ip/service/set [find where name="telnet"] disabled=yes; } on-error={};
+:do { /ip/service/set [find where name="ftp"] disabled=yes; } on-error={};
+
+# Management services are restricted to the WireGuard management subnet.\
+# The enabled/disabled state is explicitly set for the services required
+# by the radii configuration.\
+
+:do {
+    /ip/service/set [find where name="ssh"] \
+        disabled=no 
+} on-error={
+    $radiiLog "WARNING - SSH service not found/configured";
+};
+
+:do {
+    /ip/service/set [find where name="winbox"] \
+        disabled=no 
+} on-error={
+    $radiiLog "WARNING - Winbox service not found/configured";
+};
+
+:do {
+    /ip/service/set [find where name="api"] \
+        disabled=no 
+} on-error={
+    $radiiLog "WARNING - API service not found/configured";
+};
+
+:do {
+    /ip/service/set [find where name="api-ssl"] 
+} on-error={};
+
+:do {
+    /ip/service/set [find where name="www"] \
+        disabled=no 
+} on-error={
+    $radiiLog "WARNING - WebFig HTTP service not found/configured";
+};
+
+:do {
+    /ip/service/set [find where name="www-ssl"] 
+} on-error={};
+
+$radiiLog "IP management services restricted to {{WG_ALLOWED_ADDRESS}}";
+
+# ---------------------------------------------------------------------
+# 8. Report device facts + WireGuard public key
+# ---------------------------------------------------------------------
+
 :do {
     :local encKey [:convert $wgPubKey to=url];
     :local encModel [:convert $devModel to=url];
@@ -318,116 +495,336 @@ $radiiLog "IP services locked down (API bound to {{WG_ALLOWED_ADDRESS}})";
     :local encVersion [:convert $devVersion to=url];
     :local encBoard [:convert $devBoard to=url];
     :local encArch [:convert $devArch to=url];
-    /tool/fetch url="{{NAS_REPORT_URL}}" http-method=post http-data="nasId={{NAS_ID}}&token={{REGISTRATION_TOKEN}}&publicKey=$encKey&model=$encModel&serialNumber=$encSerial&firmwareVersion=$encVersion&boardName=$encBoard&architecture=$encArch";
-    $radiiLog "device facts and WireGuard public key reported to radii";
+
+    /tool/fetch \
+        url="{{NAS_REPORT_URL}}" \
+        http-method=post \
+        http-data=("nasId={{NAS_ID}}" ."&token={{REGISTRATION_TOKEN}}" ."&publicKey=" . $encKey ."&model=" . $encModel ."&serialNumber=" . $encSerial ."&firmwareVersion=" . $encVersion ."&boardName=" . $encBoard . "&architecture=" . $encArch);
+
+    $radiiLog "Device facts and WireGuard public key reported";
 } on-error={
-    :put ("radii: could not auto-report; add the WireGuard public key on the radii server manually: " . $wgPubKey);
+    $radiiLog (\
+        "WARNING - auto-report failed; WireGuard public key is: " .\
+        $wgPubKey\
+    );
 };
 
-# --- 8. hotspot with external RADIUS ----------------------------------
+# ---------------------------------------------------------------------
+# 9. HotSpot + DHCP + NAT
+# ---------------------------------------------------------------------
+
 :local hsIf "{{HOTSPOT_INTERFACE}}";
-:do { /interface/get $hsIf name; } on-error={ $radiiLog ("WARNING - interface $hsIf does not exist yet"); };
 
-/ip/pool/remove [find where name="radii-hs-pool"];
-/ip/pool/add name="radii-hs-pool" ranges={{HOTSPOT_POOL}};
+:if ([:len [/interface/find where name=$hsIf]] = 0) do={
 
-/ip/address/remove [find where comment="radii hotspot gateway"];
-/ip/address/add address={{HOTSPOT_ADDRESS}} interface=$hsIf comment="radii hotspot gateway";
+    $radiiLog (\
+        "WARNING - HotSpot interface " .\
+        $hsIf .\
+        " does not exist; HotSpot configuration skipped"\
+    );
 
-/ip/hotspot/profile/remove [find where name="radii-hs"];
-/ip/hotspot/profile/add name="radii-hs" dns-name="{{HOTSPOT_DNS_NAME}}" html-directory=hotspot login-by=http-chap,http-pap,cookie use-radius=yes radius-accounting=yes split-user-domain=no;
+} else={
 
-/ip/hotspot/user/profile/remove [find where name="radii-default"];
-/ip/hotspot/user/profile/add name="radii-default" address-pool="radii-hs-pool" shared-users={{SHARED_USERS}} status-autorefresh=1m transparent-proxy=yes;
-:do { /ip/hotspot/user/profile/set [find where name="default"] address-pool="radii-hs-pool" transparent-proxy=yes; } on-error={ };
+    # --- Pool ---------------------------------------------------------
 
-/ip/hotspot/network/remove [find where address={{HOTSPOT_NETWORK}}];
-/ip/hotspot/network/add address={{HOTSPOT_NETWORK}} gateway={{HOTSPOT_GATEWAY}} dns-name="{{HOTSPOT_DNS_NAME}}";
+    :local hsPoolIds [/ip/pool/find where name="radii-hs-pool"];
 
-/ip/hotspot/remove [find where name="radii-hotspot"];
-/ip/hotspot/add name="radii-hotspot" interface=$hsIf address-pool="radii-hs-pool" profile="radii-hs";
-
-/ip/dhcp-server/remove [find where name="radii-hs-dhcp"];
-/ip/dhcp-server/add name="radii-hs-dhcp" interface=$hsIf address-pool="radii-hs-pool" lease-time=1h;
-/ip/dhcp-server/network/remove [find where address={{HOTSPOT_NETWORK}}];
-/ip/dhcp-server/network/add address={{HOTSPOT_NETWORK}} gateway={{HOTSPOT_GATEWAY}} dns-server={{HOTSPOT_GATEWAY}};
-:do { /ip/dhcp-server/enable radii-hs-dhcp; } on-error={ };
-
-/ip/firewall/nat/remove [find where comment="radii: hotspot masquerade"];
-/ip/firewall/nat/add chain=srcnat src-address={{HOTSPOT_NETWORK}} action=masquerade comment="radii: hotspot masquerade";
-
-/ip/hotspot/walled-garden/remove [find where dst-host="{{PORTAL_DOMAIN}}"];
-/ip/hotspot/walled-garden/add action=allow dst-host="{{PORTAL_DOMAIN}}";
-:do {
-    /ip/hotspot/walled-garden/remove [find where dst-host="{{API_DOMAIN}}"];
-    /ip/hotspot/walled-garden/add action=allow dst-host="{{API_DOMAIN}}";
-} on-error={ };
-
-$radiiLog ("hotspot created on $hsIf ({{HOTSPOT_NETWORK}}, external RADIUS auth)");
-:delay 3s;
-
-# --- 9. branded hotspot HTML pages -------------------------------------
-# Custom servlet pages per the RouterOS "Hotspot customisation" manual.
-# $(var) constructs are hotspot template variables resolved by the
-# hotspot servlet at request time.
-:local writeFile do={
-    :local path $1;
-    :local content $2;
-    :local ids [/file/find name=$path];
-    :if ([:len $ids] = 0) do={
-        :set ids [/file/find name=("flash/" . $path)];
-        :set path ("flash/" . $path);
-    };
-    :if ([:len $ids] > 0) do={
-        :do { /file/set $ids contents=$content; } on-error={ $radiiLog ("failed to write " . $path); };
+    :if ([:len $hsPoolIds] = 0) do={
+        /ip/pool/add \
+            name="radii-hs-pool" \
+            ranges={{HOTSPOT_POOL}} \
+            comment="radii managed";
     } else={
-        :do { /file/set name=$path contents=$content; } on-error={ $radiiLog ("failed to create " . $path); };
+        /ip/pool/set [:pick $hsPoolIds 0] \
+            ranges={{HOTSPOT_POOL}} \
+            comment="radii managed";
+    };
+
+    # --- HotSpot gateway address -------------------------------------
+
+    :local oldHsAddresses [/ip/address/find where comment="radii hotspot gateway"];
+
+    :if ([:len $oldHsAddresses] > 0) do={
+        /ip/address/remove $oldHsAddresses;
+    };
+
+    :local hsGatewayAddress "{{HOTSPOT_ADDRESS}}";
+    :local existingHsAddress [/ip/address/find where address=$hsGatewayAddress];
+
+    :if ([:len $existingHsAddress] = 0) do={
+        /ip/address/add \
+            address=$hsGatewayAddress \
+            interface=$hsIf \
+            comment="radii hotspot gateway";
+    } else={
+        /ip/address/set [:pick $existingHsAddress 0] \
+            interface=$hsIf \
+            comment="radii hotspot gateway";
+    };
+
+    # --- HotSpot profile ----------------------------------------------
+
+    :local hsProfileIds [/ip/hotspot/profile/find where name="radii-hs"];
+
+    :if ([:len $hsProfileIds] = 0) do={
+        /ip/hotspot/profile/add \
+            name="radii-hs" \
+            dns-name="{{HOTSPOT_DNS_NAME}}" \
+            html-directory=radii-hs \
+            login-by=http-chap,http-pap \
+            use-radius=yes \
+            radius-accounting=yes \
+            split-user-domain=no;
+    } else={
+        /ip/hotspot/profile/set [:pick $hsProfileIds 0] \
+            dns-name="{{HOTSPOT_DNS_NAME}}" \
+            html-directory=radii-hs \
+            login-by=http-chap,http-pap \
+            use-radius=yes \
+            radius-accounting=yes \
+            split-user-domain=no;
+    };
+
+    # --- HotSpot user profile ----------------------------------------
+
+    :local hsUserProfileIds [/ip/hotspot/user/profile/find where name="radii-default"];
+
+    :if ([:len $hsUserProfileIds] = 0) do={
+        /ip/hotspot/user/profile/add \
+            name="radii-default" \
+            address-pool="radii-hs-pool" \
+            shared-users={{SHARED_USERS}} \
+            status-autorefresh=1m;
+    } else={
+        /ip/hotspot/user/profile/set [:pick $hsUserProfileIds 0] \
+            address-pool="radii-hs-pool" \
+            shared-users={{SHARED_USERS}} \
+            status-autorefresh=1m;
+    };
+
+    # Do NOT modify the built-in "default" HotSpot profile.\
+    # RADIUS can select the radii-default profile when appropriate.\
+
+    # --- HotSpot server ----------------------------------------------
+
+    :local hsServerIds [/ip/hotspot/find where name="radii-hotspot"];
+
+    :if ([:len $hsServerIds] = 0) do={
+
+        # If another HotSpot server already exists on this interface,
+        # update it rather than creating a conflicting second server.
+        :local interfaceHsIds [/ip/hotspot/find where interface=$hsIf];
+
+        :if ([:len $interfaceHsIds] = 0) do={
+            /ip/hotspot/add \
+                name="radii-hotspot" \
+                interface=$hsIf \
+                address-pool="radii-hs-pool" \
+                profile="radii-hs";
+        } else={
+            /ip/hotspot/set [:pick $interfaceHsIds 0] \
+                name="radii-hotspot" \
+                interface=$hsIf \
+                address-pool="radii-hs-pool" \
+                profile="radii-hs";
+        };
+
+    } else={
+
+        /ip/hotspot/set [:pick $hsServerIds 0] \
+            interface=$hsIf \
+            address-pool="radii-hs-pool" \
+            profile="radii-hs" \
+            disabled=no;
+    };
+
+    # Remove duplicate managed HotSpot servers if any.\
+    :local duplicateHs [/ip/hotspot/find where name="radii-hotspot"];
+
+    :if ([:len $duplicateHs] > 1) do={
+        :for i from=1 to=([:len $duplicateHs] - 1) do={
+            /ip/hotspot/remove [:pick $duplicateHs $i];
+        };
+    };
+
+    # --- DHCP server --------------------------------------------------
+
+    :local dhcpIds [/ip/dhcp-server/find where name="radii-hs-dhcp"];
+
+    :if ([:len $dhcpIds] = 0) do={
+        /ip/dhcp-server/add \
+            name="radii-hs-dhcp" \
+            interface=$hsIf \
+            address-pool="radii-hs-pool" \
+            lease-time=1h \
+            comment="radii managed";
+    } else={
+        /ip/dhcp-server/set [:pick $dhcpIds 0] \
+            interface=$hsIf \
+            address-pool="radii-hs-pool" \
+            lease-time=1h \
+            comment="radii managed" \
+            disabled=no;
+    };
+
+    # --- DHCP network -------------------------------------------------
+
+    :local dhcpNetworkIds [/ip/dhcp-server/network/find where comment="radii hotspot network"];
+
+    :if ([:len $dhcpNetworkIds] > 0) do={
+        /ip/dhcp-server/network/remove $dhcpNetworkIds;
+    };
+
+    /ip/dhcp-server/network/add \
+        address={{HOTSPOT_NETWORK}} \
+        gateway={{HOTSPOT_GATEWAY}} \
+        dns-server={{HOTSPOT_GATEWAY}} \
+        comment="radii hotspot network";
+
+    # Ensure DHCP is enabled.
+
+    :do {
+        /ip/dhcp-server/enable [find where name="radii-hs-dhcp"];
+    } on-error={};
+
+    # --- NAT ----------------------------------------------------------
+
+    :local natIds [/ip/firewall/nat/find where comment="radii: hotspot masquerade"];
+
+    :if ([:len $natIds] = 0) do={
+        /ip/firewall/nat/add \
+            chain=srcnat \
+            src-address={{HOTSPOT_NETWORK}} \
+            action=masquerade \
+            comment="radii: hotspot masquerade";
+    } else={
+        /ip/firewall/nat/set [:pick $natIds 0] \
+            chain=srcnat \
+            src-address={{HOTSPOT_NETWORK}} \
+            action=masquerade \
+            comment="radii: hotspot masquerade";
+    };
+
+    # Remove duplicate managed NAT entries.\
+    :local duplicateNat [/ip/firewall/nat/find where comment="radii: hotspot masquerade"];
+
+    :if ([:len $duplicateNat] > 1) do={
+        :for i from=1 to=([:len $duplicateNat] - 1) do={
+            /ip/firewall/nat/remove [:pick $duplicateNat $i];
+        };
+    };
+
+    $radiiLog (\
+        "HotSpot configured on " .\
+        $hsIf .\
+        " (" .\
+        "{{HOTSPOT_NETWORK}}" .\
+        ", external RADIUS authentication)"\
+    );
+};
+
+# ---------------------------------------------------------------------
+# 10. Walled garden
+# ---------------------------------------------------------------------
+
+:local walledPortalHost "{{PORTAL_DOMAIN}}";
+:local walledApiHost "{{API_DOMAIN}}";
+
+# Remove only radii-managed entries, then recreate them from config.
+:local oldWalledGarden [/ip/hotspot/walled-garden/find where comment="radii managed"];
+
+:if ([:len $oldWalledGarden] > 0) do={
+    /ip/hotspot/walled-garden/remove $oldWalledGarden;
+};
+
+:if ([:len $walledPortalHost] > 0) do={
+    /ip/hotspot/walled-garden/add \
+        action=allow \
+        dst-host=$walledPortalHost \
+        comment="radii managed";
+};
+
+:if ([:len $walledApiHost] > 0) do={
+    :if ($walledApiHost != $walledPortalHost) do={
+        /ip/hotspot/walled-garden/add \
+            action=allow \
+            dst-host=$walledApiHost \
+            comment="radii managed";
     };
 };
 
-{{PAGE_LOGIN}}
-$writeFile "hotspot/login.html" $pgLogin;
-{{PAGE_ALOGIN}}
-$writeFile "hotspot/alogin.html" $pgAlogin;
-{{PAGE_STATUS}}
-$writeFile "hotspot/status.html" $pgStatus;
-{{PAGE_LOGOUT}}
-$writeFile "hotspot/logout.html" $pgLogout;
-{{PAGE_ERROR}}
-$writeFile "hotspot/error.html" $pgError;
-{{PAGE_RADVERT}}
-$writeFile "hotspot/radvert.html" $pgRadvert;
-{{PAGE_REDIRECT}}
-$writeFile "hotspot/redirect.html" $pgRedirect;
+# ---------------------------------------------------------------------
+# 11. Branded HotSpot HTML pages
+# ---------------------------------------------------------------------
 
-$radiiLog "branded hotspot pages installed";
+:local hsBaseUrl "{{API_BASE_URL}}/api/nas/{{NAS_ID}}/hotspot";
+:local hsToken "{{REGISTRATION_TOKEN}}";
+:local encHsToken "";
 
-# --- done ----------------------------------------------------------------
-$radiiLog ("setup complete - hotspot login page: http://{{HOTSPOT_DNS_NAME}}/");
+:do {
+    :set encHsToken [:convert $hsToken to=url];
+} on-error={
+    :set encHsToken $hsToken;
+};
+
+:do {
+    /tool/fetch \
+        url=($hsBaseUrl . "/login.html?token=" . $encHsToken) \
+        dst-path=radii-hs/login.html;
+
+    /tool/fetch \
+        url=($hsBaseUrl . "/alogin.html?token=" . $encHsToken) \
+        dst-path=radii-hs/alogin.html;
+
+    /tool/fetch \
+        url=($hsBaseUrl . "/status.html?token=" . $encHsToken) \
+        dst-path=radii-hs/status.html;
+
+    /tool/fetch \
+        url=($hsBaseUrl . "/logout.html?token=" . $encHsToken) \
+        dst-path=radii-hs/logout.html;
+
+    /tool/fetch \
+        url=($hsBaseUrl . "/error.html?token=" . $encHsToken) \
+        dst-path=radii-hs/error.html;
+
+    /tool/fetch \
+        url=($hsBaseUrl . "/radvert.html?token=" . $encHsToken) \
+        dst-path=radii-hs/radvert.html;
+
+    /tool/fetch \
+        url=($hsBaseUrl . "/redirect.html?token=" . $encHsToken) \
+        dst-path=radii-hs/redirect.html;
+
+    $radiiLog "Branded HotSpot pages downloaded";
+} on-error={
+    $radiiLog "WARNING - branded HotSpot pages could not be downloaded";
+};
+
+# ---------------------------------------------------------------------
+# Done
+# ---------------------------------------------------------------------
+
+$radiiLog (\
+    "setup complete - HotSpot login page: " .\
+    "http://{{HOTSPOT_DNS_NAME}}/"\
+);
+
 :put "radii: setup complete";
 :put ("radii: WireGuard public key (peer on the radii server): " . $wgPubKey);
 `;
 
-export function renderMikrotikSetupScript(
-    vars: Record<string, string>,
-): string {
+export function renderMikrotikSetupScript(vars: Record<string, string>): {
+    script: string;
+    pages: Record<string, string>;
+} {
     const pages = buildHotspotPages(
         vars.BRAND_NAME,
-        vars.PORTAL_URL,
+        vars.API_BASE_URL,
         vars.NAS_ID,
     );
-    const all: Record<string, string> = {
-        ...vars,
-        PAGE_LOGIN: rosStringLines('pgLogin', pages.login),
-        PAGE_ALOGIN: rosStringLines('pgAlogin', pages.alogin),
-        PAGE_STATUS: rosStringLines('pgStatus', pages.status),
-        PAGE_LOGOUT: rosStringLines('pgLogout', pages.logout),
-        PAGE_ERROR: rosStringLines('pgError', pages.error),
-        PAGE_RADVERT: rosStringLines('pgRadvert', pages.radvert),
-        PAGE_REDIRECT: rosStringLines('pgRedirect', pages.redirect),
-    };
     let out = TEMPLATE;
-    for (const [key, value] of Object.entries(all)) {
+    for (const [key, value] of Object.entries(vars)) {
         out = out.split(`{{${key}}}`).join(value);
     }
     const leftover = out.match(/\{\{[A-Z0-9_]+\}\}/g);
@@ -436,5 +833,5 @@ export function renderMikrotikSetupScript(
             `Unresolved setup-script variables: ${Array.from(new Set(leftover)).join(', ')}`,
         );
     }
-    return out;
+    return { script: out, pages };
 }

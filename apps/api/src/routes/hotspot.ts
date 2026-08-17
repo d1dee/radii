@@ -6,7 +6,13 @@ import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { z } from 'zod';
 import { auth } from '../auth';
 import { db } from '../db';
-import { activatedPackages } from '../db/schema';
+import {
+    activatedPackages,
+    hotspotLoginRequest,
+    nasDevice,
+    radcheck,
+} from '../db/schema';
+import { env } from '../env';
 import { jsonError, jsonFieldErrors } from '../lib/error';
 import {
     createPayment,
@@ -166,6 +172,142 @@ app.post('/deauth/:deviceQuotaId', requireAuth, async (c) => {
     // call radacct deauth
 
     return c.json({ success: true, data: { deviceQuotaId } });
+});
+
+// --- External captive portal (NAS login hand-off) ---------------------------
+
+// The branded login page served by each NAS auto-submits every variable the
+// RouterOS hotspot servlet exposes at login (client MAC/IP, username, servlet
+// links, original destination, error, ...). This endpoint receives that
+// submission, persists it, and sends the client's browser on to the portal
+// carrying the row id. The portal completes the request after the client
+// authenticates (POST /login-request/:id/complete) and re-submits the issued
+// hotspot credentials to the NAS servlet login page.
+app.post('/login-request', async (c) => {
+    const body = await c.req.parseBody();
+    const str = (name: string): string => {
+        const value = body[name];
+        return typeof value === 'string' ? value.trim() : '';
+    };
+
+    const nasDeviceId = str('nas');
+    const mac = str('mac');
+    if (!nasDeviceId || !mac) {
+        return jsonError(c, 400, 'Missing nas or mac');
+    }
+    const [device] = await db
+        .select({ id: nasDevice.id })
+        .from(nasDevice)
+        .where(eq(nasDevice.id, nasDeviceId))
+        .limit(1);
+    if (!device) {
+        return jsonError(c, 404, 'Unknown NAS device');
+    }
+
+    const knownFields = new Set([
+        'nas',
+        'mac',
+        'ip',
+        'username',
+        'linkLogin',
+        'linkLoginOnly',
+        'linkOrig',
+        'error',
+    ]);
+    const extra: Record<string, string> = {};
+    for (const [key, value] of Object.entries(body)) {
+        if (knownFields.has(key)) continue;
+        if (typeof value === 'string' && value.trim()) {
+            extra[key] = value.trim();
+        }
+    }
+
+    const row = await db
+        .insert(hotspotLoginRequest)
+        .values({
+            nasDeviceId,
+            mac,
+            ip: str('ip') || null,
+            username: str('username') || null,
+            linkLogin: str('linkLogin') || null,
+            linkLoginOnly: str('linkLoginOnly') || null,
+            linkOrig: str('linkOrig') || null,
+            error: str('error') || null,
+            extra: Object.keys(extra).length > 0 ? extra : null,
+        })
+        .returning();
+
+    const portalUrl = (env.portalUrl || env.baseUrl).replace(/\/+$/, '');
+    return c.redirect(`${portalUrl}/?login_request=${row[0].id}`, 302);
+});
+
+const HOTSPOT_CREDENTIAL_CHARS =
+    'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+
+function randomHotspotPassword(length: number): string {
+    const bytes = new Uint8Array(length);
+    crypto.getRandomValues(bytes);
+    return Array.from(
+        bytes,
+        (b) => HOTSPOT_CREDENTIAL_CHARS[b % HOTSPOT_CREDENTIAL_CHARS.length]!,
+    ).join('');
+}
+
+// Called by the portal once the client referenced by the login request has
+// authenticated. Issues a hotspot credential (radcheck Cleartext-Password
+// entry), marks the request completed and returns everything the portal needs
+// to re-submit to the NAS servlet login page so the client gets online
+// (external authentication flow, see the MikroTik hotspot customisation
+// docs). Idempotent for the owning user: re-completing rotates the password.
+app.post('/login-request/:id/complete', requireAuth, async (c) => {
+    const id = c.req.param('id');
+    if (!id) return jsonError(c, 404, 'Unknown login request');
+    const currentUser = c.get('user');
+    if (!currentUser) return jsonError(c, 401, 'Unauthorized');
+
+    const [loginRequest] = await db
+        .select()
+        .from(hotspotLoginRequest)
+        .where(eq(hotspotLoginRequest.id, id))
+        .limit(1);
+    if (!loginRequest) {
+        return jsonError(c, 404, 'Unknown login request');
+    }
+    if (loginRequest.userId && loginRequest.userId !== currentUser.id) {
+        return jsonError(c, 403, 'Login request already completed');
+    }
+
+    const username = `HS-${id.replace(/-/g, '').slice(0, 10)}`;
+    const password = randomHotspotPassword(12);
+
+    await db.transaction(async (tx) => {
+        await tx.delete(radcheck).where(eq(radcheck.username, username));
+        await tx.insert(radcheck).values({
+            username,
+            attribute: 'Cleartext-Password',
+            op: ':=',
+            value: password,
+        });
+        await tx
+            .update(hotspotLoginRequest)
+            .set({
+                status: 'completed',
+                userId: currentUser.id,
+                hotspotUsername: username,
+            })
+            .where(eq(hotspotLoginRequest.id, id));
+    });
+
+    return c.json({
+        success: true,
+        data: {
+            linkLoginOnly: loginRequest.linkLoginOnly ?? '',
+            dst: loginRequest.linkOrig ?? '',
+            username,
+            password,
+            mac: loginRequest.mac,
+        },
+    });
 });
 
 // --- Admin ------------------------------------------------------------------

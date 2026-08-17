@@ -134,7 +134,7 @@ app.get('/:id/hotspot/:page', async (c) => {
     if (!script.registrationToken || script.registrationToken !== token) {
         return jsonError(c, 403, 'Invalid token');
     }
-    const content = script.hotspotPages?.[page];
+    const content = script.hotspotPages?.[page.replace(/\.html$/, '')];
     if (!content) {
         return jsonError(c, 404, 'Hotspot page not found');
     }
