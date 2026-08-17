@@ -260,9 +260,9 @@ export default function NasDevicesPage() {
                             </Text>
                         </ScrollArea>
                         <Text size='xs' c='dimmed'>
-                            Apply by pasting the script into System → Scripts on
-                            the router (RouterOS 7) and running it with full
-                            permissions, or importing it from the Files menu.
+                            Paste this single line into the MikroTik terminal
+                            (System → Terminal). It downloads and runs the setup
+                            script automatically.
                         </Text>
                     </Stack>
                 ) : (

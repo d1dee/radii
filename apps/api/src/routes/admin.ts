@@ -6,6 +6,7 @@ import {
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { id } from 'zod/locales';
+import { env } from '../env';
 import { jsonError } from '../lib/error';
 import {
     createNasDevice,
@@ -21,6 +22,7 @@ import {
     updatePackage,
 } from '../lib/packages';
 import {
+    buildBootstrapScript,
     generateSetupScript,
     getSetupScriptForNasDevice,
     SetupScriptConfigError,
@@ -187,6 +189,8 @@ app.post('/nas-devices/:id/setup-script', requireAdmin, async (c) => {
 
 // Fetch the stored generated script for this device.
 app.get('/nas-devices/:id/setup-script', requireAdmin, async (c) => {
+    const id = c.req.param('id');
+    if (!id) return jsonError(c, 406, 'missing NAS id');
     const device = await getNasDeviceById(id, c.get('session').userId);
     if (!device) {
         return jsonError(c, 404, 'NAS device not found');
@@ -195,14 +199,29 @@ app.get('/nas-devices/:id/setup-script', requireAdmin, async (c) => {
     if (!row) {
         return jsonError(c, 404, 'No setup script generated yet');
     }
-    return c.json({ success: true, data: row });
+    const apiBase = env.baseUrl.replace(/\/+$/, '');
+    return c.json({
+        success: true,
+        data: {
+            ...row,
+            script: buildBootstrapScript(
+                device.id,
+                row.registrationToken,
+                apiBase,
+            ),
+        },
+    });
 });
 
 app.put('/nas-devices/:id', requireAdmin, async (c) => {
+    const id = c.req.param('id');
+    if (!id) return jsonError(c, 404, 'Invalid NAS id');
+
     const parsed = createNasDeviceSchema.safeParse(await c.req.json());
     if (!parsed.success) {
         return jsonError(c, 400, 'Invalid NAS device payload');
     }
+
     const existing = await getNasDeviceById(id, c.get('session').userId);
     if (!existing) {
         return jsonError(c, 404, 'NAS device not found');

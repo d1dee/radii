@@ -89,4 +89,58 @@ app.post('/:id/report', async (c) => {
     return c.json({ success: true });
 });
 
+app.get('/:id/script', async (c) => {
+    const token = c.req.query('token');
+    if (!token) {
+        return jsonError(c, 400, 'Missing token');
+    }
+    const nasDeviceId = c.req.param('id');
+    const script = await getSetupScriptForNasDevice(nasDeviceId);
+    if (!script) {
+        return jsonError(c, 404, 'Unknown NAS device');
+    }
+    if (!script.registrationToken || script.registrationToken !== token) {
+        return jsonError(c, 403, 'Invalid token');
+    }
+    return c.text(script.script, 200, {
+        'Content-Type': 'text/plain; charset=utf-8',
+    });
+});
+
+const VALID_HOTSPOT_PAGES = new Set([
+    'login.html',
+    'alogin.html',
+    'status.html',
+    'logout.html',
+    'error.html',
+    'radvert.html',
+    'redirect.html',
+]);
+
+app.get('/:id/hotspot/:page', async (c) => {
+    const token = c.req.query('token');
+    if (!token) {
+        return jsonError(c, 400, 'Missing token');
+    }
+    const nasDeviceId = c.req.param('id');
+    const page = c.req.param('page');
+    if (!VALID_HOTSPOT_PAGES.has(page)) {
+        return jsonError(c, 404, 'Unknown hotspot page');
+    }
+    const script = await getSetupScriptForNasDevice(nasDeviceId);
+    if (!script) {
+        return jsonError(c, 404, 'Unknown NAS device');
+    }
+    if (!script.registrationToken || script.registrationToken !== token) {
+        return jsonError(c, 403, 'Invalid token');
+    }
+    const content = script.hotspotPages?.[page];
+    if (!content) {
+        return jsonError(c, 404, 'Hotspot page not found');
+    }
+    return c.text(content, 200, {
+        'Content-Type': 'text/html; charset=utf-8',
+    });
+});
+
 export default app;
