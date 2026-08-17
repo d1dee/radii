@@ -151,6 +151,15 @@ function parseWgEndpoint(endpoint: string): { host: string; port: number } {
     return { host, port: portNum };
 }
 
+export function buildBootstrapScript(
+    deviceId: string,
+    registrationToken: string,
+    apiBase: string,
+): string {
+    const url = `${apiBase}/api/nas/${deviceId}/script?token=${registrationToken}`;
+    return `/tool fetch url="${url}" dst-path=radii-setup.rsc; /import radii-setup.rsc`;
+}
+
 export async function generateSetupScript(
     device: NasDeviceRow,
     input: GenerateSetupScriptInput,
@@ -183,7 +192,7 @@ export async function generateSetupScript(
     const wgServerPublicKey = env.wgServerPublicKey.trim();
     const reportUrl = `${apiBase}/api/nas/${device.id}/report`;
 
-    const script = renderMikrotikSetupScript({
+    const { script, pages } = renderMikrotikSetupScript({
         NAS_ID: device.id,
         NAS_NAME: device.name,
         NAS_IDENTITY:
@@ -217,6 +226,7 @@ export async function generateSetupScript(
         PORTAL_URL: portalUrl,
         PORTAL_DOMAIN: portalDomain,
         API_DOMAIN: apiDomain,
+        API_BASE_URL: apiBase,
     });
 
     const [existing] = await db
@@ -271,6 +281,7 @@ export async function generateSetupScript(
                 .update(nasSetupScript)
                 .set({
                     script,
+                    hotspotPages: pages,
                     wgPublicKey: null,
                     wgClientIp,
                     wgPsk,
@@ -290,6 +301,7 @@ export async function generateSetupScript(
                 id: crypto.randomUUID(),
                 nasDeviceId: device.id,
                 script,
+                hotspotPages: pages,
                 wgPublicKey: null,
                 wgClientIp,
                 wgPsk,
@@ -301,7 +313,10 @@ export async function generateSetupScript(
             .returning();
     });
 
-    return row;
+    return {
+        ...row,
+        script: buildBootstrapScript(device.id, row.registrationToken, apiBase),
+    };
 }
 
 export async function getSetupScriptForNasDevice(nasDeviceId: string) {

@@ -112,6 +112,10 @@ export const nasSetupScript = pgTable(
         // The fully rendered RouterOS script, ready to paste/import — the
         // final config for the device.
         script: text('script').notNull(),
+        // Hotspot HTML pages served to the router via /api/nas/:id/hotspot/:page
+        // so the setup script can download them with /tool fetch instead of
+        // embedding large strings inline.
+        hotspotPages: jsonb('hotspot_pages').$type<Record<string, string>>(),
         // WireGuard public key reported by the device when the script runs.
         // Null until the report arrives; reset to null on regeneration
         // (the device generates a fresh keypair when re-running the script).
