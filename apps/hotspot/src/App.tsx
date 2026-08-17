@@ -33,7 +33,7 @@ export default function App() {
     };
 
     return (
-        <MantineProvider>
+        <MantineProvider defaultColorScheme='auto'>
             <Container size='sm' p='md'>
                 <Index data={data} adminContacts={adminContacts} />
             </Container>
