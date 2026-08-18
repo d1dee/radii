@@ -19,8 +19,12 @@ export type OrderResult = {
 
 const BASE = '/api/hotspot';
 
-export function getPackages() {
-    return request<Array<[string, Package[]]>>('/packages');
+// Packages are scoped to the NAS of the current login request; the API
+// errors when the id is missing.
+export function getPackages(loginRequestId: string) {
+    return request<Array<[string, Package[]]>>(
+        `/packages?login_request=${encodeURIComponent(loginRequestId)}`,
+    );
 }
 
 export function getClientData() {
@@ -94,6 +98,22 @@ export function register(body: {
     verifyPin: string;
 }) {
     return request('/register', body, { method: 'POST' });
+}
+
+export type HotspotRedirectData = {
+    linkLoginOnly: string;
+    dst: string;
+    username: string;
+    password: string;
+    mac: string;
+};
+
+export function completeLoginRequest(loginRequestId: string) {
+    return request<HotspotRedirectData>(
+        `/login-request/${encodeURIComponent(loginRequestId)}/complete`,
+        {},
+        { method: 'POST' },
+    );
 }
 
 export function login(body: { phoneNumber: string; pin: string }) {
