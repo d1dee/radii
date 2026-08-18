@@ -728,28 +728,48 @@ $radiiLog "IP management services restricted to {{WG_ALLOWED_ADDRESS}}";
 # ---------------------------------------------------------------------
 
 :local walledPortalHost "{{PORTAL_DOMAIN}}";
+:local walledPortalIsIp "{{PORTAL_DOMAIN_IS_IP}}";
 :local walledApiHost "{{API_DOMAIN}}";
+:local walledApiIsIp "{{API_DOMAIN_IS_IP}}";
 
 # Remove only radii-managed entries, then recreate them from config.
 :local oldWalledGarden [/ip/hotspot/walled-garden/find where comment="radii managed"];
+:local oldWalledGardenIp [/ip/hotspot/walled-garden/ip/find where comment="radii managed"];
 
 :if ([:len $oldWalledGarden] > 0) do={
     /ip/hotspot/walled-garden/remove $oldWalledGarden;
 };
+:if ([:len $oldWalledGardenIp] > 0) do={
+    /ip/hotspot/walled-garden/ip/remove $oldWalledGardenIp;
+};
 
 :if ([:len $walledPortalHost] > 0) do={
-    /ip/hotspot/walled-garden/add \
-        action=allow \
-        dst-host=$walledPortalHost \
-        comment="radii managed";
+    :if ([:len $walledPortalIsIp] > 0) do={
+        /ip/hotspot/walled-garden/ip/add \
+            action=accept \
+            dst-address=$walledPortalHost \
+            comment="radii managed";
+    } else={
+        /ip/hotspot/walled-garden/add \
+            action=allow \
+            dst-host=$walledPortalHost \
+            comment="radii managed";
+    };
 };
 
 :if ([:len $walledApiHost] > 0) do={
     :if ($walledApiHost != $walledPortalHost) do={
-        /ip/hotspot/walled-garden/add \
-            action=allow \
-            dst-host=$walledApiHost \
-            comment="radii managed";
+        :if ([:len $walledApiIsIp] > 0) do={
+            /ip/hotspot/walled-garden/ip/add \
+                action=accept \
+                dst-address=$walledApiHost \
+                comment="radii managed";
+        } else={
+            /ip/hotspot/walled-garden/add \
+                action=allow \
+                dst-host=$walledApiHost \
+                comment="radii managed";
+        };
     };
 };
 
