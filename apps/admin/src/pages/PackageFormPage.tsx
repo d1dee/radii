@@ -5,6 +5,7 @@ import {
     Grid,
     Group,
     Loader,
+    MultiSelect,
     NumberInput,
     Select,
     Stack,
@@ -24,10 +25,14 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
     createPackage,
     getAdminPackage,
+    getNasDevices,
     updateAdminPackage,
     type CreatePackageInput,
+    type NasDeviceRow,
     type PackageType,
 } from '@/lib/api';
+
+const ALL_NAS_VALUE = 'all';
 
 export default function PackageFormPage() {
     const navigate = useNavigate();
@@ -38,6 +43,7 @@ export default function PackageFormPage() {
     const [loading, setLoading] = useState(false);
     const [fetching, setFetching] = useState(isEdit);
     const [fetchError, setFetchError] = useState<string | null>(null);
+    const [nasDevices, setNasDevices] = useState<NasDeviceRow[]>([]);
 
     const form = useForm<CreatePackageInput>({
         initialValues: {
@@ -54,10 +60,19 @@ export default function PackageFormPage() {
             downloadRate: 0,
             downloadQuota: 0,
             uploadQuota: 0,
-            nasConfigId: '',
+            nasDeviceIds: [],
         },
         validate: zod4Resolver(createPackageSchema),
     });
+
+    useEffect(() => {
+        (async () => {
+            const result = await getNasDevices();
+            if (result.success && result.data) {
+                setNasDevices(result.data);
+            }
+        })();
+    }, []);
 
     useEffect(() => {
         if (!id) return;
@@ -88,12 +103,34 @@ export default function PackageFormPage() {
                 downloadRate: pkg.downloadRate,
                 downloadQuota: pkg.downloadQuota,
                 uploadQuota: pkg.uploadQuota,
-                nasConfigId: pkg.nasConfigId ?? '',
+                nasDeviceIds: pkg.nasDeviceIds ?? [],
             });
             setFetching(false);
         })();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [id]);
+
+    // The MultiSelect shows a synthetic "All NAS devices" option when no
+    // specific devices are selected; the form value only ever holds real ids.
+    const nasSelectValue =
+        form.values.nasDeviceIds && form.values.nasDeviceIds.length > 0
+            ? form.values.nasDeviceIds
+            : [ALL_NAS_VALUE];
+
+    const handleNasDevicesChange = (values: string[]) => {
+        if (!values.includes(ALL_NAS_VALUE)) {
+            form.setFieldValue('nasDeviceIds', values);
+            return;
+        }
+        if (values[values.length - 1] === ALL_NAS_VALUE) {
+            form.setFieldValue('nasDeviceIds', []);
+            return;
+        }
+        form.setFieldValue(
+            'nasDeviceIds',
+            values.filter((v) => v !== ALL_NAS_VALUE),
+        );
+    };
 
     const handleSubmit = async (values: CreatePackageInput) => {
         setLoading(true);
@@ -201,10 +238,23 @@ export default function PackageFormPage() {
                             />
                         </Grid.Col>
                         <Grid.Col span={6}>
-                            <TextInput
-                                label='Gateway'
-                                placeholder='Optional NAS config ID'
-                                {...form.getInputProps('nasConfigId')}
+                            <MultiSelect
+                                label='NAS Devices'
+                                description='Devices this package is available on'
+                                placeholder='Select NAS devices'
+                                searchable
+                                data={[
+                                    {
+                                        value: ALL_NAS_VALUE,
+                                        label: 'All NAS devices',
+                                    },
+                                    ...nasDevices.map((d) => ({
+                                        value: d.id,
+                                        label: d.name,
+                                    })),
+                                ]}
+                                value={nasSelectValue}
+                                onChange={handleNasDevicesChange}
                             />
                         </Grid.Col>
                     </Grid>

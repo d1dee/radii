@@ -17,6 +17,7 @@ import { useEffect, useState } from 'react';
 
 import {
     getAdminPackage,
+    getNasDevices,
     getPackageAnalytics,
     type PackageAnalytics,
     type PackagePaymentStatus,
@@ -81,6 +82,22 @@ export function PackageDetailsDrawer({
     const [pkg, setPkg] = useState<PackageRow | null>(null);
     const [analytics, setAnalytics] = useState<PackageAnalytics | null>(null);
     const [error, setError] = useState<string | null>(null);
+    const [nasDeviceNames, setNasDeviceNames] = useState<
+        Record<string, string>
+    >({});
+
+    useEffect(() => {
+        (async () => {
+            const result = await getNasDevices();
+            if (result.success && result.data) {
+                setNasDeviceNames(
+                    Object.fromEntries(
+                        result.data.map((d) => [d.id, d.name]),
+                    ),
+                );
+            }
+        })();
+    }, []);
 
     useEffect(() => {
         if (!packageId) return;
@@ -185,14 +202,21 @@ export function PackageDetailsDrawer({
                                 value={new Date(pkg.createdAt).toLocaleDateString()}
                             />
                         </Grid.Col>
-                        {pkg.nasConfigId ? (
-                            <Grid.Col span={12}>
-                                <DetailItem
-                                    label='Gateway (NAS Config)'
-                                    value={pkg.nasConfigId}
-                                />
-                            </Grid.Col>
-                        ) : null}
+                        <Grid.Col span={12}>
+                            <DetailItem
+                                label='NAS Devices'
+                                value={
+                                    pkg.nasDeviceIds.length === 0
+                                        ? 'All NAS devices'
+                                        : pkg.nasDeviceIds
+                                              .map(
+                                                  (id) =>
+                                                      nasDeviceNames[id] ?? id,
+                                              )
+                                              .join(', ')
+                                }
+                            />
+                        </Grid.Col>
                         {pkg.description ? (
                             <Grid.Col span={12}>
                                 <DetailItem

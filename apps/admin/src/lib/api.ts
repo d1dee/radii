@@ -85,7 +85,8 @@ export type PackageRow = {
     downloadRate: number;
     downloadQuota: number;
     uploadQuota: number;
-    nasConfigId: string | null;
+    // NAS devices the package is restricted to; empty means all devices.
+    nasDeviceIds: string[];
     isActive: boolean;
     createdAt: string;
 };
@@ -104,7 +105,8 @@ export type CreatePackageInput = {
     downloadRate: number;
     downloadQuota: number;
     uploadQuota: number;
-    nasConfigId?: string;
+    // NAS devices to restrict the package to; empty/omitted means all.
+    nasDeviceIds?: string[];
 };
 
 export function getAdminPackages(type?: PackageType) {
