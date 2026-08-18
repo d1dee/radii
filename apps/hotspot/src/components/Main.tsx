@@ -7,7 +7,6 @@ import {
     useState,
 } from 'react';
 import { getClientData, getPackages, type Client } from '../lib/api.ts';
-import { LOGIN_REQUEST_KEY } from './HotspotLoginRedirect.tsx';
 import type {
     MainPageProps,
     Package,
@@ -15,6 +14,7 @@ import type {
     Session,
 } from '../types/index.ts';
 import { PaymentFlow } from './Buy/PaymentFlow.tsx';
+import { LOGIN_REQUEST_KEY } from './HotspotLoginRedirect.tsx';
 import { ConnectedDevicesModal } from './Packages/ConnectedDevicesModal.tsx';
 import { CurrentPackage } from './Packages/CurrentPackage.tsx';
 import { HavingIssues } from './Packages/HavingIssues.tsx';
