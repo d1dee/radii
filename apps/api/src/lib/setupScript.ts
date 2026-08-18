@@ -225,9 +225,15 @@ export async function generateSetupScript(
         BRAND_NAME: brandName,
         PORTAL_URL: portalUrl,
         PORTAL_DOMAIN: portalDomain,
-        PORTAL_DOMAIN_IS_IP: /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(portalDomain) ? '1' : '',
+        PORTAL_DOMAIN_IS_IP: /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(
+            portalDomain,
+        )
+            ? '1'
+            : '',
         API_DOMAIN: apiDomain,
-        API_DOMAIN_IS_IP: /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(apiDomain) ? '1' : '',
+        API_DOMAIN_IS_IP: /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(apiDomain)
+            ? '1'
+            : '',
         API_BASE_URL: apiBase,
     });
 
@@ -284,6 +290,10 @@ export async function generateSetupScript(
                 .set({
                     script,
                     hotspotPages: pages,
+                    hotspotInterface: input.hotspotInterface,
+                    hotspotNetwork: input.hotspotNetwork,
+                    hotspotDnsName: input.hotspotDnsName ?? null,
+                    brandName: input.brandName ?? null,
                     wgPublicKey: null,
                     wgClientIp,
                     wgPsk,
@@ -304,6 +314,10 @@ export async function generateSetupScript(
                 nasDeviceId: device.id,
                 script,
                 hotspotPages: pages,
+                hotspotInterface: input.hotspotInterface,
+                hotspotNetwork: input.hotspotNetwork,
+                hotspotDnsName: input.hotspotDnsName ?? null,
+                brandName: input.brandName ?? null,
                 wgPublicKey: null,
                 wgClientIp,
                 wgPsk,

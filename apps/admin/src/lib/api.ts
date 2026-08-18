@@ -1,11 +1,12 @@
 import {
     ApiErrorType,
     type ApiEnvelope,
+    type GenerateSetupScriptInput,
     type NasDeviceOs,
     type NasDeviceStatus,
 } from '@shared/index';
 
-export type { NasDeviceOs, NasDeviceStatus } from '@shared/index';
+export type { GenerateSetupScriptInput, NasDeviceOs, NasDeviceStatus } from '@shared/index';
 
 const BASE = '/api';
 
@@ -215,6 +216,12 @@ export type NasSetupScriptRow = {
     script: string;
     wgPublicKey: string | null;
     wgClientIp: string;
+    // Hotspot options used when the script was generated; null for rows
+    // generated before the options were persisted.
+    hotspotInterface: string | null;
+    hotspotNetwork: string | null;
+    hotspotDnsName: string | null;
+    brandName: string | null;
     wgKeyReportedAt: string | null;
     status: NasSetupScriptStatus;
     generatedAt: string;
@@ -228,10 +235,13 @@ export function getNasSetupScript(deviceId: string) {
     );
 }
 
-export function generateNasSetupScript(deviceId: string) {
+export function generateNasSetupScript(
+    deviceId: string,
+    input?: GenerateSetupScriptInput,
+) {
     return request<NasSetupScriptRow>(
         `/admin/nas-devices/${deviceId}/setup-script`,
-        {},
+        input ?? {},
         { method: 'POST' },
     );
 }

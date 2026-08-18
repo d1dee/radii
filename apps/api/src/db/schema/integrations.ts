@@ -117,6 +117,13 @@ export const nasSetupScript = pgTable(
         // so the setup script can download them with /tool fetch instead of
         // embedding large strings inline.
         hotspotPages: jsonb('hotspot_pages').$type<Record<string, string>>(),
+        // Hotspot options used to render the script; persisted so the admin
+        // UI can prefill the generation form on regeneration. Nullable only
+        // for rows generated before the columns existed.
+        hotspotInterface: text('hotspot_interface'),
+        hotspotNetwork: text('hotspot_network'),
+        hotspotDnsName: text('hotspot_dns_name'),
+        brandName: text('brand_name'),
         // WireGuard public key reported by the device when the script runs.
         // Null until the report arrives; reset to null on regeneration
         // (the device generates a fresh keypair when re-running the script).

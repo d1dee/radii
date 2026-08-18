@@ -1,106 +1,148 @@
 import {
     ActionIcon,
     Badge,
+    Box,
     Button,
     Center,
+    Code,
     Group,
     Loader,
     Modal,
-    ScrollArea,
     Stack,
     Table,
     Text,
+    TextInput,
     Title,
-} from '@mantine/core'
-import { useCallback, useEffect, useState } from 'react'
-import { MdAdd, MdEdit, MdTerminal } from 'react-icons/md'
-import { useNavigate } from 'react-router-dom'
+} from '@mantine/core';
+import { useForm } from '@mantine/form';
+import { generateSetupScriptSchema } from '@shared/index';
+import { zod4Resolver } from 'mantine-form-zod-resolver';
+import { useCallback, useEffect, useState } from 'react';
+import { MdAdd, MdEdit, MdTerminal } from 'react-icons/md';
+import { useNavigate } from 'react-router-dom';
 
 import {
     generateNasSetupScript,
     getNasDevices,
     getNasSetupScript,
+    type GenerateSetupScriptInput,
     type NasDeviceRow,
     type NasSetupScriptRow,
-} from '@/lib/api'
-import {
-    nasDeviceOsLabel,
-    nasDeviceStatusColors,
-} from '@/lib/nas'
+} from '@/lib/api';
+import { nasDeviceOsLabel, nasDeviceStatusColors } from '@/lib/nas';
+import { notifications } from '@mantine/notifications';
 
 const setupScriptStatusColors: Record<NasSetupScriptRow['status'], string> = {
     pending: 'yellow',
     applied: 'green',
     failed: 'red',
-}
+};
 
 export default function NasDevicesPage() {
-    const navigate = useNavigate()
-    const [devices, setDevices] = useState<NasDeviceRow[]>([])
-    const [loading, setLoading] = useState(true)
-    const [error, setError] = useState<string | null>(null)
+    const navigate = useNavigate();
+    const [devices, setDevices] = useState<NasDeviceRow[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
 
-    const [scriptDevice, setScriptDevice] = useState<NasDeviceRow | null>(null)
-    const [scriptRow, setScriptRow] = useState<NasSetupScriptRow | null>(null)
-    const [scriptLoading, setScriptLoading] = useState(false)
-    const [scriptBusy, setScriptBusy] = useState(false)
-    const [scriptError, setScriptError] = useState<string | null>(null)
+    const [scriptDevice, setScriptDevice] = useState<NasDeviceRow | null>(null);
+    const [scriptRow, setScriptRow] = useState<NasSetupScriptRow | null>(null);
+    const [scriptLoading, setScriptLoading] = useState(false);
+    const [scriptBusy, setScriptBusy] = useState(false);
+    const [scriptError, setScriptError] = useState<string | null>(null);
+
+    const form = useForm<GenerateSetupScriptInput>({
+        initialValues: {
+            hotspotInterface: 'ether2',
+            hotspotNetwork: '10.100.0.0/16',
+            hotspotDnsName: '',
+            brandName: '',
+        },
+        validate: zod4Resolver(generateSetupScriptSchema),
+    });
 
     const load = useCallback(async () => {
-        setLoading(true)
-        setError(null)
-        const result = await getNasDevices()
-        setLoading(false)
+        setLoading(true);
+        setError(null);
+        const result = await getNasDevices();
+        setLoading(false);
         if (!result.success) {
-            setError(result.message || 'Failed to load NAS devices')
-            return
+            setError(result.message || 'Failed to load NAS devices');
+            return;
         }
-        setDevices(result.data ?? [])
-    }, [])
+        setDevices(result.data ?? []);
+    }, []);
 
     useEffect(() => {
-        load()
-    }, [load])
+        load();
+    }, [load]);
+
+    const prefillForm = (
+        row: NasSetupScriptRow | null,
+        device: NasDeviceRow,
+    ) => {
+        form.reset();
+        form.setValues({
+            hotspotInterface: row?.hotspotInterface ?? 'ether2',
+            hotspotNetwork: row?.hotspotNetwork ?? '10.100.0.0/16',
+            hotspotDnsName: row?.hotspotDnsName ?? '',
+            brandName: row?.brandName ?? device.name,
+        });
+    };
 
     const openScriptModal = async (device: NasDeviceRow) => {
-        setScriptDevice(device)
-        setScriptRow(null)
-        setScriptError(null)
-        setScriptLoading(true)
-        const result = await getNasSetupScript(device.id)
-        setScriptLoading(false)
+        setScriptDevice(device);
+        setScriptRow(null);
+        setScriptError(null);
+        prefillForm(null, device);
+        setScriptLoading(true);
+        const result = await getNasSetupScript(device.id);
+        setScriptLoading(false);
         if (result.success && result.data) {
-            setScriptRow(result.data)
+            setScriptRow(result.data);
+            prefillForm(result.data, device);
         }
-    }
+    };
 
     const closeScriptModal = () => {
-        setScriptDevice(null)
-        setScriptRow(null)
-        setScriptError(null)
-    }
+        setScriptDevice(null);
+        setScriptRow(null);
+        setScriptError(null);
+    };
 
-    const handleGenerateScript = async () => {
-        if (!scriptDevice) return
-        setScriptBusy(true)
-        setScriptError(null)
-        const result = await generateNasSetupScript(scriptDevice.id)
-        setScriptBusy(false)
+    const handleGenerateScript = async (values: GenerateSetupScriptInput) => {
+        if (!scriptDevice) return;
+        setScriptBusy(true);
+        setScriptError(null);
+        const result = await generateNasSetupScript(scriptDevice.id, values);
+        setScriptBusy(false);
         if (!result.success) {
-            setScriptError(result.message)
-            return
+            setScriptError(result.message);
+            return;
         }
         if (!result.data) {
-            setScriptError('Failed to generate setup script')
-            return
+            setScriptError('Failed to generate setup script');
+            return;
         }
-        setScriptRow(result.data)
-    }
+        setScriptRow(result.data);
+    };
+
+    const handleRegenerate = () => {
+        if (!scriptDevice) return;
+        prefillForm(scriptRow, scriptDevice);
+        setScriptError(null);
+        setScriptRow(null);
+    };
 
     const handleCopyScript = async () => {
-        if (!scriptRow) return
-        await navigator.clipboard.writeText(scriptRow.script)
-    }
+        if (!scriptRow) return;
+        await navigator.clipboard.writeText(scriptRow.script);
+
+        notifications.show({
+            title: 'Success',
+            message: 'Script copied to clipboard',
+            color: 'green',
+        });
+    };
 
     return (
         <Stack gap='md'>
@@ -145,7 +187,9 @@ export default function NasDevicesPage() {
                                 <Table.Tr
                                     key={device.id}
                                     onClick={() =>
-                                        navigate(`/nas-devices/${device.id}/edit`)
+                                        navigate(
+                                            `/nas-devices/${device.id}/edit`,
+                                        )
                                     }
                                     style={{ cursor: 'pointer' }}
                                 >
@@ -161,10 +205,16 @@ export default function NasDevicesPage() {
                                     <Table.Td>
                                         {device.firmwareVersion ?? '—'}
                                     </Table.Td>
-                                    <Table.Td>{device.location ?? '—'}</Table.Td>
+                                    <Table.Td>
+                                        {device.location ?? '—'}
+                                    </Table.Td>
                                     <Table.Td>
                                         <Badge
-                                            color={nasDeviceStatusColors[device.status]}
+                                            color={
+                                                nasDeviceStatusColors[
+                                                    device.status
+                                                ]
+                                            }
                                             variant='light'
                                         >
                                             {device.status}
@@ -176,8 +226,8 @@ export default function NasDevicesPage() {
                                                 variant='light'
                                                 aria-label={`Setup script for ${device.name}`}
                                                 onClick={(e) => {
-                                                    e.stopPropagation()
-                                                    openScriptModal(device)
+                                                    e.stopPropagation();
+                                                    openScriptModal(device);
                                                 }}
                                             >
                                                 <MdTerminal size={16} />
@@ -186,10 +236,10 @@ export default function NasDevicesPage() {
                                                 variant='light'
                                                 aria-label={`Edit ${device.name}`}
                                                 onClick={(e) => {
-                                                    e.stopPropagation()
+                                                    e.stopPropagation();
                                                     navigate(
                                                         `/nas-devices/${device.id}/edit`,
-                                                    )
+                                                    );
                                                 }}
                                             >
                                                 <MdEdit size={16} />
@@ -207,9 +257,7 @@ export default function NasDevicesPage() {
                 opened={!!scriptDevice}
                 onClose={closeScriptModal}
                 title={
-                    <Text fw={600}>
-                        Setup script — {scriptDevice?.name}
-                    </Text>
+                    <Text fw={600}>Setup script — {scriptDevice?.name}</Text>
                 }
                 size='xl'
             >
@@ -223,7 +271,9 @@ export default function NasDevicesPage() {
                             <Group gap='xs'>
                                 <Badge
                                     color={
-                                        setupScriptStatusColors[scriptRow.status]
+                                        setupScriptStatusColors[
+                                            scriptRow.status
+                                        ]
                                     }
                                     variant='light'
                                 >
@@ -244,47 +294,72 @@ export default function NasDevicesPage() {
                                 >
                                     Copy script
                                 </Button>
-                                <Button
-                                    size='xs'
-                                    loading={scriptBusy}
-                                    onClick={handleGenerateScript}
-                                >
+                                <Button size='xs' onClick={handleRegenerate}>
                                     Regenerate
                                 </Button>
                             </Group>
                         </Group>
                         {scriptError && <Text c='red'>{scriptError}</Text>}
-                        <ScrollArea h={460} type='auto'>
-                            <Text component='pre' size='xs' maw={860}>
-                                {scriptRow.script}
-                            </Text>
-                        </ScrollArea>
                         <Text size='xs' c='dimmed'>
-                            Paste this single line into the MikroTik terminal
+                            Paste this command into the MikroTik terminal
                             (System → Terminal). It downloads and runs the setup
                             script automatically.
                         </Text>
+                        <Box pos='relative'>
+                            <Code
+                                block
+                                style={{
+                                    whiteSpace: 'pre-wrap',
+                                    overflowWrap: 'anywhere',
+                                    wordBreak: 'break-word',
+                                    paddingInlineEnd: 44,
+                                }}
+                            >
+                                {scriptRow.script}
+                            </Code>
+                        </Box>
                     </Stack>
                 ) : (
-                    <Stack gap='md'>
-                        {scriptError && <Text c='red'>{scriptError}</Text>}
-                        <Text size='sm' c='dimmed'>
-                            Generates a device-specific RouterOS script that
-                            configures the external radii RADIUS, hotspot with
-                            RADIUS authentication, a WireGuard management
-                            tunnel, API lockdown and branded hotspot pages.
-                            Unique keys and secrets are generated and stored
-                            with the script.
-                        </Text>
-                        <Button
-                            loading={scriptBusy}
-                            onClick={handleGenerateScript}
-                        >
-                            Generate setup script
-                        </Button>
-                    </Stack>
+                    <form onSubmit={form.onSubmit(handleGenerateScript)}>
+                        <Stack gap='md'>
+                            {scriptError && <Text c='red'>{scriptError}</Text>}
+                            <Text size='sm' c='dimmed'>
+                                Configure the hotspot settings for this device.
+                                A RouterOS script will be generated that sets up
+                                RADIUS, hotspot, WireGuard tunnel and branded
+                                login pages.
+                            </Text>
+                            <TextInput
+                                label='Hotspot interface'
+                                description='RouterOS interface name for the hotspot'
+                                placeholder='ether2'
+                                {...form.getInputProps('hotspotInterface')}
+                            />
+                            <TextInput
+                                label='Hotspot network'
+                                description='IPv4 CIDR for the hotspot DHCP pool'
+                                placeholder='10.100.0.0/16'
+                                {...form.getInputProps('hotspotNetwork')}
+                            />
+                            <TextInput
+                                label='Hotspot DNS name'
+                                description='Domain name clients resolve to the captive portal'
+                                placeholder='hotspot.example.com'
+                                {...form.getInputProps('hotspotDnsName')}
+                            />
+                            <TextInput
+                                label='Brand name'
+                                description='Displayed on the hotspot login page'
+                                placeholder={scriptDevice?.name}
+                                {...form.getInputProps('brandName')}
+                            />
+                            <Button type='submit' loading={scriptBusy}>
+                                Generate setup script
+                            </Button>
+                        </Stack>
+                    </form>
                 )}
             </Modal>
         </Stack>
-    )
+    );
 }

@@ -63,12 +63,23 @@ export const generateSetupScriptSchema = z.object({
     hotspotDnsName: z
         .string()
         .trim()
-        .regex(
-            z.regexes.domain,
-            'Must be a valid domain name, e.g. hotspot.example.com',
-        )
-        .optional(),
-    brandName: z.string().trim().min(2).max(60).optional(),
+        .optional()
+        .transform((v) => (v ? v : undefined))
+        .pipe(
+            z
+                .string()
+                .regex(
+                    z.regexes.domain,
+                    'Must be a valid domain name, e.g. hotspot.example.com',
+                )
+                .optional(),
+        ),
+    brandName: z
+        .string()
+        .trim()
+        .optional()
+        .transform((v) => (v ? v : undefined))
+        .pipe(z.string().min(2).max(60).optional()),
 });
 
 export type GenerateSetupScriptInput = z.infer<
