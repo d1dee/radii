@@ -7,6 +7,7 @@ import {
     useState,
 } from 'react';
 import { getClientData, getPackages, type Client } from '../lib/api.ts';
+import { LOGIN_REQUEST_KEY } from './HotspotLoginRedirect.tsx';
 import type {
     MainPageProps,
     Package,
@@ -66,7 +67,9 @@ export default function Index({
         (async () => {
             const clientData = await getClientData();
             if (clientData.success) setClientData(clientData.data);
-            const packages = await getPackages();
+            const loginRequestId = localStorage.getItem(LOGIN_REQUEST_KEY);
+            if (!loginRequestId) return;
+            const packages = await getPackages(loginRequestId);
             if (packages.success) setPackages(packages.data);
         })();
     }, []);

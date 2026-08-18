@@ -1,4 +1,5 @@
 import {
+    Alert,
     Button,
     Card,
     Group,
@@ -9,13 +10,11 @@ import {
 } from '@mantine/core';
 import { upperFirstCase } from '@radii/shared';
 import { dayjs } from '../../lib/dayjs.ts';
-import {
-    ModalActionsContext,
-    SessionContext,
-} from '../Main.tsx';
+import { ModalActionsContext, SessionContext } from '../Main.tsx';
 
 import humanFormat from 'human-format';
 import { useContext, useState } from 'react';
+import { AiOutlineExclamationCircle } from 'react-icons/ai';
 import type { Package, Packages } from '../../types/index.ts';
 
 export const dataScale = new humanFormat.Scale({
@@ -31,7 +30,11 @@ function getPackagesByTitle(title: string, packages: Packages) {
     return h ? h[1] : [];
 }
 
-export function PackagePricing({ packages }: { packages: Packages | undefined }) {
+export function PackagePricing({
+    packages,
+}: {
+    packages: Packages | undefined;
+}) {
     const [selectedTitle, setSelectedTitle] = useState('');
 
     const { startBuy, openLogin } = useContext(ModalActionsContext);
@@ -58,13 +61,31 @@ export function PackagePricing({ packages }: { packages: Packages | undefined })
         else openLogin(pkg.packageId, String(pkg.price));
     }
 
-    if (!packages || packages.length === 0) return null;
+    if (!packages || packages.length === 0)
+        return (
+            <Paper shadow='xl' radius='lg' p='lg' mt='md' withBorder>
+                {' '}
+                <Stack gap='md' mt='md'>
+                    <Text size='lg' fw={600}>
+                        Available Packages
+                    </Text>
+                    <Alert
+                        color='orange'
+                        title='Warning'
+                        icon={<AiOutlineExclamationCircle size={24} />}
+                    >
+                        Could not find packages linked with your current NAS.
+                        Reconnect your wifi network to resolve.
+                    </Alert>
+                </Stack>
+            </Paper>
+        );
 
     return (
         <Paper shadow='xl' radius='lg' p='lg' mt='md' withBorder>
             <Stack gap='md' mt='md'>
                 <Text size='lg' fw={600}>
-                    Our Packages
+                    Available Packages
                 </Text>
 
                 <SimpleGrid
