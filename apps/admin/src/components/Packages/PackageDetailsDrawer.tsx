@@ -33,6 +33,21 @@ const STATUS_BADGE: Record<
     failed: { color: 'red', label: 'Failed' },
 };
 
+const NAS_BADGE_COLOR = [
+    'red',
+    'pink',
+    'grape',
+    'violet',
+    'indigo',
+    'blue',
+    'cyan',
+    'green',
+    'lime',
+    'yellow',
+    'orange',
+    'teal',
+];
+
 function StatCard({
     label,
     value,
@@ -91,9 +106,7 @@ export function PackageDetailsDrawer({
             const result = await getNasDevices();
             if (result.success && result.data) {
                 setNasDeviceNames(
-                    Object.fromEntries(
-                        result.data.map((d) => [d.id, d.name]),
-                    ),
+                    Object.fromEntries(result.data.map((d) => [d.id, d.name])),
                 );
             }
         })();
@@ -129,7 +142,9 @@ export function PackageDetailsDrawer({
 
     const repeatRate =
         analytics && analytics.buyers.unique > 0
-            ? Math.round((analytics.buyers.repeat / analytics.buyers.unique) * 100)
+            ? Math.round(
+                  (analytics.buyers.repeat / analytics.buyers.unique) * 100,
+              )
             : 0;
 
     return (
@@ -199,23 +214,45 @@ export function PackageDetailsDrawer({
                         <Grid.Col span={6}>
                             <DetailItem
                                 label='Created'
-                                value={new Date(pkg.createdAt).toLocaleDateString()}
+                                value={new Date(
+                                    pkg.createdAt,
+                                ).toLocaleDateString()}
                             />
                         </Grid.Col>
                         <Grid.Col span={12}>
-                            <DetailItem
-                                label='NAS Devices'
-                                value={
-                                    pkg.nasDeviceIds.length === 0
-                                        ? 'All NAS devices'
-                                        : pkg.nasDeviceIds
-                                              .map(
-                                                  (id) =>
-                                                      nasDeviceNames[id] ?? id,
-                                              )
-                                              .join(', ')
-                                }
-                            />
+                            <Stack gap={2}>
+                                <Text size='xs' c='dimmed'>
+                                    NAS Devices
+                                </Text>
+
+                                {pkg.nasDeviceIds.length === 0 ? (
+                                    <Text
+                                        span
+                                        c='orange'
+                                        inherit
+                                        size='sm'
+                                        fw={500}
+                                    >
+                                        Not linked to any NAS — hidden
+                                    </Text>
+                                ) : (
+                                    <Group>
+                                        {pkg.nasDeviceIds.map((id) => (
+                                            <Badge
+                                                color={
+                                                    NAS_BADGE_COLOR[
+                                                        Math.floor(
+                                                            Math.random() * 10,
+                                                        )
+                                                    ]
+                                                }
+                                            >
+                                                {nasDeviceNames[id] ?? id}
+                                            </Badge>
+                                        ))}
+                                    </Group>
+                                )}
+                            </Stack>
                         </Grid.Col>
                         {pkg.description ? (
                             <Grid.Col span={12}>
@@ -304,19 +341,24 @@ export function PackageDetailsDrawer({
                                     <Table.Tr key={p.id}>
                                         <Table.Td>{p.phoneNumber}</Table.Td>
                                         <Table.Td>
-                                            Ksh {Number(p.amount).toLocaleString()}
+                                            Ksh{' '}
+                                            {Number(p.amount).toLocaleString()}
                                         </Table.Td>
                                         <Table.Td>
                                             <Badge
                                                 size='sm'
-                                                color={STATUS_BADGE[p.status].color}
+                                                color={
+                                                    STATUS_BADGE[p.status].color
+                                                }
                                                 variant='light'
                                             >
                                                 {STATUS_BADGE[p.status].label}
                                             </Badge>
                                         </Table.Td>
                                         <Table.Td>
-                                            {new Date(p.createdAt).toLocaleString()}
+                                            {new Date(
+                                                p.createdAt,
+                                            ).toLocaleString()}
                                         </Table.Td>
                                     </Table.Tr>
                                 ))}

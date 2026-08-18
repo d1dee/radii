@@ -110,20 +110,15 @@ export default function PackageFormPage() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [id]);
 
-    // The MultiSelect shows a synthetic "All NAS devices" option when no
-    // specific devices are selected; the form value only ever holds real ids.
-    const nasSelectValue =
-        form.values.nasDeviceIds && form.values.nasDeviceIds.length > 0
-            ? form.values.nasDeviceIds
-            : [ALL_NAS_VALUE];
-
+    // The MultiSelect shows a synthetic "All NAS devices" option that selects
+    // every NAS device owned by the current admin; the form value only ever
+    // holds real device ids.
     const handleNasDevicesChange = (values: string[]) => {
-        if (!values.includes(ALL_NAS_VALUE)) {
-            form.setFieldValue('nasDeviceIds', values);
-            return;
-        }
         if (values[values.length - 1] === ALL_NAS_VALUE) {
-            form.setFieldValue('nasDeviceIds', []);
+            form.setFieldValue(
+                'nasDeviceIds',
+                nasDevices.map((d) => d.id),
+            );
             return;
         }
         form.setFieldValue(
@@ -243,6 +238,7 @@ export default function PackageFormPage() {
                                 description='Devices this package is available on'
                                 placeholder='Select NAS devices'
                                 searchable
+                                required
                                 data={[
                                     {
                                         value: ALL_NAS_VALUE,
@@ -253,7 +249,7 @@ export default function PackageFormPage() {
                                         label: d.name,
                                     })),
                                 ]}
-                                value={nasSelectValue}
+                                {...form.getInputProps('nasDeviceIds')}
                                 onChange={handleNasDevicesChange}
                             />
                         </Grid.Col>
