@@ -93,14 +93,14 @@ app.post('/packages', requireAdmin, async (c) => {
         nasDeviceIds,
     );
 
-    return c.json(
-        { success: true, data: { ...row, nasDeviceIds } },
-        201,
-    );
+    return c.json({ success: true, data: { ...row, nasDeviceIds } }, 201);
 });
 
 app.get('/packages/:id', requireAdmin, async (c) => {
     const packageId = c.req.param('id');
+    if (!packageId) {
+        return jsonError(c, 404, 'Package not found');
+    }
     const row = await getPackageById(packageId);
     if (!row) {
         return jsonError(c, 404, 'Package not found');
@@ -111,6 +111,9 @@ app.get('/packages/:id', requireAdmin, async (c) => {
 
 app.get('/packages/:id/analytics', requireAdmin, async (c) => {
     const packageId = c.req.param('id');
+    if (!packageId) {
+        return jsonError(c, 404, 'Package not found');
+    }
     const pkg = await getPackageById(packageId);
     if (!pkg) {
         return jsonError(c, 404, 'Package not found');
@@ -121,6 +124,9 @@ app.get('/packages/:id/analytics', requireAdmin, async (c) => {
 
 app.put('/packages/:id', requireAdmin, async (c) => {
     const packageId = c.req.param('id');
+    if (!packageId) {
+        return jsonError(c, 404, 'Package not found');
+    }
     const parsed = createPackageSchema.safeParse(await c.req.json());
     if (!parsed.success) {
         return jsonError(c, 400, 'Invalid package payload');
