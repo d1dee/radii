@@ -14,7 +14,6 @@ export type Package = {
     downloadRate: number; // Kbps
     downloadQuota: number; // KB
     uploadQuota: number; // KB
-    gateway?: string;
 };
 
 // A single device-quota entry returned by the status endpoint.

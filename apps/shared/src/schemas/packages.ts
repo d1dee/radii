@@ -19,9 +19,7 @@ export const createPackageSchema = z.object({
     downloadRate: z.number().min(0, 'Must be non-negative'),
     downloadQuota: z.number().min(0, 'Must be non-negative'),
     uploadQuota: z.number().min(0, 'Must be non-negative'),
-    nasConfigId: z
-        .string()
-        .optional()
-        .transform((v) => (v?.trim() ? v.trim() : undefined))
-        .pipe(z.uuid().optional()),
+    nasDeviceIds: z
+        .array(z.uuid())
+        .min(1, 'Link the package to at least one NAS device'),
 });
