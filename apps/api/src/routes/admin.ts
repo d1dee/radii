@@ -5,7 +5,6 @@ import {
 } from '@radii/shared';
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { id } from 'zod/locales';
 import { env } from '../env';
 import { jsonError } from '../lib/error';
 import {
@@ -16,6 +15,8 @@ import {
 } from '../lib/nas';
 import {
     createPackage,
+    getNasDeviceIdsByPackage,
+    getNasDeviceIdsForPackage,
     getPackageAnalytics,
     getPackageById,
     getPackages,
@@ -46,6 +47,17 @@ function isUniqueViolation(e: unknown): boolean {
 
 const packageTypeSchema = z.enum(['hotspot', 'pppoe']);
 
+// Packages may only be linked to NAS devices owned by the current admin.
+async function ownsAllNasDevices(
+    ownerId: string,
+    nasDeviceIds: string[],
+): Promise<boolean> {
+    if (nasDeviceIds.length === 0) return true;
+    const devices = await getNasDevices(ownerId);
+    const owned = new Set(devices.map((d) => d.id));
+    return nasDeviceIds.every((id) => owned.has(id));
+}
+
 app.get('/packages', requireAdmin, async (c) => {
     const typeParam = c.req.query('type');
     if (
@@ -54,10 +66,17 @@ app.get('/packages', requireAdmin, async (c) => {
     ) {
         return jsonError(c, 400, 'Invalid package type filter');
     }
-    const packages = await getPackages(
+    const rows = await getPackages(
         typeParam as 'hotspot' | 'pppoe' | undefined,
     );
-    return c.json({ success: true, data: packages });
+    const links = await getNasDeviceIdsByPackage(rows.map((r) => r.id));
+    return c.json({
+        success: true,
+        data: rows.map((row) => ({
+            ...row,
+            nasDeviceIds: links[row.id] ?? [],
+        })),
+    });
 });
 
 app.post('/packages', requireAdmin, async (c) => {
@@ -65,24 +84,33 @@ app.post('/packages', requireAdmin, async (c) => {
     if (!parsed.success) {
         return jsonError(c, 400, 'Invalid package payload');
     }
-    const row = await createPackage({
-        ...parsed.data,
-        price: String(parsed.data.price),
-    });
+    const { nasDeviceIds, ...data } = parsed.data;
+    if (!(await ownsAllNasDevices(c.var.session.userId, nasDeviceIds))) {
+        return jsonError(c, 400, 'Unknown NAS device');
+    }
+    const row = await createPackage(
+        { ...data, price: String(data.price) },
+        nasDeviceIds,
+    );
 
-    return c.json({ success: true, data: row }, 201);
+    return c.json(
+        { success: true, data: { ...row, nasDeviceIds } },
+        201,
+    );
 });
 
 app.get('/packages/:id', requireAdmin, async (c) => {
-    const row = await getPackageById(id);
+    const packageId = c.req.param('id');
+    const row = await getPackageById(packageId);
     if (!row) {
         return jsonError(c, 404, 'Package not found');
     }
-    return c.json({ success: true, data: row });
+    const nasDeviceIds = await getNasDeviceIdsForPackage(packageId);
+    return c.json({ success: true, data: { ...row, nasDeviceIds } });
 });
 
 app.get('/packages/:id/analytics', requireAdmin, async (c) => {
-    const packageId = id;
+    const packageId = c.req.param('id');
     const pkg = await getPackageById(packageId);
     if (!pkg) {
         return jsonError(c, 404, 'Package not found');
@@ -92,19 +120,24 @@ app.get('/packages/:id/analytics', requireAdmin, async (c) => {
 });
 
 app.put('/packages/:id', requireAdmin, async (c) => {
+    const packageId = c.req.param('id');
     const parsed = createPackageSchema.safeParse(await c.req.json());
     if (!parsed.success) {
         return jsonError(c, 400, 'Invalid package payload');
     }
-    const row = await updatePackage(id, {
-        ...parsed.data,
-        price: String(parsed.data.price),
-        nasConfigId: parsed.data.nasConfigId ?? null,
-    });
+    const { nasDeviceIds, ...data } = parsed.data;
+    if (!(await ownsAllNasDevices(c.var.session.userId, nasDeviceIds))) {
+        return jsonError(c, 400, 'Unknown NAS device');
+    }
+    const row = await updatePackage(
+        packageId,
+        { ...data, price: String(data.price) },
+        nasDeviceIds,
+    );
     if (!row) {
         return jsonError(c, 404, 'Package not found');
     }
-    return c.json({ success: true, data: row });
+    return c.json({ success: true, data: { ...row, nasDeviceIds } });
 });
 
 app.get('/nas-devices', requireAdmin, async (c) => {

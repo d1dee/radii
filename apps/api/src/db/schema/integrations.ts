@@ -5,6 +5,7 @@ import {
     inet,
     jsonb,
     pgTable,
+    primaryKey,
     text,
     timestamp,
     unique,
@@ -12,6 +13,7 @@ import {
     varchar,
 } from 'drizzle-orm/pg-core';
 import { user } from './auth-schema';
+import { packages } from './packages';
 
 export const nasDevice = pgTable(
     'nas_device',
@@ -93,6 +95,41 @@ export const integrationConfigRelations = relations(nasConfig, ({ one }) => ({
         references: [nasDevice.id],
     }),
 }));
+
+// Many-to-many link between packages and NAS devices. A package with no rows
+// here is available on all NAS devices.
+export const packageNasDevice = pgTable(
+    'package_nas_device',
+    {
+        packageId: uuid('package_id')
+            .notNull()
+            .references(() => packages.id, { onDelete: 'cascade' }),
+        nasDeviceId: text('nas_device_id')
+            .notNull()
+            .references(() => nasDevice.id, { onDelete: 'cascade' }),
+        createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+            .defaultNow()
+            .notNull(),
+    },
+    (table) => [
+        primaryKey({ columns: [table.packageId, table.nasDeviceId] }),
+        index('package_nas_device_nas_device_id_idx').on(table.nasDeviceId),
+    ],
+);
+
+export const packageNasDeviceRelations = relations(
+    packageNasDevice,
+    ({ one }) => ({
+        package: one(packages, {
+            fields: [packageNasDevice.packageId],
+            references: [packages.id],
+        }),
+        nasDevice: one(nasDevice, {
+            fields: [packageNasDevice.nasDeviceId],
+            references: [nasDevice.id],
+        }),
+    }),
+);
 
 // Rendered (device-specific) NAS setup script, generated from a template that
 // is substituted with this device's IP, RADIUS secret, WireGuard keys, etc.

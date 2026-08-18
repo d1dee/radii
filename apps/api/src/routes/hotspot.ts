@@ -26,8 +26,25 @@ const app = new Hono<{ Variables: AppVariables }>();
 
 // --- Packages ---------------------------------------------------------------
 
+// Packages are scoped to the NAS the client connected through: the portal
+// passes the login-request id it received on redirect, which carries the
+// device id. Packages not linked to that device are not returned.
 app.get('/packages', async (c) => {
-    const packages = await getPackagesGroupedByCategory();
+    const loginRequestId = c.req.query('login_request');
+    if (!loginRequestId) {
+        return jsonError(c, 400, 'Missing login_request');
+    }
+    const [loginRequest] = await db
+        .select({ nasDeviceId: hotspotLoginRequest.nasDeviceId })
+        .from(hotspotLoginRequest)
+        .where(eq(hotspotLoginRequest.id, loginRequestId))
+        .limit(1);
+    if (!loginRequest) {
+        return jsonError(c, 404, 'Unknown login request');
+    }
+    const packages = await getPackagesGroupedByCategory(
+        loginRequest.nasDeviceId,
+    );
     return c.json({ success: true, data: packages });
 });
 

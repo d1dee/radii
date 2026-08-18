@@ -1,15 +1,22 @@
 import type { Package } from '@radii/shared';
-import { and, asc, count, desc, eq, sql } from 'drizzle-orm';
+import { and, asc, count, desc, eq, exists, inArray, sql } from 'drizzle-orm';
 import { db } from '../db';
-import { activatedPackages, packages, packagePayments } from '../db/schema';
+import {
+    activatedPackages,
+    packageNasDevice,
+    packages,
+    packagePayments,
+} from '../db/schema';
 
 type InsertPackage = typeof packages.$inferInsert;
 export type PackageRow = typeof packages.$inferSelect;
 export type PackageType = 'hotspot' | 'pppoe';
 
-export async function getPackagesGroupedByCategory(): Promise<
-    Array<[string, Package[]]>
-> {
+// Only packages explicitly linked to the given NAS device are returned; a
+// package without any link rows never shows up.
+export async function getPackagesGroupedByCategory(
+    nasDeviceId: string,
+): Promise<Array<[string, Package[]]>> {
     const rows = await db
         .select()
         .from(packages)
@@ -17,6 +24,20 @@ export async function getPackagesGroupedByCategory(): Promise<
             and(
                 eq(packages.isActive, true),
                 eq(packages.type, 'hotspot'),
+                exists(
+                    db
+                        .select()
+                        .from(packageNasDevice)
+                        .where(
+                            and(
+                                eq(packageNasDevice.packageId, packages.id),
+                                eq(
+                                    packageNasDevice.nasDeviceId,
+                                    nasDeviceId,
+                                ),
+                            ),
+                        ),
+                ),
             ),
         )
         .orderBy(packages.category, asc(packages.title));
@@ -41,7 +62,6 @@ export async function getPackagesGroupedByCategory(): Promise<
             downloadRate: row.downloadRate,
             downloadQuota: row.downloadQuota,
             uploadQuota: row.uploadQuota,
-            gateway: row.nasConfigId ?? undefined,
         });
     }
     return Array.from(grouped.entries());
@@ -70,18 +90,81 @@ export async function getPackageById(id: string) {
     return row;
 }
 
-export async function createPackage(data: InsertPackage) {
-    const [row] = await db.insert(packages).values(data).returning();
-    return row;
+// An empty nasDeviceIds list means the package is available on all NAS
+// devices (no join rows are stored).
+export async function createPackage(
+    data: InsertPackage,
+    nasDeviceIds: string[],
+) {
+    return db.transaction(async (tx) => {
+        const [row] = await tx.insert(packages).values(data).returning();
+        if (nasDeviceIds.length > 0) {
+            await tx.insert(packageNasDevice).values(
+                nasDeviceIds.map((nasDeviceId) => ({
+                    packageId: row.id,
+                    nasDeviceId,
+                })),
+            );
+        }
+        return row;
+    });
 }
 
-export async function updatePackage(id: string, data: InsertPackage) {
-    const [row] = await db
-        .update(packages)
-        .set(data)
-        .where(eq(packages.id, id))
-        .returning();
-    return row;
+export async function updatePackage(
+    id: string,
+    data: InsertPackage,
+    nasDeviceIds: string[],
+) {
+    return db.transaction(async (tx) => {
+        const [row] = await tx
+            .update(packages)
+            .set(data)
+            .where(eq(packages.id, id))
+            .returning();
+        if (!row) return row;
+        await tx
+            .delete(packageNasDevice)
+            .where(eq(packageNasDevice.packageId, id));
+        if (nasDeviceIds.length > 0) {
+            await tx.insert(packageNasDevice).values(
+                nasDeviceIds.map((nasDeviceId) => ({
+                    packageId: id,
+                    nasDeviceId,
+                })),
+            );
+        }
+        return row;
+    });
+}
+
+export async function getNasDeviceIdsForPackage(
+    packageId: string,
+): Promise<string[]> {
+    const rows = await db
+        .select({ nasDeviceId: packageNasDevice.nasDeviceId })
+        .from(packageNasDevice)
+        .where(eq(packageNasDevice.packageId, packageId));
+    return rows.map((r) => r.nasDeviceId);
+}
+
+// Returns a map of package id -> linked NAS device ids for the given
+// packages; packages absent from the map have no restriction.
+export async function getNasDeviceIdsByPackage(
+    packageIds: string[],
+): Promise<Record<string, string[]>> {
+    if (packageIds.length === 0) return {};
+    const rows = await db
+        .select({
+            packageId: packageNasDevice.packageId,
+            nasDeviceId: packageNasDevice.nasDeviceId,
+        })
+        .from(packageNasDevice)
+        .where(inArray(packageNasDevice.packageId, packageIds));
+    const map: Record<string, string[]> = {};
+    for (const row of rows) {
+        (map[row.packageId] ??= []).push(row.nasDeviceId);
+    }
+    return map;
 }
 
 export async function getPackageAnalytics(packageId: string) {

@@ -105,8 +105,8 @@ export type CreatePackageInput = {
     downloadRate: number;
     downloadQuota: number;
     uploadQuota: number;
-    // NAS devices to restrict the package to; empty/omitted means all.
-    nasDeviceIds?: string[];
+    // NAS devices the package is available on; at least one is required.
+    nasDeviceIds: string[];
 };
 
 export function getAdminPackages(type?: PackageType) {

@@ -11,7 +11,6 @@ import {
     uuid,
 } from 'drizzle-orm/pg-core';
 import { user } from './auth-schema';
-import { nasConfig } from './integrations';
 import { transaction } from './payments';
 import { radacct } from './radius';
 
@@ -34,7 +33,6 @@ export const packages = pgTable(
         downloadRate: integer('download_rate').notNull(),
         downloadQuota: integer('download_quota').notNull(),
         uploadQuota: integer('upload_quota').notNull(),
-        nasConfigId: text('nas_config_id').references(() => nasConfig.id),
         isActive: boolean('is_active').default(true).notNull(),
         createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
             .defaultNow()
@@ -43,7 +41,6 @@ export const packages = pgTable(
     (table) => [
         index('packages_type_idx').on(table.type),
         index('packages_category_idx').on(table.category),
-        index('packages_nas_config_id_idx').on(table.nasConfigId),
     ],
 );
 
