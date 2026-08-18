@@ -101,7 +101,7 @@ export function CurrentPackage() {
     const progressValue = Math.max(0, Math.min(100, parseFloat(width) || 0));
 
     return (
-        <Paper shadow='xl' radius='lg' p='lg' mt='md'>
+        <Paper shadow='xl' radius='lg' p='lg' mt='md' withBorder>
             <Stack gap='md'>
                 <Text size='lg' fw={600}>
                     Active Package Details

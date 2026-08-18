@@ -61,7 +61,7 @@ export function PackagePricing({ packages }: { packages: Packages | undefined })
     if (!packages || packages.length === 0) return null;
 
     return (
-        <Paper shadow='xl' radius='lg' p='lg' mt='md'>
+        <Paper shadow='xl' radius='lg' p='lg' mt='md' withBorder>
             <Stack gap='md' mt='md'>
                 <Text size='lg' fw={600}>
                     Our Packages
