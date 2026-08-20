@@ -6,7 +6,7 @@ import {
     parsePhoneNumberFromString,
 } from 'libphonenumber-js';
 import { db } from './db';
-import * as schema from './db/schema';
+import * as schema from './db/schema/auth-schema';
 
 export const auth = betterAuth({
     database: drizzleAdapter(db, {
