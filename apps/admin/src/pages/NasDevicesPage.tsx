@@ -31,7 +31,7 @@ import {
     type NasSetupScriptRow,
 } from '@/lib/api';
 import { nasDeviceOsLabel, nasDeviceStatusColors } from '@/lib/nas';
-w;
+import { notifications } from '@mantine/notifications';
 
 const setupScriptStatusColors: Record<NasSetupScriptRow['status'], string> = {
     pending: 'yellow',
