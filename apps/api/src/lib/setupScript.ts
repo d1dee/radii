@@ -424,20 +424,19 @@ export async function applyNasReport(
             if (report.serialNumber) {
                 deviceUpdate.serialNumber = report.serialNumber;
             }
-
             await tx
-                .update(nasDevice)
-                .set(deviceUpdate)
-                .where(eq(nasDevice.id, nasDeviceId))
-                .catch(async (err) => {
-                    // A serial number registered on another device must not
-                    // block the whole report; retry without it.
+                .transaction(async (tx2) => {
+                    await tx2
+                        .update(nasDevice)
+                        .set(deviceUpdate)
+                        .where(eq(nasDevice.id, nasDeviceId));
+                })
+                .catch(async () => {
                     delete deviceUpdate.serialNumber;
                     await tx
                         .update(nasDevice)
                         .set(deviceUpdate)
-                        .where(eq(nasDevice.id, nasDeviceId))
-                        .catch((err) => console.log(err));
+                        .where(eq(nasDevice.id, nasDeviceId));
                 });
         }
         return row;
