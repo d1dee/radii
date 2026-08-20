@@ -377,9 +377,7 @@ export interface NasReport {
 // Applies a router report: stores the WireGuard public key on the setup
 // script row (the peering source of truth) and auto-fills the NAS device
 // record with facts read from the device (model, serial number, firmware
-// version). Empty values are ignored; a colliding serial number (already
-// registered on another device) is skipped without failing. The server-side
-// WireGuard peer itself is applied by the caller.
+// version).
 export async function applyNasReport(
     scriptId: string,
     nasDeviceId: string,
@@ -426,20 +424,21 @@ export async function applyNasReport(
             if (report.serialNumber) {
                 deviceUpdate.serialNumber = report.serialNumber;
             }
-            try {
-                await tx
-                    .update(nasDevice)
-                    .set(deviceUpdate)
-                    .where(eq(nasDevice.id, nasDeviceId));
-            } catch {
-                // A serial number registered on another device must not
-                // block the whole report; retry without it.
-                delete deviceUpdate.serialNumber;
-                await tx
-                    .update(nasDevice)
-                    .set(deviceUpdate)
-                    .where(eq(nasDevice.id, nasDeviceId));
-            }
+
+            await tx
+                .update(nasDevice)
+                .set(deviceUpdate)
+                .where(eq(nasDevice.id, nasDeviceId))
+                .catch(async (err) => {
+                    // A serial number registered on another device must not
+                    // block the whole report; retry without it.
+                    delete deviceUpdate.serialNumber;
+                    await tx
+                        .update(nasDevice)
+                        .set(deviceUpdate)
+                        .where(eq(nasDevice.id, nasDeviceId))
+                        .catch((err) => console.log(err));
+                });
         }
         return row;
     });
