@@ -74,7 +74,14 @@ export async function interfaceReady(): Promise<boolean> {
 
 // Adds or updates a single peer without affecting any other peer. Idempotent.
 export async function upsertPeer(peer: WgPeerConfig): Promise<void> {
-    const args = ['set', env.wgIface, 'peer', peer.publicKey];
+    const args = [
+        'set',
+        env.wgIface,
+        'peer',
+        peer.publicKey,
+        'persistent-keepalive',
+        '20',
+    ];
     let pskFile: string | undefined;
     try {
         if (peer.presharedKey) {
