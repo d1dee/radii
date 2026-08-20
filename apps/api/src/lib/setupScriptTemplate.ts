@@ -337,21 +337,17 @@ $radiiLog ("RADIUS client configured for {{RADIUS_SERVER}}");
 :local wgIds [/interface/wireguard/find where name=$wgName];
 
 # IMPORTANT:
-# Never remove/recreate the interface here. RouterOS generates its keypair
+# Recreate the interface here to have RouterOS generates its keypair
 # when the interface is created. Keeping the interface preserves its key.
-:if ([:len $wgIds] = 0) do={
-    /interface/wireguard/add \
-        name=$wgName \
-        listen-port={{WG_LISTEN_PORT}} \
-        mtu=1420 \
-        comment="radii management tunnel";
-} else={
-    /interface/wireguard/set [:pick $wgIds 0] \
-        listen-port={{WG_LISTEN_PORT}} \
-        mtu=1420 \
-        comment="radii management tunnel" \
-        disabled=no;
-};
+:if ([:len $wgIds] > 0) do={
+    /interface/wireguard/remove [:pick $wgIds 0]
+}
+/interface/wireguard/add \
+    name=$wgName \
+    listen-port={{WG_LISTEN_PORT}} \
+    mtu=1420 \
+    comment="radii management tunnel";
+
 
 :local wgId [/interface/wireguard/find where name=$wgName];
 :local wgPubKey [/interface/wireguard/get $wgId public-key];
