@@ -12,13 +12,13 @@
 import { inArray, isNotNull } from 'drizzle-orm';
 import { db } from '../db';
 import { nasSetupScript } from '../db/schema';
+import { env } from '../env';
 import {
     interfaceReady,
     listPeerPublicKeys,
     removePeer,
     upsertPeer,
 } from './wireguard';
-import { env } from '../env';
 
 export async function reconcileWireGuardPeers(): Promise<void> {
     if (!env.wgManagePeers) {
@@ -42,7 +42,7 @@ export async function reconcileWireGuardPeers(): Promise<void> {
 
     const upserted = new Set<string>();
     for (const row of rows) {
-        const publicKey = row.wgPublicKey as string;
+        const publicKey = row.wgPublicKey!;
         try {
             await upsertPeer({
                 publicKey,

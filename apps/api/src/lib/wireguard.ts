@@ -23,17 +23,24 @@ export function wgManagementEnabled(): boolean {
     return env.wgManagePeers;
 }
 
+const PRIVILEGED_SUBCOMMANDS = new Set(['set', 'syncconf', 'show']);
+
 async function runWg(args: string[]): Promise<string> {
+    const needsSudo = env.wgUseSudo && PRIVILEGED_SUBCOMMANDS.has(args[0]);
+    const cmd = needsSudo
+        ? ['sudo', '-n', env.wgBin, ...args]
+        : [env.wgBin, ...args];
+
     let proc;
     try {
-        proc = Bun.spawn([env.wgBin, ...args], {
+        proc = Bun.spawn(cmd, {
             stdout: 'pipe',
             stderr: 'pipe',
         });
     } catch (e) {
         throw new WgError(
-            `Failed to execute '${env.wgBin}' (is it installed, and does the ` +
-                `API process have CAP_NET_ADMIN?): ${String(e)}`,
+            `Failed to execute '${cmd[0]}' (is it installed? for sudo mode, ` +
+                `does the API user have a NOPASSWD sudoers entry?): ${String(e)}`,
         );
     }
     const code = await proc.exited;
@@ -49,10 +56,7 @@ async function runWg(args: string[]): Promise<string> {
 // Writes secrets to a root-only temp file for the CLI and deletes it after
 // use. Caller must remove the returned path.
 async function writeSecretFile(content: string): Promise<string> {
-    const file = path.join(
-        os.tmpdir(),
-        `radii-wg-${crypto.randomUUID()}.key`,
-    );
+    const file = path.join(os.tmpdir(), `radii-wg-${crypto.randomUUID()}.key`);
     await writeFile(file, `${content}\n`, { mode: 0o600 });
     await chmod(file, 0o600);
     return file;
@@ -62,7 +66,8 @@ export async function interfaceReady(): Promise<boolean> {
     try {
         await runWg(['show', env.wgIface, 'public-key']);
         return true;
-    } catch {
+    } catch (err) {
+        err instanceof Error && console.error(err.message);
         return false;
     }
 }

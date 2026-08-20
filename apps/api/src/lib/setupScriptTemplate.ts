@@ -399,7 +399,7 @@ $radiiLog ("WireGuard public key: " . $wgPubKey);
     public-key="{{WG_SERVER_PUBLIC_KEY}}" \
     preshared-key="{{WG_PSK}}" \
     allowed-address={{WG_ALLOWED_ADDRESS}} \
-    persistent-keepalive=25s \
+        persistent-keepalive=20s \
     comment="radii server peer";
 
 # ---------------------------------------------------------------------

@@ -97,6 +97,7 @@ function randomInt(maxExclusive: number): number {
 async function allocateWgClientIp(
     subnetCidr: string,
     nasDeviceId: string,
+    reservedIp?: string,
 ): Promise<string> {
     const { network, broadcast } = parseIpv4Cidr(subnetCidr);
     const rows = await db
@@ -110,6 +111,7 @@ async function allocateWgClientIp(
     used.add(network);
     used.add(network + 1);
     used.add(broadcast);
+    if (reservedIp) used.add(parseIpv4(reservedIp));
     for (const row of rows) {
         if (row.nasDeviceId === nasDeviceId) continue;
         used.add(parseIpv4(row.wgClientIp));
@@ -179,9 +181,25 @@ export async function generateSetupScript(
     const hs = hotspotNetworkInfo(input.hotspotNetwork);
     const wg = parseWgEndpoint(env.wgEndpoint);
     const wgSubnet = parseIpv4Cidr(env.wgManagementSubnet);
+    const wgInterfaceIp = env.wgInterfaceIp.trim();
+    if (!wgInterfaceIp) {
+        throw new SetupScriptConfigError(
+            'WireGuard server interface IP is not configured. Set WG_INTERFACE_IP (the radii server WireGuard interface address inside WG_MANAGEMENT_SUBNET) before generating setup scripts.',
+        );
+    }
+    const wgInterfaceNum = parseIpv4(wgInterfaceIp);
+    if (
+        wgInterfaceNum <= wgSubnet.network ||
+        wgInterfaceNum >= wgSubnet.broadcast
+    ) {
+        throw new SetupScriptConfigError(
+            `WG_INTERFACE_IP (${wgInterfaceIp}) must be inside the management subnet ${env.wgManagementSubnet}`,
+        );
+    }
     const wgClientIp = await allocateWgClientIp(
         env.wgManagementSubnet,
         device.id,
+        wgInterfaceIp,
     );
     const hotspotDnsName = input.hotspotDnsName || `hotspot.radii.lan`;
     const brandName = input.brandName || device.name;
@@ -211,7 +229,7 @@ export async function generateSetupScript(
         WG_ENDPOINT_PORT: String(wg.port),
         WG_SERVER_PUBLIC_KEY: wgServerPublicKey,
         WG_PSK: wgPsk,
-        WG_ALLOWED_ADDRESS: env.wgManagementSubnet,
+        WG_ALLOWED_ADDRESS: `${wgInterfaceIp}/32`,
         NAS_REPORT_URL: reportUrl,
         REGISTRATION_TOKEN: registrationToken,
         HOTSPOT_INTERFACE: input.hotspotInterface,
