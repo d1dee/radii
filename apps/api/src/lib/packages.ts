@@ -6,6 +6,7 @@ import {
     packageNasDevice,
     packages,
     packagePayments,
+    radacct,
 } from '../db/schema';
 
 type InsertPackage = typeof packages.$inferInsert;
@@ -233,6 +234,127 @@ export async function getPackageAnalytics(packageId: string) {
         activations: {
             total: Number(activationStats.total),
             active: Number(activationStats.active),
+        },
+        recentPayments,
+    };
+}
+
+// Aggregated analytics for a single NAS device: payments, buyers and
+// activations across all packages linked to the device, plus RADIUS session
+// accounting matched by the device's IP address.
+export async function getNasDeviceAnalytics(
+    nasDeviceId: string,
+    nasIpAddress: string,
+) {
+    const linkedPackageIds = () =>
+        db
+            .select({ packageId: packageNasDevice.packageId })
+            .from(packageNasDevice)
+            .where(eq(packageNasDevice.nasDeviceId, nasDeviceId));
+
+    const [packageStats] = await db
+        .select({
+            total: count(packages.id),
+            active: sql<number>`count(*) filter (where ${packages.isActive})`,
+        })
+        .from(packages)
+        .where(
+            exists(
+                db
+                    .select()
+                    .from(packageNasDevice)
+                    .where(
+                        and(
+                            eq(packageNasDevice.packageId, packages.id),
+                            eq(packageNasDevice.nasDeviceId, nasDeviceId),
+                        ),
+                    ),
+            ),
+        );
+
+    const [paymentStats] = await db
+        .select({
+            total: count(packagePayments.id),
+            pending: sql<number>`count(*) filter (where ${packagePayments.status} = 'pending')`,
+            paid: sql<number>`count(*) filter (where ${packagePayments.status} = 'paid')`,
+            failed: sql<number>`count(*) filter (where ${packagePayments.status} = 'failed')`,
+            revenue: sql<number>`coalesce(sum(${packagePayments.amount}) filter (where ${packagePayments.status} = 'paid'), 0)::float8`,
+            uniqueBuyers: sql<number>`count(distinct ${packagePayments.userId}) filter (where ${packagePayments.status} = 'paid')`,
+        })
+        .from(packagePayments)
+        .where(inArray(packagePayments.packageId, linkedPackageIds()));
+
+    const repeatBuyers = db
+        .select({ userId: packagePayments.userId })
+        .from(packagePayments)
+        .where(
+            and(
+                inArray(packagePayments.packageId, linkedPackageIds()),
+                eq(packagePayments.status, 'paid'),
+            ),
+        )
+        .groupBy(packagePayments.userId)
+        .having(sql`count(*) > 1`)
+        .as('repeat_buyers');
+
+    const [repeatStats] = await db
+        .select({ repeat: count(repeatBuyers.userId) })
+        .from(repeatBuyers);
+
+    const [activationStats] = await db
+        .select({
+            total: count(activatedPackages.id),
+            active: sql<number>`count(*) filter (where ${activatedPackages.expireAt} > now())`,
+        })
+        .from(activatedPackages)
+        .where(inArray(activatedPackages.packageId, linkedPackageIds()));
+
+    const [sessionStats] = await db
+        .select({
+            total: count(radacct.radacctid),
+            active: sql<number>`count(*) filter (where ${radacct.acctstoptime} is null)`,
+        })
+        .from(radacct)
+        .where(eq(radacct.nasipaddress, nasIpAddress));
+
+    const recentPayments = await db
+        .select({
+            id: packagePayments.id,
+            phoneNumber: packagePayments.phoneNumber,
+            amount: packagePayments.amount,
+            status: packagePayments.status,
+            packageTitle: packages.title,
+            createdAt: packagePayments.createdAt,
+        })
+        .from(packagePayments)
+        .innerJoin(packages, eq(packagePayments.packageId, packages.id))
+        .where(inArray(packagePayments.packageId, linkedPackageIds()))
+        .orderBy(desc(packagePayments.createdAt))
+        .limit(10);
+
+    return {
+        packages: {
+            total: Number(packageStats.total),
+            active: Number(packageStats.active),
+        },
+        payments: {
+            total: Number(paymentStats.total),
+            pending: Number(paymentStats.pending),
+            paid: Number(paymentStats.paid),
+            failed: Number(paymentStats.failed),
+            revenue: Number(paymentStats.revenue),
+        },
+        buyers: {
+            unique: Number(paymentStats.uniqueBuyers),
+            repeat: Number(repeatStats.repeat),
+        },
+        activations: {
+            total: Number(activationStats.total),
+            active: Number(activationStats.active),
+        },
+        sessions: {
+            total: Number(sessionStats.total),
+            active: Number(sessionStats.active),
         },
         recentPayments,
     };

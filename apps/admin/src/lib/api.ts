@@ -209,6 +209,44 @@ export function updateNasDevice(id: string, body: CreateNasDeviceInput) {
     });
 }
 
+export type NasDeviceAnalytics = {
+    packages: {
+        total: number;
+        active: number;
+    };
+    payments: {
+        total: number;
+        pending: number;
+        paid: number;
+        failed: number;
+        revenue: number;
+    };
+    buyers: {
+        unique: number;
+        repeat: number;
+    };
+    activations: {
+        total: number;
+        active: number;
+    };
+    sessions: {
+        total: number;
+        active: number;
+    };
+    recentPayments: Array<{
+        id: string;
+        phoneNumber: string;
+        amount: string;
+        status: PackagePaymentStatus;
+        packageTitle: string;
+        createdAt: string;
+    }>;
+};
+
+export function getNasDeviceAnalytics(id: string) {
+    return request<NasDeviceAnalytics>(`/admin/nas-devices/${id}/analytics`);
+}
+
 export type NasSetupScriptStatus = 'pending' | 'applied' | 'failed';
 
 // Generated RouterOS setup script stored on the server.

@@ -15,6 +15,7 @@ import {
 } from '../lib/nas';
 import {
     createPackage,
+    getNasDeviceAnalytics,
     getNasDeviceIdsByPackage,
     getNasDeviceIdsForPackage,
     getPackageAnalytics,
@@ -187,6 +188,17 @@ app.get('/nas-devices/:id', requireAdmin, async (c) => {
         return jsonError(c, 404, 'NAS device not found');
     }
     return c.json({ success: true, data: row });
+});
+
+app.get('/nas-devices/:id/analytics', requireAdmin, async (c) => {
+    const id = c.req.param('id');
+    if (!id) return jsonError(c, 406, 'missing NAS id');
+    const device = await getNasDeviceById(id, c.get('session').userId);
+    if (!device) {
+        return jsonError(c, 404, 'NAS device not found');
+    }
+    const data = await getNasDeviceAnalytics(device.id, device.ipAddress);
+    return c.json({ success: true, data });
 });
 
 // Generate (or regenerate) the device-specific RouterOS setup script and
