@@ -21,6 +21,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { MdAdd, MdEdit, MdTerminal } from 'react-icons/md';
 import { useNavigate } from 'react-router-dom';
 
+import { NasDetailsDrawer } from '@/components/NasDevices/NasDetailsDrawer';
 import {
     generateNasSetupScript,
     getNasDevices,
@@ -30,6 +31,7 @@ import {
     type NasSetupScriptRow,
 } from '@/lib/api';
 import { nasDeviceOsLabel, nasDeviceStatusColors } from '@/lib/nas';
+import { useClipboard } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
 
 const setupScriptStatusColors: Record<NasSetupScriptRow['status'], string> = {
@@ -43,12 +45,15 @@ export default function NasDevicesPage() {
     const [devices, setDevices] = useState<NasDeviceRow[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [detailsId, setDetailsId] = useState<string | null>(null);
 
     const [scriptDevice, setScriptDevice] = useState<NasDeviceRow | null>(null);
     const [scriptRow, setScriptRow] = useState<NasSetupScriptRow | null>(null);
     const [scriptLoading, setScriptLoading] = useState(false);
     const [scriptBusy, setScriptBusy] = useState(false);
     const [scriptError, setScriptError] = useState<string | null>(null);
+
+    const clipboard = useClipboard({ timeout: 1000 });
 
     const form = useForm<GenerateSetupScriptInput>({
         initialValues: {
@@ -135,7 +140,7 @@ export default function NasDevicesPage() {
 
     const handleCopyScript = async () => {
         if (!scriptRow) return;
-        await navigator.clipboard.writeText(scriptRow.script);
+        clipboard.copy(scriptRow.script);
 
         notifications.show({
             title: 'Success',
@@ -186,11 +191,7 @@ export default function NasDevicesPage() {
                             {devices.map((device) => (
                                 <Table.Tr
                                     key={device.id}
-                                    onClick={() =>
-                                        navigate(
-                                            `/nas-devices/${device.id}/edit`,
-                                        )
-                                    }
+                                    onClick={() => setDetailsId(device.id)}
                                     style={{ cursor: 'pointer' }}
                                 >
                                     <Table.Td fw={500}>{device.name}</Table.Td>
@@ -360,6 +361,11 @@ export default function NasDevicesPage() {
                     </form>
                 )}
             </Modal>
+
+            <NasDetailsDrawer
+                nasDeviceId={detailsId}
+                onClose={() => setDetailsId(null)}
+            />
         </Stack>
     );
 }
