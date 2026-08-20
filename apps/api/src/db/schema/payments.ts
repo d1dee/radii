@@ -6,13 +6,14 @@ import {
     pgTable,
     text,
     timestamp,
+    uuid,
 } from 'drizzle-orm/pg-core';
 import { user } from './auth-schema';
 
 export const transaction = pgTable(
     'transaction',
     {
-        id: text('id').primaryKey(),
+        id: uuid('id').defaultRandom().primaryKey(),
         userId: text('user_id')
             .notNull()
             .references(() => user.id, { onDelete: 'cascade' }),
@@ -52,8 +53,8 @@ export const transaction = pgTable(
 export const transactionLog = pgTable(
     'transaction_log',
     {
-        id: text('id').primaryKey(),
-        transactionId: text('transaction_id')
+        id: uuid('id').defaultRandom().primaryKey(),
+        transactionId: uuid('transaction_id')
             .notNull()
             .references(() => transaction.id, { onDelete: 'cascade' }),
         provider: text('provider').notNull(),

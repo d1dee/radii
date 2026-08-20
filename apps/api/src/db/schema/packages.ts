@@ -47,7 +47,7 @@ export const packages = pgTable(
 export const packagePayments = pgTable(
     'package_payments',
     {
-        id: text('id').primaryKey(),
+        id: uuid('id').defaultRandom().primaryKey(),
         userId: text('user_id')
             .notNull()
             .references(() => user.id, { onDelete: 'cascade' }),
@@ -59,7 +59,7 @@ export const packagePayments = pgTable(
             .default('pending'),
         amount: numeric('amount', { precision: 10, scale: 2 }).notNull(),
         phoneNumber: text('phone_number').notNull(),
-        transaction: text('transaction').references(() => transaction.id, {
+        transaction: uuid('transaction').references(() => transaction.id, {
             onDelete: 'cascade',
         }),
         createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
@@ -97,8 +97,8 @@ export const packagePaymentsRelations = relations(
 export const activatedPackages = pgTable(
     'activated_packages',
     {
-        id: text('id').primaryKey(),
-        packagePaymentId: text('package_payment_id')
+        id: uuid('id').defaultRandom().primaryKey(),
+        packagePaymentId: uuid('package_payment_id')
             .notNull()
             .references(() => packagePayments.id, { onDelete: 'cascade' }),
         radacctId: bigserial('radacct_id', { mode: 'bigint' })
