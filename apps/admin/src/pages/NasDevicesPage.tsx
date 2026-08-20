@@ -31,8 +31,7 @@ import {
     type NasSetupScriptRow,
 } from '@/lib/api';
 import { nasDeviceOsLabel, nasDeviceStatusColors } from '@/lib/nas';
-import { useClipboard } from '@mantine/hooks';
-import { notifications } from '@mantine/notifications';
+w;
 
 const setupScriptStatusColors: Record<NasSetupScriptRow['status'], string> = {
     pending: 'yellow',
@@ -52,8 +51,6 @@ export default function NasDevicesPage() {
     const [scriptLoading, setScriptLoading] = useState(false);
     const [scriptBusy, setScriptBusy] = useState(false);
     const [scriptError, setScriptError] = useState<string | null>(null);
-
-    const clipboard = useClipboard({ timeout: 1000 });
 
     const form = useForm<GenerateSetupScriptInput>({
         initialValues: {
@@ -140,13 +137,20 @@ export default function NasDevicesPage() {
 
     const handleCopyScript = async () => {
         if (!scriptRow) return;
-        clipboard.copy(scriptRow.script);
-
-        notifications.show({
-            title: 'Success',
-            message: 'Script copied to clipboard',
-            color: 'green',
-        });
+        try {
+            await navigator.clipboard.writeText(scriptRow.script);
+            notifications.show({
+                title: 'Success',
+                message: 'Script copied to clipboard',
+                color: 'green',
+            });
+        } catch (_) {
+            notifications.show({
+                title: 'Error',
+                message: 'Failed to copy to clipboard',
+                color: 'orange',
+            });
+        }
     };
 
     return (
