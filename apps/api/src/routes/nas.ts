@@ -3,18 +3,15 @@ import { Hono } from 'hono';
 import { db } from '../db';
 import { nasSetupScript } from '../db/schema';
 import { jsonError } from '../lib/error';
-import {
-    applyNasReport,
-    getSetupScriptForNasDevice,
-} from '../lib/setupScript';
-import { upsertPeer, wgManagementEnabled, WgError } from '../lib/wireguard';
+import { applyNasReport, getSetupScriptForNasDevice } from '../lib/setupScript';
+import { upsertPeer, WgError, wgManagementEnabled } from '../lib/wireguard';
 import type { AppVariables } from '../types';
 
 const app = new Hono<{ Variables: AppVariables }>();
 
 // Called by the router itself (via /tool/fetch at the end of the setup
 // script) to register its WireGuard public key and device facts (model,
-// serial number, firmware version), which auto-fill the NAS record.
+// serial number, firmware version).
 // Unauthenticated but guarded by the per-device registration token embedded
 // in the generated script.
 app.post('/:id/report', async (c) => {
@@ -70,9 +67,7 @@ app.post('/:id/report', async (c) => {
                 .set({ status: 'failed' })
                 .where(eq(nasSetupScript.id, row.id));
             const hint =
-                e instanceof WgError
-                    ? e.message
-                    : 'unexpected server error';
+                e instanceof WgError ? e.message : 'unexpected server error';
             return jsonError(
                 c,
                 500,
