@@ -1,7 +1,7 @@
 import { Group, Paper, Radio, Stack, Text } from '@mantine/core';
 import { parseServiceProvider } from '@radii/shared';
 import { useContext } from 'react';
-import { ClientContext } from '../Main.tsx';
+import { ClientContext } from '../../App';
 
 export function PrevPaymentMethods({
     selectedPhone,

@@ -3,10 +3,10 @@ import {
     AiOutlineCheckCircle,
     AiOutlineExclamationCircle,
 } from 'react-icons/ai';
-import { ModalActionsContext } from '../Main.tsx';
 
 import type { Quota } from '@radii/shared';
 import { useContext, useEffect, useState } from 'react';
+import { ModalActionsContext } from '../../App.tsx';
 import { getStatus } from '../../lib/api.ts';
 
 export function ConnectedDevice() {

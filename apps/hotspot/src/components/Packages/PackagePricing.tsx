@@ -10,11 +10,12 @@ import {
 } from '@mantine/core';
 import { upperFirstCase } from '@radii/shared';
 import { dayjs } from '../../lib/dayjs.ts';
-import { ModalActionsContext, SessionContext } from '../Main.tsx';
 
 import humanFormat from 'human-format';
 import { useContext, useState } from 'react';
 import { AiOutlineExclamationCircle } from 'react-icons/ai';
+import { ModalActionsContext } from '../../App.tsx';
+import { useSession } from '../../lib/auth.ts';
 import type { Package, Packages } from '../../types/index.ts';
 
 export const dataScale = new humanFormat.Scale({
@@ -38,7 +39,7 @@ export function PackagePricing({
     const [selectedTitle, setSelectedTitle] = useState('');
 
     const { startBuy, openLogin } = useContext(ModalActionsContext);
-    const session = useContext(SessionContext);
+    const session = useSession();
 
     // A category is always selected: fall back to the first one when the
     // selection is unset (packages still loading) or stale.
@@ -57,7 +58,7 @@ export function PackagePricing({
             price: String(pkg.price),
         };
 
-        if (session && session.expiresAt > Date.now()) startBuy(seed);
+        if (session.data?.session) startBuy(seed);
         else openLogin(pkg.packageId, String(pkg.price));
     }
 

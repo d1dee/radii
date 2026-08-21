@@ -1,6 +1,6 @@
 import { Anchor, Button, Group, Stack, Text } from '@mantine/core';
 import { useContext } from 'react';
-import { ModalActionsContext } from '../Main.tsx';
+import { ModalActionsContext } from '../../App';
 
 export function SigninSignup() {
     const { openRegister, openLogin } = useContext(ModalActionsContext);

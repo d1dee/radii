@@ -3,9 +3,9 @@ import { schemaResolver, useForm } from '@mantine/form';
 import { hasFieldErrors, loginSchema, signUpSchema } from '@radii/shared';
 import { PhoneNumberInput } from '@radii/ui';
 import { useContext, useState } from 'react';
+import { ModalActionsContext } from '../../App.tsx';
 import { login, register } from '../../lib/api.ts';
 import { useSession } from '../../lib/auth.ts';
-import { ModalActionsContext } from '../Main.tsx';
 
 type FormValues = {
     phoneNumber: string;

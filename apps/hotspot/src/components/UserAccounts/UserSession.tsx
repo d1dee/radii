@@ -1,8 +1,8 @@
 import { Button, Group, Stack, Text } from '@mantine/core';
-import { ClientContext } from '../Main.tsx';
 
 import type { Dispatch, SetStateAction } from 'react';
 import { useContext } from 'react';
+import { ClientContext } from '../../App.tsx';
 import { useSession } from '../../lib/auth.ts';
 
 export function UserSession({

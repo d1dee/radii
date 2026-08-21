@@ -4,10 +4,10 @@ import { parseServiceProvider } from '@radii/shared';
 import { PhoneNumberInput } from '@radii/ui';
 import { useContext, useState } from 'react';
 import { createOrder } from '../../lib/api.ts';
-import { ClientContext } from '../Main.tsx';
 
 import { AiOutlineLoading } from 'react-icons/ai';
 import z from 'zod';
+import { ClientContext } from '../../App.tsx';
 import { PrevPaymentMethods } from './PrevPaymentMethods.tsx';
 
 type FormValues = {
