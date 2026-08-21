@@ -1,6 +1,6 @@
 import { Button, Divider, Input, Stack } from '@mantine/core';
 import { schemaResolver, useForm } from '@mantine/form';
-import { parseServiceProvider } from '@radii/shared';
+import { parseServiceProvider, zPhoneNumber } from '@radii/shared';
 import { PhoneNumberInput } from '@radii/ui';
 import { useContext, useState } from 'react';
 import { createOrder } from '../../lib/api.ts';
@@ -8,6 +8,7 @@ import { createOrder } from '../../lib/api.ts';
 import { AiOutlineLoading } from 'react-icons/ai';
 import z from 'zod';
 import { ClientContext } from '../../App.tsx';
+import { LOGIN_REQUEST_KEY } from '../HotspotLoginRedirect.tsx';
 import { PrevPaymentMethods } from './PrevPaymentMethods.tsx';
 
 type FormValues = {
@@ -15,16 +16,12 @@ type FormValues = {
 };
 
 const buyFormSchema = z.object({
-    phoneNumber: z
-        .string()
-        .min(1, 'Phone number is required')
-        .transform((v) => {
-            const provider = parseServiceProvider(v);
-            return provider?.phoneNumber ?? v;
-        })
-        .refine((v) => parseServiceProvider(v)?.name === 'safaricom', {
+    phoneNumber: zPhoneNumber.refine(
+        (v) => parseServiceProvider(v)?.name === 'safaricom',
+        {
             message: 'Only M-Pesa payment is supported at the moment.',
-        }),
+        },
+    ),
 });
 
 export function BuyForm({
@@ -75,6 +72,7 @@ export function BuyForm({
 
         try {
             const result = await createOrder({
+                loginRequestKey: localStorage.getItem(LOGIN_REQUEST_KEY),
                 packageId,
                 phoneNumber: parsed.data.phoneNumber,
             });

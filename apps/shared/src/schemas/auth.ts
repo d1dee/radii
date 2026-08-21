@@ -8,13 +8,10 @@ import { z } from 'zod';
 // +254712345678). Validation uses libphonenumber-js, which checks length,
 // prefix and country rules rather than a single-country regex. The value is
 // normalized to E.164 on success so storage/lookups are consistent.
-const zPhoneNumber = z
+export const zPhoneNumber = z
     .string()
     .trim()
-    .refine(
-        (v) => !!v && safeIsValidPhone(v),
-        'Enter a valid phone number',
-    )
+    .refine((v) => !!v && safeIsValidPhone(v), 'Enter a valid phone number')
     .transform((v) => parsePhoneNumberFromString(v)?.format('E.164') ?? v);
 
 function safeIsValidPhone(value: string): boolean {
