@@ -4,8 +4,8 @@ import { db } from '../db';
 import {
     activatedPackages,
     packageNasDevice,
-    packages,
     packagePayments,
+    packages,
     radacct,
 } from '../db/schema';
 
@@ -32,10 +32,7 @@ export async function getPackagesGroupedByCategory(
                         .where(
                             and(
                                 eq(packageNasDevice.packageId, packages.id),
-                                eq(
-                                    packageNasDevice.nasDeviceId,
-                                    nasDeviceId,
-                                ),
+                                eq(packageNasDevice.nasDeviceId, nasDeviceId),
                             ),
                         ),
                 ),
@@ -74,11 +71,7 @@ export async function getPackages(type?: PackageType) {
         .select()
         .from(packages)
         .where(type ? eq(packages.type, type) : undefined)
-        .orderBy(
-            packages.type,
-            packages.category,
-            asc(packages.title),
-        );
+        .orderBy(packages.type, packages.category, asc(packages.title));
     return rows;
 }
 
@@ -361,7 +354,6 @@ export async function getNasDeviceAnalytics(
 }
 
 export async function createPayment(data: {
-    id: string;
     userId: string;
     packageId: string;
     amount: number;
@@ -370,7 +362,6 @@ export async function createPayment(data: {
     const [row] = await db
         .insert(packagePayments)
         .values({
-            id: data.id,
             userId: data.userId,
             packageId: data.packageId,
             amount: String(data.amount),

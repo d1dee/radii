@@ -1,5 +1,5 @@
-import { ApiErrorType } from '@radii/shared';
 import type { ApiEnvelope, Package, Quota } from '@radii/shared';
+import { ApiErrorType } from '@radii/shared';
 
 export type Client = {
     userId: string;
@@ -35,17 +35,18 @@ export function getStatus() {
     return request<Array<Quota>>('/status');
 }
 
-export function createOrder(body: { packageId: string; phoneNumber: string }) {
-    return request<OrderResult>('/order', {
+export function createOrder(body: {
+    loginRequestKey: string | null;
+    packageId: string;
+    phoneNumber: string;
+}) {
+    return request<OrderResult>('/order', body, {
         method: 'POST',
-        body: JSON.stringify(body),
     });
 }
 
 export function getPaymentStatus(paymentId: string) {
-    return request<OrderResult>(
-        `/payment/${encodeURIComponent(paymentId)}`,
-    );
+    return request<OrderResult>(`/payment/${encodeURIComponent(paymentId)}`);
 }
 
 export function deauthDevice(deviceQuotaId: string) {
@@ -58,7 +59,7 @@ export function deauthDevice(deviceQuotaId: string) {
 export async function request<T>(
     path: string,
     body?: unknown,
-    opts?: RequestInit,
+    opts?: Omit<RequestInit, 'body'>,
 ): Promise<ApiEnvelope<T>> {
     let res: Response;
     try {

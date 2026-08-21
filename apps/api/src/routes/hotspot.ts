@@ -148,12 +148,14 @@ app.get('/status', requireAuth, async (c) => {
 // --- Orders / payments ------------------------------------------------------
 
 const orderSchema = z.object({
-    packageId: z.string().min(8).max(32),
+    loginRequestKey: z.uuid().nullable(),
+    packageId: z.uuid(),
     phoneNumber: z.string().min(10),
 });
 
 app.post('/order', requireAuth, async (c) => {
-    const parsed = orderSchema.safeParse(await c.req.json());
+    const body = await c.req.json();
+    const parsed = orderSchema.safeParse(body);
     if (!parsed.success) {
         return jsonError(c, 400, 'Invalid order payload');
     }
@@ -163,19 +165,19 @@ app.post('/order', requireAuth, async (c) => {
     if (!pkg) return jsonError(c, 404, 'Package not found');
 
     const currentUser = c.get('user');
-    const paymentId = crypto.randomUUID();
-    await createPayment({
-        id: paymentId,
+    const row = await createPayment({
         userId: currentUser!.id,
         packageId: pkg.id,
         amount: Number(pkg.price),
         phoneNumber: parsed.data.phoneNumber,
     });
 
+    // Call appropriate payment gateway
+
     return c.json({
         success: true,
         data: {
-            paymentId,
+            paymentId: row.id,
             status: 'pending',
             amount: Number(pkg.price),
             packageId: pkg.id,
@@ -185,6 +187,9 @@ app.post('/order', requireAuth, async (c) => {
 
 app.get('/payment/:id', requireAuth, async (c) => {
     const id = c.req.param('id');
+    if (!id) {
+        return jsonError(c, 404, 'Payment not found');
+    }
     const currentUser = c.get('user');
     const payment = await getPaymentById(id);
     if (!payment || payment.userId !== currentUser!.id) {
