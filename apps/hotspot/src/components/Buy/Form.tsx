@@ -33,9 +33,7 @@ export function BuyForm({
 
     const defaultPhone =
         prevPaymentMethods.find(
-            (v) =>
-                !(parseServiceProvider(v) instanceof Error) &&
-                parseServiceProvider(v).name === 'safaricom',
+            (v) => parseServiceProvider(v)?.name === 'safaricom',
         ) || '';
 
     const form = useForm<FormValues>({

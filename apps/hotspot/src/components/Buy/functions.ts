@@ -43,13 +43,7 @@ export const buyFormSchema = z.object({
         .string()
         .min(1, 'Phone number is required')
         .refine(
-            (v) => {
-                const provider = parseServiceProvider(v);
-                return (
-                    !(provider instanceof Error) &&
-                    provider.name === 'safaricom'
-                );
-            },
+            (v) => parseServiceProvider(v)?.name === 'safaricom',
             { message: 'Only M-Pesa payment is supported at the moment.' },
         ),
 });

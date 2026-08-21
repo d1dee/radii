@@ -61,12 +61,12 @@ const PROVIDER_PREFIXES: Record<
 
 export function parseServiceProvider(
     phoneNumber: string,
-): ParsedProvider | Error {
+): ParsedProvider | undefined {
     let normalized = phoneNumber;
     if (normalized.startsWith('+254') || normalized.startsWith('254')) {
         normalized = normalized.replace(/^254|\+254(?=7)/, '0');
     }
-    if (normalized.length !== 10) return new Error('Invalid phone number');
+    if (normalized.length !== 10) return;
 
     const phoneNoPrefix = normalized.slice(1, 4);
 
@@ -80,16 +80,14 @@ export function parseServiceProvider(
             };
         }
     }
-
-    return new Error('Provider not found');
 }
 
 // Format a Safaricom number to the M-Pesa 2547xxxxxxxx partyA format.
 export function formatMpesaNumber(phoneNumber: string): number {
     const provider = parseServiceProvider(phoneNumber);
     if (provider instanceof Error) throw provider;
-    if (provider.name !== 'safaricom') {
+    if (provider?.name !== 'safaricom') {
         throw new Error('Phone number is not a valid Safaricom number');
     }
-    return Number(provider.phoneNumber.replace(/^0/, '254'));
+    return Number(provider?.phoneNumber.replace(/^0/, '254'));
 }
