@@ -379,3 +379,12 @@ export async function createPayment(data: {
         .returning();
     return row;
 }
+
+export async function getPaymentById(paymentId: string) {
+    const [payment] = await db
+        .select()
+        .from(packagePayments)
+        .where(eq(packagePayments.id, paymentId))
+        .limit(1);
+    return payment;
+}

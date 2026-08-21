@@ -18,6 +18,7 @@ import {
     createPayment,
     getPackageById,
     getPackagesGroupedByCategory,
+    getPaymentById,
 } from '../lib/packages';
 import { requireAdmin, requireAuth } from '../middleware/auth';
 import type { AppContext, AppVariables } from '../types';
@@ -178,6 +179,24 @@ app.post('/order', requireAuth, async (c) => {
             status: 'pending',
             amount: Number(pkg.price),
             packageId: pkg.id,
+        },
+    });
+});
+
+app.get('/payment/:id', requireAuth, async (c) => {
+    const id = c.req.param('id');
+    const currentUser = c.get('user');
+    const payment = await getPaymentById(id);
+    if (!payment || payment.userId !== currentUser!.id) {
+        return jsonError(c, 404, 'Payment not found');
+    }
+    return c.json({
+        success: true,
+        data: {
+            paymentId: payment.id,
+            status: payment.status,
+            amount: Number(payment.amount),
+            packageId: payment.packageId,
         },
     });
 });
