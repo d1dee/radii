@@ -1,13 +1,12 @@
 import { Button, Stack, Text } from '@mantine/core';
-import type { PaymentXHR } from '../paymentTypes.ts';
 
 import { IoMdRefresh } from 'react-icons/io';
 
 export function PaymentError({
-    xhr,
+    message,
     onRetry,
 }: {
-    xhr: PaymentXHR | undefined;
+    message: string;
     onRetry: () => void;
 }) {
     return (
@@ -27,8 +26,7 @@ export function PaymentError({
             </svg>
 
             <Text size="sm" c="red" ta="center">
-                {(xhr && xhr.success === false ? xhr.message : undefined) ||
-                    'An error occured while handling your payment. Please try again.'}
+                {message || 'An error occurred while handling your payment. Please try again.'}
             </Text>
 
             <Button

@@ -1,10 +1,12 @@
 import { Modal, Stack, Text, Title } from '@mantine/core';
 import { useState } from 'react';
+import type { OrderResult } from '../../lib/api.ts';
 import { BuyForm } from './Form.tsx';
-import { PaymentError } from './Payments/PaymentError.tsx';
-import { PendingPayment } from './Payments/PaymentPending.tsx';
-import { PaymentSuccess } from './Payments/PaymentSuccess.tsx';
-import type { FlowStatus, PaymentXHR } from './paymentTypes.ts';
+import { PaymentError } from './PaymentError.tsx';
+import { PendingPayment } from './PaymentPending.tsx';
+import { PaymentSuccess } from './PaymentSuccess.tsx';
+
+export type FlowStatus = 'buy' | 'pending' | 'errored' | 'success';
 
 const TITLES: Record<FlowStatus, { title: string; subtitle: string }> = {
     buy: {
@@ -36,7 +38,8 @@ export function PaymentFlow({
 }) {
     const [status, setStatus] = useState<FlowStatus>('buy');
     const [orderId, setOrderId] = useState('');
-    const [xhr, setXHR] = useState<PaymentXHR | undefined>();
+    const [paymentData, setPaymentData] = useState<OrderResult | null>(null);
+    const [errorMessage, setErrorMessage] = useState('');
 
     return (
         <Modal
@@ -59,7 +62,11 @@ export function PaymentFlow({
                     price={seed.price}
                     onOrder={(result) => {
                         setOrderId(result.orderId);
-                        setXHR(result.xhr);
+                        if (result.status === 'errored') {
+                            setErrorMessage(
+                                result.message || 'Payment failed.',
+                            );
+                        }
                         setStatus(result.status);
                     }}
                 />
@@ -68,20 +75,27 @@ export function PaymentFlow({
             {status === 'pending' ? (
                 <PendingPayment
                     orderId={orderId}
-                    onStatusChange={(next, res) => {
-                        if (res) setXHR(res);
-                        if (next !== 'pending') setStatus(next);
+                    onStatusChange={(next, data) => {
+                        if (data) setPaymentData(data);
+                        setStatus(next);
+                    }}
+                    onError={(message) => {
+                        setErrorMessage(message);
+                        setStatus('errored');
                     }}
                     onRetry={() => setStatus('buy')}
                 />
             ) : null}
 
             {status === 'errored' ? (
-                <PaymentError xhr={xhr} onRetry={() => setStatus('buy')} />
+                <PaymentError
+                    message={errorMessage}
+                    onRetry={() => setStatus('buy')}
+                />
             ) : null}
 
             {status === 'success' ? (
-                <PaymentSuccess xhr={xhr} onDone={onClose} />
+                <PaymentSuccess paymentData={paymentData} onDone={onClose} />
             ) : null}
         </Modal>
     );

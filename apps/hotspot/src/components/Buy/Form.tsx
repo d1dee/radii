@@ -1,19 +1,31 @@
 import { Button, Divider, Input, Stack } from '@mantine/core';
-import { parseServiceProvider } from '@radii/shared';
 import { schemaResolver, useForm } from '@mantine/form';
+import { parseServiceProvider } from '@radii/shared';
 import { PhoneNumberInput } from '@radii/ui';
 import { useContext, useState } from 'react';
 import { createOrder } from '../../lib/api.ts';
 import { ClientContext } from '../Main.tsx';
-import { buyFormSchema, validateForm } from './functions.ts';
-import type { PaymentData, PaymentXHR } from './paymentTypes.ts';
 
 import { AiOutlineLoading } from 'react-icons/ai';
+import z from 'zod';
 import { PrevPaymentMethods } from './PrevPaymentMethods.tsx';
 
 type FormValues = {
     phoneNumber: string;
 };
+
+const buyFormSchema = z.object({
+    phoneNumber: z
+        .string()
+        .min(1, 'Phone number is required')
+        .transform((v) => {
+            const provider = parseServiceProvider(v);
+            return provider?.phoneNumber ?? v;
+        })
+        .refine((v) => parseServiceProvider(v)?.name === 'safaricom', {
+            message: 'Only M-Pesa payment is supported at the moment.',
+        }),
+});
 
 export function BuyForm({
     packageId,
@@ -25,7 +37,7 @@ export function BuyForm({
     onOrder: (result: {
         orderId: string;
         status: 'pending' | 'errored';
-        xhr: PaymentXHR;
+        message?: string;
     }) => void;
 }) {
     const client = useContext(ClientContext);
@@ -45,7 +57,6 @@ export function BuyForm({
     const [inputMethod, setInputMethod] = useState<'radio' | 'input'>(
         defaultPhone ? 'radio' : 'input',
     );
-    const [btnDisabled, setBtnDisabled] = useState(false);
 
     function setPhone(phone: string, method: 'radio' | 'input') {
         form.setFieldValue('phoneNumber', phone);
@@ -53,79 +64,57 @@ export function BuyForm({
     }
 
     async function handleSubmit(values: FormValues) {
-        setBtnDisabled(true);
-
-        const data = validateForm({
-            phoneNumber: values.phoneNumber,
-            packageId,
-        });
-
-        if (data instanceof Error) {
-            form.setFieldError('phoneNumber', data.message);
-            setBtnDisabled(false);
+        const parsed = buyFormSchema.safeParse(values);
+        if (!parsed.success) {
+            form.setFieldError(
+                'phoneNumber',
+                parsed.error.issues[0]?.message ?? '',
+            );
             return;
         }
 
         try {
             const result = await createOrder({
-                packageId: data.packageId,
-                phoneNumber: data.phoneNumber,
+                packageId,
+                phoneNumber: parsed.data.phoneNumber,
             });
 
-            if (!result.success || !result.data) {
+            if (!result.success) {
                 onOrder({
                     orderId: '',
                     status: 'errored',
-                    xhr: {
-                        success: false,
-                        message: result.success
-                            ? 'Could not submit your order.'
-                            : result.message,
-                    },
+                    message: result.message || 'Could not submit your order.',
                 });
                 return;
             }
 
-            const paymentData: PaymentData = {
-                ...result.data,
-                status: 'pending',
-            };
-
             onOrder({
-                orderId: paymentData.paymentId || '',
+                orderId: result.data!.paymentId,
                 status: 'pending',
-                xhr: { success: true, data: paymentData },
             });
         } catch (err) {
             console.warn('Order failed', err);
             onOrder({
                 orderId: '',
                 status: 'errored',
-                xhr: {
-                    success: false,
-                    message:
-                        err instanceof Error
-                            ? err.message
-                            : 'Could not submit your order.',
-                },
+                message:
+                    err instanceof Error
+                        ? err.message
+                        : 'Could not submit your order.',
             });
-        } finally {
-            setBtnDisabled(false);
         }
     }
 
     return (
         <form onSubmit={form.onSubmit(handleSubmit)}>
-            <Stack gap='md' m='md'>
+            <Stack gap='md'>
                 <Input.Wrapper
                     label='Saved Numbers'
                     description="Choose a number you've paid with before"
-                    error={form.errors.phoneNumber}
                 >
                     <PrevPaymentMethods
-                        phoneNumber={form.values.phoneNumber}
-                        inputMethod={inputMethod}
-                        setPhone={setPhone}
+                        selectedPhone={form.values.phoneNumber}
+                        onSelect={(phone) => setPhone(phone, 'radio')}
                     />
                 </Input.Wrapper>
 
@@ -136,7 +125,9 @@ export function BuyForm({
                     description='We send an STK push prompt to this phone'
                     placeholder='712 345 678'
                     error={form.errors.phoneNumber}
-                    value={inputMethod === 'input' ? form.values.phoneNumber : ''}
+                    value={
+                        inputMethod === 'input' ? form.values.phoneNumber : ''
+                    }
                     onChange={(value) => {
                         setPhone(value ?? '', 'input');
                     }}
@@ -145,7 +136,7 @@ export function BuyForm({
                 <Button
                     type='submit'
                     mt='md'
-                    loading={btnDisabled}
+                    loading={form.submitting}
                     loaderProps={{ children: <AiOutlineLoading /> }}
                     fullWidth
                 >

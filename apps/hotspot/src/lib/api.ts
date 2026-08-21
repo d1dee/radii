@@ -12,7 +12,7 @@ export type Client = {
 
 export type OrderResult = {
     paymentId: string;
-    status: string;
+    status: 'pending' | 'paid' | 'failed';
     amount: number;
     packageId: string;
 };
@@ -40,6 +40,12 @@ export function createOrder(body: { packageId: string; phoneNumber: string }) {
         method: 'POST',
         body: JSON.stringify(body),
     });
+}
+
+export function getPaymentStatus(paymentId: string) {
+    return request<OrderResult>(
+        `/payment/${encodeURIComponent(paymentId)}`,
+    );
 }
 
 export function deauthDevice(deviceQuotaId: string) {
