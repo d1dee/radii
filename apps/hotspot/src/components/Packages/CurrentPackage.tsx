@@ -1,7 +1,7 @@
 import { Box, Group, Paper, Progress, Stack, Text } from '@mantine/core';
 import { useEffect, useState } from 'react';
 import { IoMdArrowDown, IoMdArrowUp } from 'react-icons/io';
-import { checkOnlineStatus, timeRemaining } from './functions.ts';
+import { timeRemaining } from './functions.ts';
 
 import humanFormat from 'human-format';
 import { getStatus } from '../../lib/api.ts';
@@ -66,7 +66,7 @@ export function CurrentPackage() {
     /* Run online status check every 20 seconds */
     useEffect(() => {
         const check = async () => {
-            const isOnline = await checkOnlineStatus();
+            const isOnline = true; /* await checkOnlineStatus(); */
 
             // update online status
             if (isOnline) {

@@ -1,4 +1,4 @@
-import { Modal, Stack, Text, Title } from '@mantine/core';
+import { Modal, Paper, Stack, Text, Title } from '@mantine/core';
 import { useState } from 'react';
 import type { OrderResult } from '../../lib/api.ts';
 import { BuyForm } from './Form.tsx';
@@ -56,47 +56,52 @@ export function PaymentFlow({
             size='lg'
             centered
         >
-            {status === 'buy' && seed ? (
-                <BuyForm
-                    packageId={seed.packageId}
-                    price={seed.price}
-                    onOrder={(result) => {
-                        setOrderId(result.orderId);
-                        if (result.status === 'errored') {
-                            setErrorMessage(
-                                result.message || 'Payment failed.',
-                            );
-                        }
-                        setStatus(result.status);
-                    }}
-                />
-            ) : null}
+            <Paper m='md'>
+                {status === 'buy' && seed ? (
+                    <BuyForm
+                        packageId={seed.packageId}
+                        price={seed.price}
+                        onOrder={(result) => {
+                            setOrderId(result.orderId);
+                            if (result.status === 'errored') {
+                                setErrorMessage(
+                                    result.message || 'Payment failed.',
+                                );
+                            }
+                            setStatus(result.status);
+                        }}
+                    />
+                ) : null}
 
-            {status === 'pending' ? (
-                <PendingPayment
-                    orderId={orderId}
-                    onStatusChange={(next, data) => {
-                        if (data) setPaymentData(data);
-                        setStatus(next);
-                    }}
-                    onError={(message) => {
-                        setErrorMessage(message);
-                        setStatus('errored');
-                    }}
-                    onRetry={() => setStatus('buy')}
-                />
-            ) : null}
+                {status === 'pending' ? (
+                    <PendingPayment
+                        orderId={orderId}
+                        onStatusChange={(next, data) => {
+                            if (data) setPaymentData(data);
+                            setStatus(next);
+                        }}
+                        onError={(message) => {
+                            setErrorMessage(message);
+                            setStatus('errored');
+                        }}
+                        onRetry={() => setStatus('buy')}
+                    />
+                ) : null}
 
-            {status === 'errored' ? (
-                <PaymentError
-                    message={errorMessage}
-                    onRetry={() => setStatus('buy')}
-                />
-            ) : null}
+                {status === 'errored' ? (
+                    <PaymentError
+                        message={errorMessage}
+                        onRetry={() => setStatus('buy')}
+                    />
+                ) : null}
 
-            {status === 'success' ? (
-                <PaymentSuccess paymentData={paymentData} onDone={onClose} />
-            ) : null}
+                {status === 'success' ? (
+                    <PaymentSuccess
+                        paymentData={paymentData}
+                        onDone={onClose}
+                    />
+                ) : null}
+            </Paper>
         </Modal>
     );
 }
