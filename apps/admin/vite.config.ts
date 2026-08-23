@@ -26,6 +26,7 @@ export default defineConfig(({ mode }) => {
             dedupe: ['react', 'react-dom'],
         },
         server: {
+            host: '0.0.0.0',
             port: APP_PORT,
             proxy: {
                 '/api': {

@@ -1,5 +1,15 @@
 import type { Package } from '@radii/shared';
-import { and, asc, count, desc, eq, exists, inArray, sql } from 'drizzle-orm';
+import {
+    and,
+    asc,
+    count,
+    desc,
+    eq,
+    exists,
+    getTableColumns,
+    inArray,
+    sql,
+} from 'drizzle-orm';
 import { db } from '../db';
 import {
     activatedPackages,
@@ -7,6 +17,7 @@ import {
     packagePayments,
     packages,
     radacct,
+    transaction,
 } from '../db/schema';
 
 type InsertPackage = typeof packages.$inferInsert;
@@ -377,5 +388,24 @@ export async function getPaymentById(paymentId: string) {
         .from(packagePayments)
         .where(eq(packagePayments.id, paymentId))
         .limit(1);
+    return payment;
+}
+export async function getPaymentByTransactionCode(transactionCode: string) {
+    const [payment] = await db
+        .select({
+            ...getTableColumns(packagePayments),
+        })
+        .from(packagePayments)
+        .innerJoin(transaction, eq(transaction.id, packagePayments.transaction))
+        .where(eq(transaction.providerTransactionId, transactionCode));
+    return payment;
+}
+
+export async function getUsersPaidPackages(userId: string) {
+    const [payment] = await db
+        .select()
+        .from(packagePayments)
+        .where(and(eq(packagePayments.userId, userId)))
+        .orderBy(desc(packagePayments.createdAt));
     return payment;
 }

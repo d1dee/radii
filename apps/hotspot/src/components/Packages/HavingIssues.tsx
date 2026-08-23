@@ -1,27 +1,10 @@
-import { useState } from 'react';
 import { Button, Paper, Stack, Text, TextInput } from '@mantine/core';
-import type { ApiEnvelope } from '@radii/shared';
+import { useEffect, useRef, useState } from 'react';
 
+import { schemaResolver, useForm } from '@mantine/form';
+import { paymentTransactionCodeSchema } from '@radii/shared';
 import { AdminContacts } from '../../components/AdminContacts.tsx';
-
-async function verifyTransactionRequest(
-    transactionId: string,
-): Promise<ApiEnvelope<{ status?: string; message?: string }> | undefined> {
-    try {
-        const res = await fetch('/api/hotspot/verify-transaction', {
-            method: 'POST',
-            credentials: 'include',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ transactionId }),
-        });
-        return (await res.json()) as ApiEnvelope<{
-            status?: string;
-            message?: string;
-        }>;
-    } catch {
-        return undefined;
-    }
-}
+import { verifyPaymentReceipt } from '../../lib/api.ts';
 
 export function HavingIssues({
     adminContacts,
@@ -29,86 +12,120 @@ export function HavingIssues({
     adminContacts: { ADMIN_TEL: string; ADMIN_WHATSAPP: string };
 }) {
     const [message, setMessage] = useState<
-        | {
-              success?: true;
-              message: string;
-              data?: Record<PropertyKey, unknown>;
-          }
-        | undefined
+        { success?: true; message: string } | undefined
     >(undefined);
-    const [value, setValue] = useState('');
+    const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-    const verifyTransaction = (e: React.FormEvent<HTMLFormElement>) => {
-        e.preventDefault();
-        const transactionId = value.trim().split(/\s+/)[0];
-        console.log('Transaction ID:', transactionId);
+    const form = useForm({
+        mode: 'controlled',
+        initialValues: { transactionCode: '' },
+        validate: schemaResolver(paymentTransactionCodeSchema, { sync: true }),
+        transformValues: paymentTransactionCodeSchema.parse,
+    });
+    const stopPolling = () => {
+        if (!intervalRef.current) return;
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+    };
 
-        const isValidTransactionId = /^[0-9A-Z]{10}$/i.test(transactionId);
-        if (!isValidTransactionId) {
-            setMessage({ message: 'Invalid transaction ID format' });
+    useEffect(() => stopPolling, []);
+
+    const verifyTransaction = async (values: typeof form.values) => {
+        stopPolling();
+
+        const transactionId = values.transactionCode;
+        if (!transactionId) {
+            setMessage({
+                message:
+                    'Enter the M-Pesa receipt number (e.g. NEF61H8J60), or paste the whole M-Pesa message.',
+            });
             return;
-        } else {
-            setMessage({ success: true, message: 'Processing...' });
         }
 
-        const interval = setInterval(async () => {
-            try {
-                const res = await verifyTransactionRequest(transactionId);
-                if (!res || res.success === false) {
-                    clearInterval(interval);
-                    setMessage({
-                        message:
-                            res?.message || 'Transaction verification failed',
-                    });
-                } else {
-                    const status =
-                        res.data?.status || res.data?.message || 'pending';
-                    if (status === 'pending') {
-                        setMessage({ success: true, message: 'Processing...' });
-                    } else {
-                        clearInterval(interval);
-                        setMessage({ success: true, message: status });
-                    }
-                }
-            } catch (error) {
-                console.error('Error verifying transaction:', error);
-                setMessage({ message: 'Error verifying transaction.' });
+        setMessage({ success: true, message: 'Processing...' });
+        /* 
+        const pending = await getLatestPendingPayment();
+        if (!pending.success || !pending.data) {
+            setMessage({
+                message: pending.success
+                    ? 'No pending payment found. Buy a package first, then paste your receipt here.'
+                    : pending.message ||
+                      'Could not look up your pending payment',
+            });
+            return;
+        }
+        const paymentId = pending.data.paymentId; */
+
+        // The provider may confirm asynchronously (status callback), so repost
+        // the receipt until the payment leaves the pending state; the service
+        // deduplicates in-flight verifications server-side.
+        const pollOnce = async (): Promise<boolean> => {
+            const res = await verifyPaymentReceipt(values.transactionCode);
+            if (!res.success) {
+                setMessage({
+                    message: res.message || 'Transaction verification failed',
+                });
+                return false;
             }
-        }, 3e3);
+            const { status, message: detail } = res.data!;
+            if (status === 'pending') {
+                setMessage({
+                    success: true,
+                    message: detail || 'Processing...',
+                });
+                return true;
+            }
+            setMessage({
+                success: status === 'paid' ? true : undefined,
+                message: detail || status,
+            });
+            return false;
+        };
+
+        if (await pollOnce()) {
+            let attempts = 1;
+            intervalRef.current = setInterval(async () => {
+                attempts++;
+                if (!(await pollOnce())) {
+                    stopPolling();
+                } else if (attempts >= 60) {
+                    stopPolling();
+                    setMessage({
+                        success: true,
+                        message:
+                            'Verification is taking longer than usual. Your payment may still be confirmed automatically — check back shortly or contact the admin.',
+                    });
+                }
+            }, 3e3);
+        }
     };
 
     return (
-        <Stack gap="md" mt="md">
-            <Paper shadow="xl" radius="lg" p="lg">
-                <Stack gap="md">
-                    <Text size="lg" fw={600}>
+        <Stack gap='md' mt='md'>
+            <Paper shadow='xl' radius='lg' p='lg'>
+                <Stack gap='md'>
+                    <Text size='lg' fw={600}>
                         Having Issues?
                     </Text>
 
-                    <Paper bg="grape.1" radius="lg" p="md">
-                        <Stack gap="sm">
+                    <Paper bg='grape.1' radius='lg' p='md'>
+                        <Stack gap='sm'>
                             <Text fw={500}>Verify Transaction:</Text>
 
-                            <form onSubmit={verifyTransaction}>
-                                <Stack gap="xs">
+                            <form onSubmit={form.onSubmit(verifyTransaction)}>
+                                <Stack gap='xs'>
                                     <TextInput
-                                        placeholder="Enter transaction ID or paste your M-pesa message here"
-                                        name="transactionMessage"
-                                        value={value}
-                                        onChange={(e) =>
-                                            setValue(e.currentTarget.value)
-                                        }
-                                        error={
-                                            message && !message.success
-                                                ? message.message
-                                                : undefined
-                                        }
+                                        placeholder='Enter transaction ID or paste your M-pesa message here'
+                                        name='transactionCode'
+                                        {...form.getInputProps(
+                                            'transactionCode',
+                                        )}
                                     />
-                                    <Button type="submit">Verify</Button>
+                                    <Button type='submit'>Verify</Button>
 
                                     {message ? (
                                         <Text
-                                            size="sm"
+                                            size='sm'
                                             c={
                                                 message.success
                                                     ? 'green'

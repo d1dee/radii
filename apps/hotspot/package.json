@@ -23,7 +23,6 @@
         "better-fetch": "^1.1.2",
         "dayjs": "^1.11.21",
         "human-format": "^1.2.0",
-        "mantine-form-zod-resolver": "^1.3.0",
         "react": "^19.2.7",
         "react-dom": "^19.2.7",
         "react-icons": "^5.5.0",

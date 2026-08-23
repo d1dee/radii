@@ -2,7 +2,7 @@ import { Button, Loader, Stack, Text } from '@mantine/core';
 import { useEffect, useRef, useState } from 'react';
 import type { OrderResult } from '../../lib/api.ts';
 import { getPaymentStatus } from '../../lib/api.ts';
-import type { FlowStatus } from '../paymentTypes.ts';
+import type { FlowStatus } from './PaymentFlow.tsx';
 
 import { IoMdRefresh } from 'react-icons/io';
 
@@ -19,7 +19,9 @@ export function PendingPayment({
 }) {
     const [tick, setTick] = useState(0);
     const tickRef = useRef(0);
-    const pollRef = useRef<ReturnType<typeof setInterval>>();
+    const pollRef = useRef<ReturnType<typeof setInterval> | undefined>(
+        undefined,
+    );
 
     useEffect(() => {
         const tickInterval = setInterval(() => {

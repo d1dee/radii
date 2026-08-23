@@ -1,6 +1,10 @@
-import { loginSchema, signUpSchema } from '@radii/shared';
+import {
+    loginSchema,
+    paymentTransactionCodeSchema,
+    signUpSchema,
+} from '@radii/shared';
 import { APIError } from 'better-auth/api';
-import { and, eq, gte } from 'drizzle-orm';
+import { and, desc, eq, gte } from 'drizzle-orm';
 import { Hono } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { z } from 'zod';
@@ -10,6 +14,7 @@ import {
     activatedPackages,
     hotspotLoginRequest,
     nasDevice,
+    packagePayments,
     radcheck,
 } from '../db/schema';
 import { env } from '../env';
@@ -20,6 +25,7 @@ import {
     getPackagesGroupedByCategory,
     getPaymentById,
 } from '../lib/packages';
+import { paymentService } from '../lib/payments';
 import { requireAdmin, requireAuth } from '../middleware/auth';
 import type { AppContext, AppVariables } from '../types';
 
@@ -172,7 +178,13 @@ app.post('/order', requireAuth, async (c) => {
         phoneNumber: parsed.data.phoneNumber,
     });
 
-    // Call appropriate payment gateway
+    // Hand the purchase to the default registered payment provider (gateway
+    // specifics live inside the provider; see lib/payments). On failure the
+    // payment row stays pending so the customer can retry.
+    const initiated = await paymentService.initiatePackagePayment(row, pkg);
+    if (!initiated.success) {
+        return jsonError(c, 502, initiated.message);
+    }
 
     return c.json({
         success: true,
@@ -181,6 +193,40 @@ app.post('/order', requireAuth, async (c) => {
             status: 'pending',
             amount: Number(pkg.price),
             packageId: pkg.id,
+        },
+    });
+});
+
+// The customer's most recent pending payment, used by the portal's "verify
+// transaction" flow when the STK push callback never arrived. Reconciles
+// against the provider before answering, so a stale pending row converges.
+// Must be registered before /payment/:id.
+app.get('/payment/pending/latest', requireAuth, async (c) => {
+    const currentUser = c.get('user');
+    const [payment] = await db
+        .select()
+        .from(packagePayments)
+        .where(
+            and(
+                eq(packagePayments.userId, currentUser!.id),
+                eq(packagePayments.status, 'pending'),
+            ),
+        )
+        .orderBy(desc(packagePayments.createdAt))
+        .limit(1);
+
+    if (!payment) {
+        return c.json({ success: true, data: null });
+    }
+
+    const status = await paymentService.refreshPackagePaymentStatus(payment);
+    return c.json({
+        success: true,
+        data: {
+            paymentId: payment.id,
+            status,
+            amount: Number(payment.amount),
+            packageId: payment.packageId,
         },
     });
 });
@@ -195,13 +241,57 @@ app.get('/payment/:id', requireAuth, async (c) => {
     if (!payment || payment.userId !== currentUser!.id) {
         return jsonError(c, 404, 'Payment not found');
     }
+    // While pending, reconcile against the provider so clients converge even
+    // when the gateway webhook has not arrived yet.
+    const status = await paymentService.refreshPackagePaymentStatus(payment);
     return c.json({
         success: true,
         data: {
             paymentId: payment.id,
-            status: payment.status,
+            status,
             amount: Number(payment.amount),
             packageId: payment.packageId,
+        },
+    });
+});
+
+// Verify a gateway transaction code (e.g. M-Pesa receipt) supplied by the
+// customer. Idempotent and pollable: known receipts report their current
+// state; unknown ones are submitted to the provider and stay 'pending' until
+// the provider's status callback arrives, so the client re-posts the same
+// code until it leaves pending.
+app.post('/payment/:id/verify', requireAuth, async (c) => {
+    const id = c.req.param('id');
+    const parsed = paymentTransactionCodeSchema.safeParse({
+        transactionCode: id ?? '',
+    });
+    if (!parsed.success) {
+        return jsonError(
+            c,
+            400,
+            parsed.error.issues[0]?.message ?? 'Invalid transaction code.',
+        );
+    }
+
+    const currentUser = c.get('user');
+    const result = await paymentService.verifyTransactionCode(
+        currentUser!.id,
+        parsed.data.transactionCode,
+    );
+
+    if (result === null) {
+        return jsonError(c, 404, 'Payment not found');
+    }
+    if (result.error) {
+        return jsonError(c, 502, result.message);
+    }
+
+    return c.json({
+        success: true,
+        data: {
+            paymentId: result.paymentId ?? '',
+            status: result.status,
+            message: result.message,
         },
     });
 });

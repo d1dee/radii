@@ -3,7 +3,8 @@
 
 function required(name: string): string {
     const value = process.env[name];
-    if (!value) throw new Error(`Missing required environment variable: ${name}`);
+    if (!value)
+        throw new Error(`Missing required environment variable: ${name}`);
     return value;
 }
 
@@ -39,6 +40,20 @@ export const env = {
         (process.env.WG_MANAGE_PEERS || '').trim().toLowerCase() === 'true',
     wgIface: process.env.WG_IFACE || 'wg0',
     wgBin: process.env.WG_BIN || 'wg',
-    wgUseSudo:
-        (process.env.WG_USE_SUDO || '').trim().toLowerCase() === 'true',
+    wgUseSudo: (process.env.WG_USE_SUDO || '').trim().toLowerCase() === 'true',
+    // M-Pesa payment provider credentials. All optional here: when nothing is
+    // set the provider simply is not registered; when partially set, the
+    // provider constructor validates and fails fast with a clear message.
+    mpesa: {
+        consumerKey: process.env.MPESA_CONSUMER_KEY || '',
+        consumerSecret: process.env.MPESA_CONSUMER_SECRET || '',
+        shortcode: process.env.MPESA_SHORTCODE || '',
+        passkey: process.env.MPESA_PASSKEY || '',
+        environment: (process.env.MPESA_ENVIRONMENT === 'production'
+            ? 'production'
+            : 'sandbox') as 'production' | 'sandbox',
+        initiatorName: process.env.MPESA_INITIATOR_NAME || '',
+        initiatorPassword: process.env.MPESA_INITIATOR_PASSWORD || '',
+        certificatePath: process.env.MPESA_CERTIFICATE_PATH || '',
+    },
 };

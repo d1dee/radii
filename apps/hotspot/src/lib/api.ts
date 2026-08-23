@@ -49,6 +49,22 @@ export function getPaymentStatus(paymentId: string) {
     return request<OrderResult>(`/payment/${encodeURIComponent(paymentId)}`);
 }
 
+export function getLatestPendingPayment() {
+    return request<OrderResult | null>('/payment/pending/latest');
+}
+
+export function verifyPaymentReceipt(transactionCode: string) {
+    return request<{
+        paymentId: string;
+        status: 'pending' | 'paid' | 'failed';
+        message: string;
+    }>(
+        `/payment/${encodeURIComponent(transactionCode)}/verify`,
+        { transactionCode },
+        { method: 'POST' },
+    );
+}
+
 export function deauthDevice(deviceQuotaId: string) {
     return request<{ deviceQuotaId: string }>(
         `/deauth/${encodeURIComponent(deviceQuotaId)}`,
