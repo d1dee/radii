@@ -17,7 +17,7 @@ import { packages } from './packages';
 export const nasDevice = pgTable(
     'nas_device',
     {
-        id: uuid('id').primaryKey(),
+        id: uuid('id').defaultRandom().primaryKey(),
         name: text('name').notNull(),
         ipAddress: inet('ip_address').notNull(),
         macAddress: varchar('mac_address', { length: 17 }),

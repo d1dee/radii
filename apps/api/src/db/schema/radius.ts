@@ -27,26 +27,26 @@ export const radacct = pgTable(
         acctupdatetime: timestamp({ withTimezone: true, mode: 'date' }),
         acctstoptime: timestamp({ withTimezone: true, mode: 'date' }),
         // You can use { mode: "bigint" } if numbers are exceeding js number limitations
-        acctinterval: bigint({ mode: 'bigint' }),
+        acctinterval: bigint({ mode: 'number' }),
         // You can use { mode: "bigint" } if numbers are exceeding js number limitations
-        acctsessiontime: bigint({ mode: 'bigint' }),
+        acctsessiontime: bigint({ mode: 'number' }),
         acctauthentic: text(),
         connectinfoStart: text('connectinfo_start'),
         connectinfoStop: text('connectinfo_stop'),
         // You can use { mode: "bigint" } if numbers are exceeding js number limitations
-        acctinputoctets: bigint({ mode: 'bigint' }),
+        acctinputoctets: bigint({ mode: 'number' }),
         // You can use { mode: "bigint" } if numbers are exceeding js number limitations
-        acctoutputoctets: bigint({ mode: 'bigint' }),
+        acctoutputoctets: bigint({ mode: 'number' }),
         calledstationid: text(),
         callingstationid: text(),
         acctterminatecause: text(),
         servicetype: text(),
         framedprotocol: text(),
         framedipaddress: inet(),
-        framedipv6Address: inet(),
-        framedipv6Prefix: inet(),
+        framedipv6address: inet(),
+        framedipv6prefix: inet(),
         framedinterfaceid: text(),
-        delegatedipv6Prefix: inet(),
+        delegatedipv6prefix: inet(),
         class: text(),
     },
     (table) => [
