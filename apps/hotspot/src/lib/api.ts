@@ -149,6 +149,9 @@ export type HotspotRedirectData = {
     password: string;
     mac: string;
     activationId?: string | null;
+    // Servlet CHAP challenge for http-chap logins; empty when CHAP is off.
+    chapId?: string;
+    chapChallenge?: string;
 };
 
 export function completeLoginRequest(loginRequestId: string) {

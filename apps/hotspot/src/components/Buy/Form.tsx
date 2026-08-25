@@ -41,8 +41,8 @@ export function BuyForm({
     const prevPaymentMethods = client?.prevPaymentMethods || [];
 
     const defaultPhone =
-        prevPaymentMethods.find(
-            (v) => parseServiceProvider(v)?.name === 'safaricom',
+        [...prevPaymentMethods, client?.phoneNumber || ''].find(
+            (v) => v && parseServiceProvider(v)?.name === 'safaricom',
         ) || '';
 
     const form = useForm<FormValues>({

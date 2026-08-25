@@ -41,22 +41,25 @@ export const env = {
     wgIface: process.env.WG_IFACE || 'wg0',
     wgBin: process.env.WG_BIN || 'wg',
     wgUseSudo: (process.env.WG_USE_SUDO || '').trim().toLowerCase() === 'true',
-    // RADIUS integration (backend <-> FreeRADIUS + NAS). All optional: with
-    // nothing set, package provisioning still writes the FreeRADIUS SQL tables
+    // RADIUS integration (backend <-> FreeRADIUS). All optional: with nothing
+    // set, package provisioning still writes the FreeRADIUS SQL tables
     // (radcheck/radreply), but direct RADIUS packets (credential checks,
-    // Disconnect-Requests) are disabled with a clear error.
+    // session CoA-Requests) are disabled with a clear error.
     //
-    // RADIUS_URL points at the RADIUS server, e.g. "radius://127.0.0.1" or
+    // RADIUS_SERVER points at the RADIUS server, e.g. "radius://127.0.0.1" or
     // "radius://10.99.0.1:1812" (scheme optional; auth port defaults to 1812).
     // RADIUS_SECRET is the shared secret registered for THIS api as a RADIUS
     // client on that server (FreeRADIUS clients.conf / nas table) and signs
     // every packet the api originates.
-    // RADIUS_DM_PORT is the RouterOS `/radius/incoming` port on the NAS, the
-    // single listener where it accepts BOTH Disconnect-Messages and
-    // CoA-Requests (RouterOS default 1700). RADIUS_COA_PORT (3799) applies
-    // only to CoA sent toward the RADIUS server itself.
+    //
+    // The backend only ever talks to the RADIUS SERVER: session termination
+    // and re-authorization are CoA-Requests (RFC 5176) sent to
+    // RADIUS_COA_PORT on the server (FreeRADIUS convention 3799), identified
+    // by Acct-Session-Id + User-Name + NAS-IP-Address; the server then acts on
+    // the NAS. RADIUS_DM_PORT is kept as the NAS-side `/radius/incoming` port
+    // reference (RouterOS default 1700) but is not a target of this api.
     radius: {
-        url: process.env.RADIUS_URL || '',
+        url: process.env.RADIUS_SERVER || '',
         secret: process.env.RADIUS_SECRET || '',
         acctPort: parseInt(process.env.RADIUS_ACCT_PORT || '1813', 10),
         coaPort: parseInt(process.env.RADIUS_COA_PORT || '3799', 10),

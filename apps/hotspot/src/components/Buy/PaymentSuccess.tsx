@@ -36,7 +36,11 @@ export function PaymentSuccess({
                 <Text size='sm' c='gray.6'>
                     Connecting you to the internet&hellip;
                 </Text>
-                <form ref={formRef} action={activation.linkLoginOnly} method='post'>
+                <form
+                    ref={formRef}
+                    action={activation.linkLoginOnly}
+                    method='post'
+                >
                     <input
                         type='hidden'
                         name='username'
@@ -53,7 +57,11 @@ export function PaymentSuccess({
                     <noscript>
                         <Stack align='center' gap='sm'>
                             <Text size='sm'>JavaScript is disabled.</Text>
-                            <Button type='submit' variant='outline' color='green'>
+                            <Button
+                                type='submit'
+                                variant='outline'
+                                color='green'
+                            >
                                 Connect Now
                             </Button>
                         </Stack>

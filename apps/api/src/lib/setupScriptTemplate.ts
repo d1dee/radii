@@ -107,6 +107,7 @@ function buildHotspotPages(
 $(if error)
 <div class='alert'>$(error)</div>
 $(endif)
+
 <form name='redirect' action='${apiBaseUrl}/api/hotspot/login-request' method='post'>
 <input type='hidden' name='nas' value='${nasId}'>
 <input type='hidden' name='mac' value='$(mac)'>
@@ -115,6 +116,8 @@ $(endif)
 <input type='hidden' name='linkLogin' value='$(link-login)'>
 <input type='hidden' name='linkLoginOnly' value='$(link-login-only)'>
 <input type='hidden' name='linkOrig' value='$(link-orig)'>
+<input type='hidden' name='chapId' value='$(chap-id)'>
+<input type='hidden' name='chapChallenge' value='$(chap-challenge)'>
 <input type='hidden' name='error' value='$(error)'>
 <input type='hidden' name='hostname' value='$(hostname)'>
 <input type='hidden' name='serverAddress' value='$(server-address)'>
@@ -330,11 +333,12 @@ $radiiLog (    "device: " . $devModel .    " (id " . $devSerial .    ") on Route
 
 $radiiLog ("RADIUS client configured for {{RADIUS_SERVER}}");
 
-# Accept unsolicited Disconnect-Messages from the RADIUS server (RouterOS
-# has no PoD support; DMs terminate the matched session immediately). Needed
-# for radii to disconnect users on package deactivation / quota expiry.
+# Accept unsolicited CoA / Disconnect-Messages from the RADIUS server
+# (RouterOS has no PoD support; DMs terminate the matched session
+# immediately). Needed so the RADIUS server can disconnect users on package
+# deactivation / time-bank exhaustion / validity expiry.
 /radius/incoming/set accept=yes port=1700;
-$radiiLog ("RADIUS incoming (Disconnect-Messages) enabled on port 1700");
+$radiiLog ("RADIUS incoming (CoA / Disconnect-Messages) enabled on port 1700");
 
 
 # ---------------------------------------------------------------------

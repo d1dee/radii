@@ -75,6 +75,8 @@ export type ActivationRedirect = {
     linkLoginOnly: string;
     dst: string;
     mac: string;
+    chapId?: string;
+    chapChallenge?: string;
 };
 
 export type Session = {

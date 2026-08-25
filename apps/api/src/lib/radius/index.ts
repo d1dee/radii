@@ -28,7 +28,7 @@ export const radiusClient: RadiusClient =
 
 if (!env.radius.url) {
     console.warn(
-        '[radius] RADIUS_URL is not configured; provisioning still writes the RADIUS SQL tables but direct RADIUS packets (credential checks, disconnects via this server) are disabled.',
+        '[radius] RADIUS_SERVER is not configured; provisioning still writes the RADIUS SQL tables but direct RADIUS packets (credential checks, disconnects via this server) are disabled.',
     );
 }
 
@@ -40,9 +40,11 @@ if (!env.radius.url) {
 const tickerSeconds = Math.max(5, env.radius.bankReconcileSeconds);
 if (!globalRef.__radiusBankTicker) {
     globalRef.__radiusBankTicker = setInterval(() => {
-        void radiusClient.reconcileBankPackages().catch((err) =>
-            console.error('[radius] bank reconciliation tick failed:', err),
-        );
+        void radiusClient
+            .reconcileBankPackages()
+            .catch((err) =>
+                console.error('[radius] bank reconciliation tick failed:', err),
+            );
     }, tickerSeconds * 1000);
     // Never hold the event loop open for the ticker alone (tests/scripts).
     if (typeof globalRef.__radiusBankTicker.unref === 'function') {
@@ -50,7 +52,12 @@ if (!globalRef.__radiusBankTicker) {
     }
 }
 
-export { RadiusClient, RadiusError, RADIUS_CONSTANTS, parseRadiusServerUrl } from './client';
+export {
+    parseRadiusServerUrl,
+    RADIUS_CONSTANTS,
+    RadiusClient,
+    RadiusError,
+} from './client';
 export type {
     ActivationRedirect,
     ActivationStatus,

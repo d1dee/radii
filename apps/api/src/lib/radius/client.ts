@@ -25,21 +25,19 @@
 //    mandatory Message-Authenticator).
 //
 // Direct packet targets:
-//  - the RADIUS SERVER itself (env RADIUS_URL/RADIUS_SECRET) for
-//    Access-Request credential checks; the api must be registered there as a
-//    client.
-//  - the NAS for Disconnect/CoA; secrets are looked up from the FreeRADIUS
-//    `nas` table (nasname = the NAS WireGuard tunnel IP, which is also the
-//    address accounting records carry in NAS-IP-Address / radacct.nasipaddress).
+//  - the RADIUS SERVER only (env RADIUS_SERVER/RADIUS_SECRET). The backend never
+//    addresses a NAS directly: credential checks are Access-Requests, and
+//    session termination / re-authorization are CoA-Requests (RFC 5176)
+//    identified by Acct-Session-Id (+ User-Name, NAS-IP-Address); the server
+//    owns the NAS relationship and carries the action out there.
 
+import { and, desc, eq, gte, isNotNull, isNull, or, sql } from 'drizzle-orm';
 import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
 import * as dgram from 'node:dgram';
-import { and, desc, eq, gte, isNotNull, isNull, or, sql } from 'drizzle-orm';
 import { db } from '../../db';
 import {
     activatedPackages,
     hotspotLoginRequest,
-    nas,
     nasSetupScript,
     packagePayments,
     packages,
@@ -115,7 +113,12 @@ const MIKROTIK_ATTR = {
     TOTAL_LIMIT_GIGAWORDS: 18,
 } as const;
 
-export const RADIUS_CONSTANTS = { CODE, ATTR, MIKROTIK_VENDOR_ID, MIKROTIK_ATTR };
+export const RADIUS_CONSTANTS = {
+    CODE,
+    ATTR,
+    MIKROTIK_VENDOR_ID,
+    MIKROTIK_ATTR,
+};
 
 const GIGAWORD = 2 ** 32;
 const ZERO_AUTH = Buffer.alloc(16);
@@ -140,13 +143,16 @@ export interface RadiusConfig {
     // RADIUS server, e.g. "radius://127.0.0.1" or "10.99.0.1:1812" (auth port
     // defaults to 1812 when omitted). Empty disables direct-to-server packets.
     serverUrl: string;
-    // Shared secret the RADIUS server knows this api by.
+    // Shared secret the RADIUS server knows this api by; signs every packet
+    // the backend originates (Access-Requests, CoA-Requests).
     secret: string;
-    // RouterOS `/radius/incoming` port on the NAS — the single listener where
-    // the router accepts BOTH Disconnect-Messages and CoA-Requests.
+    // RouterOS `/radius/incoming` port on the NAS where the RADIUS SERVER (not
+    // this backend) delivers CoA/Disconnect to the router. Carried here for
+    // completeness/documentation; session CoA from the backend goes to
+    // coaPort on the server instead.
     dmPort: number;
-    // CoA port towards a RADIUS SERVER (FreeRADIUS convention); not used for
-    // RouterOS targets, which share dmPort.
+    // CoA listener on the RADIUS SERVER (FreeRADIUS convention 3799). Every
+    // session-targeted CoA from this class is sent here.
     coaPort: number;
     timeoutMs: number;
     retries: number;
@@ -184,6 +190,11 @@ export interface ActivationRedirect {
     linkLoginOnly: string;
     dst: string;
     mac: string;
+    // CHAP challenge issued by the servlet when the login page was served.
+    // When present the portal must submit hexMD5(chapId + password +
+    // chapChallenge) instead of the plaintext password (http-chap login).
+    chapId: string;
+    chapChallenge: string;
 }
 
 export interface SessionInfo {
@@ -287,28 +298,42 @@ function attrToString(data: Uint8Array): string {
     return new TextDecoder().decode(data);
 }
 
+// Encodes a dotted-quad as the 4 octets an ipaddr attribute (NAS-IP-Address)
+// needs on the wire.
+function ipv4ToOctets(ip: string): Uint8Array {
+    const parts = ip.split('.').map((p) => Number.parseInt(p, 10));
+    if (
+        parts.length !== 4 ||
+        parts.some((p) => !Number.isInteger(p) || p < 0 || p > 255)
+    ) {
+        throw new RadiusError(`Invalid IPv4 address for NAS-IP-Address: ${ip}`);
+    }
+    return Uint8Array.from(parts);
+}
+
 // FreeRADIUS `expiration` module date format ("31 Dec 2026").
 function formatExpiration(date: Date): string {
     return `${date.getUTCDate()} ${MONTHS[date.getUTCMonth()]} ${date.getUTCFullYear()}`;
 }
 
-export function parseRadiusServerUrl(
-    raw: string,
-): { host: string; port: number } {
+export function parseRadiusServerUrl(raw: string): {
+    host: string;
+    port: number;
+} {
     const trimmed = raw.trim();
     if (!trimmed) {
         throw new RadiusError(
-            'RADIUS_URL is not configured; direct RADIUS packets are disabled.',
+            'RADIUS_SERVER is not configured; direct RADIUS packets are disabled.',
         );
     }
     const withoutScheme = trimmed.replace(/^(radius|udp):\/\//i, '');
     const [host, portRaw] = withoutScheme.split(':');
     if (!host) {
-        throw new RadiusError(`Invalid RADIUS_URL "${raw}"`);
+        throw new RadiusError(`Invalid RADIUS_SERVER "${raw}"`);
     }
     const port = portRaw ? Number.parseInt(portRaw, 10) : 1812;
     if (!Number.isFinite(port) || port <= 0 || port > 65535) {
-        throw new RadiusError(`Invalid RADIUS_URL port in "${raw}"`);
+        throw new RadiusError(`Invalid RADIUS_SERVER port in "${raw}"`);
     }
     return { host, port };
 }
@@ -318,10 +343,7 @@ export class RadiusClient {
     // Concurrent-call guard: the payment webhook and the client poller can
     // both trigger activation of the same payment at the same moment; without
     // this map both would provision a duplicate RADIUS user.
-    private activating = new Map<
-        string,
-        Promise<ActivationRedirect | null>
-    >();
+    private activating = new Map<string, Promise<ActivationRedirect | null>>();
 
     constructor(private readonly config: RadiusConfig) {}
 
@@ -368,10 +390,7 @@ export class RadiusClient {
             // Bank packages must show the current balance before the client
             // is handed credentials; an exhausted bank gets no redirect.
             if (pkg.noExpiry) {
-                const sync = await this.syncBankAuthorization(
-                    existing.id,
-                    pkg,
-                );
+                const sync = await this.syncBankAuthorization(existing.id, pkg);
                 if (!sync.active) return null;
             } else {
                 // Heal a damaged activation whose password row vanished
@@ -400,9 +419,7 @@ export class RadiusClient {
     // user. Bank activations are reconciled first so the login they receive
     // carries the current balance as its Session-Timeout; exhausted ones are
     // skipped. Null when nothing usable is active.
-    async getActiveActivationCredentials(
-        userId: string,
-    ): Promise<{
+    async getActiveActivationCredentials(userId: string): Promise<{
         activationId: string;
         username: string;
         password: string;
@@ -486,15 +503,19 @@ export class RadiusClient {
             .where(eq(activatedPackages.id, activationId))
             .limit(1);
         if (!row) return null;
-        return this.activationStatusFromRows(activationId, row.activation, row.pkg);
+        return this.activationStatusFromRows(
+            activationId,
+            row.activation,
+            row.pkg,
+        );
     }
 
     // Deactivates a package: removes the RADIUS provisioning (no further
     // logins), expires the activation record, and terminates every live
-    // session with RFC 5176 Disconnect-Messages sent to each NAS carrying a
-    // session (RouterOS `/radius/incoming`). Provisioning removal is
-    // authoritative; a missed disconnect still ends the session at the next
-    // Session-Timeout/Idle-Timeout boundary.
+    // session by sending a session-targeted CoA-Request (keyed on
+    // Acct-Session-Id) to the RADIUS server, which disconnects each session at
+    // its NAS. Provisioning removal is authoritative; a missed CoA still ends
+    // the session at the next Session-Timeout/Idle-Timeout boundary.
     async deactivateActivation(activationId: string): Promise<{
         ok: boolean;
         message: string;
@@ -533,20 +554,20 @@ export class RadiusClient {
                 .where(eq(activatedPackages.id, activationId)),
         ]);
 
-        // One Disconnect-Request per live session, addressed by the NAS
-        // tunnel IP that its accounting rows carry.
+        // One session-targeted CoA per live session, sent to the RADIUS
+        // server (keyed on Acct-Session-Id) to disconnect it at the NAS.
         let sessionsDisconnected = 0;
         const failures: Array<{ nasIpAddress: string; reason: string }> = [];
         for (const session of liveSessions) {
             try {
-                const ack = await this.disconnectLiveSession(username, session);
+                const ack = await this.coaTerminateSession(username, session);
                 if (ack) {
                     sessionsDisconnected++;
                     await this.closeSessionRecord(session);
                 } else {
                     failures.push({
                         nasIpAddress: session.nasIpAddress,
-                        reason: 'NAS answered Disconnect-NAK',
+                        reason: 'RADIUS server answered CoA-NAK',
                     });
                 }
             } catch (err) {
@@ -562,7 +583,7 @@ export class RadiusClient {
             ? liveSessions.length === 0
                 ? 'Package deactivated'
                 : 'Package deactivated and all live sessions terminated'
-            : `Package deactivated but ${failures.length} session(s) could not be terminated at the NAS`;
+            : `Package deactivated but ${failures.length} session(s) could not be terminated via the RADIUS server`;
         return {
             ok,
             message,
@@ -572,15 +593,16 @@ export class RadiusClient {
         };
     }
 
-    // Disconnects live session(s) of an activation at the NAS via RADIUS
-    // Disconnect-Messages WITHOUT touching the package: provisioning
-    // (radcheck/radreply) stays intact and the activation keeps its validity,
-    // so the client (or another device) can log straight back in. This is the
-    // "free a device slot" operation used by the portal's connected-devices
-    // screen. Pass sessionId (radacct id) to disconnect one device only;
-    // omit it to disconnect every live session of the package.
+    // Disconnects live session(s) of an activation WITHOUT touching the
+    // package: each session is terminated by a CoA-Request sent to the RADIUS
+    // server (keyed on Acct-Session-Id), which disconnects it at the NAS,
+    // while provisioning (radcheck/radreply) stays intact and the activation
+    // keeps its validity, so the client (or another device) can log straight
+    // back in. This is the "free a device slot" operation used by the portal's
+    // connected-devices screen. Pass sessionId (radacct id) to disconnect one
+    // device only; omit it to disconnect every live session of the package.
     //
-    // A Disconnect-ACK also closes the accounting record locally
+    // A CoA-ACK also closes the accounting record locally
     // (Acct-Terminate-Cause Admin-Reset): the session is provably terminated,
     // and a late Accounting-Stop from the NAS then matches no open row.
     async disconnectDeviceSessions(
@@ -633,14 +655,14 @@ export class RadiusClient {
         const failures: Array<{ nasIpAddress: string; reason: string }> = [];
         for (const session of liveSessions) {
             try {
-                const ack = await this.disconnectLiveSession(username, session);
+                const ack = await this.coaTerminateSession(username, session);
                 if (ack) {
                     sessionsDisconnected++;
                     await this.closeSessionRecord(session);
                 } else {
                     failures.push({
                         nasIpAddress: session.nasIpAddress,
-                        reason: 'NAS answered Disconnect-NAK',
+                        reason: 'RADIUS server answered CoA-NAK',
                     });
                 }
             } catch (err) {
@@ -656,7 +678,7 @@ export class RadiusClient {
             ok,
             message: ok
                 ? 'Session disconnected — the package stays active'
-                : `${failures.length} session(s) could not be disconnected at the NAS`,
+                : `${failures.length} session(s) could not be disconnected via the RADIUS server`,
             sessionsFound: liveSessions.length,
             sessionsDisconnected,
             failures,
@@ -680,7 +702,10 @@ export class RadiusClient {
             .select()
             .from(radacct)
             .where(
-                and(isNull(radacct.acctstoptime), isNotNull(radacct.acctstarttime)),
+                and(
+                    isNull(radacct.acctstoptime),
+                    isNotNull(radacct.acctstarttime),
+                ),
             );
 
         let liveOctets = 0;
@@ -724,7 +749,11 @@ export class RadiusClient {
             .from(radacct)
             .where(gte(radacct.acctstarttime, windowStart))
             .groupBy(radacct.username)
-            .orderBy(desc(sql`sum(${radacct.acctinputoctets} + ${radacct.acctoutputoctets})`))
+            .orderBy(
+                desc(
+                    sql`sum(${radacct.acctinputoctets} + ${radacct.acctoutputoctets})`,
+                ),
+            )
             .limit(10);
 
         return {
@@ -757,7 +786,10 @@ export class RadiusClient {
             .select()
             .from(radacct)
             .where(
-                and(isNull(radacct.acctstoptime), isNotNull(radacct.acctstarttime)),
+                and(
+                    isNull(radacct.acctstoptime),
+                    isNotNull(radacct.acctstarttime),
+                ),
             )
             .orderBy(desc(radacct.acctstarttime))
             .limit(limit);
@@ -805,9 +837,9 @@ export class RadiusClient {
         };
     }
 
-    // RFC 5176 Disconnect-Request towards a NAS (RouterOS `/radius/incoming`).
-    // RouterOS terminates the matching session immediately. Returns true on
-    // Disconnect-ACK.
+    // Low-level RFC 5176 Disconnect-Request primitive (kept for completeness;
+    // the business flows terminate sessions via CoA sent to the RADIUS
+    // server). Returns true on Disconnect-ACK.
     async sendDisconnectRequest(
         target: { host: string; port: number },
         secret: string,
@@ -823,12 +855,11 @@ export class RadiusClient {
         return reply.code === CODE.DISCONNECT_ACK;
     }
 
-    // RFC 5176 CoA-Request. RouterOS live-changes (per its RADIUS manual page)
-    // Mikrotik-Rate-Limit, byte limits, Mikrotik-Group, Filter-Id,
-    // Mikrotik-Mark-Id, advertise attributes, Session-Timeout, Idle-Timeout
-    // and Port-Limit — addresses, pools and routes need a disconnect first.
-    // Returns true on CoA-ACK. Convenience builders below compose the
-    // Mikrotik VSAs.
+    // RFC 5176 CoA-Request. The business flows send these to the RADIUS SERVER
+    // (identified by Acct-Session-Id + User-Name + NAS-IP-Address) to
+    // terminate or re-authorize a live session; RouterOS itself accepts the
+    // attributes the server relays on `/radius/incoming`. Returns true on
+    // CoA-ACK.
     async sendCoARequest(
         target: { host: string; port: number },
         secret: string,
@@ -844,48 +875,6 @@ export class RadiusClient {
         return reply.code === CODE.COA_ACK;
     }
 
-    // CoA helper: change a live session's Mikrotik-Rate-Limit and/or
-    // Session-Timeout in place (e.g. throttling before a quota kicks in).
-    // RouterOS accepts CoA-Requests on the same `/radius/incoming` listener
-    // as Disconnect-Messages (no separate CoA port), so the NAS-bound target
-    // uses dmPort. The nasIpAddress is the NAS-IP-Address recorded in
-    // radacct — the NAS WireGuard tunnel address (fixed by `src-address` in
-    // the setup script), which is exactly the route the server reaches it on.
-    async changeSessionLimits(opts: {
-        nasIpAddress: string;
-        username: string;
-        rateLimit?: string; // "rx/tx k|M" router-perspective format
-        sessionTimeoutSeconds?: number;
-    }): Promise<boolean> {
-        const secret = await this.getNasSecret(opts.nasIpAddress);
-        if (!secret) {
-            throw new RadiusError(
-                `No shared secret registered for NAS ${opts.nasIpAddress}`,
-            );
-        }
-        const attrs: RadiusOutAttribute[] = [
-            { type: ATTR.USER_NAME, value: opts.username },
-        ];
-        if (opts.rateLimit) {
-            attrs.push({
-                type: MIKROTIK_ATTR.RATE_LIMIT,
-                vendor: MIKROTIK_VENDOR_ID,
-                value: opts.rateLimit,
-            });
-        }
-        if (opts.sessionTimeoutSeconds !== undefined) {
-            attrs.push({
-                type: ATTR.SESSION_TIMEOUT,
-                value: opts.sessionTimeoutSeconds,
-            });
-        }
-        return this.sendCoARequest(
-            { host: opts.nasIpAddress, port: this.config.dmPort },
-            secret,
-            attrs,
-        );
-    }
-
     // =========================================================================
     // Cumulative time bank (noExpiry packages)
     // =========================================================================
@@ -894,9 +883,7 @@ export class RadiusClient {
     // TOTAL minutes consumable across sessions within the validity window.
     // Usage = closed sessions' Acct-Session-Time + live sessions' elapsed
     // time (accounting interim updates keep the closed-figure side fresh).
-    async getBankUsage(
-        activationId: string,
-    ): Promise<{
+    async getBankUsage(activationId: string): Promise<{
         totalSeconds: number;
         usedSeconds: number;
         remainingSeconds: number;
@@ -958,7 +945,9 @@ export class RadiusClient {
 
         if (remainingSeconds <= 0) {
             await db.transaction(async (tx) => {
-                await tx.delete(radcheck).where(eq(radcheck.username, username));
+                await tx
+                    .delete(radcheck)
+                    .where(eq(radcheck.username, username));
                 await tx.insert(radcheck).values({
                     username,
                     attribute: 'Auth-Type',
@@ -968,7 +957,7 @@ export class RadiusClient {
             });
             for (const session of liveSessions) {
                 try {
-                    if (await this.disconnectLiveSession(username, session)) {
+                    if (await this.coaTerminateSession(username, session)) {
                         await this.closeSessionRecord(session);
                     }
                 } catch (err) {
@@ -987,14 +976,16 @@ export class RadiusClient {
             String(remainingSeconds),
         );
         for (const session of liveSessions) {
-            await this
-                .coaSessionTimeout(username, session, remainingSeconds)
-                .catch((err) =>
-                    console.error(
-                        `[radius] bank CoA failed on ${session.nasIpAddress}:`,
-                        err,
-                    ),
-                );
+            await this.coaSessionTimeout(
+                username,
+                session,
+                remainingSeconds,
+            ).catch((err) =>
+                console.error(
+                    `[radius] bank CoA failed on ${session.nasIpAddress}:`,
+                    err,
+                ),
+            );
         }
         return { active: true, remainingSeconds };
     }
@@ -1023,7 +1014,12 @@ export class RadiusClient {
                     });
                     for (const session of liveSessions) {
                         try {
-                            if (await this.disconnectLiveSession(username, session)) {
+                            if (
+                                await this.coaTerminateSession(
+                                    username,
+                                    session,
+                                )
+                            ) {
                                 await this.closeSessionRecord(session);
                             }
                         } catch (err) {
@@ -1106,26 +1102,24 @@ export class RadiusClient {
                 })
                 .returning();
 
-            await tx.insert(radcheck).values(
-                [
-                    {
-                        username,
-                        attribute: 'Cleartext-Password',
-                        op: ':=',
-                        value: password,
-                    },
-                    // Calendar cutoff for ALL packages: bank packages keep
-                    // their unused balance unusable after the validity window;
-                    // regular packages stop logging in once their allowance
-                    // window closes.
-                    {
-                        username,
-                        attribute: 'Expiration',
-                        op: ':=',
-                        value: formatExpiration(expireAt),
-                    },
-                ],
-            );
+            await tx.insert(radcheck).values([
+                {
+                    username,
+                    attribute: 'Cleartext-Password',
+                    op: ':=',
+                    value: password,
+                },
+                // Calendar cutoff for ALL packages: bank packages keep
+                // their unused balance unusable after the validity window;
+                // regular packages stop logging in once their allowance
+                // window closes.
+                {
+                    username,
+                    attribute: 'Expiration',
+                    op: ':=',
+                    value: formatExpiration(expireAt),
+                },
+            ]);
 
             await tx
                 .insert(radreply)
@@ -1228,7 +1222,7 @@ export class RadiusClient {
 
     private async buildRedirect(
         activationId: string,
-        loginRequest: (typeof hotspotLoginRequest.$inferSelect) | null,
+        loginRequest: typeof hotspotLoginRequest.$inferSelect | null,
     ): Promise<ActivationRedirect | null> {
         if (!loginRequest?.linkLoginOnly) return null;
         const username = activationUsername(activationId);
@@ -1241,6 +1235,8 @@ export class RadiusClient {
             linkLoginOnly: loginRequest.linkLoginOnly,
             dst: loginRequest.linkOrig ?? '',
             mac: loginRequest.mac,
+            chapId: loginRequest.extra?.chapId ?? '',
+            chapChallenge: loginRequest.extra?.chapChallenge ?? '',
         };
     }
 
@@ -1307,15 +1303,6 @@ export class RadiusClient {
         return script?.wgClientIp ?? null;
     }
 
-    private async getNasSecret(nasIpAddress: string): Promise<string | null> {
-        const [row] = await db
-            .select({ secret: nas.secret })
-            .from(nas)
-            .where(eq(nas.nasname, nasIpAddress))
-            .limit(1);
-        return row?.secret ?? null;
-    }
-
     // Replace-or-insert one radreply attribute row (free-format reply
     // attributes such as Session-Timeout that the reconciler maintains).
     private async upsertReplyAttribute(
@@ -1338,57 +1325,74 @@ export class RadiusClient {
         });
     }
 
-    // RFC 5176 Disconnect-Request for one live session, addressed at the NAS
-    // tunnel IP its accounting rows carry. Throws on transport failure;
-    // Disconnect-NAK resolves to false.
-    private async disconnectLiveSession(
+    // --- Session-targeted CoA towards the RADIUS server ---------------------
+    //
+    // The backend only ever talks to the RADIUS SERVER (FreeRADIUS); the
+    // server is what owns the NAS relationship and terminates / re-authorizes
+    // sessions on it. Every session-targeted CoA carries Acct-Session-Id (the
+    // NAS-assigned session key, unique per NAS) plus User-Name and
+    // NAS-IP-Address so the server can pinpoint the session. Signed with the
+    // server shared secret (RADIUS_SECRET) on the CoA port.
+
+    private radiusServerCoaTarget(): { host: string; port: number } {
+        const { host } = parseRadiusServerUrl(this.config.serverUrl);
+        if (!this.config.secret) {
+            throw new RadiusError(
+                'RADIUS_SECRET is not configured; cannot sign RADIUS packets.',
+            );
+        }
+        return { host, port: this.config.coaPort };
+    }
+
+    // Identity attributes that let the RADIUS server locate the session.
+    private sessionCoaIdentity(
+        username: string,
+        session: SessionInfo,
+    ): RadiusOutAttribute[] {
+        return [
+            { type: ATTR.USER_NAME, value: username },
+            { type: ATTR.ACCT_SESSION_ID, value: session.acctSessionId },
+            {
+                type: ATTR.NAS_IP_ADDRESS,
+                value: ipv4ToOctets(session.nasIpAddress),
+            },
+        ];
+    }
+
+    // Terminates a live session by sending a CoA-Request to the RADIUS server,
+    // which in turn disconnects the session on the NAS. Keyed on
+    // Acct-Session-Id. Returns true on CoA-ACK.
+    private async coaTerminateSession(
         username: string,
         session: SessionInfo,
     ): Promise<boolean> {
-        const secret = await this.getNasSecret(session.nasIpAddress);
-        if (!secret) {
-            throw new RadiusError(
-                `No shared secret registered for NAS ${session.nasIpAddress}`,
-            );
-        }
-        const attrs: RadiusOutAttribute[] = [
-            { type: ATTR.USER_NAME, value: username },
-            { type: ATTR.ACCT_SESSION_ID, value: session.acctSessionId },
-        ];
+        const attrs = this.sessionCoaIdentity(username, session);
         if (session.callingStationId) {
             attrs.push({
                 type: ATTR.CALLING_STATION_ID,
                 value: session.callingStationId,
             });
         }
-        return this.sendDisconnectRequest(
-            { host: session.nasIpAddress, port: this.config.dmPort },
-            secret,
+        return this.sendCoARequest(
+            this.radiusServerCoaTarget(),
+            this.config.secret,
             attrs,
         );
     }
 
-    // CoA-Request pushing a new Session-Timeout onto one live session
-    // (RouterOS honours it on `/radius/incoming`).
+    // CoA-Request pushing a new Session-Timeout onto one live session via the
+    // RADIUS server (used to cap a time-bank session at its remaining balance).
     private async coaSessionTimeout(
         username: string,
         session: SessionInfo,
         seconds: number,
     ): Promise<boolean> {
-        const secret = await this.getNasSecret(session.nasIpAddress);
-        if (!secret) {
-            throw new RadiusError(
-                `No shared secret registered for NAS ${session.nasIpAddress}`,
-            );
-        }
+        const attrs = this.sessionCoaIdentity(username, session);
+        attrs.push({ type: ATTR.SESSION_TIMEOUT, value: seconds });
         return this.sendCoARequest(
-            { host: session.nasIpAddress, port: this.config.dmPort },
-            secret,
-            [
-                { type: ATTR.USER_NAME, value: username },
-                { type: ATTR.ACCT_SESSION_ID, value: session.acctSessionId },
-                { type: ATTR.SESSION_TIMEOUT, value: seconds },
-            ],
+            this.radiusServerCoaTarget(),
+            this.config.secret,
+            attrs,
         );
     }
 
@@ -1404,7 +1408,7 @@ export class RadiusClient {
             .set({
                 acctstoptime: new Date(),
                 acctterminatecause: 'Admin-Reset',
-                acctsessiontime: BigInt(session.seconds),
+                acctsessiontime: session.seconds,
             })
             .where(
                 and(
@@ -1451,9 +1455,7 @@ export class RadiusClient {
         return rows.map((row) => this.sessionInfoFromRow(row));
     }
 
-    private sessionInfoFromRow(
-        row: typeof radacct.$inferSelect,
-    ): SessionInfo {
+    private sessionInfoFromRow(row: typeof radacct.$inferSelect): SessionInfo {
         const inputOctets = Number(row.acctinputoctets ?? 0);
         const outputOctets = Number(row.acctoutputoctets ?? 0);
         // Live = started by accounting and not yet stopped; the activation
@@ -1498,10 +1500,7 @@ export class RadiusClient {
         const totalSeconds = pkg.sessionLength * 60;
         // Bank (noExpiry) packages: time is cumulative across sessions within
         // the validity window. Regular packages: per-session allowance.
-        const cumulativeUsed = sessions.reduce(
-            (sum, s) => sum + s.seconds,
-            0,
-        );
+        const cumulativeUsed = sessions.reduce((sum, s) => sum + s.seconds, 0);
         const sessionUsed = liveSessions.length
             ? Math.max(...liveSessions.map((s) => s.seconds))
             : Math.max(0, ...sessions.map((s) => s.seconds));
@@ -1619,10 +1618,7 @@ export class RadiusClient {
         );
         password.copy(padded);
         const out = Buffer.alloc(padded.length);
-        let chain = Buffer.concat([
-            Buffer.from(secret, 'utf8'),
-            authenticator,
-        ]);
+        let chain = Buffer.concat([Buffer.from(secret, 'utf8'), authenticator]);
         for (let i = 0; i < padded.length; i += 16) {
             const hash = createHash('md5').update(chain).digest();
             for (let j = 0; j < 16; j++) {

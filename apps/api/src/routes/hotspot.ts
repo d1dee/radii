@@ -391,9 +391,10 @@ app.post('/payment/:id/verify', requireAuth, async (c) => {
 // full — kick one device" on the connected-devices screen). This does NOT
 // deactivate the package: provisioning stays in the RADIUS tables and the
 // activation keeps its validity, so the client can log back in. The session is
-// terminated at the NAS with a RADIUS Disconnect-Message and its accounting
-// record is closed. ?session=<radacctId> targets one device; without it every
-// live session of the package is disconnected.
+// terminated by a CoA-Request (keyed on Acct-Session-Id) to the RADIUS server,
+// which disconnects it at the NAS, and its accounting record is closed.
+// ?session=<radacctId> targets one device; without it every live session of
+// the package is disconnected.
 app.post('/deauth/:deviceQuotaId', requireAuth, async (c) => {
     const deviceQuotaId = c.req.param('deviceQuotaId');
     if (!deviceQuotaId) return jsonError(c, 400, 'Missing device quota id');
@@ -584,6 +585,10 @@ app.post('/login-request/:id/complete', requireAuth, async (c) => {
             password,
             mac: loginRequest.mac,
             activationId: active?.activationId ?? null,
+            // Servlet CHAP challenge captured at login-page time; the portal
+            // hashes the password with it when both are present (http-chap).
+            chapId: loginRequest.extra?.chapId ?? '',
+            chapChallenge: loginRequest.extra?.chapChallenge ?? '',
         },
     });
 });

@@ -23,13 +23,13 @@ import {
     getPackages,
     updatePackage,
 } from '../lib/packages';
+import { radiusClient } from '../lib/radius';
 import {
     buildBootstrapScript,
     generateSetupScript,
     getSetupScriptForNasDevice,
     SetupScriptConfigError,
 } from '../lib/setupScript';
-import { radiusClient } from '../lib/radius';
 import { requireAdmin } from '../middleware/auth';
 import type { AppVariables } from '../types';
 
@@ -162,7 +162,6 @@ app.post('/nas-devices', requireAdmin, async (c) => {
     try {
         const row = await createNasDevice({
             ...rest,
-            id: crypto.randomUUID(),
             ownerId: c.get('session').userId,
             // The DB schema has no OS column; keep it in metadata so new
             // platforms can be added without a migration.
@@ -311,7 +310,8 @@ app.put('/nas-devices/:id', requireAdmin, async (c) => {
 // heaviest users. ?windowMinutes=<n> (default 60).
 app.get('/radius/summary', requireAdmin, async (c) => {
     const raw = Number(c.req.query('windowMinutes') ?? 60);
-    const windowMinutes = Number.isFinite(raw) && raw > 0 ? Math.min(raw, 1440) : 60;
+    const windowMinutes =
+        Number.isFinite(raw) && raw > 0 ? Math.min(raw, 1440) : 60;
     const data = await radiusClient.getNetworkUsage(windowMinutes);
     return c.json({ success: true, data });
 });
@@ -334,8 +334,9 @@ app.get('/radius/activations/:id', requireAdmin, async (c) => {
     return c.json({ success: true, data });
 });
 
-// Admin deactivation: removes the RADIUS provisioning and disconnects every
-// live session of the activation at the NAS (RFC 5176 Disconnect-Messages).
+// Admin deactivation: removes the RADIUS provisioning and terminates every
+// live session of the activation via CoA-Requests (keyed on Acct-Session-Id)
+// sent to the RADIUS server.
 app.post('/radius/activations/:id/deactivate', requireAdmin, async (c) => {
     const id = c.req.param('id');
     if (!id) return jsonError(c, 404, 'Unknown activation');
@@ -344,7 +345,11 @@ app.post('/radius/activations/:id/deactivate', requireAdmin, async (c) => {
         if (!result.ok && result.sessionsFound === 0) {
             return jsonError(c, 404, result.message);
         }
-        return c.json({ success: result.ok, message: result.message, data: result });
+        return c.json({
+            success: result.ok,
+            message: result.message,
+            data: result,
+        });
     } catch (err) {
         console.error('[radius] admin deactivation failed:', err);
         return jsonError(c, 502, 'Could not contact the RADIUS system');
@@ -352,7 +357,7 @@ app.post('/radius/activations/:id/deactivate', requireAdmin, async (c) => {
 });
 
 // Validates a RADIUS user against the RADIUS server with a real
-// Access-Request (provisioning diagnostics; requires RADIUS_URL/RADIUS_SECRET).
+// Access-Request (provisioning diagnostics; requires RADIUS_SERVER/RADIUS_SECRET).
 app.post('/radius/check-credentials', requireAdmin, async (c) => {
     const parsed = z
         .object({ username: z.string().min(1), password: z.string().min(1) })
