@@ -4,7 +4,7 @@ import {
     signUpSchema,
 } from '@radii/shared';
 import { APIError } from 'better-auth/api';
-import { and, desc, eq, gte } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import { Hono } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { z } from 'zod';
@@ -26,6 +26,7 @@ import {
     getPaymentById,
 } from '../lib/packages';
 import { paymentService } from '../lib/payments';
+import { radiusClient, type ActivationRedirect } from '../lib/radius';
 import { requireAdmin, requireAuth } from '../middleware/auth';
 import type { AppContext, AppVariables } from '../types';
 
@@ -132,19 +133,48 @@ app.get('/client', requireAuth, (c) => {
 
 // --- Device quota status ----------------------------------------------------
 
+// Active (non-expired) package activations enriched with live RADIUS usage:
+// remaining time/bytes, live sessions, average speed — everything the portal
+// needs to render quota state without talking to RADIUS itself.
 app.get('/status', requireAuth, async (c) => {
     try {
         const currentUser = c.get('user');
-
-        const activeSubscriptions = await db.query.activatedPackages.findMany({
-            where: and(
-                eq(activatedPackages.userId, currentUser.id),
-                gte(activatedPackages.expireAt, new Date()),
-            ),
-            with: { package: true, packagePayment: true },
-        });
-
-        return c.json({ success: true, data: activeSubscriptions });
+        const activations = await radiusClient.getUserPackageStatuses(
+            currentUser!.id,
+        );
+        const data = activations.map((a) => ({
+            deviceQuotaId: a.activationId,
+            parentQuotaId: a.packageId,
+            sessionLength: a.sessionLength,
+            // For bank (noExpiry) packages remainingSeconds carries the
+            // cumulative balance, so this renders as bank minutes left.
+            remainingSessionLength:
+                a.remainingSeconds === null
+                    ? 0
+                    : Math.ceil(a.remainingSeconds / 60),
+            price: a.price,
+            uploadRate: a.uploadRate,
+            downloadRate: a.downloadRate,
+            maxDevices: a.maxDevices,
+            expiresAt: a.expireAt.toISOString(),
+            lastActive: a.lastActive?.toISOString(),
+            thisDevice: a.online,
+            online: a.online,
+            packageId: a.packageId,
+            packageTitle: a.packageTitle,
+            username: a.username,
+            usedSeconds: a.usedSeconds,
+            sessionLimitSeconds: a.sessionLimitSeconds,
+            octetsUsed: a.octetsUsed,
+            octetsLimit: a.octetsLimit,
+            remainingOctets: a.remainingOctets,
+            avgSpeedBps: a.avgSpeedBps,
+            liveSessions: a.liveSessions,
+            bankTotalSeconds: a.bankTotalSeconds,
+            bankUsedSeconds: a.bankUsedSeconds,
+            bankRemainingSeconds: a.bankRemainingSeconds,
+        }));
+        return c.json({ success: true, data });
     } catch (err) {
         console.error(err);
         throw err;
@@ -180,8 +210,14 @@ app.post('/order', requireAuth, async (c) => {
 
     // Hand the purchase to the default registered payment provider (gateway
     // specifics live inside the provider; see lib/payments). On failure the
-    // payment row stays pending so the customer can retry.
-    const initiated = await paymentService.initiatePackagePayment(row, pkg);
+    // payment row stays pending so the customer can retry. The login request
+    // is recorded with the transaction so activation can later find the NAS
+    // servlet links for the redirect back to MikroTik.
+    const initiated = await paymentService.initiatePackagePayment(
+        row,
+        pkg,
+        parsed.data.loginRequestKey,
+    );
     if (!initiated.success) {
         return jsonError(c, 502, initiated.message);
     }
@@ -220,6 +256,8 @@ app.get('/payment/pending/latest', requireAuth, async (c) => {
     }
 
     const status = await paymentService.refreshPackagePaymentStatus(payment);
+    const activation =
+        status === 'paid' ? await activationForPayment(payment.id) : null;
     return c.json({
         success: true,
         data: {
@@ -227,6 +265,7 @@ app.get('/payment/pending/latest', requireAuth, async (c) => {
             status,
             amount: Number(payment.amount),
             packageId: payment.packageId,
+            activation,
         },
     });
 });
@@ -244,6 +283,11 @@ app.get('/payment/:id', requireAuth, async (c) => {
     // While pending, reconcile against the provider so clients converge even
     // when the gateway webhook has not arrived yet.
     const status = await paymentService.refreshPackagePaymentStatus(payment);
+    // Once paid, make sure the package is activated on RADIUS (idempotent)
+    // and hand the portal the credentials + NAS servlet link for the final
+    // redirect to MikroTik.
+    const activation =
+        status === 'paid' ? await activationForPayment(payment.id) : null;
     return c.json({
         success: true,
         data: {
@@ -251,9 +295,27 @@ app.get('/payment/:id', requireAuth, async (c) => {
             status,
             amount: Number(payment.amount),
             packageId: payment.packageId,
+            activation,
         },
     });
 });
+
+// Ensures a paid payment has its package activated and returns the redirect
+// payload for the portal. Never fails the request: activation errors leave
+// `activation` null and the client keeps polling.
+async function activationForPayment(
+    paymentId: string,
+): Promise<ActivationRedirect | null> {
+    try {
+        return await radiusClient.ensureActivated(paymentId);
+    } catch (err) {
+        console.error(
+            `[radius] activation for payment ${paymentId} failed:`,
+            err,
+        );
+        return null;
+    }
+}
 
 // Verify a gateway transaction code (e.g. M-Pesa receipt) supplied by the
 // customer. Idempotent and pollable: known receipts report their current
@@ -292,17 +354,52 @@ app.post('/payment/:id/verify', requireAuth, async (c) => {
             paymentId: result.paymentId ?? '',
             status: result.status,
             message: result.message,
+            activation: result.activation ?? null,
         },
     });
 });
 
+// Disconnects a device's live session of an activated package ("max devices
+// full — kick one device" on the connected-devices screen). This does NOT
+// deactivate the package: provisioning stays in the RADIUS tables and the
+// activation keeps its validity, so the client can log back in. The session is
+// terminated at the NAS with a RADIUS Disconnect-Message and its accounting
+// record is closed. ?session=<radacctId> targets one device; without it every
+// live session of the package is disconnected.
 app.post('/deauth/:deviceQuotaId', requireAuth, async (c) => {
     const deviceQuotaId = c.req.param('deviceQuotaId');
     if (!deviceQuotaId) return jsonError(c, 400, 'Missing device quota id');
 
-    // call radacct deauth
+    const currentUser = c.get('user');
+    const [activation] = await db
+        .select()
+        .from(activatedPackages)
+        .where(eq(activatedPackages.id, deviceQuotaId))
+        .limit(1);
+    if (!activation) return jsonError(c, 404, 'Unknown device quota');
+    if (activation.userId !== currentUser!.id) {
+        return jsonError(c, 404, 'Unknown device quota');
+    }
 
-    return c.json({ success: true, data: { deviceQuotaId } });
+    const sessionId = c.req.query('session') || undefined;
+    try {
+        const result = await radiusClient.disconnectDeviceSessions(
+            deviceQuotaId,
+            { sessionId },
+        );
+        return c.json({
+            success: result.ok,
+            message: result.message,
+            data: {
+                deviceQuotaId,
+                sessionsFound: result.sessionsFound,
+                sessionsDisconnected: result.sessionsDisconnected,
+            },
+        });
+    } catch (err) {
+        console.error('[radius] session disconnect failed:', err);
+        return jsonError(c, 502, 'Could not contact the RADIUS system');
+    }
 });
 
 // --- External captive portal (NAS login hand-off) ---------------------------
@@ -385,11 +482,13 @@ function randomHotspotPassword(length: number): string {
 }
 
 // Called by the portal once the client referenced by the login request has
-// authenticated. Issues a hotspot credential (radcheck Cleartext-Password
-// entry), marks the request completed and returns everything the portal needs
-// to re-submit to the NAS servlet login page so the client gets online
-// (external authentication flow, see the MikroTik hotspot customisation
-// docs). Idempotent for the owning user: re-completing rotates the password.
+// authenticated. If the user has an active (paid) package activation, its
+// RADIUS credentials are what get sent to the NAS — that login is how the
+// package activates on the router. Otherwise a one-off hotspot credential is
+// issued (radcheck Cleartext-Password entry) so the client can at least reach
+// the portal. Marks the request completed and returns everything the portal
+// needs to re-submit to the NAS servlet login page (external authentication
+// flow, see the MikroTik hotspot customisation docs).
 app.post('/login-request/:id/complete', requireAuth, async (c) => {
     const id = c.req.param('id');
     if (!id) return jsonError(c, 404, 'Unknown login request');
@@ -408,18 +507,16 @@ app.post('/login-request/:id/complete', requireAuth, async (c) => {
         return jsonError(c, 403, 'Login request already completed');
     }
 
-    const username = `HS-${id.replace(/-/g, '').slice(0, 10)}`;
-    const password = randomHotspotPassword(12);
+    const active = await radiusClient
+        .getActiveActivationCredentials(currentUser.id)
+        .catch(() => null);
 
-    await db.transaction(async (tx) => {
-        await tx.delete(radcheck).where(eq(radcheck.username, username));
-        await tx.insert(radcheck).values({
-            username,
-            attribute: 'Cleartext-Password',
-            op: ':=',
-            value: password,
-        });
-        await tx
+    let username: string;
+    let password: string;
+    if (active) {
+        username = active.username;
+        password = active.password;
+        await db
             .update(hotspotLoginRequest)
             .set({
                 status: 'completed',
@@ -427,7 +524,28 @@ app.post('/login-request/:id/complete', requireAuth, async (c) => {
                 hotspotUsername: username,
             })
             .where(eq(hotspotLoginRequest.id, id));
-    });
+    } else {
+        username = `HS-${id.replace(/-/g, '').slice(0, 10)}`;
+        password = randomHotspotPassword(12);
+
+        await db.transaction(async (tx) => {
+            await tx.delete(radcheck).where(eq(radcheck.username, username));
+            await tx.insert(radcheck).values({
+                username,
+                attribute: 'Cleartext-Password',
+                op: ':=',
+                value: password,
+            });
+            await tx
+                .update(hotspotLoginRequest)
+                .set({
+                    status: 'completed',
+                    userId: currentUser.id,
+                    hotspotUsername: username,
+                })
+                .where(eq(hotspotLoginRequest.id, id));
+        });
+    }
 
     return c.json({
         success: true,
@@ -437,6 +555,7 @@ app.post('/login-request/:id/complete', requireAuth, async (c) => {
             username,
             password,
             mac: loginRequest.mac,
+            activationId: active?.activationId ?? null,
         },
     });
 });

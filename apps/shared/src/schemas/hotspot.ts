@@ -31,6 +31,50 @@ export type Quota = {
     parentQuotaId: string;
     thisDevice?: boolean;
     expiresAt?: string;
+    online?: boolean;
+    packageId?: string;
+    packageTitle?: string;
+    username?: string;
+    usedSeconds?: number;
+    sessionLimitSeconds?: number;
+    octetsUsed?: number;
+    octetsLimit?: number | null;
+    remainingOctets?: number | null;
+    avgSpeedBps?: number;
+    // Cumulative time-bank packages (noExpiry): total/used/remaining bank
+    // seconds within the static validity window. Null for regular packages.
+    bankTotalSeconds?: number | null;
+    bankUsedSeconds?: number | null;
+    bankRemainingSeconds?: number | null;
+    liveSessions?: Array<{
+        radacctId: string;
+        acctSessionId: string;
+        username: string;
+        nasIpAddress: string;
+        callingStationId: string | null;
+        framedIpAddress: string | null;
+        startedAt: Date | string | null;
+        updatedAt: Date | string | null;
+        stoppedAt: Date | string | null;
+        live: boolean;
+        seconds: number;
+        inputOctets: number;
+        outputOctets: number;
+        totalOctets: number;
+        terminateCause: string | null;
+        avgSpeedBps: number;
+    }>;
+};
+
+// Everything the portal needs for the final activation hop: submitting the
+// freshly issued hotspot credentials to the NAS servlet login page.
+export type ActivationRedirect = {
+    activationId: string;
+    username: string;
+    password: string;
+    linkLoginOnly: string;
+    dst: string;
+    mac: string;
 };
 
 export type Session = {

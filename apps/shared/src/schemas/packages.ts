@@ -7,6 +7,11 @@ export const createPackageSchema = z.object({
         .number()
         .int('Must be an integer')
         .positive('Must be positive'),
+    validityDays: z
+        .number()
+        .int('Must be an integer')
+        .positive('Must be positive')
+        .default(30),
     price: z.number().min(0, 'Must be non-negative'),
     maxDevices: z
         .number()

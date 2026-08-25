@@ -24,7 +24,13 @@ export function ConnectedDevicesModal({
             if (deviceId) {
                 setPendingDeauth((prev) => [...prev, deviceId]);
                 try {
-                    await deauthDevice(deviceId);
+                    // Target the device's live session when known (single
+                    // session); the backend disconnects all sessions of the
+                    // package when no session id is given.
+                    const session = quota?.find(
+                        (v) => v.deviceQuotaId === deviceId,
+                    )?.liveSessions?.[0];
+                    await deauthDevice(deviceId, session?.radacctId);
                 } catch (err) {
                     console.warn('Deauth failed', err);
                 }

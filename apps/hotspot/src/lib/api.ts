@@ -1,4 +1,9 @@
-import type { ApiEnvelope, Package, Quota } from '@radii/shared';
+import type {
+    ActivationRedirect,
+    ApiEnvelope,
+    Package,
+    Quota,
+} from '@radii/shared';
 import { ApiErrorType } from '@radii/shared';
 
 export type Client = {
@@ -15,6 +20,10 @@ export type OrderResult = {
     status: 'pending' | 'paid' | 'failed';
     amount: number;
     packageId: string;
+    // Present once the payment is paid and its package was activated on the
+    // RADIUS side — the portal auto-submits these credentials to the NAS to
+    // get online.
+    activation?: ActivationRedirect | null;
 };
 
 const BASE = '/api/hotspot';
@@ -58,6 +67,7 @@ export function verifyPaymentReceipt(transactionCode: string) {
         paymentId: string;
         status: 'pending' | 'paid' | 'failed';
         message: string;
+        activation?: ActivationRedirect | null;
     }>(
         `/payment/${encodeURIComponent(transactionCode)}/verify`,
         { transactionCode },
@@ -65,9 +75,18 @@ export function verifyPaymentReceipt(transactionCode: string) {
     );
 }
 
-export function deauthDevice(deviceQuotaId: string) {
-    return request<{ deviceQuotaId: string }>(
-        `/deauth/${encodeURIComponent(deviceQuotaId)}`,
+// Disconnects a device's live session of a package (frees a device slot).
+// The package itself stays active; the session is killed at the NAS via a
+// RADIUS Disconnect-Message. Pass sessionId (radacct id) to target one device.
+export function deauthDevice(deviceQuotaId: string, sessionId?: string) {
+    const query = sessionId ? `?session=${encodeURIComponent(sessionId)}` : '';
+    return request<{
+        deviceQuotaId: string;
+        sessionsFound?: number;
+        sessionsDisconnected?: number;
+    }>(
+        `/deauth/${encodeURIComponent(deviceQuotaId)}${query}`,
+        { deviceQuotaId },
         { method: 'POST' },
     );
 }
@@ -129,6 +148,7 @@ export type HotspotRedirectData = {
     username: string;
     password: string;
     mac: string;
+    activationId?: string | null;
 };
 
 export function completeLoginRequest(loginRequestId: string) {

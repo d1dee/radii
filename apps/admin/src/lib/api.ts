@@ -76,6 +76,9 @@ export type PackageRow = {
     type: PackageType;
     category: string;
     sessionLength: number;
+    // Static validity of an activation in days (bank packages consume their
+    // cumulative time within this window).
+    validityDays?: number;
     price: string;
     maxDevices: number;
     noExpiry: boolean;
@@ -96,6 +99,7 @@ export type CreatePackageInput = {
     type: PackageType;
     category: string;
     sessionLength: number;
+    validityDays?: number;
     price: number;
     maxDevices: number;
     noExpiry: boolean;

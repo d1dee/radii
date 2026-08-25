@@ -18,6 +18,7 @@ import { and, desc, eq, sql } from 'drizzle-orm';
 import { db } from '../../db';
 import { packagePayments, transaction, transactionLog } from '../../db/schema';
 import { getPaymentByTransactionCode, type PackageRow } from '../packages';
+import { radiusClient, type ActivationRedirect } from '../radius';
 import {
     PaymentProviderError,
     type PaymentOutcome,
@@ -42,6 +43,9 @@ export interface VerifyByCodeOutcome {
     paymentId: string | null;
     message: string;
     error?: boolean;
+    // Present once the verified payment has its package activated on RADIUS;
+    // the portal uses it for the final redirect to the NAS.
+    activation?: ActivationRedirect | null;
 }
 
 const STATUS_QUERY_EVENT = 'status_query';
@@ -95,10 +99,14 @@ export class PaymentService {
 
     // Initiates a payment for a package purchase that already has its
     // package_payments row. Returns a user-facing error message on failure;
-    // the payment row stays pending so the customer can retry.
+    // the payment row stays pending so the customer can retry. The initiating
+    // login request id (when the purchase happened through a hotspot portal)
+    // is carried in the transaction metadata; activation uses it to find the
+    // NAS servlet links for the final redirect back to MikroTik.
     async initiatePackagePayment(
         payment: PackagePaymentRow,
         pkg: PackageRow,
+        loginRequestId?: string | null,
     ): Promise<{ success: boolean; message: string }> {
         const provider = this.defaultProvider;
         if (!provider) {
@@ -120,6 +128,7 @@ export class PaymentService {
                 metadata: {
                     packagePaymentId: payment.id,
                     packageId: pkg.id,
+                    ...(loginRequestId ? { loginRequestId } : {}),
                 },
             })
             .returning();
@@ -252,13 +261,24 @@ export class PaymentService {
         const payment = await getPaymentByTransactionCode(code);
         if (payment) {
             if (payment.userId !== userId) return null;
-            // TODO: before reporting this as settled, check the payment is
-            // linked to a package and that its activation state (activated
-            // packages / RADIUS session) is consistent, activating it if the
-            // payment is paid but the package was never activated.
+            // Paid but never activated (e.g. callback arrived before the
+            // client polled): activate now — idempotent.
+            const activation =
+                payment.status === 'paid'
+                    ? await radiusClient
+                          .ensureActivated(payment.id)
+                          .catch((err) => {
+                              console.error(
+                                  `[radius] activation for payment ${payment.id} failed:`,
+                                  err,
+                              );
+                              return null;
+                          })
+                    : null;
             return {
                 paymentId: payment.id,
                 status: payment.status,
+                activation,
                 message:
                     payment.status === 'paid'
                         ? 'This payment has already been completed.'
@@ -586,7 +606,9 @@ export class PaymentService {
 
     // Flips the transaction (and any linked package payment) to a final state
     // and records the provider event. Webhook outcomes are authoritative and
-    // overwrite earlier poll-based results.
+    // overwrite earlier poll-based results. A completed package purchase also
+    // triggers RADIUS activation here (fire-and-forget: the payment is already
+    // settled, and GET /payment/:id re-asserts activation idempotently).
     private async applyOutcome(
         txRow: TransactionRow,
         outcome: Exclude<PaymentOutcome, 'pending'>,
@@ -634,6 +656,22 @@ export class PaymentService {
                 providerConversationId: details.conversationId ?? null,
             });
         });
+
+        if (outcome === 'completed') {
+            const packagePaymentId = (
+                txRow.metadata as { packagePaymentId?: string } | null
+            )?.packagePaymentId;
+            if (packagePaymentId) {
+                void radiusClient
+                    .ensureActivated(packagePaymentId)
+                    .catch((err) =>
+                        console.error(
+                            `[radius] activation for payment ${packagePaymentId} failed:`,
+                            err,
+                        ),
+                    );
+            }
+        }
     }
 
     private async linkPaymentToTransaction(

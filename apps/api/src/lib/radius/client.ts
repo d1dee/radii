@@ -1,0 +1,1870 @@
+// RADIUS integration: one class covering the whole backend <-> RADIUS surface.
+//
+// What it does and why (sources of truth, per project policy — no behaviour
+// here is assumed beyond these documents):
+//
+//  * MikroTik RouterOS manual — RADIUS page: the NAS authenticates hotspot
+//    users against the RADIUS server (radcheck/radreply provisioning), honours
+//    Access-Accept attributes Session-Timeout, Port-Limit (overrides
+//    shared-users), Class (cookie echoed unchanged into accounting),
+//    Mikrotik-Rate-Limit ("rx/tx k|M" format, rx = client upload), and
+//    Mikrotik-Total-Limit (+Gigawords) for byte quotas. Sessions are
+//    terminated from the RADIUS side via Disconnect-Messages accepted on the
+//    router's `/radius/incoming` (default port 1700; RouterOS does NOT
+//    support PoD). CoA can live-change rate limits/timeouts/Port-Limit.
+//  * MikroTik RouterOS manual — HotSpot page: hotspot logs users in through
+//    its servlet login page (http-chap by default); the portal re-submits
+//    issued credentials to $(link-login-only) as the final activation hop.
+//  * FreeRADIUS: the SQL backend (radcheck check-attributes, radreply
+//    reply-attributes) is how consumers manage users on this server, and the
+//    radacct table is where accounting lands. `Expiration` in radcheck is
+//    enforced by the stock `expiration` module.
+//  * RFC 2865 (Access packets, PAP User-Password encryption, response
+//    authenticator), RFC 2866 (accounting), RFC 3576 / RFC 5176
+//    (Disconnect-Request / CoA-Request: zero-authenticator request signing,
+//    mandatory Message-Authenticator).
+//
+// Direct packet targets:
+//  - the RADIUS SERVER itself (env RADIUS_URL/RADIUS_SECRET) for
+//    Access-Request credential checks; the api must be registered there as a
+//    client.
+//  - the NAS for Disconnect/CoA; secrets are looked up from the FreeRADIUS
+//    `nas` table (nasname = the NAS WireGuard tunnel IP, which is also the
+//    address accounting records carry in NAS-IP-Address / radacct.nasipaddress).
+
+import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
+import * as dgram from 'node:dgram';
+import { and, desc, eq, gte, isNotNull, isNull, or, sql } from 'drizzle-orm';
+import { db } from '../../db';
+import {
+    activatedPackages,
+    hotspotLoginRequest,
+    nas,
+    nasSetupScript,
+    packagePayments,
+    packages,
+    radacct,
+    radcheck,
+    radreply,
+    transaction,
+} from '../../db/schema';
+
+export class RadiusError extends Error {
+    constructor(
+        message: string,
+        public readonly detail?: unknown,
+    ) {
+        super(message);
+        this.name = 'RadiusError';
+    }
+}
+
+// --- RADIUS protocol constants (RFC 2865/2866/3576/5176) ---------------------
+
+const CODE = {
+    ACCESS_REQUEST: 1,
+    ACCESS_ACCEPT: 2,
+    ACCESS_REJECT: 3,
+    ACCOUNTING_REQUEST: 4,
+    ACCOUNTING_RESPONSE: 5,
+    DISCONNECT_REQUEST: 40,
+    DISCONNECT_ACK: 41,
+    DISCONNECT_NAK: 42,
+    COA_REQUEST: 43,
+    COA_ACK: 44,
+    COA_NAK: 45,
+} as const;
+
+// Attribute types the api originates or inspects.
+const ATTR = {
+    USER_NAME: 1,
+    USER_PASSWORD: 2,
+    NAS_IP_ADDRESS: 4,
+    SERVICE_TYPE: 6,
+    FRAMED_IP_ADDRESS: 8,
+    REPLY_MESSAGE: 18,
+    CLASS: 25,
+    VENDOR_SPECIFIC: 26,
+    SESSION_TIMEOUT: 27,
+    IDLE_TIMEOUT: 28,
+    CALLED_STATION_ID: 30,
+    CALLING_STATION_ID: 31,
+    NAS_IDENTIFIER: 32,
+    ACCT_STATUS_TYPE: 40,
+    ACCT_INPUT_OCTETS: 42,
+    ACCT_OUTPUT_OCTETS: 43,
+    ACCT_SESSION_ID: 44,
+    ACCT_SESSION_TIME: 46,
+    ACCT_TERMINATE_CAUSE: 49,
+    ACCT_INPUT_GIGAWORDS: 52,
+    ACCT_OUTPUT_GIGAWORDS: 53,
+    EVENT_TIMESTAMP: 55,
+    PORT_LIMIT: 62,
+    ACCT_INTERIM_INTERVAL: 85,
+    MESSAGE_AUTHENTICATOR: 80,
+} as const;
+
+// Mikrotik vendor-specific attributes (vendor 14988, RouterOS RADIUS page).
+const MIKROTIK_VENDOR_ID = 14988;
+const MIKROTIK_ATTR = {
+    RECV_LIMIT: 1,
+    XMIT_LIMIT: 2,
+    GROUP: 3,
+    RATE_LIMIT: 8,
+    TOTAL_LIMIT: 17,
+    TOTAL_LIMIT_GIGAWORDS: 18,
+} as const;
+
+export const RADIUS_CONSTANTS = { CODE, ATTR, MIKROTIK_VENDOR_ID, MIKROTIK_ATTR };
+
+const GIGAWORD = 2 ** 32;
+const ZERO_AUTH = Buffer.alloc(16);
+const CREDENTIAL_CHARS =
+    'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+const MONTHS = [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
+];
+
+export interface RadiusConfig {
+    // RADIUS server, e.g. "radius://127.0.0.1" or "10.99.0.1:1812" (auth port
+    // defaults to 1812 when omitted). Empty disables direct-to-server packets.
+    serverUrl: string;
+    // Shared secret the RADIUS server knows this api by.
+    secret: string;
+    // RouterOS `/radius/incoming` port on the NAS — the single listener where
+    // the router accepts BOTH Disconnect-Messages and CoA-Requests.
+    dmPort: number;
+    // CoA port towards a RADIUS SERVER (FreeRADIUS convention); not used for
+    // RouterOS targets, which share dmPort.
+    coaPort: number;
+    timeoutMs: number;
+    retries: number;
+    // Cumulative time-bank (noExpiry) packages: Acct-Interim-Interval pushed
+    // to the NAS so bank accounting stays fresh between reconciles.
+    bankInterimSeconds: number;
+}
+
+type AttributeValue = number | string | Uint8Array;
+
+export interface RadiusOutAttribute {
+    type: number;
+    value: AttributeValue;
+    // Set for vendor-specific attributes (wrapped in a VSA TLV).
+    vendor?: number;
+}
+
+export interface RadiusInAttribute {
+    type: number;
+    vendor?: number;
+    data: Uint8Array;
+}
+
+export interface RadiusReply {
+    code: number;
+    attributes: RadiusInAttribute[];
+}
+
+// Everything the portal needs to perform the final hop: submitting the issued
+// hotspot credentials to the NAS servlet login page ($(link-login-only)).
+export interface ActivationRedirect {
+    activationId: string;
+    username: string;
+    password: string;
+    linkLoginOnly: string;
+    dst: string;
+    mac: string;
+}
+
+export interface SessionInfo {
+    radacctId: string;
+    // The NAS-issued Acct-Session-Id (RFC 2866), needed to address
+    // Disconnect-Messages at a specific session.
+    acctSessionId: string;
+    username: string;
+    nasIpAddress: string;
+    callingStationId: string | null;
+    framedIpAddress: string | null;
+    startedAt: Date | null;
+    updatedAt: Date | null;
+    stoppedAt: Date | null;
+    live: boolean;
+    seconds: number;
+    inputOctets: number;
+    outputOctets: number;
+    totalOctets: number;
+    terminateCause: string | null;
+    // Average speed across the session's lifetime so far (closed sessions use
+    // their final counters).
+    avgSpeedBps: number;
+}
+
+export interface ActivationStatus {
+    activationId: string;
+    username: string;
+    packageId: string;
+    packageTitle: string;
+    paymentId: string;
+    activatedAt: Date;
+    expireAt: Date;
+    expired: boolean;
+    sessionLimitSeconds: number;
+    usedSeconds: number;
+    // Bank packages report the remaining CUMULATIVE balance here; regular
+    // packages the remaining per-session allowance.
+    remainingSeconds: number | null;
+    octetsUsed: number;
+    octetsLimit: number | null; // null = unlimited
+    remainingOctets: number | null;
+    online: boolean;
+    liveSessions: SessionInfo[];
+    avgSpeedBps: number;
+    lastActive: Date | null;
+    // Cumulative time-bank (noExpiry packages): the bank is consumed across
+    // sessions within the static validity window; null for regular packages
+    // where remainingSeconds is per-session.
+    bankTotalSeconds: number | null;
+    bankUsedSeconds: number | null;
+    bankRemainingSeconds: number | null;
+}
+
+export interface NetworkUsage {
+    windowMinutes: number;
+    liveSessions: number;
+    liveUsers: number;
+    liveOctets: number;
+    // Sum of per-live-session throughput: what the currently online user base is
+    // transferring right now, averaged over the window (radacct interim
+    // updates keep the counters current between Start/Stop records).
+    aggregateThroughputBps: number;
+    // Mean of the per-session averages over the window.
+    avgSpeedPerSessionBps: number;
+    sessionsStartedInWindow: number;
+    avgSessionSeconds: number;
+    topUsers: Array<{ username: string; octets: number; sessions: number }>;
+}
+
+function randomCredentialPassword(length: number): string {
+    const bytes = randomBytes(length);
+    return Array.from(
+        bytes,
+        (b) => CREDENTIAL_CHARS[b % CREDENTIAL_CHARS.length]!,
+    ).join('');
+}
+
+// Activation id -> hotspot username, deterministic so re-activation of the
+// same payment always maps to the same RADIUS user.
+function activationUsername(activationId: string): string {
+    return `PK-${activationId.replace(/-/g, '').slice(0, 10).toUpperCase()}`;
+}
+
+function attrToOctets(value: AttributeValue): Uint8Array {
+    if (typeof value === 'number') {
+        const buf = Buffer.alloc(4);
+        buf.writeUInt32BE(value >>> 0, 0);
+        return buf;
+    }
+    if (typeof value === 'string') return new TextEncoder().encode(value);
+    return value;
+}
+
+function attrToInt(data: Uint8Array): number {
+    if (data.length < 4) return 0;
+    return Buffer.from(data).readUInt32BE(0);
+}
+
+function attrToString(data: Uint8Array): string {
+    return new TextDecoder().decode(data);
+}
+
+// FreeRADIUS `expiration` module date format ("31 Dec 2026").
+function formatExpiration(date: Date): string {
+    return `${date.getUTCDate()} ${MONTHS[date.getUTCMonth()]} ${date.getUTCFullYear()}`;
+}
+
+export function parseRadiusServerUrl(
+    raw: string,
+): { host: string; port: number } {
+    const trimmed = raw.trim();
+    if (!trimmed) {
+        throw new RadiusError(
+            'RADIUS_URL is not configured; direct RADIUS packets are disabled.',
+        );
+    }
+    const withoutScheme = trimmed.replace(/^(radius|udp):\/\//i, '');
+    const [host, portRaw] = withoutScheme.split(':');
+    if (!host) {
+        throw new RadiusError(`Invalid RADIUS_URL "${raw}"`);
+    }
+    const port = portRaw ? Number.parseInt(portRaw, 10) : 1812;
+    if (!Number.isFinite(port) || port <= 0 || port > 65535) {
+        throw new RadiusError(`Invalid RADIUS_URL port in "${raw}"`);
+    }
+    return { host, port };
+}
+
+export class RadiusClient {
+    private identifier = Math.floor(Math.random() * 256);
+    // Concurrent-call guard: the payment webhook and the client poller can
+    // both trigger activation of the same payment at the same moment; without
+    // this map both would provision a duplicate RADIUS user.
+    private activating = new Map<
+        string,
+        Promise<ActivationRedirect | null>
+    >();
+
+    constructor(private readonly config: RadiusConfig) {}
+
+    // =========================================================================
+    // Package lifecycle (activation / status / deactivation / usage)
+    // =========================================================================
+
+    // Idempotently activates the package attached to a paid package payment and
+    // returns everything the portal needs for the final redirect to the NAS
+    // (credentials + servlet login link). Returns null when the payment does
+    // not exist/is not paid or carries no package.
+    async ensureActivated(
+        paymentId: string,
+    ): Promise<ActivationRedirect | null> {
+        const inFlight = this.activating.get(paymentId);
+        if (inFlight) return inFlight;
+        const run = this.ensureActivatedInner(paymentId).finally(() => {
+            this.activating.delete(paymentId);
+        });
+        this.activating.set(paymentId, run);
+        return run;
+    }
+
+    private async ensureActivatedInner(
+        paymentId: string,
+    ): Promise<ActivationRedirect | null> {
+        const [payment] = await db
+            .select()
+            .from(packagePayments)
+            .where(eq(packagePayments.id, paymentId))
+            .limit(1);
+        if (!payment || payment.status !== 'paid') return null;
+
+        const [pkg] = await db
+            .select()
+            .from(packages)
+            .where(eq(packages.id, payment.packageId))
+            .limit(1);
+        if (!pkg) return null;
+
+        const loginRequest = await this.getLoginRequestForPayment(payment);
+        const existing = await this.getActivationByPayment(payment.id);
+        if (existing) {
+            // Bank packages must show the current balance before the client
+            // is handed credentials; an exhausted bank gets no redirect.
+            if (pkg.noExpiry) {
+                const sync = await this.syncBankAuthorization(
+                    existing.id,
+                    pkg,
+                );
+                if (!sync.active) return null;
+            } else {
+                // Heal a damaged activation whose password row vanished
+                // (manual edits / partial cleanup rotate it back in rather
+                // than stranding a paid customer).
+                const username = activationUsername(existing.id);
+                if (!(await this.getProvisionedPassword(username))) {
+                    await db.insert(radcheck).values({
+                        username,
+                        attribute: 'Cleartext-Password',
+                        op: ':=',
+                        value: randomCredentialPassword(12),
+                    });
+                }
+            }
+            return await this.buildRedirect(existing.id, loginRequest);
+        }
+
+        const activation = await this.provisionActivation(payment, pkg);
+        return this.buildRedirect(activation.id, loginRequest);
+    }
+
+    // Credentials of the user's most recent active (non-expired) activation,
+    // used by the portal login-complete flow to send a returning customer back
+    // to the NAS with their package login instead of a fresh one-off hotspot
+    // user. Bank activations are reconciled first so the login they receive
+    // carries the current balance as its Session-Timeout; exhausted ones are
+    // skipped. Null when nothing usable is active.
+    async getActiveActivationCredentials(
+        userId: string,
+    ): Promise<{
+        activationId: string;
+        username: string;
+        password: string;
+    } | null> {
+        const rows = await db
+            .select({ activation: activatedPackages, pkg: packages })
+            .from(activatedPackages)
+            .innerJoin(packages, eq(activatedPackages.packageId, packages.id))
+            .where(
+                and(
+                    eq(activatedPackages.userId, userId),
+                    gte(activatedPackages.expireAt, new Date()),
+                ),
+            )
+            .orderBy(desc(activatedPackages.activatedAt))
+            .limit(5);
+        for (const row of rows) {
+            if (row.pkg.noExpiry) {
+                const sync = await this.syncBankAuthorization(
+                    row.activation.id,
+                    row.pkg,
+                );
+                if (!sync.active) continue;
+            }
+            const username = activationUsername(row.activation.id);
+            const password = await this.getProvisionedPassword(username);
+            if (!password) continue;
+            return { activationId: row.activation.id, username, password };
+        }
+        return null;
+    }
+
+    // The user's active (non-expired) activations enriched with live RADIUS
+    // usage — the portal status payload (remaining time/bytes, speeds).
+    async getUserPackageStatuses(userId: string) {
+        const rows = await db
+            .select({
+                activation: activatedPackages,
+                pkg: packages,
+            })
+            .from(activatedPackages)
+            .innerJoin(packages, eq(activatedPackages.packageId, packages.id))
+            .where(
+                and(
+                    eq(activatedPackages.userId, userId),
+                    gte(activatedPackages.expireAt, new Date()),
+                ),
+            )
+            .orderBy(desc(activatedPackages.activatedAt));
+
+        const out = [];
+        for (const row of rows) {
+            const status = await this.activationStatusFromRows(
+                row.activation.id,
+                row.activation,
+                row.pkg,
+            );
+            out.push({
+                ...status,
+                maxDevices: row.pkg.maxDevices,
+                price: Number(row.pkg.price),
+                uploadRate: row.pkg.uploadRate,
+                downloadRate: row.pkg.downloadRate,
+                sessionLength: row.pkg.sessionLength,
+                noExpiry: row.pkg.noExpiry,
+                category: row.pkg.category,
+            });
+        }
+        return out;
+    }
+
+    // Full status + usage of one activation: remaining time/bytes, live
+    // sessions, average speed.
+    async getPackageStatus(
+        activationId: string,
+    ): Promise<ActivationStatus | null> {
+        const [row] = await db
+            .select({ activation: activatedPackages, pkg: packages })
+            .from(activatedPackages)
+            .innerJoin(packages, eq(activatedPackages.packageId, packages.id))
+            .where(eq(activatedPackages.id, activationId))
+            .limit(1);
+        if (!row) return null;
+        return this.activationStatusFromRows(activationId, row.activation, row.pkg);
+    }
+
+    // Deactivates a package: removes the RADIUS provisioning (no further
+    // logins), expires the activation record, and terminates every live
+    // session with RFC 5176 Disconnect-Messages sent to each NAS carrying a
+    // session (RouterOS `/radius/incoming`). Provisioning removal is
+    // authoritative; a missed disconnect still ends the session at the next
+    // Session-Timeout/Idle-Timeout boundary.
+    async deactivateActivation(activationId: string): Promise<{
+        ok: boolean;
+        message: string;
+        sessionsFound: number;
+        sessionsDisconnected: number;
+        failures: Array<{ nasIpAddress: string; reason: string }>;
+    }> {
+        const [activation] = await db
+            .select()
+            .from(activatedPackages)
+            .where(eq(activatedPackages.id, activationId))
+            .limit(1);
+        if (!activation) {
+            return {
+                ok: false,
+                message: 'Unknown activation',
+                sessionsFound: 0,
+                sessionsDisconnected: 0,
+                failures: [],
+            };
+        }
+
+        const username = activationUsername(activationId);
+        const liveSessions = await this.getSessions({
+            username,
+            activationId,
+            liveOnly: true,
+        });
+
+        await Promise.all([
+            db.delete(radcheck).where(eq(radcheck.username, username)),
+            db.delete(radreply).where(eq(radreply.username, username)),
+            db
+                .update(activatedPackages)
+                .set({ expireAt: new Date() })
+                .where(eq(activatedPackages.id, activationId)),
+        ]);
+
+        // One Disconnect-Request per live session, addressed by the NAS
+        // tunnel IP that its accounting rows carry.
+        let sessionsDisconnected = 0;
+        const failures: Array<{ nasIpAddress: string; reason: string }> = [];
+        for (const session of liveSessions) {
+            try {
+                const ack = await this.disconnectLiveSession(username, session);
+                if (ack) {
+                    sessionsDisconnected++;
+                    await this.closeSessionRecord(session);
+                } else {
+                    failures.push({
+                        nasIpAddress: session.nasIpAddress,
+                        reason: 'NAS answered Disconnect-NAK',
+                    });
+                }
+            } catch (err) {
+                failures.push({
+                    nasIpAddress: session.nasIpAddress,
+                    reason: err instanceof Error ? err.message : String(err),
+                });
+            }
+        }
+
+        const ok = failures.length === 0;
+        const message = ok
+            ? liveSessions.length === 0
+                ? 'Package deactivated'
+                : 'Package deactivated and all live sessions terminated'
+            : `Package deactivated but ${failures.length} session(s) could not be terminated at the NAS`;
+        return {
+            ok,
+            message,
+            sessionsFound: liveSessions.length,
+            sessionsDisconnected,
+            failures,
+        };
+    }
+
+    // Disconnects live session(s) of an activation at the NAS via RADIUS
+    // Disconnect-Messages WITHOUT touching the package: provisioning
+    // (radcheck/radreply) stays intact and the activation keeps its validity,
+    // so the client (or another device) can log straight back in. This is the
+    // "free a device slot" operation used by the portal's connected-devices
+    // screen. Pass sessionId (radacct id) to disconnect one device only;
+    // omit it to disconnect every live session of the package.
+    //
+    // A Disconnect-ACK also closes the accounting record locally
+    // (Acct-Terminate-Cause Admin-Reset): the session is provably terminated,
+    // and a late Accounting-Stop from the NAS then matches no open row.
+    async disconnectDeviceSessions(
+        activationId: string,
+        opts: { sessionId?: string } = {},
+    ): Promise<{
+        ok: boolean;
+        message: string;
+        sessionsFound: number;
+        sessionsDisconnected: number;
+        failures: Array<{ nasIpAddress: string; reason: string }>;
+    }> {
+        const [activation] = await db
+            .select()
+            .from(activatedPackages)
+            .where(eq(activatedPackages.id, activationId))
+            .limit(1);
+        if (!activation) {
+            return {
+                ok: false,
+                message: 'Unknown activation',
+                sessionsFound: 0,
+                sessionsDisconnected: 0,
+                failures: [],
+            };
+        }
+
+        const username = activationUsername(activationId);
+        let liveSessions = await this.getSessions({
+            username,
+            activationId,
+            liveOnly: true,
+        });
+        if (opts.sessionId) {
+            liveSessions = liveSessions.filter(
+                (s) => s.radacctId === opts.sessionId,
+            );
+        }
+        if (liveSessions.length === 0) {
+            return {
+                ok: true,
+                message: 'No active session to disconnect',
+                sessionsFound: 0,
+                sessionsDisconnected: 0,
+                failures: [],
+            };
+        }
+
+        let sessionsDisconnected = 0;
+        const failures: Array<{ nasIpAddress: string; reason: string }> = [];
+        for (const session of liveSessions) {
+            try {
+                const ack = await this.disconnectLiveSession(username, session);
+                if (ack) {
+                    sessionsDisconnected++;
+                    await this.closeSessionRecord(session);
+                } else {
+                    failures.push({
+                        nasIpAddress: session.nasIpAddress,
+                        reason: 'NAS answered Disconnect-NAK',
+                    });
+                }
+            } catch (err) {
+                failures.push({
+                    nasIpAddress: session.nasIpAddress,
+                    reason: err instanceof Error ? err.message : String(err),
+                });
+            }
+        }
+
+        const ok = failures.length === 0;
+        return {
+            ok,
+            message: ok
+                ? 'Session disconnected — the package stays active'
+                : `${failures.length} session(s) could not be disconnected at the NAS`,
+            sessionsFound: liveSessions.length,
+            sessionsDisconnected,
+            failures,
+        };
+    }
+
+    // =========================================================================
+    // Metrics
+    // =========================================================================
+
+    // Admin-facing aggregate usage over a trailing window: live session/user
+    // counts, current throughput and per-session average speed, sessions
+    // started inside the window, and the heaviest users.
+    async getNetworkUsage(windowMinutes: number): Promise<NetworkUsage> {
+        const windowMs = Math.max(1, windowMinutes) * 60_000;
+        const windowStart = new Date(Date.now() - windowMs);
+        const windowSeconds = windowMs / 1000;
+        const now = Date.now();
+
+        const liveRows = await db
+            .select()
+            .from(radacct)
+            .where(
+                and(isNull(radacct.acctstoptime), isNotNull(radacct.acctstarttime)),
+            );
+
+        let liveOctets = 0;
+        let aggregateBps = 0;
+        const sessionRates: number[] = [];
+        const liveUsers = new Set<string>();
+        for (const row of liveRows) {
+            const octets =
+                Number(row.acctinputoctets ?? 0) +
+                Number(row.acctoutputoctets ?? 0);
+            liveOctets += octets;
+            if (row.username) liveUsers.add(row.username);
+            const elapsed = row.acctstarttime
+                ? Math.max(
+                      1,
+                      Math.min(
+                          windowSeconds,
+                          (now - row.acctstarttime.getTime()) / 1000,
+                      ),
+                  )
+                : windowSeconds;
+            const bps = (octets * 8) / elapsed;
+            aggregateBps += bps;
+            sessionRates.push(bps);
+        }
+
+        const [windowStats] = await db
+            .select({
+                sessions: sql<number>`count(*)`,
+                avgSeconds: sql<number>`coalesce(avg(${radacct.acctsessiontime}), 0)::float8`,
+            })
+            .from(radacct)
+            .where(gte(radacct.acctstarttime, windowStart));
+
+        const topUsers = await db
+            .select({
+                username: radacct.username,
+                octets: sql<number>`coalesce(sum(${radacct.acctinputoctets} + ${radacct.acctoutputoctets}), 0)::float8`,
+                sessions: sql<number>`count(*)`,
+            })
+            .from(radacct)
+            .where(gte(radacct.acctstarttime, windowStart))
+            .groupBy(radacct.username)
+            .orderBy(desc(sql`sum(${radacct.acctinputoctets} + ${radacct.acctoutputoctets})`))
+            .limit(10);
+
+        return {
+            windowMinutes,
+            liveSessions: liveRows.length,
+            liveUsers: liveUsers.size,
+            liveOctets,
+            aggregateThroughputBps: Math.round(aggregateBps),
+            avgSpeedPerSessionBps: sessionRates.length
+                ? Math.round(
+                      sessionRates.reduce((a, b) => a + b, 0) /
+                          sessionRates.length,
+                  )
+                : 0,
+            sessionsStartedInWindow: Number(windowStats?.sessions ?? 0),
+            avgSessionSeconds: Number(windowStats?.avgSeconds ?? 0),
+            topUsers: topUsers.map((u) => ({
+                username: u.username ?? '',
+                octets: Number(u.octets),
+                sessions: Number(u.sessions),
+            })),
+        };
+    }
+
+    // Live session board for admins (most recent first). Anchor rows (the
+    // NOT-NULL-locked activation placeholders) have no accounting start time,
+    // so a real live session is: no stop record yet, but already started.
+    async getLiveSessions(limit = 100): Promise<SessionInfo[]> {
+        const rows = await db
+            .select()
+            .from(radacct)
+            .where(
+                and(isNull(radacct.acctstoptime), isNotNull(radacct.acctstarttime)),
+            )
+            .orderBy(desc(radacct.acctstarttime))
+            .limit(limit);
+        return rows.map((row) => this.sessionInfoFromRow(row));
+    }
+
+    // =========================================================================
+    // Diagnostics / direct protocol
+    // =========================================================================
+
+    // Validates credentials against the RADIUS SERVER with a real PAP
+    // Access-Request. Hotspot logins from the NAS use CHAP; PAP against the
+    // same radcheck row is equivalent for a server-side provisioning check.
+    async checkCredentials(
+        username: string,
+        password: string,
+    ): Promise<{ accepted: boolean; message: string }> {
+        const target = parseRadiusServerUrl(this.config.serverUrl);
+        if (!this.config.secret) {
+            throw new RadiusError(
+                'RADIUS_SECRET is not configured; cannot sign RADIUS packets.',
+            );
+        }
+        const reply = await this.sendPacket(
+            CODE.ACCESS_REQUEST,
+            target,
+            this.config.secret,
+            [
+                { type: ATTR.USER_NAME, value: username },
+                { type: ATTR.USER_PASSWORD, value: password },
+                { type: ATTR.NAS_IDENTIFIER, value: 'radii-api' },
+            ],
+            new Set([CODE.ACCESS_ACCEPT, CODE.ACCESS_REJECT]),
+        );
+        const messageAttr = reply.attributes.find(
+            (a) => a.type === ATTR.REPLY_MESSAGE,
+        );
+        return {
+            accepted: reply.code === CODE.ACCESS_ACCEPT,
+            message: messageAttr
+                ? attrToString(messageAttr.data)
+                : reply.code === CODE.ACCESS_ACCEPT
+                  ? 'Access-Accept'
+                  : 'Access-Reject',
+        };
+    }
+
+    // RFC 5176 Disconnect-Request towards a NAS (RouterOS `/radius/incoming`).
+    // RouterOS terminates the matching session immediately. Returns true on
+    // Disconnect-ACK.
+    async sendDisconnectRequest(
+        target: { host: string; port: number },
+        secret: string,
+        attributes: RadiusOutAttribute[],
+    ): Promise<boolean> {
+        const reply = await this.sendPacket(
+            CODE.DISCONNECT_REQUEST,
+            target,
+            secret,
+            this.withEventTimestamp(attributes),
+            new Set([CODE.DISCONNECT_ACK, CODE.DISCONNECT_NAK]),
+        );
+        return reply.code === CODE.DISCONNECT_ACK;
+    }
+
+    // RFC 5176 CoA-Request. RouterOS live-changes (per its RADIUS manual page)
+    // Mikrotik-Rate-Limit, byte limits, Mikrotik-Group, Filter-Id,
+    // Mikrotik-Mark-Id, advertise attributes, Session-Timeout, Idle-Timeout
+    // and Port-Limit — addresses, pools and routes need a disconnect first.
+    // Returns true on CoA-ACK. Convenience builders below compose the
+    // Mikrotik VSAs.
+    async sendCoARequest(
+        target: { host: string; port: number },
+        secret: string,
+        attributes: RadiusOutAttribute[],
+    ): Promise<boolean> {
+        const reply = await this.sendPacket(
+            CODE.COA_REQUEST,
+            target,
+            secret,
+            this.withEventTimestamp(attributes),
+            new Set([CODE.COA_ACK, CODE.COA_NAK]),
+        );
+        return reply.code === CODE.COA_ACK;
+    }
+
+    // CoA helper: change a live session's Mikrotik-Rate-Limit and/or
+    // Session-Timeout in place (e.g. throttling before a quota kicks in).
+    // RouterOS accepts CoA-Requests on the same `/radius/incoming` listener
+    // as Disconnect-Messages (no separate CoA port), so the NAS-bound target
+    // uses dmPort. The nasIpAddress is the NAS-IP-Address recorded in
+    // radacct — the NAS WireGuard tunnel address (fixed by `src-address` in
+    // the setup script), which is exactly the route the server reaches it on.
+    async changeSessionLimits(opts: {
+        nasIpAddress: string;
+        username: string;
+        rateLimit?: string; // "rx/tx k|M" router-perspective format
+        sessionTimeoutSeconds?: number;
+    }): Promise<boolean> {
+        const secret = await this.getNasSecret(opts.nasIpAddress);
+        if (!secret) {
+            throw new RadiusError(
+                `No shared secret registered for NAS ${opts.nasIpAddress}`,
+            );
+        }
+        const attrs: RadiusOutAttribute[] = [
+            { type: ATTR.USER_NAME, value: opts.username },
+        ];
+        if (opts.rateLimit) {
+            attrs.push({
+                type: MIKROTIK_ATTR.RATE_LIMIT,
+                vendor: MIKROTIK_VENDOR_ID,
+                value: opts.rateLimit,
+            });
+        }
+        if (opts.sessionTimeoutSeconds !== undefined) {
+            attrs.push({
+                type: ATTR.SESSION_TIMEOUT,
+                value: opts.sessionTimeoutSeconds,
+            });
+        }
+        return this.sendCoARequest(
+            { host: opts.nasIpAddress, port: this.config.dmPort },
+            secret,
+            attrs,
+        );
+    }
+
+    // =========================================================================
+    // Cumulative time bank (noExpiry packages)
+    // =========================================================================
+
+    // Balance of an activation's time bank: the package's sessionLength is the
+    // TOTAL minutes consumable across sessions within the validity window.
+    // Usage = closed sessions' Acct-Session-Time + live sessions' elapsed
+    // time (accounting interim updates keep the closed-figure side fresh).
+    async getBankUsage(
+        activationId: string,
+    ): Promise<{
+        totalSeconds: number;
+        usedSeconds: number;
+        remainingSeconds: number;
+    } | null> {
+        const [row] = await db
+            .select({ pkg: packages })
+            .from(activatedPackages)
+            .innerJoin(packages, eq(activatedPackages.packageId, packages.id))
+            .where(eq(activatedPackages.id, activationId))
+            .limit(1);
+        if (!row) return null;
+
+        const totalSeconds = row.pkg.sessionLength * 60;
+        const sessions = await this.getSessions({
+            username: activationUsername(activationId),
+            activationId,
+        });
+        let usedSeconds = 0;
+        for (const session of sessions) {
+            usedSeconds += session.seconds;
+        }
+        return {
+            totalSeconds,
+            usedSeconds: Math.round(usedSeconds),
+            remainingSeconds: Math.max(
+                0,
+                Math.round(totalSeconds - usedSeconds),
+            ),
+        };
+    }
+
+    // Reconciles one bank activation against its current balance:
+    //  - balance left: radreply Session-Timeout becomes the remaining bank
+    //    (the next login gets the fresh cap) and every live session receives
+    //    a CoA Session-Timeout with the same value, so the NAS enforces the
+    //    cumulative cap mid-session. Concurrent sessions each carry the FULL
+    //    remaining balance; the drift is bounded by the reconcile interval.
+    //  - balance gone: the credential is invalidated (radcheck
+    //    `Auth-Type := Reject`) so future logins fail at the RADIUS server,
+    //    and live sessions are disconnected at the NAS.
+    // Live on every login/redirect path too, so reconnects always carry the
+    // current balance even between reconciler ticks.
+    async syncBankAuthorization(
+        activationId: string,
+        pkg: typeof packages.$inferSelect,
+    ): Promise<{ active: boolean; remainingSeconds: number }> {
+        if (!pkg.noExpiry) {
+            return { active: true, remainingSeconds: pkg.sessionLength * 60 };
+        }
+
+        const username = activationUsername(activationId);
+        const usage = await this.getBankUsage(activationId);
+        const remainingSeconds = usage?.remainingSeconds ?? 0;
+        const liveSessions = await this.getSessions({
+            username,
+            activationId,
+            liveOnly: true,
+        });
+
+        if (remainingSeconds <= 0) {
+            await db.transaction(async (tx) => {
+                await tx.delete(radcheck).where(eq(radcheck.username, username));
+                await tx.insert(radcheck).values({
+                    username,
+                    attribute: 'Auth-Type',
+                    op: ':=',
+                    value: 'Reject',
+                });
+            });
+            for (const session of liveSessions) {
+                try {
+                    if (await this.disconnectLiveSession(username, session)) {
+                        await this.closeSessionRecord(session);
+                    }
+                } catch (err) {
+                    console.error(
+                        `[radius] bank-exhaust disconnect failed on ${session.nasIpAddress}:`,
+                        err,
+                    );
+                }
+            }
+            return { active: false, remainingSeconds: 0 };
+        }
+
+        await this.upsertReplyAttribute(
+            username,
+            'Session-Timeout',
+            String(remainingSeconds),
+        );
+        for (const session of liveSessions) {
+            await this
+                .coaSessionTimeout(username, session, remainingSeconds)
+                .catch((err) =>
+                    console.error(
+                        `[radius] bank CoA failed on ${session.nasIpAddress}:`,
+                        err,
+                    ),
+                );
+        }
+        return { active: true, remainingSeconds };
+    }
+
+    // Periodic bank reconciliation: every active bank activation gets its
+    // balance re-checked (caps pushed / exhausted ones cut), and activations
+    // whose validity window has closed still get their live sessions
+    // disconnected (the radcheck Expiration date already blocks fresh logins,
+    // but running sessions survive without this sweep).
+    async reconcileBankPackages(): Promise<number> {
+        const rows = await db
+            .select({ activation: activatedPackages, pkg: packages })
+            .from(activatedPackages)
+            .innerJoin(packages, eq(activatedPackages.packageId, packages.id))
+            .where(eq(packages.noExpiry, true));
+
+        let touched = 0;
+        for (const row of rows) {
+            try {
+                if (row.activation.expireAt.getTime() < Date.now()) {
+                    const username = activationUsername(row.activation.id);
+                    const liveSessions = await this.getSessions({
+                        username,
+                        activationId: row.activation.id,
+                        liveOnly: true,
+                    });
+                    for (const session of liveSessions) {
+                        try {
+                            if (await this.disconnectLiveSession(username, session)) {
+                                await this.closeSessionRecord(session);
+                            }
+                        } catch (err) {
+                            console.error(
+                                `[radius] expiry disconnect failed on ${session.nasIpAddress}:`,
+                                err,
+                            );
+                        }
+                    }
+                    if (liveSessions.length) touched++;
+                    continue;
+                }
+                await this.syncBankAuthorization(row.activation.id, row.pkg);
+                touched++;
+            } catch (err) {
+                console.error(
+                    `[radius] bank reconcile failed for activation ${row.activation.id}:`,
+                    err,
+                );
+            }
+        }
+        return touched;
+    }
+
+    // =========================================================================
+    // Internals — provisioning (FreeRADIUS SQL backend)
+    // =========================================================================
+
+    private withEventTimestamp(
+        attributes: RadiusOutAttribute[],
+    ): RadiusOutAttribute[] {
+        if (attributes.some((a) => a.type === ATTR.EVENT_TIMESTAMP)) {
+            return attributes;
+        }
+        return [
+            ...attributes,
+            {
+                type: ATTR.EVENT_TIMESTAMP,
+                value: Math.floor(Date.now() / 1000),
+            },
+        ];
+    }
+
+    private async provisionActivation(
+        payment: typeof packagePayments.$inferSelect,
+        pkg: typeof packages.$inferSelect,
+    ) {
+        const sessionSeconds = pkg.sessionLength * 60;
+        const validityDays = pkg.validityDays ?? 30;
+        // noExpiry = cumulative time bank: sessionLength minutes may be
+        // consumed across sessions within the static validity window
+        // (validityDays from activation). Regular packages expire one
+        // sessionLength after activation (no separate validity field exists).
+        const expireAt = pkg.noExpiry
+            ? new Date(Date.now() + validityDays * 86_400_000)
+            : new Date(Date.now() + sessionSeconds * 1000);
+
+        const activationId = randomUUID();
+        const username = activationUsername(activationId);
+        const password = randomCredentialPassword(12);
+
+        // activated_packages.radacct_id is NOT NULL but the NAS only creates
+        // accounting rows once the first session opens; insert an anchor row
+        // now. Its Class cookie is the activation id, which the RADIUS reply
+        // sets on every future Access-Accept and accounting echoes back into
+        // radacct.class — that is the correlation key for usage and deauth.
+        const anchorNasIp =
+            (await this.getLoginRequestNasIp(payment)) ?? '0.0.0.0';
+
+        const [activation] = await db.transaction(async (tx) => {
+            const [anchor] = await tx
+                .insert(radacct)
+                .values({
+                    acctsessionid: `RADII-${activationId.replace(/-/g, '').slice(0, 12)}`,
+                    acctuniqueid: randomUUID(),
+                    username,
+                    nasipaddress: anchorNasIp,
+                    servicetype: 'Package-Activation',
+                    class: activationId,
+                })
+                .returning();
+
+            await tx.insert(radcheck).values(
+                [
+                    {
+                        username,
+                        attribute: 'Cleartext-Password',
+                        op: ':=',
+                        value: password,
+                    },
+                    // Calendar cutoff for ALL packages: bank packages keep
+                    // their unused balance unusable after the validity window;
+                    // regular packages stop logging in once their allowance
+                    // window closes.
+                    {
+                        username,
+                        attribute: 'Expiration',
+                        op: ':=',
+                        value: formatExpiration(expireAt),
+                    },
+                ],
+            );
+
+            await tx
+                .insert(radreply)
+                .values(
+                    this.buildReplyAttributes(
+                        username,
+                        activationId,
+                        pkg,
+                        sessionSeconds,
+                    ),
+                );
+
+            const [row] = await tx
+                .insert(activatedPackages)
+                .values({
+                    id: activationId,
+                    packagePaymentId: payment.id,
+                    radacctId: anchor.radacctid,
+                    userId: payment.userId,
+                    packageId: pkg.id,
+                    activatedAt: new Date(),
+                    expireAt,
+                })
+                .returning();
+            return [row];
+        });
+        return activation;
+    }
+
+    // Access-Accept attributes pushed through radreply on every login:
+    // Session-Timeout (session length), Port-Limit (max simultaneous logins —
+    // RouterOS maps this to shared-users), Mikrotik-Rate-Limit (first value =
+    // client upload / router rx, 'k'/'M' units), Mikrotik-Total-Limit
+    // (+Gigawords above 4 GiB) for the byte quota, and the Class cookie for
+    // accounting correlation. Bank (noExpiry) packages additionally request a
+    // short Acct-Interim-Interval so the cumulative-time counters in radacct
+    // stay fresh; their Session-Timeout is the remaining bank balance and is
+    // re-synced at every login and by the bank reconciler.
+    private buildReplyAttributes(
+        username: string,
+        activationId: string,
+        pkg: typeof packages.$inferSelect,
+        sessionSeconds: number,
+    ): Array<typeof radreply.$inferInsert> {
+        const rows: Array<typeof radreply.$inferInsert> = [
+            {
+                username,
+                attribute: 'Session-Timeout',
+                op: '=',
+                value: String(sessionSeconds),
+            },
+            {
+                username,
+                attribute: 'Port-Limit',
+                op: '=',
+                value: String(pkg.maxDevices),
+            },
+            { username, attribute: 'Class', op: '=', value: activationId },
+        ];
+
+        if (pkg.noExpiry) {
+            rows.push({
+                username,
+                attribute: 'Acct-Interim-Interval',
+                op: '=',
+                value: String(this.config.bankInterimSeconds),
+            });
+        }
+
+        if (pkg.uploadRate > 0 || pkg.downloadRate > 0) {
+            rows.push({
+                username,
+                attribute: 'Mikrotik-Rate-Limit',
+                op: '=',
+                // Package rates are Kbps; MikroTik's 'k' suffix denotes
+                // thousands. 0 is read as unlimited by RouterOS queuing.
+                value: `${pkg.uploadRate}k/${pkg.downloadRate}k`,
+            });
+        }
+
+        const quotaBytes = (pkg.downloadQuota + pkg.uploadQuota) * 1024;
+        if (quotaBytes > 0) {
+            rows.push({
+                username,
+                attribute: 'Mikrotik-Total-Limit',
+                op: '=',
+                value: String(quotaBytes % GIGAWORD),
+            });
+            if (quotaBytes >= GIGAWORD) {
+                rows.push({
+                    username,
+                    attribute: 'Mikrotik-Total-Limit-Gigawords',
+                    op: '=',
+                    value: String(Math.floor(quotaBytes / GIGAWORD)),
+                });
+            }
+        }
+        return rows;
+    }
+
+    private async buildRedirect(
+        activationId: string,
+        loginRequest: (typeof hotspotLoginRequest.$inferSelect) | null,
+    ): Promise<ActivationRedirect | null> {
+        if (!loginRequest?.linkLoginOnly) return null;
+        const username = activationUsername(activationId);
+        const password = await this.getProvisionedPassword(username);
+        if (!password) return null;
+        return {
+            activationId,
+            username,
+            password,
+            linkLoginOnly: loginRequest.linkLoginOnly,
+            dst: loginRequest.linkOrig ?? '',
+            mac: loginRequest.mac,
+        };
+    }
+
+    private async getProvisionedPassword(
+        username: string,
+    ): Promise<string | null> {
+        const [row] = await db
+            .select({ value: radcheck.value })
+            .from(radcheck)
+            .where(
+                and(
+                    eq(radcheck.username, username),
+                    eq(radcheck.attribute, 'Cleartext-Password'),
+                ),
+            )
+            .limit(1);
+        return row?.value ?? null;
+    }
+
+    private async getActivationByPayment(paymentId: string) {
+        const [row] = await db
+            .select()
+            .from(activatedPackages)
+            .where(eq(activatedPackages.packagePaymentId, paymentId))
+            .orderBy(desc(activatedPackages.createdAt))
+            .limit(1);
+        return row ?? null;
+    }
+
+    // The login request that started the purchase, carried in the initiating
+    // transaction's metadata — it supplies the NAS servlet links for the
+    // redirect back to MikroTik.
+    private async getLoginRequestForPayment(
+        payment: typeof packagePayments.$inferSelect,
+    ) {
+        if (!payment.transaction) return null;
+        const [tx] = await db
+            .select({ metadata: transaction.metadata })
+            .from(transaction)
+            .where(eq(transaction.id, payment.transaction))
+            .limit(1);
+        const loginRequestId = (
+            tx?.metadata as { loginRequestId?: string } | null
+        )?.loginRequestId;
+        if (!loginRequestId) return null;
+        const [row] = await db
+            .select()
+            .from(hotspotLoginRequest)
+            .where(eq(hotspotLoginRequest.id, loginRequestId))
+            .limit(1);
+        return row ?? null;
+    }
+
+    private async getLoginRequestNasIp(
+        payment: typeof packagePayments.$inferSelect,
+    ): Promise<string | null> {
+        const loginRequest = await this.getLoginRequestForPayment(payment);
+        if (!loginRequest) return null;
+        const [script] = await db
+            .select({ wgClientIp: nasSetupScript.wgClientIp })
+            .from(nasSetupScript)
+            .where(eq(nasSetupScript.nasDeviceId, loginRequest.nasDeviceId))
+            .limit(1);
+        return script?.wgClientIp ?? null;
+    }
+
+    private async getNasSecret(nasIpAddress: string): Promise<string | null> {
+        const [row] = await db
+            .select({ secret: nas.secret })
+            .from(nas)
+            .where(eq(nas.nasname, nasIpAddress))
+            .limit(1);
+        return row?.secret ?? null;
+    }
+
+    // Replace-or-insert one radreply attribute row (free-format reply
+    // attributes such as Session-Timeout that the reconciler maintains).
+    private async upsertReplyAttribute(
+        username: string,
+        attribute: string,
+        value: string,
+    ): Promise<void> {
+        await db.transaction(async (tx) => {
+            await tx
+                .delete(radreply)
+                .where(
+                    and(
+                        eq(radreply.username, username),
+                        eq(radreply.attribute, attribute),
+                    ),
+                );
+            await tx
+                .insert(radreply)
+                .values({ username, attribute, op: '=', value });
+        });
+    }
+
+    // RFC 5176 Disconnect-Request for one live session, addressed at the NAS
+    // tunnel IP its accounting rows carry. Throws on transport failure;
+    // Disconnect-NAK resolves to false.
+    private async disconnectLiveSession(
+        username: string,
+        session: SessionInfo,
+    ): Promise<boolean> {
+        const secret = await this.getNasSecret(session.nasIpAddress);
+        if (!secret) {
+            throw new RadiusError(
+                `No shared secret registered for NAS ${session.nasIpAddress}`,
+            );
+        }
+        const attrs: RadiusOutAttribute[] = [
+            { type: ATTR.USER_NAME, value: username },
+            { type: ATTR.ACCT_SESSION_ID, value: session.acctSessionId },
+        ];
+        if (session.callingStationId) {
+            attrs.push({
+                type: ATTR.CALLING_STATION_ID,
+                value: session.callingStationId,
+            });
+        }
+        return this.sendDisconnectRequest(
+            { host: session.nasIpAddress, port: this.config.dmPort },
+            secret,
+            attrs,
+        );
+    }
+
+    // CoA-Request pushing a new Session-Timeout onto one live session
+    // (RouterOS honours it on `/radius/incoming`).
+    private async coaSessionTimeout(
+        username: string,
+        session: SessionInfo,
+        seconds: number,
+    ): Promise<boolean> {
+        const secret = await this.getNasSecret(session.nasIpAddress);
+        if (!secret) {
+            throw new RadiusError(
+                `No shared secret registered for NAS ${session.nasIpAddress}`,
+            );
+        }
+        return this.sendCoARequest(
+            { host: session.nasIpAddress, port: this.config.dmPort },
+            secret,
+            [
+                { type: ATTR.USER_NAME, value: username },
+                { type: ATTR.ACCT_SESSION_ID, value: session.acctSessionId },
+                { type: ATTR.SESSION_TIMEOUT, value: seconds },
+            ],
+        );
+    }
+
+    // Closes an accounting record after a confirmed (ACKed) disconnect:
+    // stop time + Admin-Reset cause (RFC 2866 §5.10 terminology, the value
+    // FreeRADIUS itself stores for admin kills). Only matches rows still open,
+    // so a concurrent Accounting-Stop can never be double-applied. Session
+    // time is bumped to the actual elapsed time when the last interim update
+    // lagged behind it.
+    private async closeSessionRecord(session: SessionInfo): Promise<void> {
+        await db
+            .update(radacct)
+            .set({
+                acctstoptime: new Date(),
+                acctterminatecause: 'Admin-Reset',
+                acctsessiontime: BigInt(session.seconds),
+            })
+            .where(
+                and(
+                    eq(radacct.radacctid, BigInt(session.radacctId)),
+                    isNull(radacct.acctstoptime),
+                ),
+            );
+    }
+
+    // =========================================================================
+    // Internals — accounting correlation + usage math
+    // =========================================================================
+
+    // Accounting rows of an activation. The Class cookie set at
+    // authentication is echoed unchanged into every Accounting-Request
+    // (RouterOS), so radacct rows correlate by class; matching by username
+    // covers rows written by servers that strip Class.
+    private async getSessions(opts: {
+        username: string;
+        activationId: string;
+        liveOnly?: boolean;
+        limit?: number;
+    }): Promise<SessionInfo[]> {
+        const match = or(
+            eq(radacct.username, opts.username),
+            eq(radacct.class, opts.activationId),
+        );
+        const rows = await db
+            .select()
+            .from(radacct)
+            .where(
+                opts.liveOnly
+                    ? and(
+                          match,
+                          isNull(radacct.acctstoptime),
+                          // Exclude the activation anchor rows, which were never
+                          // started by accounting (no acctstarttime).
+                          isNotNull(radacct.acctstarttime),
+                      )
+                    : match,
+            )
+            .orderBy(desc(radacct.acctstarttime))
+            .limit(opts.limit ?? 200);
+        return rows.map((row) => this.sessionInfoFromRow(row));
+    }
+
+    private sessionInfoFromRow(
+        row: typeof radacct.$inferSelect,
+    ): SessionInfo {
+        const inputOctets = Number(row.acctinputoctets ?? 0);
+        const outputOctets = Number(row.acctoutputoctets ?? 0);
+        // Live = started by accounting and not yet stopped; the activation
+        // anchor rows (no start record) are never live.
+        const live = row.acctstoptime === null && row.acctstarttime !== null;
+        const seconds = live
+            ? row.acctstarttime
+                ? Math.max(0, (Date.now() - row.acctstarttime.getTime()) / 1000)
+                : 0
+            : Number(row.acctsessiontime ?? 0);
+        const totalOctets = inputOctets + outputOctets;
+        return {
+            radacctId: String(row.radacctid),
+            acctSessionId: row.acctsessionid,
+            username: row.username ?? '',
+            nasIpAddress: row.nasipaddress,
+            callingStationId: row.callingstationid,
+            framedIpAddress: row.framedipaddress,
+            startedAt: row.acctstarttime,
+            updatedAt: row.acctupdatetime,
+            stoppedAt: row.acctstoptime,
+            live,
+            seconds: Math.round(seconds),
+            inputOctets,
+            outputOctets,
+            totalOctets,
+            terminateCause: row.acctterminatecause,
+            avgSpeedBps:
+                seconds > 0 ? Math.round((totalOctets * 8) / seconds) : 0,
+        };
+    }
+
+    private async activationStatusFromRows(
+        activationId: string,
+        activation: typeof activatedPackages.$inferSelect,
+        pkg: typeof packages.$inferSelect,
+    ): Promise<ActivationStatus> {
+        const username = activationUsername(activationId);
+        const sessions = await this.getSessions({ username, activationId });
+        const liveSessions = sessions.filter((s) => s.live);
+
+        const totalSeconds = pkg.sessionLength * 60;
+        // Bank (noExpiry) packages: time is cumulative across sessions within
+        // the validity window. Regular packages: per-session allowance.
+        const cumulativeUsed = sessions.reduce(
+            (sum, s) => sum + s.seconds,
+            0,
+        );
+        const sessionUsed = liveSessions.length
+            ? Math.max(...liveSessions.map((s) => s.seconds))
+            : Math.max(0, ...sessions.map((s) => s.seconds));
+
+        const bankTotalSeconds = pkg.noExpiry ? totalSeconds : null;
+        const bankUsedSeconds = pkg.noExpiry
+            ? Math.round(cumulativeUsed)
+            : null;
+        const bankRemainingSeconds = pkg.noExpiry
+            ? Math.max(0, Math.round(totalSeconds - cumulativeUsed))
+            : null;
+
+        const usedSeconds = pkg.noExpiry
+            ? Math.round(Math.min(cumulativeUsed, totalSeconds))
+            : Math.round(Math.min(sessionUsed, totalSeconds));
+        const remainingSeconds = Math.max(0, totalSeconds - usedSeconds);
+
+        const octetsUsed = sessions.reduce((sum, s) => sum + s.totalOctets, 0);
+        const quotaBytes = (pkg.downloadQuota + pkg.uploadQuota) * 1024;
+        const lastActive = sessions.reduce<Date | null>((acc, s) => {
+            const latest = s.updatedAt ?? s.startedAt;
+            if (!latest) return acc;
+            return !acc || latest > acc ? latest : acc;
+        }, null);
+
+        return {
+            activationId,
+            username,
+            packageId: pkg.id,
+            packageTitle: pkg.title,
+            paymentId: activation.packagePaymentId,
+            activatedAt: activation.activatedAt,
+            expireAt: activation.expireAt,
+            expired: activation.expireAt.getTime() < Date.now(),
+            sessionLimitSeconds: totalSeconds,
+            usedSeconds,
+            remainingSeconds,
+            octetsUsed,
+            octetsLimit: quotaBytes > 0 ? quotaBytes : null,
+            remainingOctets:
+                quotaBytes > 0 ? Math.max(0, quotaBytes - octetsUsed) : null,
+            online: liveSessions.length > 0,
+            liveSessions,
+            avgSpeedBps: liveSessions.length
+                ? Math.round(
+                      liveSessions.reduce((sum, s) => sum + s.avgSpeedBps, 0) /
+                          liveSessions.length,
+                  )
+                : 0,
+            lastActive,
+            bankTotalSeconds,
+            bankUsedSeconds,
+            bankRemainingSeconds,
+        };
+    }
+
+    // =========================================================================
+    // Internals — RADIUS packet transport (RFC 2865 / RFC 5176)
+    // =========================================================================
+
+    private nextIdentifier(): number {
+        this.identifier = (this.identifier + 1) % 256;
+        return this.identifier;
+    }
+
+    private encodeAttributes(
+        attributes: RadiusOutAttribute[],
+        papAuthenticator: Buffer | null,
+        secret: string,
+    ): Buffer {
+        const parts: Buffer[] = [];
+        for (const attribute of attributes) {
+            const data = Buffer.from(attrToOctets(attribute.value));
+            if (attribute.vendor !== undefined) {
+                // VSA: Type=26, Length=4+2+n, Vendor(4), SubType(1), SubLen(1)
+                const inner = Buffer.alloc(6 + data.length);
+                inner.writeUInt32BE(attribute.vendor, 0);
+                inner[4] = attribute.type & 0xff;
+                inner[5] = 2 + data.length;
+                data.copy(inner, 6);
+                parts.push(this.tlv(ATTR.VENDOR_SPECIFIC, inner));
+            } else if (
+                attribute.type === ATTR.USER_PASSWORD &&
+                papAuthenticator
+            ) {
+                parts.push(
+                    this.tlv(
+                        ATTR.USER_PASSWORD,
+                        this.encryptPapPassword(data, secret, papAuthenticator),
+                    ),
+                );
+            } else {
+                parts.push(this.tlv(attribute.type, data));
+            }
+        }
+        return Buffer.concat(parts);
+    }
+
+    private tlv(type: number, data: Buffer): Buffer {
+        const buf = Buffer.alloc(2 + data.length);
+        buf[0] = type & 0xff;
+        buf[1] = 2 + data.length;
+        data.copy(buf, 2);
+        return buf;
+    }
+
+    // RFC 2865 §5.2 — XOR chain keyed with MD5(secret + authenticator).
+    private encryptPapPassword(
+        password: Buffer,
+        secret: string,
+        authenticator: Buffer,
+    ): Buffer {
+        const padded = Buffer.alloc(
+            Math.ceil(Math.max(1, password.length) / 16) * 16,
+        );
+        password.copy(padded);
+        const out = Buffer.alloc(padded.length);
+        let chain = Buffer.concat([
+            Buffer.from(secret, 'utf8'),
+            authenticator,
+        ]);
+        for (let i = 0; i < padded.length; i += 16) {
+            const hash = createHash('md5').update(chain).digest();
+            for (let j = 0; j < 16; j++) {
+                out[i + j] = padded[i + j]! ^ hash[j]!;
+            }
+            chain = Buffer.concat([
+                Buffer.from(secret, 'utf8'),
+                padded.subarray(i, i + 16),
+            ]);
+        }
+        return out;
+    }
+
+    // Builds the wire packet with Message-Authenticator and the correct
+    // Request-Authenticator per RFC:
+    //  - Access-Request: random authenticator (RFC 2865 §3); PAP password is
+    //    encrypted with it.
+    //  - Disconnect/CoA-Request: Message-Authenticator first (computed with a
+    //    zeroed authenticator), then Request-Authenticator =
+    //    MD5(Code+ID+Length+16 zero octets+attributes+secret) (RFC 5176 §3);
+    //    passwords are not allowed in these packets.
+    private buildSignedPacket(
+        code: number,
+        identifier: number,
+        attributes: RadiusOutAttribute[],
+        secret: string,
+    ): { packet: Buffer; authenticator: Buffer } {
+        const isDynamic =
+            code === CODE.DISCONNECT_REQUEST || code === CODE.COA_REQUEST;
+        if (
+            isDynamic &&
+            attributes.some((a) => a.type === ATTR.USER_PASSWORD)
+        ) {
+            throw new RadiusError(
+                'User-Password is not valid in Disconnect/CoA requests',
+            );
+        }
+
+        const randomAuth = isDynamic ? null : randomBytes(16);
+
+        // Attribute block ending in a zeroed Message-Authenticator TLV.
+        let attrBytes = this.encodeAttributes(
+            attributes,
+            randomAuth ?? ZERO_AUTH,
+            secret,
+        );
+        const maOffset = attrBytes.length;
+        attrBytes = Buffer.concat([attrBytes, Buffer.alloc(18)]);
+        attrBytes[maOffset] = ATTR.MESSAGE_AUTHENTICATOR;
+        attrBytes[maOffset + 1] = 18;
+
+        const assemble = (auth: Buffer): Buffer => {
+            const header = Buffer.alloc(20);
+            header[0] = code;
+            header[1] = identifier;
+            header.writeUInt16BE(20 + attrBytes.length, 2);
+            auth.copy(header, 4);
+            return Buffer.concat([header, attrBytes]);
+        };
+
+        // Message-Authenticator: HMAC-MD5 over the whole packet with the
+        // MA field itself zeroed. Access-Requests sign with the real request
+        // authenticator (RFC 3579 §2.3); Disconnect/CoA requests sign with a
+        // zeroed authenticator because the real one is derived afterwards
+        // (RFC 5176 §3).
+        const forMa = assemble(isDynamic ? ZERO_AUTH : randomAuth!);
+        const ma = createHmac('md5', secret).update(forMa).digest();
+        ma.copy(attrBytes, maOffset + 2);
+
+        // Final request authenticator.
+        const authenticator = isDynamic
+            ? createHash('md5')
+                  .update(
+                      Buffer.concat([
+                          // Code+ID+Length with zeroed authenticator, then
+                          // attributes (incl. final MA), then the secret.
+                          assemble(ZERO_AUTH),
+                          Buffer.from(secret, 'utf8'),
+                      ]),
+                  )
+                  .digest()
+            : randomAuth!;
+
+        return { packet: assemble(authenticator), authenticator };
+    }
+
+    private decodeAttributes(packet: Buffer): RadiusInAttribute[] {
+        const out: RadiusInAttribute[] = [];
+        let offset = 20;
+        while (offset + 2 <= packet.length) {
+            const type = packet[offset]!;
+            const length = packet[offset + 1]!;
+            if (length < 2 || offset + length > packet.length) break;
+            const data = packet.subarray(offset + 2, offset + length);
+            if (type === ATTR.VENDOR_SPECIFIC && data.length >= 6) {
+                const vendor = Buffer.from(data.subarray(0, 4)).readUInt32BE(0);
+                let inner = 4;
+                while (inner + 2 <= data.length) {
+                    const subType = data[inner]!;
+                    const subLen = data[inner + 1]!;
+                    if (subLen < 2 || inner + subLen > data.length) break;
+                    out.push({
+                        type: subType,
+                        vendor,
+                        data: data.subarray(inner + 2, inner + subLen),
+                    });
+                    inner += subLen;
+                }
+            } else {
+                out.push({ type, data });
+            }
+            offset += length;
+        }
+        return out;
+    }
+
+    // RFC 2865 §3 and RFC 5176 §2.3 use the same response formula:
+    // MD5(Code+ID+Length+RequestAuth+ResponseAttrs+Secret).
+    private validResponseAuthenticator(
+        response: Buffer,
+        requestAuthenticator: Buffer,
+        secret: string,
+    ): boolean {
+        const expected = createHash('md5')
+            .update(
+                Buffer.concat([
+                    response.subarray(0, 4),
+                    requestAuthenticator,
+                    response.subarray(20),
+                    Buffer.from(secret, 'utf8'),
+                ]),
+            )
+            .digest();
+        return expected.equals(response.subarray(4, 20));
+    }
+
+    private async sendPacket(
+        code: number,
+        target: { host: string; port: number },
+        secret: string,
+        attributes: RadiusOutAttribute[],
+        expectedCodes: Set<number>,
+    ): Promise<RadiusReply> {
+        const identifier = this.nextIdentifier();
+        const { packet, authenticator } = this.buildSignedPacket(
+            code,
+            identifier,
+            attributes,
+            secret,
+        );
+
+        const attempts = Math.max(1, this.config.retries + 1);
+        let lastError: unknown = null;
+        for (let attempt = 0; attempt < attempts; attempt++) {
+            try {
+                const response = await this.udpExchange(
+                    packet,
+                    target,
+                    this.config.timeoutMs,
+                );
+                if (response.length < 20) {
+                    throw new RadiusError('Runt RADIUS response');
+                }
+                if (response[1] !== identifier) {
+                    throw new RadiusError(
+                        `RADIUS response identifier mismatch (got ${response[1]}, expected ${identifier})`,
+                    );
+                }
+                if (!expectedCodes.has(response[0]!)) {
+                    throw new RadiusError(
+                        `Unexpected RADIUS response code ${response[0]}`,
+                    );
+                }
+                if (
+                    !this.validResponseAuthenticator(
+                        response,
+                        authenticator,
+                        secret,
+                    )
+                ) {
+                    // A bad response authenticator means a shared-secret
+                    // mismatch (RouterOS calls these "bad-replies") — retrying
+                    // will not fix it.
+                    throw new RadiusError(
+                        'RADIUS response authenticator mismatch (check the shared secret)',
+                    );
+                }
+                return {
+                    code: response[0]!,
+                    attributes: this.decodeAttributes(response),
+                };
+            } catch (err) {
+                lastError = err;
+                const message = err instanceof Error ? err.message : '';
+                const retriable =
+                    message.includes('timed out') ||
+                    message.includes('ENOTFOUND') ||
+                    message.includes('EAI_AGAIN');
+                if (!retriable) throw err;
+            }
+        }
+        throw new RadiusError(
+            `No RADIUS response from ${target.host}:${target.port}`,
+            lastError,
+        );
+    }
+
+    private udpExchange(
+        packet: Buffer,
+        target: { host: string; port: number },
+        timeoutMs: number,
+    ): Promise<Buffer> {
+        return new Promise((resolve, reject) => {
+            const socket = dgram.createSocket('udp4');
+            const timer = setTimeout(() => {
+                socket.close();
+                reject(
+                    new RadiusError(
+                        `RADIUS request to ${target.host}:${target.port} timed out`,
+                    ),
+                );
+            }, timeoutMs);
+
+            socket.once('error', (err) => {
+                clearTimeout(timer);
+                socket.close();
+                reject(err);
+            });
+            socket.once('message', (msg) => {
+                clearTimeout(timer);
+                socket.close();
+                resolve(Buffer.from(msg));
+            });
+            socket.send(packet, target.port, target.host, (err) => {
+                if (err) {
+                    clearTimeout(timer);
+                    socket.close();
+                    reject(err);
+                }
+            });
+        });
+    }
+}
+
+export { attrToInt, attrToString };

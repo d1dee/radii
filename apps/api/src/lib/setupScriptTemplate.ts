@@ -307,6 +307,7 @@ $radiiLog (    "device: " . $devModel .    " (id " . $devSerial .    ") on Route
         secret="{{RADIUS_SECRET}}" \
         service=hotspot,ppp \
         timeout=3s \
+        src-address={{WG_CLIENT_IP}} \
         comment="radii managed";
 } else={
     :local radiusFirst [:pick $radiusIds 0];
@@ -317,6 +318,7 @@ $radiiLog (    "device: " . $devModel .    " (id " . $devSerial .    ") on Route
         service=hotspot,ppp \
         timeout=3s \
         disabled=no \
+        src-address={{WG_CLIENT_IP}} \
         comment="radii managed";
 
     :if ($radiusCount > 1) do={
@@ -327,6 +329,12 @@ $radiiLog (    "device: " . $devModel .    " (id " . $devSerial .    ") on Route
 };
 
 $radiiLog ("RADIUS client configured for {{RADIUS_SERVER}}");
+
+# Accept unsolicited Disconnect-Messages from the RADIUS server (RouterOS
+# has no PoD support; DMs terminate the matched session immediately). Needed
+# for radii to disconnect users on package deactivation / quota expiry.
+/radius/incoming/set accept=yes port=1700;
+$radiiLog ("RADIUS incoming (Disconnect-Messages) enabled on port 1700");
 
 
 # ---------------------------------------------------------------------

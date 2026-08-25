@@ -51,6 +51,7 @@ export default function PackageFormPage() {
             type: defaultType,
             category: '',
             sessionLength: 60,
+            validityDays: 30,
             price: 0,
             maxDevices: 1,
             noExpiry: false,
@@ -94,6 +95,7 @@ export default function PackageFormPage() {
                 type: pkg.type,
                 category: pkg.category,
                 sessionLength: pkg.sessionLength,
+                validityDays: pkg.validityDays ?? 30,
                 price: Number(pkg.price),
                 maxDevices: pkg.maxDevices,
                 noExpiry: pkg.noExpiry,
@@ -300,9 +302,16 @@ export default function PackageFormPage() {
                     />
                     <Switch
                         label='No Expiry'
+                        description='Cumulative time package: the session length becomes a time bank the client consumes across sessions'
                         {...form.getInputProps('noExpiry', {
                             type: 'checkbox',
                         })}
+                    />
+                    <NumberInput
+                        label='Validity (days)'
+                        description='How many days after activation the package stays usable (the time bank must be consumed within this window)'
+                        min={1}
+                        {...form.getInputProps('validityDays')}
                     />
                     <Group justify='flex-end'>
                         <Button

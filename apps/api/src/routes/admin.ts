@@ -29,6 +29,7 @@ import {
     getSetupScriptForNasDevice,
     SetupScriptConfigError,
 } from '../lib/setupScript';
+import { radiusClient } from '../lib/radius';
 import { requireAdmin } from '../middleware/auth';
 import type { AppVariables } from '../types';
 
@@ -300,6 +301,77 @@ app.put('/nas-devices/:id', requireAdmin, async (c) => {
             );
         }
         throw e;
+    }
+});
+
+// --- RADIUS -----------------------------------------------------------------
+
+// Aggregate network usage from RADIUS accounting over a trailing window:
+// live sessions/users, current throughput, average speed per session, and the
+// heaviest users. ?windowMinutes=<n> (default 60).
+app.get('/radius/summary', requireAdmin, async (c) => {
+    const raw = Number(c.req.query('windowMinutes') ?? 60);
+    const windowMinutes = Number.isFinite(raw) && raw > 0 ? Math.min(raw, 1440) : 60;
+    const data = await radiusClient.getNetworkUsage(windowMinutes);
+    return c.json({ success: true, data });
+});
+
+// Live RADIUS sessions (radacct rows without a stop record), most recent
+// first. ?limit=<n> (default 100).
+app.get('/radius/sessions', requireAdmin, async (c) => {
+    const raw = Number(c.req.query('limit') ?? 100);
+    const limit = Number.isFinite(raw) && raw > 0 ? Math.min(raw, 500) : 100;
+    const data = await radiusClient.getLiveSessions(limit);
+    return c.json({ success: true, data });
+});
+
+// Full status of one activation: remaining time/bytes, live sessions, speeds.
+app.get('/radius/activations/:id', requireAdmin, async (c) => {
+    const id = c.req.param('id');
+    if (!id) return jsonError(c, 404, 'Unknown activation');
+    const data = await radiusClient.getPackageStatus(id);
+    if (!data) return jsonError(c, 404, 'Unknown activation');
+    return c.json({ success: true, data });
+});
+
+// Admin deactivation: removes the RADIUS provisioning and disconnects every
+// live session of the activation at the NAS (RFC 5176 Disconnect-Messages).
+app.post('/radius/activations/:id/deactivate', requireAdmin, async (c) => {
+    const id = c.req.param('id');
+    if (!id) return jsonError(c, 404, 'Unknown activation');
+    try {
+        const result = await radiusClient.deactivateActivation(id);
+        if (!result.ok && result.sessionsFound === 0) {
+            return jsonError(c, 404, result.message);
+        }
+        return c.json({ success: result.ok, message: result.message, data: result });
+    } catch (err) {
+        console.error('[radius] admin deactivation failed:', err);
+        return jsonError(c, 502, 'Could not contact the RADIUS system');
+    }
+});
+
+// Validates a RADIUS user against the RADIUS server with a real
+// Access-Request (provisioning diagnostics; requires RADIUS_URL/RADIUS_SECRET).
+app.post('/radius/check-credentials', requireAdmin, async (c) => {
+    const parsed = z
+        .object({ username: z.string().min(1), password: z.string().min(1) })
+        .safeParse(await c.req.json().catch(() => ({})));
+    if (!parsed.success) {
+        return jsonError(c, 400, 'Invalid payload');
+    }
+    try {
+        const data = await radiusClient.checkCredentials(
+            parsed.data.username,
+            parsed.data.password,
+        );
+        return c.json({ success: true, data });
+    } catch (err) {
+        return jsonError(
+            c,
+            502,
+            err instanceof Error ? err.message : 'RADIUS check failed',
+        );
     }
 });
 

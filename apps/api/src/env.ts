@@ -41,6 +41,41 @@ export const env = {
     wgIface: process.env.WG_IFACE || 'wg0',
     wgBin: process.env.WG_BIN || 'wg',
     wgUseSudo: (process.env.WG_USE_SUDO || '').trim().toLowerCase() === 'true',
+    // RADIUS integration (backend <-> FreeRADIUS + NAS). All optional: with
+    // nothing set, package provisioning still writes the FreeRADIUS SQL tables
+    // (radcheck/radreply), but direct RADIUS packets (credential checks,
+    // Disconnect-Requests) are disabled with a clear error.
+    //
+    // RADIUS_URL points at the RADIUS server, e.g. "radius://127.0.0.1" or
+    // "radius://10.99.0.1:1812" (scheme optional; auth port defaults to 1812).
+    // RADIUS_SECRET is the shared secret registered for THIS api as a RADIUS
+    // client on that server (FreeRADIUS clients.conf / nas table) and signs
+    // every packet the api originates.
+    // RADIUS_DM_PORT is the RouterOS `/radius/incoming` port on the NAS, the
+    // single listener where it accepts BOTH Disconnect-Messages and
+    // CoA-Requests (RouterOS default 1700). RADIUS_COA_PORT (3799) applies
+    // only to CoA sent toward the RADIUS server itself.
+    radius: {
+        url: process.env.RADIUS_URL || '',
+        secret: process.env.RADIUS_SECRET || '',
+        acctPort: parseInt(process.env.RADIUS_ACCT_PORT || '1813', 10),
+        coaPort: parseInt(process.env.RADIUS_COA_PORT || '3799', 10),
+        dmPort: parseInt(process.env.RADIUS_DM_PORT || '1700', 10),
+        timeoutMs: parseInt(process.env.RADIUS_TIMEOUT_MS || '2000', 10),
+        retries: parseInt(process.env.RADIUS_RETRIES || '2', 10),
+        // Cumulative time-bank (noExpiry) packages: how often the reconciler
+        // recomputes bank balances (pushing CoA Session-Timeout caps to live
+        // sessions and cutting exhausted ones), and the Acct-Interim-Interval
+        // requested from the NAS so accounting counters stay fresh.
+        bankReconcileSeconds: parseInt(
+            process.env.RADIUS_BANK_RECONCILE_SECONDS || '60',
+            10,
+        ),
+        bankInterimSeconds: parseInt(
+            process.env.RADIUS_BANK_INTERIM_SECONDS || '60',
+            10,
+        ),
+    },
     // M-Pesa payment provider credentials. All optional here: when nothing is
     // set the provider simply is not registered; when partially set, the
     // provider constructor validates and fails fast with a clear message.

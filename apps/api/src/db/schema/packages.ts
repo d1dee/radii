@@ -24,6 +24,11 @@ export const packages = pgTable(
             .notNull(),
         category: text('category').notNull(),
         sessionLength: integer('session_length').notNull(),
+        // Static validity of an activation in days, counted from activation.
+        // For cumulative time-bank packages (no_expiry) the bank may be
+        // consumed any time within this window; afterwards logins are
+        // rejected via the radcheck Expiration date.
+        validityDays: integer('validity_days').default(30).notNull(),
         price: numeric('price', { precision: 10, scale: 2 }).notNull(),
         maxDevices: integer('max_devices').notNull(),
         noExpiry: boolean('no_expiry').notNull(),
