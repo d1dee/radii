@@ -31,6 +31,7 @@
 //    identified by Acct-Session-Id (+ User-Name, NAS-IP-Address); the server
 //    owns the NAS relationship and carries the action out there.
 
+import dayjs from 'dayjs';
 import { and, desc, eq, gte, isNotNull, isNull, or, sql } from 'drizzle-orm';
 import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
 import * as dgram from 'node:dgram';
@@ -309,11 +310,6 @@ function ipv4ToOctets(ip: string): Uint8Array {
         throw new RadiusError(`Invalid IPv4 address for NAS-IP-Address: ${ip}`);
     }
     return Uint8Array.from(parts);
-}
-
-// FreeRADIUS `expiration` module date format ("31 Dec 2026").
-function formatExpiration(date: Date): string {
-    return `${date.getUTCDate()} ${MONTHS[date.getUTCMonth()]} ${date.getUTCFullYear()}`;
 }
 
 export function parseRadiusServerUrl(raw: string): {
@@ -1067,15 +1063,9 @@ export class RadiusClient {
         payment: typeof packagePayments.$inferSelect,
         pkg: typeof packages.$inferSelect,
     ) {
-        const sessionSeconds = pkg.sessionLength * 60;
-        const validityDays = pkg.validityDays ?? 30;
-        // noExpiry = cumulative time bank: sessionLength minutes may be
-        // consumed across sessions within the static validity window
-        // (validityDays from activation). Regular packages expire one
-        // sessionLength after activation (no separate validity field exists).
         const expireAt = pkg.noExpiry
-            ? new Date(Date.now() + validityDays * 86_400_000)
-            : new Date(Date.now() + sessionSeconds * 1000);
+            ? dayjs().add(pkg.validityDays ?? 30, 'days')
+            : dayjs().add(pkg.sessionLength, 'minutes');
 
         const activationId = randomUUID();
         const username = activationUsername(activationId);
@@ -1109,15 +1099,12 @@ export class RadiusClient {
                     op: ':=',
                     value: password,
                 },
-                // Calendar cutoff for ALL packages: bank packages keep
-                // their unused balance unusable after the validity window;
-                // regular packages stop logging in once their allowance
-                // window closes.
+
                 {
                     username,
                     attribute: 'Expiration',
                     op: ':=',
-                    value: formatExpiration(expireAt),
+                    value: expireAt.format('DD MMM YYYY HH:mm:ss'),
                 },
             ]);
 
@@ -1128,7 +1115,7 @@ export class RadiusClient {
                         username,
                         activationId,
                         pkg,
-                        sessionSeconds,
+                        pkg.sessionLength * 60,
                     ),
                 );
 
@@ -1141,7 +1128,7 @@ export class RadiusClient {
                     userId: payment.userId,
                     packageId: pkg.id,
                     activatedAt: new Date(),
-                    expireAt,
+                    expireAt: expireAt.toDate(),
                 })
                 .returning();
             return [row];
