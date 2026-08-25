@@ -116,8 +116,36 @@ app.post('/login', async (c) => {
 
 // --- Current user -----------------------------------------------------------
 
-app.get('/client', requireAuth, (c) => {
+app.get('/client', requireAuth, async (c) => {
     const user = c.get('user');
+
+    // Phones the user has successfully paid with before, most recent first,
+    // offered on the buy screen so they don't retype their number.
+    const payments = await db
+        .select({
+            phoneNumber: packagePayments.phoneNumber,
+            createdAt: packagePayments.createdAt,
+        })
+        .from(packagePayments)
+        .where(
+            and(
+                eq(packagePayments.userId, user!.id),
+                eq(packagePayments.status, 'paid'),
+            ),
+        )
+        .orderBy(desc(packagePayments.createdAt))
+        .limit(20);
+
+    const seen = new Set<string>();
+    const prevPaymentMethods: string[] = [];
+    for (const payment of payments) {
+        const phone = payment.phoneNumber.trim();
+        if (phone && !seen.has(phone)) {
+            seen.add(phone);
+            prevPaymentMethods.push(phone);
+        }
+    }
+
     return c.json({
         success: true,
         data: {
@@ -126,7 +154,7 @@ app.get('/client', requireAuth, (c) => {
             email: user!.email,
             role: user!.role,
             phoneNumber: (user as { username?: string }).username || '',
-            prevPaymentMethods: [] as string[],
+            prevPaymentMethods,
         },
     });
 });
