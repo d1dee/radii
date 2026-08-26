@@ -3,14 +3,13 @@ import { useEffect, useState } from 'react';
 import { IoMdArrowDown, IoMdArrowUp } from 'react-icons/io';
 import { timeRemaining } from './functions.ts';
 
+import { notifications } from '@mantine/notifications';
 import humanFormat from 'human-format';
 import { getStatus } from '../../lib/api.ts';
 import { dayjs } from '../../lib/dayjs.ts';
 import type { Quota } from '../../types/index.ts';
-import { Toast } from '../Alert.tsx';
 import { ConnectedDevice } from './ConnectedDevices.tsx';
 import { dataScale } from './PackagePricing.tsx';
-
 export function CurrentPackage() {
     const [onlineStatus, setOnlineStatus] = useState<{
         state: 'online' | 'offline' | '';
@@ -24,6 +23,13 @@ export function CurrentPackage() {
             const quota = await getStatus();
             if (quota.success) setQuota(quota.data);
         })();
+    }, []);
+
+    useEffect(() => {
+        notifyOnlineStatus(
+            onlineStatus.state,
+            !!remainingSessionLength && remainingSessionLength > 0,
+        );
     }, []);
 
     // Pick the highest if no token belongs to this devices
@@ -175,63 +181,25 @@ export function CurrentPackage() {
                         <ConnectedDevice />
                     </Box>
                 </Stack>
-
-                {onlineStatus.state === 'online' ? <OnlineAlert /> : null}
-
-                {onlineStatus.state === 'offline' ? (
-                    <OfflineAlert
-                        hasSession={
-                            !!(
-                                remainingSessionLength &&
-                                remainingSessionLength > 0
-                            )
-                        }
-                    />
-                ) : null}
             </Stack>
         </Paper>
     );
 }
 
-function OnlineAlert() {
-    return (
-        <Toast
-            values={{
-                message: (
-                    <Stack gap={0}>
-                        <Text fw={700}>You are back online.</Text>
-                        <Text size='xs'>You can now surf the internet.</Text>
-                    </Stack>
-                ),
-                style: 'alert-soft',
-                type: 'alert-success',
-            }}
-        />
-    );
-}
-
-function OfflineAlert({ hasSession }: { hasSession: boolean }) {
-    return (
-        <Toast
-            values={{
-                message: (
-                    <Stack gap={0}>
-                        <Text fw={700}>You are offline.</Text>
-                        {hasSession ? (
-                            <Text size='xs'>
-                                Turn your wifi off and on again.
-                            </Text>
-                        ) : (
-                            <Text size='xs'>
-                                Purchase one of the packages below to access the
-                                internet.
-                            </Text>
-                        )}
-                    </Stack>
-                ),
-                style: 'alert-soft',
-                type: 'alert-error',
-            }}
-        />
-    );
+function notifyOnlineStatus(
+    status: 'online' | 'offline' | '',
+    hasSession: boolean,
+) {
+    if (status === 'online')
+        notifications.show({
+            title: 'You are back online.',
+            message: 'You can now surf the internet.',
+        });
+    if (status === 'offline')
+        notifications.show({
+            title: 'You are offline.',
+            message: hasSession
+                ? 'Turn your wifi off and on again.'
+                : 'Purchase one of the packages below to access the internet.',
+        });
 }

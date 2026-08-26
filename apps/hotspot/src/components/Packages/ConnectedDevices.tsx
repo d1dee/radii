@@ -44,7 +44,6 @@ export function ConnectedDevice() {
                 return (
                     <Alert
                         color='red'
-                        variant='light'
                         icon={<AiOutlineExclamationCircle size={24} />}
                         title={
                             canConnect
@@ -60,10 +59,11 @@ export function ConnectedDevice() {
                                     : 'All Packages are full, buy a new package or disconect an existing device.'}
                             </span>
                             <Button
-                                variant='light'
-                                color='red'
+                                color='red.2'
+                                variant='outline'
                                 onClick={openConnectedDevices}
                                 size='xs'
+                                mr='md'
                             >
                                 See Connected
                             </Button>
@@ -74,7 +74,6 @@ export function ConnectedDevice() {
                 return (
                     <Alert
                         color='green'
-                        variant='light'
                         icon={<AiOutlineCheckCircle size={24} />}
                         title='This device is active.'
                         mt='md'
@@ -84,10 +83,11 @@ export function ConnectedDevice() {
                                 You can manage your connected devices here.
                             </span>
                             <Button
-                                variant='light'
+                                variant='outline'
                                 color='green'
                                 onClick={openConnectedDevices}
                                 size='xs'
+                                mr='md'
                             >
                                 See Connected
                             </Button>

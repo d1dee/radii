@@ -19,6 +19,7 @@
         "@mantine/nprogress": "^9.4.0",
         "@radii/shared": "workspace:*",
         "@radii/ui": "workspace:*",
+        "@tabler/icons-react": "^3.46.0",
         "better-auth": "^1.6.22",
         "better-fetch": "^1.1.2",
         "dayjs": "^1.11.21",

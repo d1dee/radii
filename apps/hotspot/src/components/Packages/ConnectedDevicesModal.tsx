@@ -63,16 +63,14 @@ export function ConnectedDevicesModal({
                         </Text>
                     </Stack>
                 </Table.Td>
-                <Table.Td>
+                <Table.Td miw='120'>
                     <Stack gap={0}>
-                        <span>
+                        <span>{v.packageTitle}</span>
+                        <Text size='xs' c='dimmed' opacity={0.5}>
                             {humanFormat(v.downloadRate, {
                                 scale: dataScale,
                             })}{' '}
                             - Ksh {v.price.toLocaleString()}
-                        </span>
-                        <Text size='xs' c='dimmed' opacity={0.5}>
-                            {v.parentQuotaId}
                         </Text>
                     </Stack>
                 </Table.Td>
@@ -106,7 +104,7 @@ export function ConnectedDevicesModal({
             opened={opened}
             onClose={onClose}
             title='Connected Devices'
-            size='md'
+            size='lg'
             centered
         >
             <Stack gap='md'>
