@@ -1,8 +1,12 @@
 import { Button, Loader, Stack, Text } from '@mantine/core';
 import { useEffect, useRef, useState } from 'react';
-import { completeLoginRequest, type HotspotRedirectData } from '../lib/api.ts';
+import {
+    completeLoginRequest,
+    LOGIN_REQUEST_KEY,
+    type HotspotRedirectData,
+} from '../lib/api.ts';
 
-export const LOGIN_REQUEST_KEY = 'radii.loginRequestId';
+export { LOGIN_REQUEST_KEY };
 
 // Completes an external captive-portal login request once the client is
 // authenticated on the portal: fetches the issued hotspot credentials and

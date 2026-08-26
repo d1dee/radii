@@ -28,6 +28,14 @@ export type OrderResult = {
 
 const BASE = '/api/hotspot';
 
+// The NAS hotspot login page hands the client over to the portal with a
+// `login_request` id; App.tsx persists it so NAS-bound calls can carry it.
+export const LOGIN_REQUEST_KEY = 'radii.loginRequestId';
+
+export function currentLoginRequestId(): string | null {
+    return localStorage.getItem(LOGIN_REQUEST_KEY);
+}
+
 // Packages are scoped to the NAS of the current login request; the API
 // errors when the id is missing.
 export function getPackages(loginRequestId: string) {
@@ -40,8 +48,13 @@ export function getClientData() {
     return request<Client>('/client');
 }
 
-export function getStatus() {
-    return request<Array<Quota>>('/status');
+// Pass the login-request id so the API can identify this device (via the
+// login request's client MAC) and mark which activation runs on it.
+export function getStatus(loginRequestId?: string | null) {
+    const query = loginRequestId
+        ? `?login_request=${encodeURIComponent(loginRequestId)}`
+        : '';
+    return request<Array<Quota>>(`/status${query}`);
 }
 
 export function createOrder(body: {
