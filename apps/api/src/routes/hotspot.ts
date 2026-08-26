@@ -518,6 +518,10 @@ function randomHotspotPassword(length: number): string {
 // the portal. Marks the request completed and returns everything the portal
 // needs to re-submit to the NAS servlet login page (external authentication
 // flow, see the MikroTik hotspot customisation docs).
+//
+// Body may carry { activationId } to connect one specific device quota
+// (the connected-devices screen reconnects an offline activation with it)
+// instead of the most recent active one.
 app.post('/login-request/:id/complete', requireAuth, async (c) => {
     const id = c.req.param('id');
     if (!id) return jsonError(c, 404, 'Unknown login request');
@@ -536,9 +540,27 @@ app.post('/login-request/:id/complete', requireAuth, async (c) => {
         return jsonError(c, 403, 'Login request already completed');
     }
 
-    const active = await radiusClient
-        .getActiveActivationCredentials(currentUser.id)
-        .catch(() => null);
+    const body = (await c.req.json().catch(() => ({}))) as {
+        activationId?: unknown;
+    };
+    const requestedActivationId =
+        typeof body.activationId === 'string' ? body.activationId : null;
+
+    const active = await (requestedActivationId
+        ? radiusClient.getActivationCredentials(
+              requestedActivationId,
+              currentUser.id,
+          )
+        : radiusClient.getActiveActivationCredentials(currentUser.id)
+    ).catch(() => null);
+
+    if (requestedActivationId && !active) {
+        return jsonError(
+            c,
+            404,
+            'That package is not active anymore — buy a new one to connect.',
+        );
+    }
 
     let username: string;
     let password: string;

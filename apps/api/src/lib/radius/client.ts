@@ -448,6 +448,55 @@ export class RadiusClient {
         return null;
     }
 
+    // Credentials of one specific active (non-expired) activation, used by the
+    // portal's connected-devices screen to reconnect a device quota that has no
+    // live session. Bank (noExpiry) activations are reconciled first so the
+    // login carries the current balance; an exhausted bank refuses. A damaged
+    // activation whose password row vanished gets one re-provisioned rather
+    // than stranding a paid customer. Null when the activation is not this
+    // user's, is expired, or is unusable.
+    async getActivationCredentials(
+        activationId: string,
+        userId: string,
+    ): Promise<{
+        activationId: string;
+        username: string;
+        password: string;
+    } | null> {
+        const [row] = await db
+            .select({ activation: activatedPackages, pkg: packages })
+            .from(activatedPackages)
+            .innerJoin(packages, eq(activatedPackages.packageId, packages.id))
+            .where(
+                and(
+                    eq(activatedPackages.id, activationId),
+                    eq(activatedPackages.userId, userId),
+                    gte(activatedPackages.expireAt, new Date()),
+                ),
+            )
+            .limit(1);
+        if (!row) return null;
+        if (row.pkg.noExpiry) {
+            const sync = await this.syncBankAuthorization(
+                row.activation.id,
+                row.pkg,
+            );
+            if (!sync.active) return null;
+        }
+        const username = activationUsername(row.activation.id);
+        let password = await this.getProvisionedPassword(username);
+        if (!password) {
+            password = randomCredentialPassword(12);
+            await db.insert(radcheck).values({
+                username,
+                attribute: 'Cleartext-Password',
+                op: ':=',
+                value: password,
+            });
+        }
+        return { activationId: row.activation.id, username, password };
+    }
+
     // The user's active (non-expired) activations enriched with live RADIUS
     // usage — the portal status payload (remaining time/bytes, speeds).
     async getUserPackageStatuses(userId: string) {

@@ -1,18 +1,37 @@
-import { Anchor, Box, Modal, Stack, Table, Text } from '@mantine/core';
-import { useEffect, useState } from 'react';
+import {
+    Anchor,
+    Group,
+    Loader,
+    Modal,
+    Stack,
+    Table,
+    Text,
+} from '@mantine/core';
+import { useEffect, useRef, useState } from 'react';
 
-import { deauthDevice, getStatus } from '@lib/api.ts';
+import {
+    completeLoginRequest,
+    deauthDevice,
+    getStatus,
+    type HotspotRedirectData,
+} from '@lib/api.ts';
 import { dayjs } from '@lib/dayjs.ts';
+import { notifications } from '@mantine/notifications';
 import type { Quota } from '@radii/shared';
 import type { ModalControl } from '@types';
 import humanFormat from 'human-format';
-import { FaSpinner } from 'react-icons/fa';
+import { LOGIN_REQUEST_KEY } from '../HotspotLoginRedirect.tsx';
 import { timeRemaining } from './functions.ts';
 import { dataScale } from './PackagePricing.tsx';
 
 export function ConnectedDevicesModal({ opened, onClose }: ModalControl) {
     const [deviceId, setDeviceId] = useState<string>('');
     const [pendingDeauth, setPendingDeauth] = useState<Array<string>>([]);
+    const [pendingConnect, setPendingConnect] = useState<Array<string>>([]);
+    const [connectRedirect, setConnectRedirect] =
+        useState<HotspotRedirectData | null>(null);
+    const formRef = useRef<HTMLFormElement>(null);
+    const submitted = useRef(false);
 
     useEffect(() => {
         const deauth = async () => {
@@ -26,8 +45,14 @@ export function ConnectedDevicesModal({ opened, onClose }: ModalControl) {
                         (v) => v.deviceQuotaId === deviceId,
                     )?.liveSessions?.[0];
                     await deauthDevice(deviceId, session?.radacctId);
+                    const refreshed = await getStatus();
+                    if (refreshed.success) setQuota(refreshed.data);
                 } catch (err) {
                     console.warn('Deauth failed', err);
+                } finally {
+                    setPendingDeauth((prev) =>
+                        prev.filter((id) => id !== deviceId),
+                    );
                 }
             }
         };
@@ -41,6 +66,51 @@ export function ConnectedDevicesModal({ opened, onClose }: ModalControl) {
             if (quota.success) setQuota(quota.data);
         })();
     }, []);
+
+    // Connects this device using an offline activation: the backend returns its
+    // RADIUS credentials plus the NAS servlet link, which are re-submitted as
+    // a form post (same final hop as after a purchase), logging this client
+    // into the hotspot.
+    const connectDevice = async (deviceQuotaId: string) => {
+        const loginRequestId = localStorage.getItem(LOGIN_REQUEST_KEY);
+        if (!loginRequestId) {
+            notifications.show({
+                color: 'red',
+                title: 'Cannot connect',
+                message:
+                    'Hotspot session expired. Turn your wifi off and on again.',
+            });
+            return;
+        }
+        setPendingConnect((prev) => [...prev, deviceQuotaId]);
+        try {
+            const res = await completeLoginRequest(
+                loginRequestId,
+                deviceQuotaId,
+            );
+            if (res.success && res.data?.linkLoginOnly) {
+                setConnectRedirect(res.data);
+                return; // spinner stays until the form navigates the page away
+            }
+            notifications.show({
+                color: 'red',
+                title: 'Could not connect',
+                message: res.success
+                    ? 'Try again.'
+                    : res.message || 'Try again.',
+            });
+        } catch (err) {
+            console.warn('Connect failed', err);
+        }
+        setPendingConnect((prev) => prev.filter((id) => id !== deviceQuotaId));
+    };
+
+    useEffect(() => {
+        if (connectRedirect && !submitted.current && formRef.current) {
+            submitted.current = true;
+            formRef.current.submit();
+        }
+    }, [connectRedirect]);
 
     const rows = quota
         ?.toSorted((v) => (v.thisDevice ? -1 : 1))
@@ -75,7 +145,21 @@ export function ConnectedDevicesModal({ opened, onClose }: ModalControl) {
                     )}
                 </Table.Td>
                 <Table.Td>
-                    {!pendingDeauth?.includes(v.deviceQuotaId) ? (
+                    {pendingDeauth.includes(v.deviceQuotaId) ? (
+                        <Group gap='xs' wrap='nowrap'>
+                            <Loader size={14} />
+                            <Text size='sm' c='dimmed'>
+                                Disconnecting…
+                            </Text>
+                        </Group>
+                    ) : pendingConnect.includes(v.deviceQuotaId) ? (
+                        <Group gap='xs' wrap='nowrap'>
+                            <Loader size={14} color='green' />
+                            <Text size='sm' c='dimmed'>
+                                Connecting…
+                            </Text>
+                        </Group>
+                    ) : v.online ? (
                         <Anchor
                             component='button'
                             type='button'
@@ -86,9 +170,15 @@ export function ConnectedDevicesModal({ opened, onClose }: ModalControl) {
                             Disconnect
                         </Anchor>
                     ) : (
-                        <Box c='red' style={{ cursor: 'wait' }}>
-                            <FaSpinner className='animate-spin' />
-                        </Box>
+                        <Anchor
+                            component='button'
+                            type='button'
+                            size='sm'
+                            c='green'
+                            onClick={() => connectDevice(v.deviceQuotaId)}
+                        >
+                            Connect
+                        </Anchor>
                     )}
                 </Table.Td>
             </Table.Tr>
@@ -121,6 +211,28 @@ export function ConnectedDevicesModal({ opened, onClose }: ModalControl) {
                     </Table>
                 </Table.ScrollContainer>
             </Stack>
+
+            {connectRedirect && (
+                <form
+                    ref={formRef}
+                    action={connectRedirect.linkLoginOnly}
+                    method='post'
+                >
+                    <input
+                        type='hidden'
+                        name='username'
+                        value={connectRedirect.username}
+                    />
+                    <input
+                        type='hidden'
+                        name='password'
+                        value={connectRedirect.password}
+                    />
+                    <input type='hidden' name='domain' value='' />
+                    <input type='hidden' name='dst' value={connectRedirect.dst} />
+                    <input type='hidden' name='popup' value='true' />
+                </form>
+            )}
         </Modal>
     );
 }

@@ -154,10 +154,15 @@ export type HotspotRedirectData = {
     chapChallenge?: string;
 };
 
-export function completeLoginRequest(loginRequestId: string) {
+// Pass activationId to connect one specific device quota (connected-devices
+// screen) instead of the user's most recent active activation.
+export function completeLoginRequest(
+    loginRequestId: string,
+    activationId?: string,
+) {
     return request<HotspotRedirectData>(
         `/login-request/${encodeURIComponent(loginRequestId)}/complete`,
-        {},
+        activationId ? { activationId } : {},
         { method: 'POST' },
     );
 }
