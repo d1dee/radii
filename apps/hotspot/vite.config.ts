@@ -18,6 +18,12 @@ export default defineConfig(({ mode }) => {
             alias: {
                 '@': path.resolve(import.meta.dirname, './src'),
                 '@shared': path.resolve(import.meta.dirname, '../shared/src'),
+                '@lib': path.resolve(import.meta.dirname, './src/lib'),
+                '@components/*': path.resolve(
+                    import.meta.dirname,
+                    './src/components',
+                ),
+                '@types': path.resolve(import.meta.dirname, './src/types'),
             },
             // Force a single React/React-DOM instance across the bundle.
             // Without this, workspace deps like `better-auth` (installed via
