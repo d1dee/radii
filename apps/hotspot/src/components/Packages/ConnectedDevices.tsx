@@ -7,7 +7,7 @@ import {
 import type { Quota } from '@radii/shared';
 import { useContext, useEffect, useState } from 'react';
 import { ModalActionsContext } from '../../App.tsx';
-import { getStatus } from '../../lib/api.ts';
+import { currentLoginRequestId, getStatus } from '../../lib/api.ts';
 
 export function ConnectedDevice() {
     const { openConnectedDevices } = useContext(ModalActionsContext);
@@ -15,27 +15,17 @@ export function ConnectedDevice() {
 
     useEffect(() => {
         (async () => {
-            const quota = await getStatus();
+            const quota = await getStatus(currentLoginRequestId());
             if (quota.success) setQuota(quota.data);
         })();
     }, []);
 
     const isThisDevice = !!quota?.some((v) => v.thisDevice);
-    const quotaMap = new Map<string, Array<Quota>>();
 
-    quota?.forEach((v) => {
-        if (quotaMap.has(v.parentQuotaId)) {
-            quotaMap.set(v.parentQuotaId, [
-                ...(quotaMap.get(v.parentQuotaId) || []),
-                v,
-            ]);
-        } else {
-            quotaMap.set(v.parentQuotaId, [v]);
-        }
-    });
-
-    const canConnect = Array.from(quotaMap.entries()).some(
-        ([_, v]) => v[0].maxDevices < v.filter((v) => !v.online).length,
+    // A slot for this device exists when at least one package has fewer
+    // online devices (live sessions) than its max-devices allowance.
+    const canConnect = quota?.some(
+        (v) => (v.liveSessions?.length ?? 0) < v.maxDevices,
     );
 
     if (Array.isArray(quota)) {
@@ -43,23 +33,22 @@ export function ConnectedDevice() {
             if (!isThisDevice) {
                 return (
                     <Alert
-                        color='red'
-                        icon={<AiOutlineExclamationCircle size={24} />}
                         title={
                             canConnect
-                                ? "This device doesn't have an active quota"
+                                ? 'You are not connected'
                                 : 'Maximum devices reached'
                         }
+                        color={'orange'}
                         mt='md'
                     >
                         <Stack gap='sm'>
                             <span>
                                 {canConnect
-                                    ? 'Disconnect and connect wifi to activate with an existing quota.'
+                                    ? 'Disconnect and connect wifi to activate with an existing package or click below to activate an existing one.'
                                     : 'All Packages are full, buy a new package or disconect an existing device.'}
                             </span>
                             <Button
-                                color='red.2'
+                                color='orange'
                                 variant='outline'
                                 onClick={openConnectedDevices}
                                 size='xs'

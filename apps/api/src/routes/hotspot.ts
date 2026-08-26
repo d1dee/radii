@@ -167,12 +167,28 @@ app.get('/client', requireAuth, async (c) => {
 app.get('/status', requireAuth, async (c) => {
     try {
         const currentUser = c.get('user');
+
+        // Identify the calling device: the portal carries the login-request id
+        // it received on redirect (kept in localStorage), and the login
+        // request's client MAC is what marks the activation currently running
+        // on THIS device (thisDevice) — matched against the MAC the NAS puts
+        // into accounting (Calling-Station-Id) for each live session.
+        const loginRequestId = c.req.query('login_request');
+        let clientMac = '';
+        if (loginRequestId) {
+            const [loginRequest] = await db
+                .select({ mac: hotspotLoginRequest.mac })
+                .from(hotspotLoginRequest)
+                .where(eq(hotspotLoginRequest.id, loginRequestId))
+                .limit(1);
+            clientMac = normalizeMac(loginRequest?.mac);
+        }
+
         const activations = await radiusClient.getUserPackageStatuses(
             currentUser!.id,
         );
         const data = activations.map((a) => ({
             deviceQuotaId: a.activationId,
-            parentQuotaId: a.packageId,
             sessionLength: a.sessionLength,
             // For bank (noExpiry) packages remainingSeconds carries the
             // cumulative balance, so this renders as bank minutes left.
@@ -186,8 +202,15 @@ app.get('/status', requireAuth, async (c) => {
             maxDevices: a.maxDevices,
             expiresAt: a.expireAt.toISOString(),
             lastActive: a.lastActive?.toISOString(),
-            thisDevice: a.online,
+            thisDevice:
+                clientMac !== '' &&
+                a.liveSessions.some(
+                    (s) => normalizeMac(s.callingStationId) === clientMac,
+                ),
             online: a.online,
+            clientMac:
+                a.liveSessions.find((s) => s.callingStationId)
+                    ?.callingStationId ?? null,
             packageId: a.packageId,
             packageTitle: a.packageTitle,
             username: a.username,
@@ -551,12 +574,13 @@ app.post('/login-request/:id/complete', requireAuth, async (c) => {
     const requestedActivationId =
         typeof body.activationId === 'string' ? body.activationId : null;
 
-    const active = await (requestedActivationId
-        ? radiusClient.getActivationCredentials(
-              requestedActivationId,
-              currentUser.id,
-          )
-        : radiusClient.getActiveActivationCredentials(currentUser.id)
+    const active = await (
+        requestedActivationId
+            ? radiusClient.getActivationCredentials(
+                  requestedActivationId,
+                  currentUser.id,
+              )
+            : radiusClient.getActiveActivationCredentials(currentUser.id)
     ).catch(() => null);
 
     if (requestedActivationId && !active) {
@@ -634,6 +658,12 @@ app.get('/users', requireAdmin, async (c) => {
 
 function normalizePhone(phone: string) {
     return phone.replace(/\D/g, '');
+}
+
+// Compares MACs across formats (AA:BB:.., AA-BB-.., aabb..): hex digits only,
+// lowercase.
+function normalizeMac(mac: string | null | undefined) {
+    return (mac ?? '').toLowerCase().replace(/[^0-9a-f]/g, '');
 }
 
 function fieldErrorsFromIssues(

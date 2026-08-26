@@ -11,6 +11,7 @@ import { useEffect, useRef, useState } from 'react';
 
 import {
     completeLoginRequest,
+    currentLoginRequestId,
     deauthDevice,
     getStatus,
     type HotspotRedirectData,
@@ -20,7 +21,6 @@ import { notifications } from '@mantine/notifications';
 import type { Quota } from '@radii/shared';
 import type { ModalControl } from '@types';
 import humanFormat from 'human-format';
-import { LOGIN_REQUEST_KEY } from '../HotspotLoginRedirect.tsx';
 import { timeRemaining } from './functions.ts';
 import { dataScale } from './PackagePricing.tsx';
 
@@ -32,6 +32,8 @@ export function ConnectedDevicesModal({ opened, onClose }: ModalControl) {
         useState<HotspotRedirectData | null>(null);
     const formRef = useRef<HTMLFormElement>(null);
     const submitted = useRef(false);
+
+    const [quota, setQuota] = useState<Array<Quota>>();
 
     useEffect(() => {
         const deauth = async () => {
@@ -45,7 +47,7 @@ export function ConnectedDevicesModal({ opened, onClose }: ModalControl) {
                         (v) => v.deviceQuotaId === deviceId,
                     )?.liveSessions?.[0];
                     await deauthDevice(deviceId, session?.radacctId);
-                    const refreshed = await getStatus();
+                    const refreshed = await getStatus(currentLoginRequestId());
                     if (refreshed.success) setQuota(refreshed.data);
                 } catch (err) {
                     console.warn('Deauth failed', err);
@@ -53,16 +55,16 @@ export function ConnectedDevicesModal({ opened, onClose }: ModalControl) {
                     setPendingDeauth((prev) =>
                         prev.filter((id) => id !== deviceId),
                     );
+                    setDeviceId('');
                 }
             }
         };
         deauth();
     }, [deviceId]);
-    const [quota, setQuota] = useState<Array<Quota>>();
 
     useEffect(() => {
         (async () => {
-            const quota = await getStatus();
+            const quota = await getStatus(currentLoginRequestId());
             if (quota.success) setQuota(quota.data);
         })();
     }, []);
@@ -72,7 +74,7 @@ export function ConnectedDevicesModal({ opened, onClose }: ModalControl) {
     // a form post (same final hop as after a purchase), logging this client
     // into the hotspot.
     const connectDevice = async (deviceQuotaId: string) => {
-        const loginRequestId = localStorage.getItem(LOGIN_REQUEST_KEY);
+        const loginRequestId = currentLoginRequestId();
         if (!loginRequestId) {
             notifications.show({
                 color: 'red',
@@ -229,7 +231,11 @@ export function ConnectedDevicesModal({ opened, onClose }: ModalControl) {
                         value={connectRedirect.password}
                     />
                     <input type='hidden' name='domain' value='' />
-                    <input type='hidden' name='dst' value={connectRedirect.dst} />
+                    <input
+                        type='hidden'
+                        name='dst'
+                        value={connectRedirect.dst}
+                    />
                     <input type='hidden' name='popup' value='true' />
                 </form>
             )}

@@ -1,7 +1,7 @@
 import type { Dispatch, SetStateAction } from 'react';
 import type { Quota } from '../../types/index.ts';
 import { dayjs } from '../../lib/dayjs.ts';
-import { getStatus } from '../../lib/api.ts';
+import { currentLoginRequestId, getStatus } from '../../lib/api.ts';
 
 export function timeRemaining(duration: ReturnType<typeof dayjs.duration>) {
     return duration
@@ -29,7 +29,7 @@ export async function checkQuotaStatus(
     setValue: Dispatch<SetStateAction<Partial<Quota> & { width: string }>>,
 ) {
     try {
-        const result = await getStatus();
+        const result = await getStatus(currentLoginRequestId());
         if (!result.success || !result.data) return;
 
         // Pick the highest if no token belongs to this devices

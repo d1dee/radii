@@ -5,7 +5,7 @@ import { timeRemaining } from './functions.ts';
 
 import { notifications } from '@mantine/notifications';
 import humanFormat from 'human-format';
-import { getStatus } from '../../lib/api.ts';
+import { currentLoginRequestId, getStatus } from '../../lib/api.ts';
 import { dayjs } from '../../lib/dayjs.ts';
 import type { Quota } from '../../types/index.ts';
 import { ConnectedDevice } from './ConnectedDevices.tsx';
@@ -20,7 +20,7 @@ export function CurrentPackage() {
 
     useEffect(() => {
         (async () => {
-            const quota = await getStatus();
+            const quota = await getStatus(currentLoginRequestId());
             if (quota.success) setQuota(quota.data);
         })();
     }, []);
