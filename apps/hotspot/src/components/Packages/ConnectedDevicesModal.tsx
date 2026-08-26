@@ -1,21 +1,16 @@
 import { Anchor, Box, Modal, Stack, Table, Text } from '@mantine/core';
 import { useEffect, useState } from 'react';
 
+import { deauthDevice, getStatus } from '@lib/api.ts';
+import { dayjs } from '@lib/dayjs.ts';
 import type { Quota } from '@radii/shared';
+import type { ModalControl } from '@types';
 import humanFormat from 'human-format';
 import { FaSpinner } from 'react-icons/fa';
-import { deauthDevice, getStatus } from '../../lib/api.ts';
-import { dayjs } from '../../lib/dayjs.ts';
 import { timeRemaining } from './functions.ts';
 import { dataScale } from './PackagePricing.tsx';
 
-export function ConnectedDevicesModal({
-    opened,
-    onClose,
-}: {
-    opened: boolean;
-    onClose: () => void;
-}) {
+export function ConnectedDevicesModal({ opened, onClose }: ModalControl) {
     const [deviceId, setDeviceId] = useState<string>('');
     const [pendingDeauth, setPendingDeauth] = useState<Array<string>>([]);
 
