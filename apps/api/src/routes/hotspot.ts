@@ -403,7 +403,12 @@ app.post('/deauth/:deviceQuotaId', requireAuth, async (c) => {
     const [activation] = await db
         .select()
         .from(activatedPackages)
-        .where(eq(activatedPackages.id, deviceQuotaId))
+        .where(
+            and(
+                eq(activatedPackages.id, deviceQuotaId),
+                eq(activatedPackages.userId, currentUser.id),
+            ),
+        )
         .limit(1);
     if (!activation) return jsonError(c, 404, 'Unknown device quota');
     if (activation.userId !== currentUser!.id) {

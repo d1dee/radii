@@ -21,12 +21,12 @@ export function ConnectedDevice() {
     }, []);
 
     const isThisDevice = !!quota?.some((v) => v.thisDevice);
-    const quotaMap = new Map();
+    const quotaMap = new Map<string, Array<Quota>>();
 
     quota?.forEach((v) => {
         if (quotaMap.has(v.parentQuotaId)) {
             quotaMap.set(v.parentQuotaId, [
-                ...quotaMap.get(v.parentQuotaId),
+                ...(quotaMap.get(v.parentQuotaId) || []),
                 v,
             ]);
         } else {
@@ -35,7 +35,7 @@ export function ConnectedDevice() {
     });
 
     const canConnect = Array.from(quotaMap.entries()).some(
-        ([_, v]) => v.length < v[0]?.maxDevices,
+        ([_, v]) => v[0].maxDevices < v.filter((v) => !v.online).length,
     );
 
     if (Array.isArray(quota)) {
