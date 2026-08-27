@@ -510,6 +510,7 @@ export class RadiusClient {
                 row.activation,
                 row.pkg,
             );
+            if (!status) continue;
             out.push({
                 ...status,
                 maxDevices: row.pkg.maxDevices,
@@ -963,10 +964,6 @@ export class RadiusClient {
         activationId: string,
         pkg: typeof packages.$inferSelect,
     ): Promise<{ active: boolean; remainingSeconds: number }> {
-        if (!pkg.noExpiry) {
-            return { active: true, remainingSeconds: pkg.sessionLength * 60 };
-        }
-
         const username = activationUsername(activationId);
         const usage = await this.getBankUsage(activationId);
         const remainingSeconds = usage?.remainingSeconds ?? 0;
@@ -977,29 +974,7 @@ export class RadiusClient {
         });
 
         if (remainingSeconds <= 0) {
-            await db.transaction(async (tx) => {
-                await tx
-                    .delete(radcheck)
-                    .where(eq(radcheck.username, username));
-                await tx.insert(radcheck).values({
-                    username,
-                    attribute: 'Auth-Type',
-                    op: ':=',
-                    value: 'Reject',
-                });
-            });
-            for (const session of liveSessions) {
-                try {
-                    if (await this.terminateSessionAtNas(username, session)) {
-                        await this.closeSessionRecord(session);
-                    }
-                } catch (err) {
-                    console.error(
-                        `[radius] bank-exhaust disconnect failed on ${session.nasIpAddress}:`,
-                        err,
-                    );
-                }
-            }
+            await this.deactivateActivation(activationId);
             return { active: false, remainingSeconds: 0 };
         }
 
@@ -1545,7 +1520,7 @@ export class RadiusClient {
         activationId: string,
         activation: typeof activatedPackages.$inferSelect,
         pkg: typeof packages.$inferSelect,
-    ): Promise<ActivationStatus> {
+    ): Promise<ActivationStatus | null> {
         const username = activationUsername(activationId);
         const sessions = await this.getSessions({ username, activationId });
         const liveSessions = sessions.filter((s) => s.live);
@@ -1554,22 +1529,16 @@ export class RadiusClient {
         // Bank (noExpiry) packages: time is cumulative across sessions within
         // the validity window. Regular packages: per-session allowance.
         const cumulativeUsed = sessions.reduce((sum, s) => sum + s.seconds, 0);
-        const sessionUsed = liveSessions.length
-            ? Math.max(...liveSessions.map((s) => s.seconds))
-            : Math.max(0, ...sessions.map((s) => s.seconds));
+        const usedSeconds = Math.round(cumulativeUsed);
+        const remainingSeconds = Math.max(
+            0,
+            Math.round(totalSeconds - cumulativeUsed),
+        );
 
-        const bankTotalSeconds = pkg.noExpiry ? totalSeconds : null;
-        const bankUsedSeconds = pkg.noExpiry
-            ? Math.round(cumulativeUsed)
-            : null;
-        const bankRemainingSeconds = pkg.noExpiry
-            ? Math.max(0, Math.round(totalSeconds - cumulativeUsed))
-            : null;
-
-        const usedSeconds = pkg.noExpiry
-            ? Math.round(Math.min(cumulativeUsed, totalSeconds))
-            : Math.round(Math.min(sessionUsed, totalSeconds));
-        const remainingSeconds = Math.max(0, totalSeconds - usedSeconds);
+        if (totalSeconds <= cumulativeUsed) {
+            await radiusClient.deactivateActivation(activationId);
+            return null;
+        }
 
         const octetsUsed = sessions.reduce((sum, s) => sum + s.totalOctets, 0);
         const quotaBytes = (pkg.downloadQuota + pkg.uploadQuota) * 1024;
@@ -1604,9 +1573,6 @@ export class RadiusClient {
                   )
                 : 0,
             lastActive,
-            bankTotalSeconds,
-            bankUsedSeconds,
-            bankRemainingSeconds,
         };
     }
 

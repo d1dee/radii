@@ -187,44 +187,43 @@ app.get('/status', requireAuth, async (c) => {
         const activations = await radiusClient.getUserPackageStatuses(
             currentUser!.id,
         );
-        const data = activations.map((a) => ({
-            deviceQuotaId: a.activationId,
-            sessionLength: a.sessionLength,
-            // For bank (noExpiry) packages remainingSeconds carries the
-            // cumulative balance, so this renders as bank minutes left.
-            remainingSessionLength:
-                a.remainingSeconds === null
-                    ? 0
-                    : Math.ceil(a.remainingSeconds / 60),
-            price: a.price,
-            uploadRate: a.uploadRate,
-            downloadRate: a.downloadRate,
-            maxDevices: a.maxDevices,
-            expiresAt: a.expireAt.toISOString(),
-            lastActive: a.lastActive?.toISOString(),
-            thisDevice:
-                clientMac !== '' &&
-                a.liveSessions.some(
-                    (s) => normalizeMac(s.callingStationId) === clientMac,
-                ),
-            online: a.online,
-            clientMac:
-                a.liveSessions.find((s) => s.callingStationId)
-                    ?.callingStationId ?? null,
-            packageId: a.packageId,
-            packageTitle: a.packageTitle,
-            username: a.username,
-            usedSeconds: a.usedSeconds,
-            sessionLimitSeconds: a.sessionLimitSeconds,
-            octetsUsed: a.octetsUsed,
-            octetsLimit: a.octetsLimit,
-            remainingOctets: a.remainingOctets,
-            avgSpeedBps: a.avgSpeedBps,
-            liveSessions: a.liveSessions,
-            bankTotalSeconds: a.bankTotalSeconds,
-            bankUsedSeconds: a.bankUsedSeconds,
-            bankRemainingSeconds: a.bankRemainingSeconds,
-        }));
+        const data = activations
+            .filter((v) => v)
+            .map((a) => ({
+                deviceQuotaId: a.activationId,
+                sessionLength: a.sessionLength,
+                // For bank (noExpiry) packages remainingSeconds carries the
+                // cumulative balance, so this renders as bank minutes left.
+                remainingSessionLength:
+                    a.remainingSeconds === null
+                        ? 0
+                        : Math.ceil(a.remainingSeconds / 60),
+                price: a.price,
+                uploadRate: a.uploadRate,
+                downloadRate: a.downloadRate,
+                maxDevices: a.maxDevices,
+                expiresAt: a.expireAt.toISOString(),
+                lastActive: a.lastActive?.toISOString(),
+                thisDevice:
+                    clientMac !== '' &&
+                    a.liveSessions.some(
+                        (s) => normalizeMac(s.callingStationId) === clientMac,
+                    ),
+                online: a.online,
+                clientMac:
+                    a.liveSessions.find((s) => s.callingStationId)
+                        ?.callingStationId ?? null,
+                packageId: a.packageId,
+                packageTitle: a.packageTitle,
+                username: a.username,
+                usedSeconds: a.usedSeconds,
+                sessionLimitSeconds: a.sessionLimitSeconds,
+                octetsUsed: a.octetsUsed,
+                octetsLimit: a.octetsLimit,
+                remainingOctets: a.remainingOctets,
+                avgSpeedBps: a.avgSpeedBps,
+                liveSessions: a.liveSessions,
+            }));
         return c.json({ success: true, data });
     } catch (err) {
         console.error(err);
