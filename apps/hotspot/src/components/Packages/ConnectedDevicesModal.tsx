@@ -123,75 +123,79 @@ export function ConnectedDevicesModal({ opened, onClose }: ModalControl) {
 
     const rows = quota
         ?.toSorted((v) => (v.thisDevice ? -1 : 1))
-        .map((v, i) => (
-            <Table.Tr
-                key={v.deviceQuotaId}
-                bg={v.thisDevice ? 'grape.0' : undefined}
-            >
-                <Table.Td>{i + 1}</Table.Td>
-                <Table.Td>
-                    <Stack gap={0}>
-                        <span>{v.deviceQuotaId}</span>
-                        <Text size='xs' c='dimmed' opacity={0.5}>
-                            {v.clientMac}
-                        </Text>
-                    </Stack>
-                </Table.Td>
-                <Table.Td miw='120'>
-                    <Stack gap={0}>
-                        <span>{v.packageTitle}</span>
-                        <Text size='xs' c='dimmed' opacity={0.5}>
-                            {humanFormat(v.downloadRate, {
-                                scale: dataScale,
-                            })}{' '}
-                            - Ksh {v.price.toLocaleString()}
-                        </Text>
-                    </Stack>
-                </Table.Td>
-                <Table.Td style={{ maxWidth: 130 }}>
-                    {timeRemaining(
-                        dayjs.duration(v.remainingSessionLength || 0, 'm'),
-                    )}
-                </Table.Td>
-                <Table.Td>
-                    {pendingDeauth.includes(v.deviceQuotaId) ? (
-                        <Group gap='xs' wrap='nowrap'>
-                            <Loader size={14} />
-                            <Text size='sm' c='dimmed'>
-                                Disconnecting…
+        .map((v, i) => {
+            const title = v.downloadRate
+                ? humanFormat(v.downloadRate, {
+                      scale: dataScale,
+                  })
+                : 'Unlimited';
+            return (
+                <Table.Tr
+                    key={v.deviceQuotaId}
+                    bg={v.thisDevice ? 'grape.0' : undefined}
+                >
+                    <Table.Td>{i + 1}</Table.Td>
+                    <Table.Td>
+                        <Stack gap={0}>
+                            <span>{v.deviceQuotaId}</span>
+                            <Text size='xs' c='dimmed' opacity={0.5}>
+                                {v.clientMac}
                             </Text>
-                        </Group>
-                    ) : pendingConnect.includes(v.deviceQuotaId) ? (
-                        <Group gap='xs' wrap='nowrap'>
-                            <Loader size={14} color='green' />
-                            <Text size='sm' c='dimmed'>
-                                Connecting…
+                        </Stack>
+                    </Table.Td>
+                    <Table.Td miw='120'>
+                        <Stack gap={0}>
+                            <span>{v.packageTitle}</span>
+                            <Text size='xs' c='dimmed' opacity={0.5}>
+                                {title} - Ksh {v.price.toLocaleString()}
                             </Text>
-                        </Group>
-                    ) : v.online ? (
-                        <Anchor
-                            component='button'
-                            type='button'
-                            size='sm'
-                            c='red'
-                            onClick={() => setDeviceId(v.deviceQuotaId)}
-                        >
-                            Disconnect
-                        </Anchor>
-                    ) : (
-                        <Anchor
-                            component='button'
-                            type='button'
-                            size='sm'
-                            c='green'
-                            onClick={() => connectDevice(v.deviceQuotaId)}
-                        >
-                            Connect
-                        </Anchor>
-                    )}
-                </Table.Td>
-            </Table.Tr>
-        ));
+                        </Stack>
+                    </Table.Td>
+                    <Table.Td style={{ maxWidth: 130 }}>
+                        {timeRemaining(
+                            dayjs.duration(v.remainingSessionLength || 0, 'm'),
+                        )}
+                    </Table.Td>
+                    <Table.Td>
+                        {pendingDeauth.includes(v.deviceQuotaId) ? (
+                            <Group gap='xs' wrap='nowrap'>
+                                <Loader size={14} />
+                                <Text size='sm' c='dimmed'>
+                                    Disconnecting…
+                                </Text>
+                            </Group>
+                        ) : pendingConnect.includes(v.deviceQuotaId) ? (
+                            <Group gap='xs' wrap='nowrap'>
+                                <Loader size={14} color='green' />
+                                <Text size='sm' c='dimmed'>
+                                    Connecting…
+                                </Text>
+                            </Group>
+                        ) : v.online ? (
+                            <Anchor
+                                component='button'
+                                type='button'
+                                size='sm'
+                                c='red'
+                                onClick={() => setDeviceId(v.deviceQuotaId)}
+                            >
+                                Disconnect
+                            </Anchor>
+                        ) : (
+                            <Anchor
+                                component='button'
+                                type='button'
+                                size='sm'
+                                c='green'
+                                onClick={() => connectDevice(v.deviceQuotaId)}
+                            >
+                                Connect
+                            </Anchor>
+                        )}
+                    </Table.Td>
+                </Table.Tr>
+            );
+        });
 
     return (
         <Modal

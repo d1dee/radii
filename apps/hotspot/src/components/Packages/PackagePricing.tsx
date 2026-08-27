@@ -110,51 +110,57 @@ export function PackagePricing({
                 </SimpleGrid>
 
                 <Stack gap='md'>
-                    {activePackages.map((pkg) => (
-                        <Card
-                            key={pkg.packageId}
-                            shadow='sm'
-                            radius='lg'
-                            withBorder
-                        >
-                            <Stack gap='md'>
-                                <Group
-                                    justify='space-between'
-                                    align='flex-start'
-                                >
-                                    <Stack gap='xs'>
-                                        <Text c='dimmed'>{pkg.title}</Text>
-                                        <Text size='32px' fw={700}>
-                                            {humanFormat(pkg.downloadRate, {
-                                                scale: dataScale,
-                                            })}
-                                        </Text>
-                                    </Stack>
+                    {activePackages.map((pkg) => {
+                        const title = pkg.downloadRate
+                            ? humanFormat(pkg.downloadRate, {
+                                  scale: dataScale,
+                              })
+                            : 'Unlimited';
 
-                                    <Stack gap='xs' align='flex-end'>
-                                        <Text size='sm' c='dimmed'>
-                                            {dayjs
-                                                .duration(
-                                                    pkg.sessionLength,
-                                                    'm',
-                                                )
-                                                .humanize()}
-                                        </Text>
-                                        <Text size='xl' fw={700}>
-                                            Ksh {pkg.price.toLocaleString()}
-                                        </Text>
-                                    </Stack>
-                                </Group>
+                        return (
+                            <Card
+                                key={pkg.packageId}
+                                shadow='sm'
+                                radius='lg'
+                                withBorder
+                            >
+                                <Stack gap='md'>
+                                    <Group
+                                        justify='space-between'
+                                        align='flex-start'
+                                    >
+                                        <Stack gap='xs'>
+                                            <Text c='dimmed'>{pkg.title}</Text>
+                                            <Text size='32px' fw={700}>
+                                                {title}
+                                            </Text>
+                                        </Stack>
 
-                                <Button
-                                    fullWidth
-                                    onClick={() => initiateOrderFlow(pkg)}
-                                >
-                                    Buy Now
-                                </Button>
-                            </Stack>
-                        </Card>
-                    ))}
+                                        <Stack gap='xs' align='flex-end'>
+                                            <Text size='sm' c='dimmed'>
+                                                {dayjs
+                                                    .duration(
+                                                        pkg.sessionLength,
+                                                        'm',
+                                                    )
+                                                    .humanize()}
+                                            </Text>
+                                            <Text size='xl' fw={700}>
+                                                Ksh {pkg.price.toLocaleString()}
+                                            </Text>
+                                        </Stack>
+                                    </Group>
+
+                                    <Button
+                                        fullWidth
+                                        onClick={() => initiateOrderFlow(pkg)}
+                                    >
+                                        Buy Now
+                                    </Button>
+                                </Stack>
+                            </Card>
+                        );
+                    })}
                 </Stack>
             </Stack>
         </Paper>
