@@ -1,9 +1,9 @@
 import { Box, Group, Paper, Progress, Stack, Text } from '@mantine/core';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { IoMdArrowDown, IoMdArrowUp } from 'react-icons/io';
 import { timeRemaining } from './functions.ts';
 
-import { notifications } from '@mantine/notifications';
+import { useInterval } from '@mantine/hooks';
 import humanFormat from 'human-format';
 import { currentLoginRequestId, getStatus } from '../../lib/api.ts';
 import { dayjs } from '../../lib/dayjs.ts';
@@ -11,26 +11,16 @@ import type { Quota } from '../../types/index.ts';
 import { ConnectedDevice } from './ConnectedDevices.tsx';
 import { dataScale } from './PackagePricing.tsx';
 export function CurrentPackage() {
-    const [onlineStatus, setOnlineStatus] = useState<{
-        state: 'online' | 'offline' | '';
-        prevState: 'online' | 'offline' | '';
-    }>({ state: '', prevState: '' });
+    const [quota, setQuota] = useState<Array<Quota>>([]);
 
-    const [quota, setQuota] = useState<Array<Quota>>();
-
-    useEffect(() => {
-        (async () => {
+    useInterval(
+        async () => {
             const quota = await getStatus(currentLoginRequestId());
-            if (quota.success) setQuota(quota.data);
-        })();
-    }, []);
-
-    useEffect(() => {
-        notifyOnlineStatus(
-            onlineStatus.state,
-            !!remainingSessionLength && remainingSessionLength > 0,
-        );
-    }, []);
+            if (quota.success) setQuota(quota.data ?? []);
+        },
+        5e3,
+        { autoInvoke: true },
+    );
 
     // Pick the highest if no token belongs to this devices
     const deviceQuota = quota?.find((v) => v.thisDevice) || (quota && quota[0]);
@@ -69,33 +59,6 @@ export function CurrentPackage() {
             .asSeconds(),
     });
 
-    /* Run online status check every 20 seconds */
-    useEffect(() => {
-        const check = async () => {
-            const isOnline = true; /* await checkOnlineStatus(); */
-
-            // update online status
-            if (isOnline) {
-                setOnlineStatus((prev) => ({
-                    prevState: prev.state,
-                    state: 'online',
-                }));
-            } else {
-                setOnlineStatus((prev) => ({
-                    prevState: prev.state,
-                    state: 'offline',
-                }));
-            }
-        };
-        // use exponensial backoff for online status check and update online status after three attempts
-        check();
-
-        // Poll every 20 seconds
-        const interval = setInterval(check, 20e3);
-
-        return () => clearInterval(interval);
-    }, []);
-
     const {
         downloadRate,
         uploadRate,
@@ -107,7 +70,7 @@ export function CurrentPackage() {
     const progressValue = Math.max(0, Math.min(100, parseFloat(width) || 0));
 
     return (
-        <Paper shadow='xl' radius='lg' p='lg' mt='md' withBorder>
+        <Paper shadow='xl' radius='lg' p='lg' mt='md' withBorder key=''>
             <Stack gap='md'>
                 <Text size='lg' fw={600}>
                     Active Package Details
@@ -178,28 +141,10 @@ export function CurrentPackage() {
                     </Group>
 
                     <Box>
-                        <ConnectedDevice />
+                        <ConnectedDevice quota={quota} />
                     </Box>
                 </Stack>
             </Stack>
         </Paper>
     );
-}
-
-function notifyOnlineStatus(
-    status: 'online' | 'offline' | '',
-    hasSession: boolean,
-) {
-    if (status === 'online')
-        notifications.show({
-            title: 'You are back online.',
-            message: 'You can now surf the internet.',
-        });
-    if (status === 'offline')
-        notifications.show({
-            title: 'You are offline.',
-            message: hasSession
-                ? 'Turn your wifi off and on again.'
-                : 'Purchase one of the packages below to access the internet.',
-        });
 }
