@@ -1,5 +1,5 @@
 import { Box, Group, Paper, Progress, Stack, Text } from '@mantine/core';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { IoMdArrowDown, IoMdArrowUp } from 'react-icons/io';
 import { timeRemaining } from './functions.ts';
 
@@ -10,17 +10,18 @@ import { dayjs } from '../../lib/dayjs.ts';
 import type { Quota } from '../../types/index.ts';
 import { ConnectedDevice } from './ConnectedDevices.tsx';
 import { dataScale } from './PackagePricing.tsx';
+
 export function CurrentPackage() {
     const [quota, setQuota] = useState<Array<Quota>>([]);
-
-    useInterval(
-        async () => {
-            const quota = await getStatus(currentLoginRequestId());
-            if (quota.success) setQuota(quota.data ?? []);
-        },
-        5e3,
-        { autoInvoke: true },
-    );
+    const fetchQuota = async () => {
+        const quota = await getStatus(currentLoginRequestId());
+        if (quota.success) setQuota(quota.data ?? []);
+    };
+    const interval = useInterval(fetchQuota, 5e3);
+    useEffect(() => {
+        fetchQuota().finally(interval.start);
+        return interval.stop;
+    }, []);
 
     // Pick the highest if no token belongs to this devices
     const deviceQuota = quota?.find((v) => v.thisDevice) || (quota && quota[0]);
