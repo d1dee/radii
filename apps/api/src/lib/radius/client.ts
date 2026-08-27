@@ -40,6 +40,7 @@ import dayjs from 'dayjs';
 import { and, desc, eq, gte, isNotNull, isNull, or, sql } from 'drizzle-orm';
 import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
 import * as dgram from 'node:dgram';
+import { radiusClient } from '.';
 import { db } from '../../db';
 import {
     activatedPackages,
@@ -170,6 +171,17 @@ export interface RadiusReply {
     attributes: RadiusInAttribute[];
 }
 
+// JSON attribute payload an rlm_rest (FreeRADIUS 3.x) authorize response
+// returns: keys carry the list qualifier (reply:<attribute>), values follow
+// the documented { op, value } form with one array entry per instance.
+// (FreeRADIUS 4.x switched the qualifier syntax to reply.<attribute>.)
+export interface RadiusRestReply {
+    [listQualifiedAttribute: string]: {
+        op: string;
+        value: Array<string | number>;
+    };
+}
+
 // Everything the portal needs to perform the final hop: submitting the issued
 // hotspot credentials to the NAS servlet login page ($(link-login-only)).
 export interface ActivationRedirect {
@@ -230,12 +242,6 @@ export interface ActivationStatus {
     liveSessions: SessionInfo[];
     avgSpeedBps: number;
     lastActive: Date | null;
-    // Cumulative time-bank (noExpiry packages): the bank is consumed across
-    // sessions within the static validity window; null for regular packages
-    // where remainingSeconds is per-session.
-    bankTotalSeconds: number | null;
-    bankUsedSeconds: number | null;
-    bankRemainingSeconds: number | null;
 }
 
 export interface NetworkUsage {
@@ -542,6 +548,92 @@ export class RadiusClient {
             row.activation,
             row.pkg,
         );
+    }
+
+    // =========================================================================
+    // FreeRADIUS rlm_rest backend (routes/radiusRest.ts)
+    // =========================================================================
+
+    // Reverse-resolves one of the generated hotspot RADIUS usernames (PK-…)
+    // back to the activation that owns it. The username carries only the
+    // first 10 hex characters of the activation id, so candidates are
+    // pre-filtered by id-prefix match and then verified with the exact
+    // derivation. Null for anything that is not a generated package username
+    // (e.g. users provisioned directly in radcheck by the operator).
+    async resolveActivationByUsername(username: string): Promise<{
+        activation: typeof activatedPackages.$inferSelect;
+        pkg: typeof packages.$inferSelect;
+    } | null> {
+        const normalized = username.trim().toUpperCase();
+        const match = /^PK-([0-9A-F]{10})$/.exec(normalized);
+        if (!match) return null;
+        const suffix = match[1]!.toLowerCase();
+        const rows = await db
+            .select({ activation: activatedPackages, pkg: packages })
+            .from(activatedPackages)
+            .innerJoin(packages, eq(activatedPackages.packageId, packages.id))
+            .where(
+                sql`replace(lower(${activatedPackages.id}::text), '-', '') like ${`${suffix}%`}`,
+            )
+            .limit(4);
+        for (const row of rows) {
+            if (activationUsername(row.activation.id) === normalized) {
+                return row;
+            }
+        }
+        return null;
+    }
+
+    // Verdict for a FreeRADIUS rlm_rest authorization query (the rest module
+    // `authorize` section), mapped by the route onto HTTP status codes per
+    // rlm_rest's authorize table:
+    //  - unknown:   not a package activation -> 404 -> "notfound", so the
+    //               authorize chain falls through to the remaining modules
+    //               (sql) which may know the user.
+    //  - expired:   static validity window closed -> 403 -> "userlock"
+    //               (rejected; mirrors what the radcheck Expiration row +
+    //               stock expiration module would do).
+    //  - exhausted: cumulative time bank consumed -> 403; syncBankAuthorization
+    //               additionally invalidates the credential (Auth-Type :=
+    //               Reject) and cuts live sessions.
+    //  - ok:        200 with the session's Access-Accept attributes serialised
+    //               in rlm_rest JSON form (reply:<attribute>, FreeRADIUS 3.x
+    //               qualifier syntax). The payload mirrors radreply exactly —
+    //               bank (noExpiry) balances are reconciled first, so when the
+    //               SQL module also emits radreply rows the attribute values
+    //               agree and the duplication is harmless; when rest is the
+    //               only reply source the attributes stay fresh regardless of
+    //               the reconciler tick.
+    async restAuthorize(
+        username: string,
+    ): Promise<
+        | { verdict: 'unknown' }
+        | { verdict: 'expired' }
+        | { verdict: 'exhausted' }
+        | { verdict: 'ok'; attributes: RadiusRestReply }
+    > {
+        const row = await this.resolveActivationByUsername(username);
+        if (!row) return { verdict: 'unknown' };
+        if (row.activation.expireAt.getTime() < Date.now()) {
+            return { verdict: 'expired' };
+        }
+        let sessionSeconds = row.pkg.sessionLength * 60;
+
+        const sync = await this.syncBankAuthorization(
+            row.activation.id,
+            row.pkg,
+        );
+        if (!sync.active) return { verdict: 'exhausted' };
+        sessionSeconds = sync.remainingSeconds;
+
+        return {
+            verdict: 'ok',
+            attributes: this.buildRestReplyAttributes(
+                row.activation.id,
+                row.pkg,
+                sessionSeconds,
+            ),
+        };
     }
 
     // Deactivates a package: removes the RADIUS provisioning (no further
@@ -1148,75 +1240,96 @@ export class RadiusClient {
         return activation;
     }
 
-    // Access-Accept attributes pushed through radreply on every login:
-    // Session-Timeout (session length), Port-Limit (max simultaneous logins —
-    // RouterOS maps this to shared-users), Mikrotik-Rate-Limit (first value =
-    // client upload / router rx, 'k'/'M' units), Mikrotik-Total-Limit
-    // (+Gigawords above 4 GiB) for the byte quota, and the Class cookie for
-    // accounting correlation. Bank (noExpiry) packages additionally request a
-    // short Acct-Interim-Interval so the cumulative-time counters in radacct
-    // stay fresh; their Session-Timeout is the remaining bank balance and is
+    // Access-Accept attributes of one activation's session, computed once and
+    // shared by both provisioning consumers below: Session-Timeout (session
+    // length), Port-Limit (max simultaneous logins — RouterOS maps this to
+    // shared-users), Mikrotik-Rate-Limit (first value = client upload /
+    // router rx, 'k'/'M' units), Mikrotik-Total-Limit (+Gigawords above
+    // 4 GiB) for the byte quota, and the Class cookie for accounting
+    // correlation. Bank (noExpiry) packages additionally request a short
+    // Acct-Interim-Interval so the cumulative-time counters in radacct stay
+    // fresh; their Session-Timeout is the remaining bank balance and is
     // re-synced at every login and by the bank reconciler.
-    private buildReplyAttributes(
-        username: string,
+    private sessionReplyAttributes(
         activationId: string,
         pkg: typeof packages.$inferSelect,
         sessionSeconds: number,
-    ): Array<typeof radreply.$inferInsert> {
-        const rows: Array<typeof radreply.$inferInsert> = [
-            {
-                username,
-                attribute: 'Session-Timeout',
-                op: '=',
-                value: String(sessionSeconds),
-            },
-            {
-                username,
-                attribute: 'Port-Limit',
-                op: '=',
-                value: String(pkg.maxDevices),
-            },
-            { username, attribute: 'Class', op: '=', value: activationId },
+    ): Array<{ attribute: string; value: string | number }> {
+        const attrs: Array<{ attribute: string; value: string | number }> = [
+            { attribute: 'Session-Timeout', value: sessionSeconds },
+            { attribute: 'Port-Limit', value: pkg.maxDevices },
+            { attribute: 'Class', value: activationId },
         ];
 
         if (pkg.noExpiry) {
-            rows.push({
-                username,
+            attrs.push({
                 attribute: 'Acct-Interim-Interval',
-                op: '=',
-                value: String(this.config.bankInterimSeconds),
+                value: this.config.bankInterimSeconds,
             });
         }
 
         if (pkg.uploadRate > 0 || pkg.downloadRate > 0) {
-            rows.push({
-                username,
+            // Package rates are Kbps; MikroTik's 'k' suffix denotes thousands.
+            // 0 is read as unlimited by RouterOS queuing.
+            attrs.push({
                 attribute: 'Mikrotik-Rate-Limit',
-                op: '=',
-                // Package rates are Kbps; MikroTik's 'k' suffix denotes
-                // thousands. 0 is read as unlimited by RouterOS queuing.
                 value: `${pkg.uploadRate}k/${pkg.downloadRate}k`,
             });
         }
 
         const quotaBytes = (pkg.downloadQuota + pkg.uploadQuota) * 1024;
         if (quotaBytes > 0) {
-            rows.push({
-                username,
+            attrs.push({
                 attribute: 'Mikrotik-Total-Limit',
-                op: '=',
-                value: String(quotaBytes % GIGAWORD),
+                value: quotaBytes % GIGAWORD,
             });
             if (quotaBytes >= GIGAWORD) {
-                rows.push({
-                    username,
+                attrs.push({
                     attribute: 'Mikrotik-Total-Limit-Gigawords',
-                    op: '=',
-                    value: String(Math.floor(quotaBytes / GIGAWORD)),
+                    value: Math.floor(quotaBytes / GIGAWORD),
                 });
             }
         }
-        return rows;
+        return attrs;
+    }
+
+    // radreply rows written at provisioning (consumed by the SQL module).
+    private buildReplyAttributes(
+        username: string,
+        activationId: string,
+        pkg: typeof packages.$inferSelect,
+        sessionSeconds: number,
+    ): Array<typeof radreply.$inferInsert> {
+        return this.sessionReplyAttributes(
+            activationId,
+            pkg,
+            sessionSeconds,
+        ).map(({ attribute, value }) => ({
+            username,
+            attribute,
+            op: '=',
+            value: String(value),
+        }));
+    }
+
+    // rlm_rest authorize response body (FreeRADIUS 3.x syntax): the same
+    // attribute set as radreply, list-qualified into the reply list with the
+    // default := operator. Values stay typed (integers as JSON numbers) so
+    // rlm_rest builds the pairs without string coercion.
+    private buildRestReplyAttributes(
+        activationId: string,
+        pkg: typeof packages.$inferSelect,
+        sessionSeconds: number,
+    ): RadiusRestReply {
+        const reply: RadiusRestReply = {};
+        for (const { attribute, value } of this.sessionReplyAttributes(
+            activationId,
+            pkg,
+            sessionSeconds,
+        )) {
+            reply[`reply:${attribute}`] = { op: ':=', value: [value] };
+        }
+        return reply;
     }
 
     private async buildRedirect(

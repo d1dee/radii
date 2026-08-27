@@ -65,5 +65,6 @@ export type {
     RadiusInAttribute,
     RadiusOutAttribute,
     RadiusReply,
+    RadiusRestReply,
     SessionInfo,
 } from './client';
