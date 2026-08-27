@@ -19,7 +19,7 @@ import { PackagePricing } from './components/Packages/PackagePricing.tsx';
 import { RegisterModal } from './components/RegisterForm/Modal.tsx';
 import { UserAccount } from './components/UserAccounts/UserAccount.tsx';
 import { getClientData, getPackages, type Client } from './lib/api.ts';
-import { authClient } from './lib/auth.ts';
+import { authClient, useSession } from './lib/auth.ts';
 
 // The NAS hotspot login page hands the client browser to the portal with a
 // `login_request` id (see POST /api/hotspot/login-request). Persist the id
@@ -78,6 +78,8 @@ export default function App() {
 
     const adminContacts = { ADMIN_TEL: '', ADMIN_WHATSAPP: '' };
 
+    const { data } = useSession();
+
     useEffect(() => {
         (async () => {
             const clientData = await getClientData();
@@ -87,7 +89,7 @@ export default function App() {
             const packages = await getPackages(loginRequestId);
             if (packages.success) setPackages(packages.data);
         })();
-    }, []);
+    }, [data]);
 
     const session = authClient.useSession();
 
