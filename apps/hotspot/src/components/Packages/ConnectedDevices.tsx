@@ -44,7 +44,7 @@ export function ConnectedDevice() {
                         <Stack gap='sm'>
                             <span>
                                 {canConnect
-                                    ? 'Disconnect and connect wifi to activate with an existing package or click below to activate an existing one.'
+                                    ? 'Click below to activate an existing package.'
                                     : 'All Packages are full, buy a new package or disconect an existing device.'}
                             </span>
                             <Button

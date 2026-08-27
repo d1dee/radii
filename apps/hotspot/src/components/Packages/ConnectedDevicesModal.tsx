@@ -48,7 +48,14 @@ export function ConnectedDevicesModal({ opened, onClose }: ModalControl) {
                     )?.liveSessions?.[0];
                     await deauthDevice(deviceId, session?.radacctId);
                     const refreshed = await getStatus(currentLoginRequestId());
-                    if (refreshed.success) setQuota(refreshed.data);
+                    if (refreshed.success) {
+                        setQuota(refreshed.data);
+                        notifications.show({
+                            title: 'Success',
+                            message:
+                                'Device has been disconnected successfully',
+                        });
+                    }
                 } catch (err) {
                     console.warn('Deauth failed', err);
                 } finally {
