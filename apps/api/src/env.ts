@@ -41,28 +41,27 @@ export const env = {
     wgIface: process.env.WG_IFACE || 'wg0',
     wgBin: process.env.WG_BIN || 'wg',
     wgUseSudo: (process.env.WG_USE_SUDO || '').trim().toLowerCase() === 'true',
-    // RADIUS integration (backend <-> FreeRADIUS). All optional: with nothing
-    // set, package provisioning still writes the FreeRADIUS SQL tables
-    // (radcheck/radreply), but direct RADIUS packets (credential checks,
-    // session CoA-Requests) are disabled with a clear error.
+    // RADIUS integration (backend <-> FreeRADIUS + NAS). All optional: with
+    // nothing set, package provisioning still writes the FreeRADIUS SQL tables
+    // (radcheck/radreply), but direct RADIUS packets (credential checks) are
+    // disabled with a clear error.
     //
-    // RADIUS_SERVER points at the RADIUS server, e.g. "radius://127.0.0.1" or
+    // RADIUS_URL points at the RADIUS server, e.g. "radius://127.0.0.1" or
     // "radius://10.99.0.1:1812" (scheme optional; auth port defaults to 1812).
     // RADIUS_SECRET is the shared secret registered for THIS api as a RADIUS
     // client on that server (FreeRADIUS clients.conf / nas table) and signs
-    // every packet the api originates.
+    // the Access-Requests the api originates.
     //
-    // The backend only ever talks to the RADIUS SERVER: session termination
-    // and re-authorization are CoA-Requests (RFC 5176) sent to
-    // RADIUS_COA_PORT on the server (FreeRADIUS convention 3799), identified
-    // by Acct-Session-Id + User-Name + NAS-IP-Address; the server then acts on
-    // the NAS. RADIUS_DM_PORT is kept as the NAS-side `/radius/incoming` port
-    // reference (RouterOS default 1700) but is not a target of this api.
+    // Session termination (Disconnect-Request) and re-authorization
+    // (CoA-Request) are sent DIRECTLY to the NAS on its `/radius/incoming`
+    // listener (RADIUS_DM_PORT, RouterOS default 1700), identified by
+    // Acct-Session-Id + User-Name and signed with the per-NAS shared secret
+    // stored in nas_setup_script; the NAS is resolved from the session's
+    // NAS-IP-Address.
     radius: {
-        url: process.env.RADIUS_SERVER || '',
+        url: process.env.RADIUS_URL || '',
         secret: process.env.RADIUS_SECRET || '',
         acctPort: parseInt(process.env.RADIUS_ACCT_PORT || '1813', 10),
-        coaPort: parseInt(process.env.RADIUS_COA_PORT || '3799', 10),
         dmPort: parseInt(process.env.RADIUS_DM_PORT || '1700', 10),
         timeoutMs: parseInt(process.env.RADIUS_TIMEOUT_MS || '2000', 10),
         retries: parseInt(process.env.RADIUS_RETRIES || '2', 10),

@@ -11,7 +11,6 @@ function buildRadiusClient(): RadiusClient {
         serverUrl: env.radius.url,
         secret: env.radius.secret,
         dmPort: env.radius.dmPort,
-        coaPort: env.radius.coaPort,
         timeoutMs: env.radius.timeoutMs,
         retries: env.radius.retries,
         bankInterimSeconds: env.radius.bankInterimSeconds,
@@ -28,7 +27,7 @@ export const radiusClient: RadiusClient =
 
 if (!env.radius.url) {
     console.warn(
-        '[radius] RADIUS_SERVER is not configured; provisioning still writes the RADIUS SQL tables but direct RADIUS packets (credential checks, disconnects via this server) are disabled.',
+        '[radius] RADIUS_SERVER is not configured; provisioning still writes the RADIUS SQL tables and session disconnects still go directly to the NAS, but credential checks (Access-Requests to the server) are disabled.',
     );
 }
 

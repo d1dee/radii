@@ -414,8 +414,8 @@ app.post('/payment/:id/verify', requireAuth, async (c) => {
 // full — kick one device" on the connected-devices screen). This does NOT
 // deactivate the package: provisioning stays in the RADIUS tables and the
 // activation keeps its validity, so the client can log back in. The session is
-// terminated by a CoA-Request (keyed on Acct-Session-Id) to the RADIUS server,
-// which disconnects it at the NAS, and its accounting record is closed.
+// terminated by a Disconnect-Request sent directly to the NAS holding it
+// (keyed on Acct-Session-Id), and its accounting record is closed.
 // ?session=<radacctId> targets one device; without it every live session of
 // the package is disconnected.
 app.post('/deauth/:deviceQuotaId', requireAuth, async (c) => {
@@ -434,9 +434,6 @@ app.post('/deauth/:deviceQuotaId', requireAuth, async (c) => {
         )
         .limit(1);
     if (!activation) return jsonError(c, 404, 'Unknown device quota');
-    if (activation.userId !== currentUser!.id) {
-        return jsonError(c, 404, 'Unknown device quota');
-    }
 
     const sessionId = c.req.query('session') || undefined;
     try {

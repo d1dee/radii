@@ -335,8 +335,8 @@ app.get('/radius/activations/:id', requireAdmin, async (c) => {
 });
 
 // Admin deactivation: removes the RADIUS provisioning and terminates every
-// live session of the activation via CoA-Requests (keyed on Acct-Session-Id)
-// sent to the RADIUS server.
+// live session of the activation via Disconnect-Requests sent directly to
+// the NAS holding each session (keyed on Acct-Session-Id).
 app.post('/radius/activations/:id/deactivate', requireAdmin, async (c) => {
     const id = c.req.param('id');
     if (!id) return jsonError(c, 404, 'Unknown activation');
