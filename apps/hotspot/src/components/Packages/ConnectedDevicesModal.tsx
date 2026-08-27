@@ -201,7 +201,7 @@ export function ConnectedDevicesModal({ opened, onClose }: ModalControl) {
         <Modal
             opened={opened}
             onClose={onClose}
-            title='Connected Devices'
+            title={<Text fw={700}>Avaible connections</Text>}
             size='lg'
             centered
         >

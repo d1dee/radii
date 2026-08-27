@@ -42,12 +42,12 @@ export function ConnectedDevice({ quota }: Props) {
                         </span>
                         <Button
                             color='orange'
-                            variant='outline'
+                            variant='filled'
                             onClick={openConnectedDevices}
                             size='xs'
                             mr='md'
                         >
-                            See Connected
+                            Available Connections
                         </Button>
                     </Stack>
                 </Alert>
