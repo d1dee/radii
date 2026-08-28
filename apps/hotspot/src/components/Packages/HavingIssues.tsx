@@ -1,4 +1,4 @@
-import { Button, Paper, Stack, Text, TextInput } from '@mantine/core';
+import { Button, Card, Paper, Stack, Text, TextInput } from '@mantine/core';
 import { useEffect, useRef, useState } from 'react';
 
 import { schemaResolver, useForm } from '@mantine/form';
@@ -107,7 +107,7 @@ export function HavingIssues({ adminContacts }: Props) {
                     Having Issues?
                 </Text>
 
-                <Paper radius='lg' p='md' withBorder>
+                <Card radius='lg' p='md' withBorder>
                     <Stack gap='sm'>
                         <Text fw={500}>Verify Transaction:</Text>
 
@@ -131,7 +131,7 @@ export function HavingIssues({ adminContacts }: Props) {
                             </Stack>
                         </form>
                     </Stack>
-                </Paper>
+                </Card>
 
                 <AdminContacts adminContacts={adminContacts} />
             </Stack>

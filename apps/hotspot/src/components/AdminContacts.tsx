@@ -1,4 +1,4 @@
-import { Button, Group, Paper, Stack, Text } from '@mantine/core';
+import { Button, Card, Group, Stack, Text } from '@mantine/core';
 
 interface Props {
     adminContacts: { ADMIN_TEL: string; ADMIN_WHATSAPP: string };
@@ -6,7 +6,7 @@ interface Props {
 
 export function AdminContacts({ adminContacts }: Props) {
     return (
-        <Paper radius='lg' p='md' withBorder>
+        <Card radius='lg' p='md' withBorder>
             <Stack gap='md'>
                 <Stack gap='xs'>
                     <Text fw={600}>Admin Contact Details:</Text>
@@ -61,6 +61,6 @@ export function AdminContacts({ adminContacts }: Props) {
                     and registration phone number ready.
                 </Text>
             </Stack>
-        </Paper>
+        </Card>
     );
 }
