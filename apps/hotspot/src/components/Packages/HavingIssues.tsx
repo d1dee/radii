@@ -6,11 +6,11 @@ import { paymentTransactionCodeSchema } from '@radii/shared';
 import { AdminContacts } from '../../components/AdminContacts.tsx';
 import { verifyPaymentReceipt } from '../../lib/api.ts';
 
-export function HavingIssues({
-    adminContacts,
-}: {
+interface Props {
     adminContacts: { ADMIN_TEL: string; ADMIN_WHATSAPP: string };
-}) {
+}
+
+export function HavingIssues({ adminContacts }: Props) {
     const [message, setMessage] = useState<
         { success?: true; message: string } | undefined
     >(undefined);
@@ -101,48 +101,40 @@ export function HavingIssues({
     };
 
     return (
-        <Stack gap='md' mt='md'>
-            <Paper shadow='xl' radius='lg' p='lg'>
-                <Stack gap='md'>
-                    <Text size='lg' fw={600}>
-                        Having Issues?
-                    </Text>
+        <Paper shadow='xl' radius='lg' p='lg' withBorder>
+            <Stack gap='md'>
+                <Text size='lg' fw={600}>
+                    Having Issues?
+                </Text>
 
-                    <Paper bg='grape.1' radius='lg' p='md'>
-                        <Stack gap='sm'>
-                            <Text fw={500}>Verify Transaction:</Text>
+                <Paper radius='lg' p='md' withBorder>
+                    <Stack gap='sm'>
+                        <Text fw={500}>Verify Transaction:</Text>
 
-                            <form onSubmit={form.onSubmit(verifyTransaction)}>
-                                <Stack gap='xs'>
-                                    <TextInput
-                                        placeholder='Enter transaction ID or paste your M-pesa message here'
-                                        name='transactionCode'
-                                        {...form.getInputProps(
-                                            'transactionCode',
-                                        )}
-                                    />
-                                    <Button type='submit'>Verify</Button>
+                        <form onSubmit={form.onSubmit(verifyTransaction)}>
+                            <Stack gap='xs'>
+                                <TextInput
+                                    placeholder='Enter transaction ID or paste your M-pesa message here'
+                                    name='transactionCode'
+                                    {...form.getInputProps('transactionCode')}
+                                />
+                                <Button type='submit'>Verify</Button>
 
-                                    {message ? (
-                                        <Text
-                                            size='sm'
-                                            c={
-                                                message.success
-                                                    ? 'green'
-                                                    : 'red'
-                                            }
-                                        >
-                                            {message.message}
-                                        </Text>
-                                    ) : null}
-                                </Stack>
-                            </form>
-                        </Stack>
-                    </Paper>
+                                {message ? (
+                                    <Text
+                                        size='sm'
+                                        c={message.success ? 'green' : 'red'}
+                                    >
+                                        {message.message}
+                                    </Text>
+                                ) : null}
+                            </Stack>
+                        </form>
+                    </Stack>
+                </Paper>
 
-                    <AdminContacts adminContacts={adminContacts} />
-                </Stack>
-            </Paper>
-        </Stack>
+                <AdminContacts adminContacts={adminContacts} />
+            </Stack>
+        </Paper>
     );
 }

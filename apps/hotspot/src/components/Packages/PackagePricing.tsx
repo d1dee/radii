@@ -83,7 +83,7 @@ export function PackagePricing({
         );
 
     return (
-        <Paper shadow='xl' radius='lg' p='lg' mt='md' withBorder>
+        <Paper shadow='xl' radius='lg' p='lg' withBorder>
             <Stack gap='md' mt='md'>
                 <Text size='lg' fw={600}>
                     Available Packages

@@ -1,6 +1,6 @@
 import '@mantine/core/styles.css';
 
-import { Container, MantineProvider } from '@mantine/core';
+import { Container, MantineProvider, Stack } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import type { Package, Packages } from '@radii/shared';
 import {
@@ -170,41 +170,40 @@ export default function App() {
             <Container size='sm' p='md'>
                 <ModalActionsContext.Provider value={modalActions}>
                     <ClientContext.Provider value={clientData}>
-                        <UserAccount
-                            havingIssues={[havingIssues, setHavingIssues]}
-                        />
-
-                        {havingIssues ? (
-                            <HavingIssues adminContacts={adminContacts} />
-                        ) : (
-                            <CurrentPackage />
-                        )}
-
-                        <PackagePricing packages={packages} />
-
-                        {/*
+                        <Stack gap='md'>
+                            <UserAccount
+                                havingIssues={[havingIssues, setHavingIssues]}
+                            />
+                            {havingIssues ? (
+                                <HavingIssues adminContacts={adminContacts} />
+                            ) : (
+                                <CurrentPackage />
+                            )}
+                            <PackagePricing packages={packages} />
+                            {/*
                       Modals are rendered outside the mutating QuotaContext and
                       own their state locally, so background polling cannot
                       mutate data shown inside them.
                     */}
-                        <PaymentFlow
-                            key={buyKey}
-                            opened={buyOpened}
-                            onClose={closeBuy}
-                            seed={buySeed}
-                        />
-                        <RegisterModal
-                            opened={authOpened}
-                            onClose={closeAuth}
-                            mode={authMode}
-                            onModeChange={setAuthMode}
-                            packageId={authPackageId}
-                            price={authPrice}
-                        />
-                        <ConnectedDevicesModal
-                            opened={connectedOpened}
-                            onClose={closeConnected}
-                        />
+                            <PaymentFlow
+                                key={buyKey}
+                                opened={buyOpened}
+                                onClose={closeBuy}
+                                seed={buySeed}
+                            />
+                            <RegisterModal
+                                opened={authOpened}
+                                onClose={closeAuth}
+                                mode={authMode}
+                                onModeChange={setAuthMode}
+                                packageId={authPackageId}
+                                price={authPrice}
+                            />
+                            <ConnectedDevicesModal
+                                opened={connectedOpened}
+                                onClose={closeConnected}
+                            />
+                        </Stack>
                     </ClientContext.Provider>
                 </ModalActionsContext.Provider>
             </Container>
