@@ -133,7 +133,9 @@ export function PackagePricing({
                                         align='flex-start'
                                     >
                                         <Stack gap='xs'>
-                                            <Text c='dimmed'>{pkg.title}</Text>
+                                            <Text c='dimmed'>
+                                                {upperFirstCase(pkg.title)}
+                                            </Text>
                                             <Text size='32px' fw={700}>
                                                 {title}
                                             </Text>
