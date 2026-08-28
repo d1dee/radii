@@ -327,7 +327,7 @@ app.get('/payment/:id', requireAuth, async (c) => {
         return jsonError(c, 404, 'Payment not found');
     }
     const currentUser = c.get('user');
-    const payment = await getPaymentById(id);
+    const payment = await getPaymentById(id, currentUser.id);
     if (!payment || payment.userId !== currentUser!.id) {
         return jsonError(c, 404, 'Payment not found');
     }

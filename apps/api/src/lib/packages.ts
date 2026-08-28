@@ -382,11 +382,16 @@ export async function createPayment(data: {
     return row;
 }
 
-export async function getPaymentById(paymentId: string) {
+export async function getPaymentById(paymentId: string, userId: string) {
     const [payment] = await db
         .select()
         .from(packagePayments)
-        .where(eq(packagePayments.id, paymentId))
+        .where(
+            and(
+                eq(packagePayments.id, paymentId),
+                eq(packagePayments.userId, userId),
+            ),
+        )
         .limit(1);
     return payment;
 }
