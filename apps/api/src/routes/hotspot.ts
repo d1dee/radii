@@ -204,6 +204,7 @@ app.get('/status', requireAuth, async (c) => {
                 maxDevices: a.maxDevices,
                 expiresAt: a.expireAt.toISOString(),
                 lastActive: a.lastActive?.toISOString(),
+                noExpiry: a.noExpiry,
                 thisDevice:
                     clientMac !== '' &&
                     a.liveSessions.some(

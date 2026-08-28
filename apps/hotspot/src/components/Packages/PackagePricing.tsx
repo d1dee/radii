@@ -50,7 +50,7 @@ export function PackagePricing({
         packages?.[0]?.[0] ??
         '';
 
-    const activePackages = getPackagesByTitle(activeTitle, packages ?? []);
+    const groupedPackages = getPackagesByTitle(activeTitle, packages ?? []);
 
     function initiateOrderFlow(pkg: Package) {
         const seed = {
@@ -110,12 +110,15 @@ export function PackagePricing({
                 </SimpleGrid>
 
                 <Stack gap='md'>
-                    {activePackages.map((pkg) => {
+                    {groupedPackages.map((pkg) => {
                         const title = pkg.downloadRate
                             ? humanFormat(pkg.downloadRate, {
                                   scale: dataScale,
                               })
                             : 'Unlimited';
+                        const expiry = pkg.noExpiry
+                            ? 'No Expiry'
+                            : dayjs.duration(pkg.sessionLength, 'm').humanize();
 
                         return (
                             <Card
@@ -138,12 +141,7 @@ export function PackagePricing({
 
                                         <Stack gap='xs' align='flex-end'>
                                             <Text size='sm' c='dimmed'>
-                                                {dayjs
-                                                    .duration(
-                                                        pkg.sessionLength,
-                                                        'm',
-                                                    )
-                                                    .humanize()}
+                                                {expiry}
                                             </Text>
                                             <Text size='xl' fw={700}>
                                                 Ksh {pkg.price.toLocaleString()}

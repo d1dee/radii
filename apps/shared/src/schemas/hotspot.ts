@@ -22,7 +22,6 @@ export type Quota = {
     sessionLength: number;
     deviceQuotaId: string;
     lastActive?: string;
-    ndsToken?: string;
     clientMac?: string;
     price: number;
     uploadRate: number;
@@ -31,6 +30,7 @@ export type Quota = {
     parentQuotaId: string;
     thisDevice?: boolean;
     expiresAt?: string;
+    noExpiry: boolean;
     online?: boolean;
     packageId?: string;
     packageTitle?: string;

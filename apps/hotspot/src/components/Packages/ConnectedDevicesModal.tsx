@@ -129,6 +129,7 @@ export function ConnectedDevicesModal({ opened, onClose }: ModalControl) {
                       scale: dataScale,
                   })
                 : 'Unlimited';
+
             return (
                 <Table.Tr
                     key={v.deviceQuotaId}
