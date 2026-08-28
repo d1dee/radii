@@ -15,7 +15,12 @@ function buildPaymentService(): PaymentService {
     // register strictly, which throws a clear error on incomplete/invalid
     // credentials at startup. With nothing set, payments are disabled and the
     // service reports that to callers.
-    if (mpesa.consumerKey || mpesa.consumerSecret || mpesa.shortcode || mpesa.passkey) {
+    if (
+        mpesa.consumerKey ||
+        mpesa.consumerSecret ||
+        mpesa.shortcode ||
+        mpesa.passkey
+    ) {
         service.register(
             new MpesaPaymentProvider({
                 consumerKey: mpesa.consumerKey,
@@ -39,14 +44,16 @@ function buildPaymentService(): PaymentService {
 
 // Guarded against `bun --hot` re-evaluation stacking duplicate singletons
 // (same pattern as db/index.ts).
-const globalRef = globalThis as unknown as { __paymentService?: PaymentService };
-export const paymentService: PaymentService =
-    globalRef.__paymentService ?? (globalRef.__paymentService = buildPaymentService());
+const globalRef = globalThis as unknown as {
+    __paymentService?: PaymentService;
+};
+
+export const paymentService: PaymentService = globalRef.__paymentService
+    ? globalRef.__paymentService
+    : buildPaymentService();
 
 export { PaymentService } from './service';
 export type { PackagePaymentRow } from './service';
-export { MPESA_CALLBACK_EVENTS, MPESA_PROVIDER_NAME, MpesaPaymentProvider } from './mpesa/provider';
-export type { MpesaProviderConfig } from './mpesa/provider';
 export { PaymentProviderError } from './types';
 export type {
     InitiatePaymentResult,
