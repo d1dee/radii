@@ -100,7 +100,6 @@ export function PackagePricing({
                             <Button
                                 key={title}
                                 variant={active ? 'filled' : 'light'}
-                                color={active ? 'grape' : 'gray'}
                                 onClick={() => setSelectedTitle(title)}
                             >
                                 {upperFirstCase(title)}
