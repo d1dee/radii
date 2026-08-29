@@ -3,16 +3,18 @@ import { useEffect, useState } from 'react';
 import { IoMdArrowDown, IoMdArrowUp } from 'react-icons/io';
 import { timeRemaining } from './functions.ts';
 
-import { useInterval } from '@mantine/hooks';
+import { useDisclosure, useInterval } from '@mantine/hooks';
 import humanFormat from 'human-format';
 import { currentLoginRequestId, getStatus } from '../../lib/api.ts';
 import { dayjs } from '../../lib/dayjs.ts';
 import type { Quota } from '../../types/index.ts';
 import { ConnectedDevice } from './ConnectedDevices.tsx';
+import { ConnectedDevicesModal } from './ConnectedDevicesModal.tsx';
 import { dataScale } from './PackagePricing.tsx';
 
 export function CurrentPackage() {
     const [quota, setQuota] = useState<Array<Quota>>([]);
+    const [isOpen, { open, close }] = useDisclosure();
     const fetchQuota = async () => {
         const quota = await getStatus(currentLoginRequestId());
         if (quota.success) setQuota(quota.data ?? []);
@@ -71,81 +73,88 @@ export function CurrentPackage() {
     const progressValue = Math.max(0, Math.min(100, parseFloat(width) || 0));
 
     return (
-        <Paper shadow='xl' radius='lg' p='lg' withBorder key=''>
-            <Stack gap='md'>
-                <Text size='lg' fw={600}>
-                    Active Package Details
-                </Text>
-
-                <Group justify='space-between'>
-                    <Text size='sm' fw={500}>
-                        Time remaining
+        <>
+            <Paper shadow='xl' radius='lg' p='lg' withBorder key=''>
+                <Stack gap='md'>
+                    <Text size='lg' fw={600}>
+                        Active Package Details
                     </Text>
-                    <Text size='sm' fw={500}>
-                        {timeRemaining(
-                            dayjs.duration(remainingSessionLength || 0, 's'),
-                        )}
-                    </Text>
-                </Group>
 
-                <Progress
-                    value={progressValue}
-                    size='sm'
-                    radius='xl'
-                    color='grape'
-                />
+                    <Group justify='space-between'>
+                        <Text size='sm' fw={500}>
+                            Time remaining
+                        </Text>
+                        <Text size='sm' fw={500}>
+                            {timeRemaining(
+                                dayjs.duration(
+                                    remainingSessionLength || 0,
+                                    's',
+                                ),
+                            )}
+                        </Text>
+                    </Group>
 
-                <Stack gap='xs'>
-                    <Group justify='space-between' gap='sm'>
-                        <Text size='sm' c='dimmed'>
-                            Devices: {quota?.length || ' _'}
-                        </Text>
-                        <Text size='sm' c='dimmed'>
-                            Package info:{' '}
-                            {deviceQuota?.downloadRate
-                                ? `${humanFormat(deviceQuota.downloadRate, {
-                                      scale: dataScale,
-                                  })} - Ksh ${deviceQuota.price.toLocaleString()}`
-                                : ' _'}
-                        </Text>
-                        <Group gap='sm'>
-                            <Group gap='xs'>
-                                <IoMdArrowDown />
-                                <Text size='sm' c='dimmed'>
-                                    {downloadRate && downloadRate !== 0
-                                        ? humanFormat(downloadRate, {
-                                              scale: dataScale,
-                                          })
-                                        : ' _'}
-                                </Text>
-                            </Group>
-                            <Group gap='xs'>
-                                <IoMdArrowUp />
-                                <Text size='sm' c='dimmed'>
-                                    {uploadRate && uploadRate !== 0
-                                        ? humanFormat(uploadRate, {
-                                              scale: dataScale,
-                                          })
-                                        : ' _'}
-                                </Text>
+                    <Progress
+                        value={progressValue}
+                        size='sm'
+                        radius='xl'
+                        color='grape'
+                    />
+
+                    <Stack gap='xs'>
+                        <Group justify='space-between' gap='sm'>
+                            <Text size='sm' c='dimmed'>
+                                Devices: {quota?.length || ' _'}
+                            </Text>
+                            <Text size='sm' c='dimmed'>
+                                Package info:{' '}
+                                {deviceQuota?.downloadRate
+                                    ? `${humanFormat(deviceQuota.downloadRate, {
+                                          scale: dataScale,
+                                      })} - Ksh ${deviceQuota.price.toLocaleString()}`
+                                    : ' _'}
+                            </Text>
+                            <Group gap='sm'>
+                                <Group gap='xs'>
+                                    <IoMdArrowDown />
+                                    <Text size='sm' c='dimmed'>
+                                        {downloadRate && downloadRate !== 0
+                                            ? humanFormat(downloadRate, {
+                                                  scale: dataScale,
+                                              })
+                                            : ' _'}
+                                    </Text>
+                                </Group>
+                                <Group gap='xs'>
+                                    <IoMdArrowUp />
+                                    <Text size='sm' c='dimmed'>
+                                        {uploadRate && uploadRate !== 0
+                                            ? humanFormat(uploadRate, {
+                                                  scale: dataScale,
+                                              })
+                                            : ' _'}
+                                    </Text>
+                                </Group>
                             </Group>
                         </Group>
-                    </Group>
 
-                    <Group justify='space-between' gap='sm'>
-                        <Text size='sm' c='dimmed'>
-                            Quota ID: {deviceQuotaId || ' _'}
-                        </Text>
-                        <Text size='sm' c='dimmed'>
-                            Parent Quota: {deviceQuota?.parentQuotaId || ' _'}
-                        </Text>
-                    </Group>
+                        <Group justify='space-between' gap='sm'>
+                            <Text size='sm' c='dimmed'>
+                                Quota ID: {deviceQuotaId || ' _'}
+                            </Text>
+                            <Text size='sm' c='dimmed'>
+                                Parent Quota:{' '}
+                                {deviceQuota?.parentQuotaId || ' _'}
+                            </Text>
+                        </Group>
 
-                    <Box>
-                        <ConnectedDevice quota={quota} />
-                    </Box>
+                        <Box>
+                            <ConnectedDevice quota={quota} onOpen={open} />
+                        </Box>
+                    </Stack>
                 </Stack>
-            </Stack>
-        </Paper>
+            </Paper>
+            <ConnectedDevicesModal onClose={close} isOpen={isOpen} />
+        </>
     );
 }

@@ -5,15 +5,12 @@ import {
 } from 'react-icons/ai';
 
 import type { Quota } from '@radii/shared';
-import { useContext } from 'react';
-import { ModalActionsContext } from '../../App.tsx';
 
 type Props = {
     quota: Array<Quota>;
+    onOpen: () => void;
 };
-export function ConnectedDevice({ quota }: Props) {
-    const { openConnectedDevices } = useContext(ModalActionsContext);
-
+export function ConnectedDevice({ quota, onOpen }: Props) {
     const isThisDevice = !!quota?.some((v) => v.thisDevice);
 
     // A slot for this device exists when at least one package has fewer
@@ -43,7 +40,7 @@ export function ConnectedDevice({ quota }: Props) {
                         <Button
                             color='orange'
                             variant='filled'
-                            onClick={openConnectedDevices}
+                            onClick={onOpen}
                             size='xs'
                             mr='md'
                         >
@@ -65,7 +62,7 @@ export function ConnectedDevice({ quota }: Props) {
                         <Button
                             variant='outline'
                             color='green'
-                            onClick={openConnectedDevices}
+                            onClick={onOpen}
                             size='xs'
                             mr='md'
                         >

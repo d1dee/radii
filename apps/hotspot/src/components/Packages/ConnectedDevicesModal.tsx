@@ -19,12 +19,15 @@ import {
 import { dayjs } from '@lib/dayjs.ts';
 import { notifications } from '@mantine/notifications';
 import type { Quota } from '@radii/shared';
-import type { ModalControl } from '@types';
 import humanFormat from 'human-format';
 import { timeRemaining } from './functions.ts';
 import { dataScale } from './PackagePricing.tsx';
 
-export function ConnectedDevicesModal({ opened, onClose }: ModalControl) {
+interface Props {
+    isOpen: boolean;
+    onClose: () => void;
+}
+export function ConnectedDevicesModal({ isOpen, onClose }: Props) {
     const [deviceId, setDeviceId] = useState<string>('');
     const [pendingDeauth, setPendingDeauth] = useState<Array<string>>([]);
     const [pendingConnect, setPendingConnect] = useState<Array<string>>([]);
@@ -200,7 +203,7 @@ export function ConnectedDevicesModal({ opened, onClose }: ModalControl) {
 
     return (
         <Modal
-            opened={opened}
+            opened={isOpen}
             onClose={onClose}
             title={<Text fw={700}>Avaible connections</Text>}
             size='lg'

@@ -12,7 +12,6 @@ import {
 } from 'react';
 import { PaymentFlow } from './components/Buy/PaymentFlow.tsx';
 import { LOGIN_REQUEST_KEY } from './components/HotspotLoginRedirect.tsx';
-import { ConnectedDevicesModal } from './components/Packages/ConnectedDevicesModal.tsx';
 import { CurrentPackage } from './components/Packages/CurrentPackage.tsx';
 import { HavingIssues } from './components/Packages/HavingIssues.tsx';
 import { PackagePricing } from './components/Packages/PackagePricing.tsx';
@@ -51,8 +50,6 @@ export type ModalActions = {
     openRegister: (packageId?: string, price?: string) => void;
     /** Open the login modal, optionally seeding a packageId */
     openLogin: (packageId?: string, price?: string) => void;
-    /** Open the connected-devices modal with a snapshot of current quotas */
-    openConnectedDevices: () => void;
 };
 
 export const ModalActionsContext = createContext<ModalActions>(null!);
@@ -122,9 +119,6 @@ export default function App() {
     const [authPackageId, setAuthPackageId] = useState('');
     const [authPrice, setAuthPrice] = useState('');
 
-    const [connectedOpened, { open: openConnected, close: closeConnected }] =
-        useDisclosure(false);
-
     const startBuy = useCallback(
         (pkg: { packageId: string; price: string }) => {
             setBuySeed(pkg);
@@ -151,13 +145,10 @@ export default function App() {
         },
         [openAuth],
     );
-    const openConnectedDevices = useCallback(() => {
-        openConnected();
-    }, [openConnected]);
 
     const modalActions = useMemo<ModalActions>(
-        () => ({ startBuy, openRegister, openLogin, openConnectedDevices }),
-        [startBuy, openRegister, openLogin, openConnectedDevices],
+        () => ({ startBuy, openRegister, openLogin }),
+        [startBuy, openRegister, openLogin],
     );
 
     // The stored package id has now been seeded into the buy flow; remove it.
@@ -198,10 +189,6 @@ export default function App() {
                                 onModeChange={setAuthMode}
                                 packageId={authPackageId}
                                 price={authPrice}
-                            />
-                            <ConnectedDevicesModal
-                                opened={connectedOpened}
-                                onClose={closeConnected}
                             />
                         </Stack>
                     </ClientContext.Provider>
