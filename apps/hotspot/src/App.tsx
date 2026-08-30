@@ -11,6 +11,7 @@ import {
     useState,
 } from 'react';
 import { PaymentFlow } from './components/Buy/PaymentFlow.tsx';
+import { Footer } from './components/Footer.tsx';
 import { LOGIN_REQUEST_KEY } from './components/HotspotLoginRedirect.tsx';
 import { CurrentPackage } from './components/Packages/CurrentPackage.tsx';
 import { HavingIssues } from './components/Packages/HavingIssues.tsx';
@@ -158,19 +159,27 @@ export default function App() {
 
     return (
         <MantineProvider defaultColorScheme='auto'>
-            <Container size='sm' p='md'>
+            <Container size='sm' pt='md'>
                 <ModalActionsContext.Provider value={modalActions}>
                     <ClientContext.Provider value={clientData}>
-                        <Stack gap='md'>
-                            <UserAccount
-                                havingIssues={[havingIssues, setHavingIssues]}
-                            />
-                            {havingIssues ? (
-                                <HavingIssues adminContacts={adminContacts} />
-                            ) : (
-                                <CurrentPackage />
-                            )}
-                            <PackagePricing packages={packages} />
+                        <Stack justify='space-between'>
+                            <Stack gap='md'>
+                                <UserAccount
+                                    havingIssues={[
+                                        havingIssues,
+                                        setHavingIssues,
+                                    ]}
+                                />
+                                {havingIssues ? (
+                                    <HavingIssues
+                                        adminContacts={adminContacts}
+                                    />
+                                ) : (
+                                    <CurrentPackage />
+                                )}
+                                <PackagePricing packages={packages} />
+                            </Stack>
+                            <Footer />
                             {/*
                       Modals are rendered outside the mutating QuotaContext and
                       own their state locally, so background polling cannot
