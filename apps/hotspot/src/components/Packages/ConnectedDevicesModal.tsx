@@ -7,7 +7,13 @@ import {
     Table,
     Text,
 } from '@mantine/core';
-import { useEffect, useRef, useState } from 'react';
+import {
+    useEffect,
+    useRef,
+    useState,
+    type Dispatch,
+    type SetStateAction,
+} from 'react';
 
 import {
     completeLoginRequest,
@@ -26,8 +32,9 @@ import { dataScale } from './PackagePricing.tsx';
 interface Props {
     isOpen: boolean;
     onClose: () => void;
+    syncQuota: Dispatch<SetStateAction<Quota[]>>;
 }
-export function ConnectedDevicesModal({ isOpen, onClose }: Props) {
+export function ConnectedDevicesModal({ isOpen, onClose, syncQuota }: Props) {
     const [deviceId, setDeviceId] = useState<string>('');
     const [pendingDeauth, setPendingDeauth] = useState<Array<string>>([]);
     const [pendingConnect, setPendingConnect] = useState<Array<string>>([]);
@@ -46,13 +53,13 @@ export function ConnectedDevicesModal({ isOpen, onClose }: Props) {
                     // Target the device's live session when known (single
                     // session); the backend disconnects all sessions of the
                     // package when no session id is given.
-                    const session = quota?.find(
-                        (v) => v.deviceQuotaId === deviceId,
-                    )?.liveSessions?.[0];
+                    const session = quota?.find((v) => v.id === deviceId)
+                        ?.liveSessions?.[0];
                     await deauthDevice(deviceId, session?.radacctId);
                     const refreshed = await getStatus(currentLoginRequestId());
                     if (refreshed.success) {
-                        setQuota(refreshed.data);
+                        setQuota(refreshed.data ?? []);
+                        syncQuota(refreshed.data ?? []);
                         notifications.show({
                             title: 'Success',
                             message:
@@ -75,15 +82,15 @@ export function ConnectedDevicesModal({ isOpen, onClose }: Props) {
     useEffect(() => {
         (async () => {
             const quota = await getStatus(currentLoginRequestId());
-            if (quota.success) setQuota(quota.data);
+            if (quota.success) setQuota(quota.data ?? []);
         })();
-    }, []);
+    }, [isOpen]);
 
     // Connects this device using an offline activation: the backend returns its
     // RADIUS credentials plus the NAS servlet link, which are re-submitted as
     // a form post (same final hop as after a purchase), logging this client
     // into the hotspot.
-    const connectDevice = async (deviceQuotaId: string) => {
+    const connectDevice = async (id: string) => {
         const loginRequestId = currentLoginRequestId();
         if (!loginRequestId) {
             notifications.show({
@@ -94,14 +101,12 @@ export function ConnectedDevicesModal({ isOpen, onClose }: Props) {
             });
             return;
         }
-        setPendingConnect((prev) => [...prev, deviceQuotaId]);
+        setPendingConnect((prev) => [...prev, id]);
         try {
-            const res = await completeLoginRequest(
-                loginRequestId,
-                deviceQuotaId,
-            );
+            const res = await completeLoginRequest(loginRequestId, id);
             if (res.success && res.data?.linkLoginOnly) {
                 setConnectRedirect(res.data);
+
                 return; // spinner stays until the form navigates the page away
             }
             notifications.show({
@@ -114,7 +119,7 @@ export function ConnectedDevicesModal({ isOpen, onClose }: Props) {
         } catch (err) {
             console.warn('Connect failed', err);
         }
-        setPendingConnect((prev) => prev.filter((id) => id !== deviceQuotaId));
+        setPendingConnect((prev) => prev.filter((id) => id !== id));
     };
 
     useEffect(() => {
@@ -134,14 +139,11 @@ export function ConnectedDevicesModal({ isOpen, onClose }: Props) {
                 : 'Unlimited';
 
             return (
-                <Table.Tr
-                    key={v.deviceQuotaId}
-                    bg={v.thisDevice ? 'grape.0' : undefined}
-                >
+                <Table.Tr key={v.id} bg={v.thisDevice ? 'grape.0' : undefined}>
                     <Table.Td>{i + 1}</Table.Td>
                     <Table.Td>
                         <Stack gap={0}>
-                            <span>{v.deviceQuotaId}</span>
+                            <span>{v.id}</span>
                             <Text size='xs' c='dimmed' opacity={0.5}>
                                 {v.clientMac}
                             </Text>
@@ -161,14 +163,14 @@ export function ConnectedDevicesModal({ isOpen, onClose }: Props) {
                         )}
                     </Table.Td>
                     <Table.Td>
-                        {pendingDeauth.includes(v.deviceQuotaId) ? (
+                        {pendingDeauth.includes(v.id) ? (
                             <Group gap='xs' wrap='nowrap'>
                                 <Loader size={14} />
                                 <Text size='sm' c='dimmed'>
                                     Disconnecting…
                                 </Text>
                             </Group>
-                        ) : pendingConnect.includes(v.deviceQuotaId) ? (
+                        ) : pendingConnect.includes(v.id) ? (
                             <Group gap='xs' wrap='nowrap'>
                                 <Loader size={14} color='green' />
                                 <Text size='sm' c='dimmed'>
@@ -181,7 +183,7 @@ export function ConnectedDevicesModal({ isOpen, onClose }: Props) {
                                 type='button'
                                 size='sm'
                                 c='red'
-                                onClick={() => setDeviceId(v.deviceQuotaId)}
+                                onClick={() => setDeviceId(v.id)}
                             >
                                 Disconnect
                             </Anchor>
@@ -191,7 +193,7 @@ export function ConnectedDevicesModal({ isOpen, onClose }: Props) {
                                 type='button'
                                 size='sm'
                                 c='green'
-                                onClick={() => connectDevice(v.deviceQuotaId)}
+                                onClick={() => connectDevice(v.id)}
                             >
                                 Connect
                             </Anchor>

@@ -1,13 +1,22 @@
-import { Box, Group, Paper, Progress, Stack, Text } from '@mantine/core';
+import {
+    Box,
+    Grid,
+    Group,
+    Paper,
+    Progress,
+    SimpleGrid,
+    Stack,
+    Text,
+} from '@mantine/core';
 import { useEffect, useState } from 'react';
-import { IoMdArrowDown, IoMdArrowUp } from 'react-icons/io';
 import { timeRemaining } from './functions.ts';
 
+import type { Quota } from '@/types/index.ts';
+import { currentLoginRequestId, getStatus } from '@lib/api.ts';
+import { dayjs } from '@lib/dayjs.ts';
 import { useDisclosure, useInterval } from '@mantine/hooks';
+import { IconSelector } from '@tabler/icons-react';
 import humanFormat from 'human-format';
-import { currentLoginRequestId, getStatus } from '../../lib/api.ts';
-import { dayjs } from '../../lib/dayjs.ts';
-import type { Quota } from '../../types/index.ts';
 import { ConnectedDevice } from './ConnectedDevices.tsx';
 import { ConnectedDevicesModal } from './ConnectedDevicesModal.tsx';
 import { dataScale } from './PackagePricing.tsx';
@@ -26,51 +35,16 @@ export function CurrentPackage() {
     }, []);
 
     // Pick the highest if no token belongs to this devices
-    const deviceQuota = quota?.find((v) => v.thisDevice) || (quota && quota[0]);
+    const thisDevice = quota.find((v) => v.thisDevice && v.online) || quota[0];
 
-    const [signal] = useState<
-        Partial<Array<Quota>[number]> & { width: string }
-    >({
-        ...deviceQuota,
-        width:
-            !deviceQuota?.sessionLength || !deviceQuota?.remainingSessionLength
-                ? '0%'
-                : Math.max(
-                      0,
-                      Math.min(
-                          100,
-                          (dayjs
-                              .duration(
-                                  deviceQuota?.remainingSessionLength || 0,
-                                  'm',
-                              )
-                              .asSeconds() *
-                              100) /
-                              dayjs
-                                  .duration(
-                                      deviceQuota?.sessionLength || 0,
-                                      'm',
-                                  )
-                                  .asSeconds(),
-                      ),
-                  ) + '%',
-        remainingSessionLength: dayjs
-            .duration(deviceQuota?.remainingSessionLength || 0, 'm')
-            .asSeconds(),
-        sessionLength: dayjs
-            .duration(deviceQuota?.sessionLength || 0, 'm')
-            .asSeconds(),
-    });
+    const progressValue =
+        (thisDevice?.remainingSessionLength / thisDevice?.sessionLength) * 100;
 
-    const {
-        downloadRate,
-        uploadRate,
-        width,
-        remainingSessionLength,
-        deviceQuotaId,
-    } = signal;
-
-    const progressValue = Math.max(0, Math.min(100, parseFloat(width) || 0));
+    const avgTransferSpeed = thisDevice?.avgSpeedBps
+        ? humanFormat(thisDevice?.avgSpeedBps / 1e3, {
+              scale: dataScale,
+          })
+        : '_';
 
     return (
         <>
@@ -87,8 +61,8 @@ export function CurrentPackage() {
                         <Text size='sm' fw={500}>
                             {timeRemaining(
                                 dayjs.duration(
-                                    remainingSessionLength || 0,
-                                    's',
+                                    thisDevice?.remainingSessionLength || 0,
+                                    'm',
                                 ),
                             )}
                         </Text>
@@ -102,51 +76,40 @@ export function CurrentPackage() {
                     />
 
                     <Stack gap='xs'>
-                        <Group justify='space-between' gap='sm'>
+                        <SimpleGrid cols={3}>
                             <Text size='sm' c='dimmed'>
-                                Devices: {quota?.length || ' _'}
+                                Devices:{' '}
+                                {thisDevice?.liveSessions?.length || ' _'}
                             </Text>
                             <Text size='sm' c='dimmed'>
-                                Package info:{' '}
-                                {deviceQuota?.downloadRate
-                                    ? `${humanFormat(deviceQuota.downloadRate, {
+                                Package title:{' '}
+                                {thisDevice?.downloadRate
+                                    ? `${humanFormat(thisDevice.downloadRate, {
                                           scale: dataScale,
-                                      })} - Ksh ${deviceQuota.price.toLocaleString()}`
+                                      })} - Ksh ${thisDevice.price.toLocaleString()}`
                                     : ' _'}
                             </Text>
-                            <Group gap='sm'>
-                                <Group gap='xs'>
-                                    <IoMdArrowDown />
-                                    <Text size='sm' c='dimmed'>
-                                        {downloadRate && downloadRate !== 0
-                                            ? humanFormat(downloadRate, {
-                                                  scale: dataScale,
-                                              })
-                                            : ' _'}
-                                    </Text>
-                                </Group>
-                                <Group gap='xs'>
-                                    <IoMdArrowUp />
-                                    <Text size='sm' c='dimmed'>
-                                        {uploadRate && uploadRate !== 0
-                                            ? humanFormat(uploadRate, {
-                                                  scale: dataScale,
-                                              })
-                                            : ' _'}
-                                    </Text>
-                                </Group>
-                            </Group>
-                        </Group>
 
-                        <Group justify='space-between' gap='sm'>
-                            <Text size='sm' c='dimmed'>
-                                Quota ID: {deviceQuotaId || ' _'}
-                            </Text>
-                            <Text size='sm' c='dimmed'>
-                                Parent Quota:{' '}
-                                {deviceQuota?.parentQuotaId || ' _'}
-                            </Text>
-                        </Group>
+                            <Group gap='xs'>
+                                <IconSelector stroke={1} />
+                                <Text size='sm' c='dimmed'>
+                                    {avgTransferSpeed}
+                                </Text>
+                            </Group>
+                        </SimpleGrid>
+
+                        <Grid>
+                            <Grid.Col span={4}>
+                                <Text size='sm' c='dimmed'>
+                                    Username: {thisDevice?.username || ' _'}
+                                </Text>
+                            </Grid.Col>
+                            <Grid.Col span={8}>
+                                <Text size='sm' c='dimmed'>
+                                    Activation Id: {thisDevice?.id || ' _'}
+                                </Text>
+                            </Grid.Col>
+                        </Grid>
 
                         <Box>
                             <ConnectedDevice quota={quota} onOpen={open} />
@@ -154,7 +117,11 @@ export function CurrentPackage() {
                     </Stack>
                 </Stack>
             </Paper>
-            <ConnectedDevicesModal onClose={close} isOpen={isOpen} />
+            <ConnectedDevicesModal
+                onClose={close}
+                isOpen={isOpen}
+                syncQuota={setQuota}
+            />
         </>
     );
 }
