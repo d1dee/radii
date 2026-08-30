@@ -190,7 +190,7 @@ app.get('/status', requireAuth, async (c) => {
         const data = activations
             .filter((v) => v)
             .map((a) => ({
-                deviceQuotaId: a.activationId,
+                id: a.activationId,
                 sessionLength: a.sessionLength,
                 // For bank (noExpiry) packages remainingSeconds carries the
                 // cumulative balance, so this renders as bank minutes left.
