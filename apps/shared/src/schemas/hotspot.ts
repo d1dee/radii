@@ -20,14 +20,13 @@ export type Package = {
 export type Quota = {
     remainingSessionLength: number;
     sessionLength: number;
-    deviceQuotaId: string;
+    id: string;
     lastActive?: string;
     clientMac?: string;
     price: number;
     uploadRate: number;
     downloadRate: number;
     maxDevices: number;
-    parentQuotaId: string;
     thisDevice?: boolean;
     expiresAt?: string;
     noExpiry: boolean;
@@ -62,7 +61,7 @@ export type Quota = {
         outputOctets: number;
         totalOctets: number;
         terminateCause: string | null;
-        avgSpeedBps: number;
+        avgSpeedKBps: number;
     }>;
 };
 
