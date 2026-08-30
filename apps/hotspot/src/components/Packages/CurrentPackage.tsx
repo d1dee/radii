@@ -45,6 +45,9 @@ export function CurrentPackage() {
               scale: dataScale,
           })
         : '_';
+    const title = thisDevice?.packageTitle
+        ? `${thisDevice?.packageTitle} @ Ksh ${thisDevice?.price}`
+        : '_';
 
     return (
         <>
@@ -82,12 +85,7 @@ export function CurrentPackage() {
                                 {thisDevice?.liveSessions?.length || ' _'}
                             </Text>
                             <Text size='sm' c='dimmed'>
-                                Package title:{' '}
-                                {thisDevice?.downloadRate
-                                    ? `${humanFormat(thisDevice.downloadRate, {
-                                          scale: dataScale,
-                                      })} - Ksh ${thisDevice.price.toLocaleString()}`
-                                    : ' _'}
+                                Package title: {title}
                             </Text>
 
                             <Group gap='xs'>
