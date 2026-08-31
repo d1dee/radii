@@ -58,6 +58,8 @@ export default function NasDevicesPage() {
             hotspotNetwork: '10.100.0.0/16',
             hotspotDnsName: '',
             brandName: '',
+            pppoeInterface: 'ether1',
+            pppoeNetwork: '10.101.0.0/16',
         },
         validate: zod4Resolver(generateSetupScriptSchema),
     });
@@ -88,6 +90,8 @@ export default function NasDevicesPage() {
             hotspotNetwork: row?.hotspotNetwork ?? '10.100.0.0/16',
             hotspotDnsName: row?.hotspotDnsName ?? '',
             brandName: row?.brandName ?? device.name,
+            pppoeInterface: row?.pppoeInterface ?? 'ether1',
+            pppoeNetwork: row?.pppoeNetwork ?? '10.101.0.0/16',
         });
     };
 
@@ -329,10 +333,10 @@ export default function NasDevicesPage() {
                         <Stack gap='md'>
                             {scriptError && <Text c='red'>{scriptError}</Text>}
                             <Text size='sm' c='dimmed'>
-                                Configure the hotspot settings for this device.
-                                A RouterOS script will be generated that sets up
-                                RADIUS, hotspot, WireGuard tunnel and branded
-                                login pages.
+                                Configure the hotspot and PPPoE settings for
+                                this device. A RouterOS script will be generated
+                                that sets up RADIUS, hotspot, PPPoE, WireGuard
+                                tunnel and branded login pages.
                             </Text>
                             <TextInput
                                 label='Hotspot interface'
@@ -357,6 +361,18 @@ export default function NasDevicesPage() {
                                 description='Displayed on the hotspot login page'
                                 placeholder={scriptDevice?.name}
                                 {...form.getInputProps('brandName')}
+                            />
+                            <TextInput
+                                label='PPPoE interface'
+                                description='RouterOS interface the PPPoE server listens on'
+                                placeholder='ether1'
+                                {...form.getInputProps('pppoeInterface')}
+                            />
+                            <TextInput
+                                label='PPPoE network'
+                                description='IPv4 CIDR for the PPPoE client address pool'
+                                placeholder='10.101.0.0/16'
+                                {...form.getInputProps('pppoeNetwork')}
                             />
                             <Button type='submit' loading={scriptBusy}>
                                 Generate setup script

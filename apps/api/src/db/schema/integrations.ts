@@ -126,6 +126,11 @@ export const nasSetupScript = pgTable(
         hotspotNetwork: text('hotspot_network'),
         hotspotDnsName: text('hotspot_dns_name'),
         brandName: text('brand_name'),
+        // PPPoE options used to render the script; persisted so the admin UI
+        // can prefill the generation form on regeneration. Nullable only for
+        // rows generated before the columns existed.
+        pppoeInterface: text('pppoe_interface'),
+        pppoeNetwork: text('pppoe_network'),
         // WireGuard public key reported by the device when the script runs.
         // Null until the report arrives; reset to null on regeneration
         // (the device generates a fresh keypair when re-running the script).

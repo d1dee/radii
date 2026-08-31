@@ -78,6 +78,20 @@ export const env = {
             10,
         ),
     },
+    // PPPoE portal dialer configuration handed to customers configuring their
+    // PPPoE client (router/phone dialer). All optional; sane defaults apply.
+    // An empty service name means the NAS PPPoE server accepts any service.
+    // MTU/MRU default to 1480 per the RouterOS manual guidance (underlying
+    // 1500-byte Ethernet MTU reduced by 20 to avoid fragmentation).
+    pppoe: {
+        serviceName: process.env.PPPOE_SERVICE_NAME || '',
+        mtu: parseInt(process.env.PPPOE_MTU || '1480', 10),
+        mru: parseInt(process.env.PPPOE_MRU || '1480', 10),
+        dns: (process.env.PPPOE_DNS || '1.1.1.1,8.8.8.8')
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean),
+    },
     // M-Pesa payment provider credentials. All optional here: when nothing is
     // set the provider simply is not registered; when partially set, the
     // provider constructor validates and fails fast with a clear message.

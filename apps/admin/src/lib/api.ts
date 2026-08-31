@@ -6,7 +6,11 @@ import {
     type NasDeviceStatus,
 } from '@shared/index';
 
-export type { GenerateSetupScriptInput, NasDeviceOs, NasDeviceStatus } from '@shared/index';
+export type {
+    GenerateSetupScriptInput,
+    NasDeviceOs,
+    NasDeviceStatus,
+} from '@shared/index';
 
 const BASE = '/api';
 
@@ -266,6 +270,10 @@ export type NasSetupScriptRow = {
     hotspotNetwork: string | null;
     hotspotDnsName: string | null;
     brandName: string | null;
+    // PPPoE options used when the script was generated; null for rows
+    // generated before the options were persisted.
+    pppoeInterface: string | null;
+    pppoeNetwork: string | null;
     wgKeyReportedAt: string | null;
     status: NasSetupScriptStatus;
     generatedAt: string;

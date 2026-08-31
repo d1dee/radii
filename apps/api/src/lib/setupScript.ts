@@ -312,6 +312,8 @@ export async function generateSetupScript(
                     hotspotNetwork: input.hotspotNetwork,
                     hotspotDnsName: input.hotspotDnsName ?? null,
                     brandName: input.brandName ?? null,
+                    pppoeInterface: input.pppoeInterface,
+                    pppoeNetwork: input.pppoeNetwork,
                     wgPublicKey: null,
                     wgClientIp,
                     wgPsk,
@@ -328,7 +330,6 @@ export async function generateSetupScript(
         return tx
             .insert(nasSetupScript)
             .values({
-                id: crypto.randomUUID(),
                 nasDeviceId: device.id,
                 script,
                 hotspotPages: pages,
@@ -336,6 +337,8 @@ export async function generateSetupScript(
                 hotspotNetwork: input.hotspotNetwork,
                 hotspotDnsName: input.hotspotDnsName ?? null,
                 brandName: input.brandName ?? null,
+                pppoeInterface: input.pppoeInterface,
+                pppoeNetwork: input.pppoeNetwork,
                 wgPublicKey: null,
                 wgClientIp,
                 wgPsk,
