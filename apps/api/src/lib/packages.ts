@@ -25,9 +25,12 @@ export type PackageRow = typeof packages.$inferSelect;
 export type PackageType = 'hotspot' | 'pppoe';
 
 // Only packages explicitly linked to the given NAS device are returned; a
-// package without any link rows never shows up.
+// package without any link rows never shows up. Pass nasDeviceId=null to list
+// packages of the type without a NAS restriction (the PPPoE portal has no
+// captive-portal redirect that carries a device id).
 export async function getPackagesGroupedByCategory(
-    nasDeviceId: string,
+    nasDeviceId: string | null,
+    type: PackageType = 'hotspot',
 ): Promise<Array<[string, Package[]]>> {
     const rows = await db
         .select()
@@ -35,18 +38,26 @@ export async function getPackagesGroupedByCategory(
         .where(
             and(
                 eq(packages.isActive, true),
-                eq(packages.type, 'hotspot'),
-                exists(
-                    db
-                        .select()
-                        .from(packageNasDevice)
-                        .where(
-                            and(
-                                eq(packageNasDevice.packageId, packages.id),
-                                eq(packageNasDevice.nasDeviceId, nasDeviceId),
-                            ),
-                        ),
-                ),
+                eq(packages.type, type),
+                nasDeviceId
+                    ? exists(
+                          db
+                              .select()
+                              .from(packageNasDevice)
+                              .where(
+                                  and(
+                                      eq(
+                                          packageNasDevice.packageId,
+                                          packages.id,
+                                      ),
+                                      eq(
+                                          packageNasDevice.nasDeviceId,
+                                          nasDeviceId,
+                                      ),
+                                  ),
+                              ),
+                      )
+                    : undefined,
             ),
         )
         .orderBy(packages.category, asc(packages.title));

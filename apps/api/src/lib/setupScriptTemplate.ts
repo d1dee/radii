@@ -244,11 +244,12 @@ const TEMPLATE = `# ============================================================
 #    1. Identity & NTP
 #    2. Device facts
 #    3. External RADIUS
-#    5. WireGuard management tunnel
-#    6. Firewall input rules
-#    7. IP service lockdown
-#    8. Report device facts to radii
-#    9. HotSpot + DHCP + NAT
+#    4. WireGuard management tunnel
+#    5. Firewall input rules
+#    6. IP service lockdown
+#    7. Report device facts to radii
+#    8. HotSpot + DHCP + NAT
+#    9. PPPoE server
 #   10. Walled garden
 #   11. Branded HotSpot HTML pages
 # =====================================================================
@@ -411,7 +412,7 @@ $radiiLog ("WireGuard public key: " . $wgPubKey);
     comment="radii server peer";
 
 # ---------------------------------------------------------------------
-# 6. Firewall input rules
+# 5. Firewall input rules
 # ---------------------------------------------------------------------
 
 # Remove previous managed rules so changed values never leave stale rules.
@@ -443,7 +444,7 @@ $radiiLog ("WireGuard public key: " . $wgPubKey);
 $radiiLog "WireGuard firewall access rules configured";
 
 # ---------------------------------------------------------------------
-# 7. IP service lockdown
+# 6. IP service lockdown
 # ---------------------------------------------------------------------
 
 # Disable legacy/unused services.
@@ -493,7 +494,7 @@ $radiiLog "WireGuard firewall access rules configured";
 $radiiLog "IP management services restricted to {{WG_ALLOWED_ADDRESS}}";
 
 # ---------------------------------------------------------------------
-# 8. Report device facts + WireGuard public key
+# 7. Report device facts + WireGuard public key
 # ---------------------------------------------------------------------
 
 :do {
@@ -518,7 +519,7 @@ $radiiLog "IP management services restricted to {{WG_ALLOWED_ADDRESS}}";
 };
 
 # ---------------------------------------------------------------------
-# 9. HotSpot + DHCP + NAT
+# 8. HotSpot + DHCP + NAT
 # ---------------------------------------------------------------------
 
 :local hsIf "{{HOTSPOT_INTERFACE}}";
@@ -732,6 +733,181 @@ $radiiLog "IP management services restricted to {{WG_ALLOWED_ADDRESS}}";
 };
 
 # ---------------------------------------------------------------------
+# 9. PPPoE server
+# ---------------------------------------------------------------------
+
+# PPPoE dialers authenticate against the same external RADIUS as the
+# hotspot (service=hotspot,ppp in section 3): credentials are stable
+# per-customer accounts managed by the radii portal, and RADIUS replies
+# carry each dialer's Session-Timeout (until the package expiry date),
+# Port-Limit and Mikrotik-Rate-Limit. /ppp/aaa switches PPP lookups to
+# RADIUS and keeps accounting flowing to radacct.
+:do {
+    /ppp/aaa/set \
+        use-radius=yes \
+        accounting=yes \
+        interim-update={{PPP_INTERIM_UPDATE}};
+    $radiiLog "PPP AAA configured (RADIUS authentication + accounting)";
+} on-error={
+    $radiiLog "WARNING - PPP AAA could not be configured";
+};
+
+:local pppIf "{{PPP_INTERFACE}}";
+
+:if ([:len [/interface/find where name=$pppIf]] = 0) do={
+
+    $radiiLog (\
+        "WARNING - PPPoE interface " .\
+        $pppIf .\
+        " does not exist; PPPoE configuration skipped"\
+    );
+
+} else={
+
+    # --- Pool ---------------------------------------------------------
+
+    :local pppPoolIds [/ip/pool/find where name="radii-ppp-pool"];
+
+    :if ([:len $pppPoolIds] = 0) do={
+        /ip/pool/add \
+            name="radii-ppp-pool" \
+            ranges={{PPP_POOL}} \
+            comment="radii managed";
+    } else={
+        /ip/pool/set [:pick $pppPoolIds 0] \
+            ranges={{PPP_POOL}} \
+            comment="radii managed";
+    };
+
+    # --- PPPoE gateway address -----------------------------------------
+
+    :local oldPppAddresses [/ip/address/find where comment="radii pppoe gateway"];
+
+    :if ([:len $oldPppAddresses] > 0) do={
+        /ip/address/remove $oldPppAddresses;
+    };
+
+    :local pppGatewayAddress "{{PPP_ADDRESS}}";
+    :local existingPppAddress [/ip/address/find where address=$pppGatewayAddress];
+
+    :if ([:len $existingPppAddress] = 0) do={
+        /ip/address/add \
+            address=$pppGatewayAddress \
+            interface=$pppIf \
+            comment="radii pppoe gateway";
+    } else={
+        /ip/address/set [:pick $existingPppAddress 0] \
+            interface=$pppIf \
+            comment="radii pppoe gateway";
+    };
+
+    # --- PPP profile ----------------------------------------------------
+
+    :local pppProfileIds [/ppp/profile/find where name="radii-ppp"];
+
+    :if ([:len $pppProfileIds] = 0) do={
+        /ppp/profile/add \
+            name="radii-ppp" \
+            local-address={{PPP_GATEWAY}} \
+            remote-address="radii-ppp-pool" \
+            dns-server={{PPP_GATEWAY}} \
+            use-compression=no \
+            use-encryption=no \
+            change-tcp-mss=yes;
+    } else={
+        /ppp/profile/set [:pick $pppProfileIds 0] \
+            local-address={{PPP_GATEWAY}} \
+            remote-address="radii-ppp-pool" \
+            dns-server={{PPP_GATEWAY}} \
+            use-compression=no \
+            use-encryption=no \
+            change-tcp-mss=yes;
+    };
+
+    # --- PPPoE server ----------------------------------------------------
+
+    # max-mtu/max-mru follow the RouterOS manual guidance (underlying MTU
+    # reduced by 20) to avoid fragmentation. An empty service name means
+    # the server accepts any PADI; the property is only set when one is
+    # configured (it cannot be unset once present).
+    :local pppServerIds [/interface/pppoe-server/server/find where name="radii-pppoe"];
+    :local pppServiceName "{{PPP_SERVICE_NAME}}";
+
+    :if ([:len $pppServerIds] = 0) do={
+        :if ([:len $pppServiceName] > 0) do={
+            /interface/pppoe-server/server/add \
+                interface=$pppIf \
+                service-name=$pppServiceName \
+                authentication=mschap2,mschap1,chap,pap \
+                max-mtu={{PPP_MTU}} \
+                max-mru={{PPP_MRU}} \
+                default-profile="radii-ppp" \
+                disabled=no\
+                keepalive-timeout=10;
+        } else={
+            /interface/pppoe-server/server/add \
+                service-name=$pppServiceName \
+                interface=$pppIf \
+                authentication=mschap2,mschap1,chap,pap \
+                max-mtu={{PPP_MTU}} \
+                max-mru={{PPP_MRU}} \
+                default-profile="radii-ppp" \
+                disabled=no\
+                keepalive-timeout=10;
+        };
+    } else={
+        :local pppServerId [:pick $pppServerIds 0];
+        /interface/pppoe-server/server/set $pppServerId \
+            interface=$pppIf \
+            authentication=mschap2,mschap1,chap,pap \
+            max-mtu={{PPP_MTU}} \
+            max-mru={{PPP_MRU}} \
+            default-profile="radii-ppp" \
+            keepalive-timeout=10 \
+            disabled=no;
+        :if ([:len $pppServiceName] > 0) do={
+            /interface/pppoe-server/server/set $pppServerId \
+                service-name=$pppServiceName;
+        };
+    };
+
+    # Remove duplicate managed PPPoE servers.\
+    :local duplicatePpp [/interface/pppoe-server/server/find where name="radii-pppoe"];
+
+    :if ([:len $duplicatePpp] > 1) do={
+        :for i from=1 to=([:len $duplicatePpp] - 1) do={
+            /interface/pppoe-server/server/remove [:pick $duplicatePpp $i];
+        };
+    };
+
+    # --- NAT -----------------------------------------------------------
+
+    :local pppNatIds [/ip/firewall/nat/find where comment="radii: pppoe masquerade"];
+
+    :if ([:len $pppNatIds] = 0) do={
+        /ip/firewall/nat/add \
+            chain=srcnat \
+            src-address={{PPP_NETWORK}} \
+            action=masquerade \
+            comment="radii: pppoe masquerade";
+    } else={
+        /ip/firewall/nat/set [:pick $pppNatIds 0] \
+            chain=srcnat \
+            src-address={{PPP_NETWORK}} \
+            action=masquerade \
+            comment="radii: pppoe masquerade";
+    };
+
+    $radiiLog (\
+        "PPPoE server configured on " .\
+        $pppIf .\
+        " (" .\
+        "{{PPP_NETWORK}}" .\
+        ", external RADIUS authentication)"\
+    );
+};
+
+# ---------------------------------------------------------------------
 # 10. Walled garden
 # ---------------------------------------------------------------------
 
@@ -836,6 +1012,11 @@ $radiiLog "IP management services restricted to {{WG_ALLOWED_ADDRESS}}";
 $radiiLog (\
     "setup complete - HotSpot login page: " .\
     "http://{{HOTSPOT_DNS_NAME}}/"\
+);
+
+$radiiLog (\
+    "PPPoE dialers: interface {{PPP_INTERFACE}}" .\
+    ", RADIUS-managed credentials"\
 );
 
 :put "radii: setup complete";

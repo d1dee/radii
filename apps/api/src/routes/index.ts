@@ -4,6 +4,7 @@ import admin from './admin';
 import hotspot from './hotspot';
 import nas from './nas';
 import payments from './payments';
+import pppoe from './ppoe';
 import radiusRest from './radiusRest';
 
 const routes = new Hono<{ Variables: AppVariables }>();
@@ -12,6 +13,7 @@ routes.route('/admin', admin);
 routes.route('/hotspot', hotspot);
 routes.route('/nas', nas);
 routes.route('/payments', payments);
+routes.route('/ppoe', pppoe);
 routes.route('/radius/rest', radiusRest);
 
 export default routes;

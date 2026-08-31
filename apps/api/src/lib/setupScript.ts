@@ -67,11 +67,11 @@ function parseIpv4Cidr(cidr: string): Ipv4Subnet {
     return { network, broadcast, prefixLen };
 }
 
-function hotspotNetworkInfo(cidr: string) {
+function ipv4NetworkInfo(cidr: string, label: string) {
     const { network, broadcast, prefixLen } = parseIpv4Cidr(cidr);
     if (broadcast - network < 4) {
         throw new SetupScriptConfigError(
-            'Hotspot network must contain at least 4 usable addresses',
+            `${label} network must contain at least 4 usable addresses`,
         );
     }
     const gateway = formatIpv4(network + 1);
@@ -178,7 +178,8 @@ export async function generateSetupScript(
         );
     }
 
-    const hs = hotspotNetworkInfo(input.hotspotNetwork);
+    const hs = ipv4NetworkInfo(input.hotspotNetwork, 'Hotspot');
+    const pppoe = ipv4NetworkInfo(input.pppoeNetwork, 'PPPoE');
     const wg = parseWgEndpoint(env.wgEndpoint);
     const wgSubnet = parseIpv4Cidr(env.wgManagementSubnet);
     const wgInterfaceIp = env.wgInterfaceIp.trim();
@@ -239,6 +240,15 @@ export async function generateSetupScript(
         HOTSPOT_POOL: hs.pool,
         HOTSPOT_DNS_NAME: hotspotDnsName,
         SHARED_USERS: '1',
+        PPP_INTERFACE: input.pppoeInterface,
+        PPP_NETWORK: `${pppoe.network}/${pppoe.prefixLen}`,
+        PPP_GATEWAY: pppoe.gateway,
+        PPP_ADDRESS: pppoe.address,
+        PPP_POOL: pppoe.pool,
+        PPP_SERVICE_NAME: 'radii-pppoe',
+        PPP_MTU: String(env.pppoe.mtu),
+        PPP_MRU: String(env.pppoe.mru),
+        PPP_INTERIM_UPDATE: `${env.radius.bankInterimSeconds}s`,
         NTP_SERVERS: env.ntpServers,
         BRAND_NAME: brandName,
         PORTAL_URL: portalUrl,

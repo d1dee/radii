@@ -61,6 +61,7 @@ export type {
     ActivationRedirect,
     ActivationStatus,
     NetworkUsage,
+    ProvisionedCredentials,
     RadiusConfig,
     RadiusInAttribute,
     RadiusOutAttribute,

@@ -1,12 +1,6 @@
-import {
-    loginSchema,
-    paymentTransactionCodeSchema,
-    signUpSchema,
-} from '@radii/shared';
-import { APIError } from 'better-auth/api';
+import { paymentTransactionCodeSchema } from '@radii/shared';
 import { and, desc, eq } from 'drizzle-orm';
 import { Hono } from 'hono';
-import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { z } from 'zod';
 import { auth } from '../auth';
 import { db } from '../db';
@@ -18,7 +12,12 @@ import {
     radcheck,
 } from '../db/schema';
 import { env } from '../env';
-import { jsonError, jsonFieldErrors } from '../lib/error';
+import {
+    loginPhonePin,
+    logoutPhonePin,
+    registerPhonePin,
+} from '../lib/authHelpers';
+import { jsonError } from '../lib/error';
 import {
     createPayment,
     getPackageById,
@@ -28,7 +27,7 @@ import {
 import { paymentService } from '../lib/payments';
 import { radiusClient, type ActivationRedirect } from '../lib/radius';
 import { requireAdmin, requireAuth } from '../middleware/auth';
-import type { AppContext, AppVariables } from '../types';
+import type { AppVariables } from '../types';
 
 const app = new Hono<{ Variables: AppVariables }>();
 
@@ -58,61 +57,11 @@ app.get('/packages', async (c) => {
 
 // --- Authentication (phone + PIN) -------------------------------------------
 
-app.post('/register', async (c) => {
-    const parsed = signUpSchema.safeParse(await c.req.json().catch(() => ({})));
-    if (!parsed.success) {
-        return jsonFieldErrors(
-            c,
-            400,
-            fieldErrorsFromIssues(parsed.error.issues),
-        );
-    }
+app.post('/register', registerPhonePin);
 
-    const { phoneNumber, pin } = parsed.data;
+app.post('/login', loginPhonePin);
 
-    try {
-        const { headers } = await auth.api.signUpEmail({
-            body: {
-                email: `${normalizePhone(phoneNumber)}@hotspot.local`,
-                name: phoneNumber,
-                password: pin,
-                username: phoneNumber,
-            },
-            headers: c.req.raw.headers,
-            returnHeaders: true,
-        });
-
-        return forwardCookies(c, headers, { success: true, data: null });
-    } catch (err) {
-        return respondAuthError(c, err);
-    }
-});
-
-app.post('/login', async (c) => {
-    const parsed = loginSchema.safeParse(await c.req.json().catch(() => ({})));
-    if (!parsed.success) {
-        return jsonFieldErrors(
-            c,
-            400,
-            fieldErrorsFromIssues(parsed.error.issues),
-        );
-    }
-
-    try {
-        const { headers } = await auth.api.signInUsername({
-            body: {
-                username: parsed.data.phoneNumber,
-                password: parsed.data.pin,
-            },
-            headers: c.req.raw.headers,
-            returnHeaders: true,
-        });
-
-        return forwardCookies(c, headers, { success: true, data: null });
-    } catch (err) {
-        return respondAuthError(c, err);
-    }
-});
+app.post('/logout', logoutPhonePin);
 
 // --- Current user -----------------------------------------------------------
 
@@ -186,6 +135,7 @@ app.get('/status', requireAuth, async (c) => {
 
         const activations = await radiusClient.getUserPackageStatuses(
             currentUser!.id,
+            'hotspot',
         );
         const data = activations
             .filter((v) => v)
@@ -653,79 +603,10 @@ app.get('/users', requireAdmin, async (c) => {
 
 // --- Auth helpers -----------------------------------------------------------
 
-function normalizePhone(phone: string) {
-    return phone.replace(/\D/g, '');
-}
-
 // Compares MACs across formats (AA:BB:.., AA-BB-.., aabb..): hex digits only,
 // lowercase.
 function normalizeMac(mac: string | null | undefined) {
     return (mac ?? '').toLowerCase().replace(/[^0-9a-f]/g, '');
-}
-
-function fieldErrorsFromIssues(
-    issues: Array<{ path: Array<unknown>; message: string }>,
-): Record<string, string> {
-    const out: Record<string, string> = {};
-    for (const issue of issues) {
-        const key =
-            issue.path
-                .map((p) =>
-                    typeof p === 'object' && p !== null
-                        ? String((p as { key?: unknown }).key)
-                        : String(p),
-                )
-                .join('.') || 'form';
-        if (!out[key]) out[key] = issue.message;
-    }
-    return out;
-}
-
-function forwardCookies(c: AppContext, headers: Headers, body: unknown) {
-    const res = c.json(body);
-    for (const cookie of headers.getSetCookie()) {
-        res.headers.append('Set-Cookie', cookie);
-    }
-    return res;
-}
-
-function respondAuthError(c: AppContext, err: unknown) {
-    if (err instanceof APIError) {
-        const code = String(
-            (err as { code?: string }).code || '',
-        ).toLowerCase();
-        const message = (err.message || '').toLowerCase();
-        if (
-            code.includes('exists') ||
-            message.includes('already') ||
-            message.includes('exist')
-        ) {
-            return jsonFieldErrors(
-                c,
-                409,
-                { phoneNumber: 'Phone number already registered' },
-                'Phone number already registered',
-            );
-        }
-        if (
-            message.includes('password') ||
-            message.includes('credential') ||
-            message.includes('invalid')
-        ) {
-            return jsonFieldErrors(
-                c,
-                401,
-                { pin: 'Invalid phone number or PIN' },
-                'Invalid phone number or PIN',
-            );
-        }
-        return jsonError(
-            c,
-            (err.status as ContentfulStatusCode) || 400,
-            err.message || 'Authentication failed',
-        );
-    }
-    return jsonError(c, 500, 'Authentication failed');
 }
 
 export default app;
