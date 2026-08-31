@@ -80,6 +80,18 @@ export const generateSetupScriptSchema = z.object({
         .optional()
         .transform((v) => (v ? v : undefined))
         .pipe(z.string().min(2).max(60).optional()),
+    // PPPoE server options. The server authenticates dialers via RADIUS
+    // (stable per-customer credentials managed by the portal payments); an
+    // empty service name means the server accepts any service name.
+    pppoeInterface: z.string().trim().min(1).max(40).default('ether1'),
+    pppoeNetwork: z
+        .string()
+        .trim()
+        .regex(
+            z.regexes.cidrv4,
+            'Must be an IPv4 network in CIDR form, e.g. 10.101.0.0/16',
+        )
+        .default('10.101.0.0/16'),
 });
 
 export type GenerateSetupScriptInput = z.infer<

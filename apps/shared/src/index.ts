@@ -7,3 +7,4 @@ export * from './utils/id';
 export * from './utils/serviceProvider';
 
 export * from './schemas/packages';
+export * from './schemas/pppoe';
