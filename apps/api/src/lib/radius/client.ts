@@ -63,6 +63,7 @@ import {
     radcheck,
     radreply,
     transaction,
+    user,
 } from '../../db/schema';
 
 export class RadiusError extends Error {
@@ -260,6 +261,15 @@ export interface ActivationStatus {
     liveSessions: SessionInfo[];
     avgSpeedBps: number;
     lastActive: Date | null;
+}
+
+// ActivationStatus enriched with ownership info for admin listings, which
+// span every user and package type (the portal shapes are single-user).
+export interface AdminActivationStatus extends ActivationStatus {
+    userId: string;
+    packageType: 'hotspot' | 'pppoe';
+    noExpiry: boolean;
+    maxDevices: number;
 }
 
 export interface NetworkUsage {
@@ -526,16 +536,16 @@ export class RadiusClient {
             Math.round((activation.expireAt.getTime() - Date.now()) / 1000),
         );
         await db.delete(radreply).where(eq(radreply.username, username));
-        await db.insert(
-            radreply,
-        ).values(
-            this.buildReplyAttributes(
-                username,
-                activation.id,
-                pkg,
-                sessionSeconds,
-            ),
-        );
+        await db
+            .insert(radreply)
+            .values(
+                this.buildReplyAttributes(
+                    username,
+                    activation.id,
+                    pkg,
+                    sessionSeconds,
+                ),
+            );
 
         const liveSessions = await this.getSessions({
             username,
@@ -644,10 +654,7 @@ export class RadiusClient {
     // usage — the portal status payload (remaining time/bytes, speeds). The
     // optional type restricts the result to one package type so the hotspot
     // and PPPoE portals only see their own activations.
-    async getUserPackageStatuses(
-        userId: string,
-        type?: 'hotspot' | 'pppoe',
-    ) {
+    async getUserPackageStatuses(userId: string, type?: 'hotspot' | 'pppoe') {
         const rows = await db
             .select({
                 activation: activatedPackages,
@@ -713,9 +720,7 @@ export class RadiusClient {
     // SHARED stable dialer credentials of the customer (generated once on the
     // first PPPoE purchase, renewed by later payments). The credentials are
     // healed re-provisioning them if their radcheck row vanished.
-    async getPppoeClients(
-        userId: string,
-    ): Promise<
+    async getPppoeClients(userId: string): Promise<
         Array<
             ProvisionedCredentials & {
                 packageTitle: string;
@@ -853,12 +858,37 @@ export class RadiusClient {
         return null;
     }
 
+    // Reverse-resolves a stable PPPoE RADIUS username (PPP-…) to the user id
+    // that owns it. The username carries the first 10 alphanumerics of the
+    // compacted user id uppercased, so candidates are pre-filtered by a
+    // normalized prefix match and then verified with the exact derivation.
+    // Null for anything that is not a generated PPPoE account.
+    async resolvePppoeUserByUsername(username: string): Promise<string | null> {
+        const normalized = username.trim().toUpperCase();
+        const match = /^PPP-([0-9A-Z]{10})$/.exec(normalized);
+        if (!match) return null;
+        const suffix = match[1]!.toLowerCase();
+        const rows = await db
+            .select({ userId: user.id })
+            .from(user)
+            .where(
+                sql`regexp_replace(lower(${user.id}::text), '[^a-z0-9]', '', 'g') like ${`${suffix}%`}`,
+            )
+            .limit(4);
+        for (const row of rows) {
+            if (pppoeUsername(row.userId) === normalized) {
+                return row.userId;
+            }
+        }
+        return null;
+    }
+
     // Verdict for a FreeRADIUS rlm_rest authorization query (the rest module
     // `authorize` section), mapped by the route onto HTTP status codes per
     // rlm_rest's authorize table:
-    //  - unknown:   not a package activation -> 404 -> "notfound", so the
-    //               authorize chain falls through to the remaining modules
-    //               (sql) which may know the user.
+    //  - unknown:   not a package activation / dialer account -> 404 ->
+    //               "notfound", so the authorize chain falls through to the
+    //               remaining modules (sql) which may know the user.
     //  - expired:   static validity window closed -> 403 -> "userlock"
     //               (rejected; mirrors what the radcheck Expiration row +
     //               stock expiration module would do).
@@ -873,6 +903,13 @@ export class RadiusClient {
     //               agree and the duplication is harmless; when rest is the
     //               only reply source the attributes stay fresh regardless of
     //               the reconciler tick.
+    //
+    // PPPoE dialers authenticate with the customer's STABLE account (PPP-…),
+    // which carries no activation id: those are resolved to the owning user
+    // and authorized from their newest active PPPoE activation, with the
+    // Session-Timeout set to the time remaining until that activation's
+    // expiry date (the same attribute set the provisioning path applies at
+    // payment time).
     async restAuthorize(
         username: string,
     ): Promise<
@@ -882,7 +919,7 @@ export class RadiusClient {
         | { verdict: 'ok'; attributes: RadiusRestReply }
     > {
         const row = await this.resolveActivationByUsername(username);
-        if (!row) return { verdict: 'unknown' };
+        if (!row) return this.restAuthorizePppoe(username);
         if (row.activation.expireAt.getTime() < Date.now()) {
             return { verdict: 'expired' };
         }
@@ -895,6 +932,53 @@ export class RadiusClient {
         if (!sync.active) return { verdict: 'exhausted' };
         sessionSeconds = sync.remainingSeconds;
 
+        return {
+            verdict: 'ok',
+            attributes: this.buildRestReplyAttributes(
+                row.activation.id,
+                row.pkg,
+                sessionSeconds,
+            ),
+        };
+    }
+
+    // rlm_rest authorize for a stable PPPoE account (PPP-…). Unknown
+    // usernames fall through to the remaining authorize modules; an account
+    // whose newest PPPoE activation has expired is locked out.
+    private async restAuthorizePppoe(
+        username: string,
+    ): Promise<
+        | { verdict: 'unknown' }
+        | { verdict: 'expired' }
+        | { verdict: 'ok'; attributes: RadiusRestReply }
+    > {
+        const userId = await this.resolvePppoeUserByUsername(username);
+        if (!userId) return { verdict: 'unknown' };
+
+        const [row] = await db
+            .select({ activation: activatedPackages, pkg: packages })
+            .from(activatedPackages)
+            .innerJoin(packages, eq(activatedPackages.packageId, packages.id))
+            .where(
+                and(
+                    eq(activatedPackages.userId, userId),
+                    eq(packages.type, 'pppoe'),
+                ),
+            )
+            .orderBy(desc(activatedPackages.activatedAt))
+            .limit(1);
+        if (!row) return { verdict: 'unknown' };
+        if (row.activation.expireAt.getTime() < Date.now()) {
+            return { verdict: 'expired' };
+        }
+
+        // Session-Timeout = time remaining until the activation's expiry
+        // date, so the PPP session lives exactly as long as the package
+        // (identical to the radreply rows written at activation/renewal).
+        const sessionSeconds = Math.max(
+            1,
+            Math.round((row.activation.expireAt.getTime() - Date.now()) / 1000),
+        );
         return {
             verdict: 'ok',
             attributes: this.buildRestReplyAttributes(
@@ -1008,10 +1092,7 @@ export class RadiusClient {
                 .orderBy(desc(activatedPackages.activatedAt))
                 .limit(1);
             if (other) {
-                await this.applyPppoeAuthorization(
-                    other.activation,
-                    other.pkg,
-                );
+                await this.applyPppoeAuthorization(other.activation, other.pkg);
             } else {
                 await Promise.all([
                     db.delete(radcheck).where(eq(radcheck.username, username)),
@@ -1137,6 +1218,328 @@ export class RadiusClient {
             sessionsDisconnected,
             failures,
         };
+    }
+
+    // =========================================================================
+    // Admin operations (routes/admin.ts user/session management)
+    // =========================================================================
+
+    // All activations (including expired/deactivated ones) of one user — or
+    // of every user when no userId is given — enriched with RADIUS usage.
+    // Newest first. The optional type matches the underlying package type.
+    async getAdminActivations(
+        opts: {
+            userId?: string;
+            type?: 'hotspot' | 'pppoe';
+            limit?: number;
+        } = {},
+    ): Promise<AdminActivationStatus[]> {
+        const rows = await db
+            .select({ activation: activatedPackages, pkg: packages })
+            .from(activatedPackages)
+            .innerJoin(packages, eq(activatedPackages.packageId, packages.id))
+            .where(
+                and(
+                    opts.userId
+                        ? eq(activatedPackages.userId, opts.userId)
+                        : undefined,
+                    opts.type ? eq(packages.type, opts.type) : undefined,
+                ),
+            )
+            .orderBy(desc(activatedPackages.activatedAt))
+            .limit(opts.limit ?? 200);
+
+        const out: AdminActivationStatus[] = [];
+        for (const row of rows) {
+            const status = await this.activationStatusFromRows(
+                row.activation.id,
+                row.activation,
+                row.pkg,
+            );
+            if (!status) continue;
+            out.push({
+                ...status,
+                userId: row.activation.userId,
+                packageType: row.pkg.type,
+                noExpiry: row.pkg.noExpiry,
+                maxDevices: row.pkg.maxDevices,
+            });
+        }
+        return out;
+    }
+
+    // Restores a deactivated/expired activation: the expiry restarts from now
+    // (the package's validity rules) and the RADIUS provisioning is rebuilt so
+    // the user can log back in. For PPPoE the customer's stable dialer
+    // account is re-authorized from this activation. Returns the new expiry.
+    async reactivateActivation(activationId: string): Promise<{
+        ok: boolean;
+        message: string;
+        expireAt: Date | null;
+    }> {
+        const [row] = await db
+            .select({ activation: activatedPackages, pkg: packages })
+            .from(activatedPackages)
+            .innerJoin(packages, eq(activatedPackages.packageId, packages.id))
+            .where(eq(activatedPackages.id, activationId))
+            .limit(1);
+        if (!row) {
+            return { ok: false, message: 'Unknown activation', expireAt: null };
+        }
+
+        const { activation, pkg } = row;
+        const expireAt = pkg.noExpiry
+            ? dayjs()
+                  .add(pkg.validityDays ?? 30, 'day')
+                  .toDate()
+            : dayjs().add(pkg.sessionLength, 'minute').toDate();
+        activation.expireAt = expireAt;
+        await db
+            .update(activatedPackages)
+            .set({ expireAt })
+            .where(eq(activatedPackages.id, activationId));
+
+        if (pkg.type === 'pppoe') {
+            const username = pppoeUsername(activation.userId);
+            if (!(await this.getProvisionedPassword(username))) {
+                await db.insert(radcheck).values({
+                    username,
+                    attribute: 'Cleartext-Password',
+                    op: ':=',
+                    value: randomCredentialPassword(12),
+                });
+            }
+            await this.applyPppoeAuthorization(activation, pkg);
+            return {
+                ok: true,
+                message: 'PPPoE activation re-authorized',
+                expireAt,
+            };
+        }
+
+        const username = activationUsername(activationId);
+        if (!(await this.getProvisionedPassword(username))) {
+            await db.insert(radcheck).values({
+                username,
+                attribute: 'Cleartext-Password',
+                op: ':=',
+                value: randomCredentialPassword(12),
+            });
+        }
+        await this.upsertCheckAttribute(
+            username,
+            'Expiration',
+            dayjs(expireAt).format('DD MMM YYYY HH:mm:ss'),
+        );
+
+        // Bank packages advertise the remaining cumulative balance as their
+        // Session-Timeout; regular packages the per-session allowance.
+        let sessionSeconds = pkg.sessionLength * 60;
+        if (pkg.noExpiry) {
+            const usage = await this.getBankUsage(activationId);
+            sessionSeconds = usage?.remainingSeconds ?? 0;
+        }
+        await db.delete(radreply).where(eq(radreply.username, username));
+        await db
+            .insert(radreply)
+            .values(
+                this.buildReplyAttributes(
+                    username,
+                    activationId,
+                    pkg,
+                    sessionSeconds,
+                ),
+            );
+
+        if (pkg.noExpiry && sessionSeconds <= 0) {
+            await this.deactivateActivation(activationId);
+            return {
+                ok: false,
+                message:
+                    'The cumulative time bank is exhausted; reactivation was rolled back',
+                expireAt: null,
+            };
+        }
+        return { ok: true, message: 'Activation restored', expireAt };
+    }
+
+    // Moves an activation's expiry to a new date and keeps the RADIUS side in
+    // step: hotspot logins are gated by the radcheck Expiration row, and for
+    // PPPoE / bank packages the Session-Timeout cap of the next (and any
+    // live) session derives from the new expiry. A deactivated activation
+    // only moves its DB record until it is re-activated.
+    async setActivationExpiry(
+        activationId: string,
+        expireAt: Date,
+    ): Promise<{ ok: boolean; message: string }> {
+        const [row] = await db
+            .select({ activation: activatedPackages, pkg: packages })
+            .from(activatedPackages)
+            .innerJoin(packages, eq(activatedPackages.packageId, packages.id))
+            .where(eq(activatedPackages.id, activationId))
+            .limit(1);
+        if (!row) return { ok: false, message: 'Unknown activation' };
+
+        row.activation.expireAt = expireAt;
+        await db
+            .update(activatedPackages)
+            .set({ expireAt })
+            .where(eq(activatedPackages.id, activationId));
+
+        if (row.pkg.type === 'pppoe') {
+            await this.applyPppoeAuthorization(row.activation, row.pkg);
+            return { ok: true, message: 'Expiry updated' };
+        }
+
+        const username = activationUsername(activationId);
+        if (await this.getProvisionedPassword(username)) {
+            await this.upsertCheckAttribute(
+                username,
+                'Expiration',
+                dayjs(expireAt).format('DD MMM YYYY HH:mm:ss'),
+            );
+            if (row.pkg.noExpiry) {
+                await this.syncBankAuthorization(activationId, row.pkg);
+            }
+            return { ok: true, message: 'Expiry updated' };
+        }
+        return {
+            ok: true,
+            message:
+                'Expiry updated — the activation is not provisioned; re-activate it to restore logins',
+        };
+    }
+
+    // Disconnects one live session (of any user) addressed by its radacct id.
+    // Termination goes directly to the NAS holding the session.
+    async disconnectSessionByRadacctId(radacctId: string): Promise<{
+        ok: boolean;
+        message: string;
+    }> {
+        const [row] = await db
+            .select()
+            .from(radacct)
+            .where(eq(radacct.radacctid, BigInt(radacctId)))
+            .limit(1);
+        if (!row) return { ok: false, message: 'Unknown session' };
+        if (row.acctstoptime !== null || row.acctstarttime === null) {
+            return { ok: false, message: 'Session is not live' };
+        }
+        const session = this.sessionInfoFromRow(row);
+        const username = row.username ?? '';
+        try {
+            const ack = await this.terminateSessionAtNas(username, session);
+            if (!ack) {
+                return { ok: false, message: 'NAS answered Disconnect-NAK' };
+            }
+            await this.closeSessionRecord(session);
+            return { ok: true, message: 'Session disconnected' };
+        } catch (err) {
+            return {
+                ok: false,
+                message: err instanceof Error ? err.message : String(err),
+            };
+        }
+    }
+
+    // Live-edits one session's remaining time by pushing a new Session-Timeout
+    // to the NAS via CoA (RFC 5176; RouterOS accepts Session-Timeout via CoA).
+    async setSessionTimeoutByRadacctId(
+        radacctId: string,
+        seconds: number,
+    ): Promise<{ ok: boolean; message: string }> {
+        const [row] = await db
+            .select()
+            .from(radacct)
+            .where(eq(radacct.radacctid, BigInt(radacctId)))
+            .limit(1);
+        if (!row) return { ok: false, message: 'Unknown session' };
+        if (row.acctstoptime !== null || row.acctstarttime === null) {
+            return { ok: false, message: 'Session is not live' };
+        }
+        const session = this.sessionInfoFromRow(row);
+        const username = row.username ?? '';
+        try {
+            const ack = await this.coaSessionTimeout(
+                username,
+                session,
+                Math.max(1, Math.round(seconds)),
+            );
+            if (!ack) {
+                return { ok: false, message: 'NAS answered CoA-NAK' };
+            }
+            return { ok: true, message: 'Session time updated' };
+        } catch (err) {
+            return {
+                ok: false,
+                message: err instanceof Error ? err.message : String(err),
+            };
+        }
+    }
+
+    // The customer's stable PPPoE dialer credentials for admin display. The
+    // password is null when the account exists without a credential row (or
+    // was never provisioned at all).
+    async getPppoeCredentials(
+        userId: string,
+    ): Promise<{ username: string; password: string | null }> {
+        const username = pppoeUsername(userId);
+        const password = await this.getProvisionedPassword(username);
+        return { username, password };
+    }
+
+    // Sets the customer's stable PPPoE dialer password (a random one when
+    // omitted — the admin "rotate" flow) and disconnects live PPP sessions so
+    // the new credential takes effect on the next dial.
+    async setPppoePassword(
+        userId: string,
+        password?: string,
+    ): Promise<{
+        username: string;
+        password: string;
+        sessionsDisconnected: number;
+    }> {
+        const username = pppoeUsername(userId);
+        const newPassword = password ?? randomCredentialPassword(12);
+        await db.transaction(async (tx) => {
+            await tx
+                .delete(radcheck)
+                .where(
+                    and(
+                        eq(radcheck.username, username),
+                        eq(radcheck.attribute, 'Cleartext-Password'),
+                    ),
+                );
+            await tx.insert(radcheck).values({
+                username,
+                attribute: 'Cleartext-Password',
+                op: ':=',
+                value: newPassword,
+            });
+        });
+
+        // Live PPP sessions hold the old credential; cut them so the dialer
+        // re-authenticates with the new password.
+        const liveSessions = await this.getSessions({
+            username,
+            activationId: '',
+            liveOnly: true,
+        });
+        let sessionsDisconnected = 0;
+        for (const session of liveSessions) {
+            try {
+                if (await this.terminateSessionAtNas(username, session)) {
+                    sessionsDisconnected++;
+                    await this.closeSessionRecord(session);
+                }
+            } catch (err) {
+                console.error(
+                    `[radius] admin pppoe password disconnect failed on ${session.nasIpAddress}:`,
+                    err,
+                );
+            }
+        }
+        return { username, password: newPassword, sessionsDisconnected };
     }
 
     // =========================================================================
@@ -1430,10 +1833,7 @@ export class RadiusClient {
             .from(activatedPackages)
             .innerJoin(packages, eq(activatedPackages.packageId, packages.id))
             .where(
-                and(
-                    eq(packages.noExpiry, true),
-                    eq(packages.type, 'hotspot'),
-                ),
+                and(eq(packages.noExpiry, true), eq(packages.type, 'hotspot')),
             );
 
         let touched = 0;
@@ -2068,9 +2468,7 @@ export class RadiusClient {
             );
             remainingSeconds = Math.max(
                 0,
-                Math.round(
-                    (activation.expireAt.getTime() - Date.now()) / 1000,
-                ),
+                Math.round((activation.expireAt.getTime() - Date.now()) / 1000),
             );
         } else {
             const totalSeconds = pkg.sessionLength * 60;

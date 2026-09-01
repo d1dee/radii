@@ -255,6 +255,364 @@ export function getNasDeviceAnalytics(id: string) {
     return request<NasDeviceAnalytics>(`/admin/nas-devices/${id}/analytics`);
 }
 
+// --- Users (hotspot + PPPoE management) ------------------------------------
+
+export type AdminUserRow = {
+    id: string;
+    name: string;
+    email: string;
+    phoneNumber: string;
+    image: string | null;
+    role: string | null;
+    banned: boolean;
+    banReason: string | null;
+    createdAt: string;
+    flags: number;
+    online: boolean;
+    payments: {
+        total: number;
+        paid: number;
+        pending: number;
+        failed: number;
+        revenue: number;
+    };
+    activations: {
+        total: number;
+        active: number;
+        hotspot: number;
+        pppoe: number;
+    };
+    lastPaymentAt: string | null;
+};
+
+export type AdminUserList = {
+    total: number;
+    page: number;
+    perPage: number;
+    users: AdminUserRow[];
+};
+
+export type AdminUserFlagRow = {
+    id: string;
+    reason: string;
+    note: string | null;
+    createdAt: string;
+    createdBy: string | null;
+    creatorName: string | null;
+};
+
+export type AdminUserDetail = {
+    id: string;
+    name: string;
+    email: string;
+    phoneNumber: string;
+    image: string | null;
+    role: string | null;
+    banned: boolean;
+    banReason: string | null;
+    createdAt: string;
+    flags: AdminUserFlagRow[];
+    payments: {
+        total: number;
+        paid: number;
+        pending: number;
+        failed: number;
+        revenue: number;
+        firstAt: string | null;
+        lastAt: string | null;
+    };
+    activations: {
+        total: number;
+        active: number;
+        hotspot: number;
+        pppoe: number;
+    };
+    usage: {
+        sessions: number;
+        seconds: number;
+        octets: number;
+        lastSeen: string | null;
+    };
+    online: boolean;
+    pppoe: { username: string; password: string | null } | null;
+};
+
+export type ListAdminUsersQuery = {
+    q?: string;
+    type?: PackageType;
+    flagged?: boolean;
+    page?: number;
+    perPage?: number;
+};
+
+export function getAdminUsers(query: ListAdminUsersQuery = {}) {
+    const params = new URLSearchParams();
+    if (query.q) params.set('q', query.q);
+    if (query.type) params.set('type', query.type);
+    if (query.flagged) params.set('flagged', '1');
+    if (query.page) params.set('page', String(query.page));
+    if (query.perPage) params.set('perPage', String(query.perPage));
+    const qs = params.toString();
+    return request<AdminUserList>(`/admin/users${qs ? `?${qs}` : ''}`);
+}
+
+export function getAdminUser(id: string) {
+    return request<AdminUserDetail>(`/admin/users/${id}`);
+}
+
+export function addUserFlag(
+    id: string,
+    body: { reason: string; note?: string },
+) {
+    return request<AdminUserFlagRow>(`/admin/users/${id}/flags`, body, {
+        method: 'POST',
+    });
+}
+
+export function removeUserFlag(id: string, flagId: string) {
+    return request<{ message?: string }>(`/admin/users/${id}/flags/${flagId}`, undefined, {
+        method: 'DELETE',
+    });
+}
+
+export function banUser(
+    id: string,
+    body: { reason?: string; expiresAt?: string | null } = {},
+) {
+    return request<{ message?: string }>(`/admin/users/${id}/ban`, body, {
+        method: 'POST',
+    });
+}
+
+export function unbanUser(id: string) {
+    return request<{ message?: string }>(`/admin/users/${id}/ban`, undefined, {
+        method: 'DELETE',
+    });
+}
+
+// --- User payments / activations / PPPoE credentials -------------------------
+
+export type AdminPaymentRow = {
+    id: string;
+    userId: string;
+    userName: string | null;
+    phoneNumber: string;
+    amount: string;
+    status: PackagePaymentStatus;
+    packageTitle: string | null;
+    packageType: PackageType | null;
+    provider: string | null;
+    providerTransactionId: string | null;
+    providerReference: string | null;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type AdminPaymentList = {
+    total: number;
+    summary: {
+        paid: number;
+        pending: number;
+        failed: number;
+        revenue: number;
+    };
+    page: number;
+    perPage: number;
+    payments: AdminPaymentRow[];
+};
+
+export type UserPaymentRow = {
+    id: string;
+    amount: string;
+    status: PackagePaymentStatus;
+    phoneNumber: string;
+    packageTitle: string;
+    packageType: PackageType;
+    provider: string | null;
+    providerTransactionId: string | null;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export function getUserPayments(id: string) {
+    return request<UserPaymentRow[]>(`/admin/users/${id}/payments`);
+}
+
+// Mirrors the API's ActivationStatus (apps/api/src/lib/radius/client.ts).
+export type AdminActivationRow = {
+    activationId: string;
+    userId: string;
+    username: string;
+    packageId: string;
+    packageTitle: string;
+    packageType: PackageType;
+    paymentId: string;
+    activatedAt: string;
+    expireAt: string;
+    expired: boolean;
+    noExpiry: boolean;
+    maxDevices: number;
+    sessionLimitSeconds: number;
+    usedSeconds: number;
+    remainingSeconds: number | null;
+    octetsUsed: number;
+    octetsLimit: number | null;
+    remainingOctets: number | null;
+    online: boolean;
+    liveSessions: SessionInfo[];
+    avgSpeedBps: number;
+    lastActive: string | null;
+};
+
+export type SessionInfo = {
+    radacctId: string;
+    acctSessionId: string;
+    username: string;
+    nasIpAddress: string;
+    callingStationId: string | null;
+    framedIpAddress: string | null;
+    startedAt: string | null;
+    updatedAt: string | null;
+    stoppedAt: string | null;
+    live: boolean;
+    seconds: number;
+    inputOctets: number;
+    outputOctets: number;
+    totalOctets: number;
+    terminateCause: string | null;
+    avgSpeedBps: number;
+};
+
+export type AdminSessionRow = SessionInfo;
+
+export function getUserActivations(id: string) {
+    return request<AdminActivationRow[]>(`/admin/users/${id}/activations`);
+}
+
+export function setPppoePassword(id: string, password?: string) {
+    return request<{
+        username: string;
+        password: string;
+        sessionsDisconnected: number;
+    }>(`/admin/users/${id}/pppoe-password`, { password }, { method: 'POST' });
+}
+
+// --- Payment log ---------------------------------------------------------------
+
+export type ListPaymentsQuery = {
+    status?: PackagePaymentStatus;
+    q?: string;
+    from?: string;
+    to?: string;
+    page?: number;
+    perPage?: number;
+};
+
+export function getAdminPayments(query: ListPaymentsQuery = {}) {
+    const params = new URLSearchParams();
+    if (query.status) params.set('status', query.status);
+    if (query.q) params.set('q', query.q);
+    if (query.from) params.set('from', query.from);
+    if (query.to) params.set('to', query.to);
+    if (query.page) params.set('page', String(query.page));
+    if (query.perPage) params.set('perPage', String(query.perPage));
+    const qs = params.toString();
+    return request<AdminPaymentList>(`/admin/payments${qs ? `?${qs}` : ''}`);
+}
+
+// --- Reports ---------------------------------------------------------------------
+
+export type AdminReports = {
+    totals: {
+        payments: number;
+        revenue: number;
+        buyers: number;
+        newUsers: number;
+        newActivations: number;
+    };
+    daily: Array<{
+        day: string;
+        paid: number;
+        pending: number;
+        failed: number;
+        revenue: number;
+    }>;
+    topPackages: Array<{
+        packageId: string;
+        title: string;
+        type: PackageType;
+        paid: number;
+        revenue: number;
+    }>;
+    topUsers: Array<{
+        userId: string;
+        userName: string;
+        phoneNumber: string;
+        paid: number;
+        revenue: number;
+    }>;
+    topUsage: Array<{
+        username: string;
+        sessions: number;
+        seconds: number;
+        octets: number;
+    }>;
+};
+
+export function getAdminReports(from: string, to: string) {
+    const params = new URLSearchParams({ from, to });
+    return request<AdminReports>(`/admin/reports?${params.toString()}`);
+}
+
+// --- Activation & session management -------------------------------------------
+
+export function activateActivation(id: string) {
+    return request<{
+        ok: boolean;
+        message: string;
+        expireAt: string | null;
+    }>(`/admin/activations/${id}/activate`, undefined, { method: 'POST' });
+}
+
+export function deactivateActivation(id: string) {
+    return request<{
+        ok: boolean;
+        message: string;
+        sessionsFound: number;
+        sessionsDisconnected: number;
+    }>(`/admin/radius/activations/${id}/deactivate`, undefined, {
+        method: 'POST',
+    });
+}
+
+export function updateActivation(id: string, body: { expireAt: string }) {
+    return request<{ ok: boolean; message: string }>(
+        `/admin/activations/${id}`,
+        body,
+        { method: 'PUT' },
+    );
+}
+
+export function getRadiusSessions(limit = 100) {
+    return request<SessionInfo[]>(`/admin/radius/sessions?limit=${limit}`);
+}
+
+export function disconnectSession(radacctId: string) {
+    return request<{ ok: boolean; message: string }>(
+        `/admin/radius/sessions/${radacctId}/disconnect`,
+        undefined,
+        { method: 'POST' },
+    );
+}
+
+export function editSessionTimeout(radacctId: string, sessionTimeout: number) {
+    return request<{ ok: boolean; message: string }>(
+        `/admin/radius/sessions/${radacctId}`,
+        { sessionTimeout },
+        { method: 'PUT' },
+    );
+}
+
 export type NasSetupScriptStatus = 'pending' | 'applied' | 'failed';
 
 // Generated RouterOS setup script stored on the server.

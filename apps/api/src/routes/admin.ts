@@ -6,6 +6,16 @@ import {
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { env } from '../env';
+import {
+    addUserFlag,
+    getAdminReports,
+    getAdminUserDetail,
+    getUserPayments,
+    listAdminUsers,
+    listPayments,
+    removeUserFlag,
+    setUserBan,
+} from '../lib/adminUsers';
 import { jsonError } from '../lib/error';
 import {
     createNasDevice,
@@ -303,6 +313,273 @@ app.put('/nas-devices/:id', requireAdmin, async (c) => {
     }
 });
 
+// --- Users (hotspot + PPPoE customer management) -----------------------------
+
+const userTypeFilterSchema = z.enum(['hotspot', 'pppoe']);
+
+// Customer list with lifetime value aggregates; supports search, service-type
+// and flagged filters, paginated.
+app.get('/users', requireAdmin, async (c) => {
+    const q = c.req.query('q')?.trim() || undefined;
+    const flagged = c.req.query('flagged') === '1';
+    const typeParam = c.req.query('type');
+    const type = typeParam
+        ? userTypeFilterSchema.safeParse(typeParam).success
+            ? (typeParam as 'hotspot' | 'pppoe')
+            : undefined
+        : undefined;
+    if (typeParam && !type) {
+        return jsonError(c, 400, 'Invalid user type filter');
+    }
+    const page = Number(c.req.query('page') ?? 1);
+    const perPage = Number(c.req.query('perPage') ?? 50);
+    const data = await listAdminUsers({
+        q,
+        type,
+        flagged,
+        page: Number.isFinite(page) ? page : 1,
+        perPage: Number.isFinite(perPage) ? perPage : 50,
+    });
+    return c.json({ success: true, data });
+});
+
+// One customer's valuation: identity, moderation state, lifetime payments,
+// activations, usage, flags and PPPoE credentials.
+app.get('/users/:id', requireAdmin, async (c) => {
+    const id = c.req.param('id');
+    if (!id) return jsonError(c, 404, 'User not found');
+    const detail = await getAdminUserDetail(id);
+    if (!detail) return jsonError(c, 404, 'User not found');
+
+    // Only surface dialer credentials once the customer actually has a PPPoE
+    // history (the username derivation is deterministic for every user).
+    let pppoe: { username: string; password: string | null } | null = null;
+    if (detail.activations.pppoe > 0) {
+        const credentials = await radiusClient.getPppoeCredentials(id);
+        pppoe = credentials.password ? credentials : null;
+    }
+
+    return c.json({ success: true, data: { ...detail, pppoe } });
+});
+
+const flagSchema = z.object({
+    reason: z.string().min(1).max(100),
+    note: z.string().max(2000).optional(),
+});
+
+app.post('/users/:id/flags', requireAdmin, async (c) => {
+    const id = c.req.param('id');
+    if (!id) return jsonError(c, 404, 'User not found');
+    const parsed = flagSchema.safeParse(await c.req.json().catch(() => ({})));
+    if (!parsed.success) {
+        return jsonError(c, 400, 'Invalid flag payload');
+    }
+    const existing = await getAdminUserDetail(id);
+    if (!existing) return jsonError(c, 404, 'User not found');
+    const flag = await addUserFlag(
+        id,
+        c.get('session').userId,
+        parsed.data.reason,
+        parsed.data.note,
+    );
+    return c.json({ success: true, data: flag }, 201);
+});
+
+app.delete('/users/:id/flags/:flagId', requireAdmin, async (c) => {
+    const flagId = c.req.param('flagId');
+    if (!flagId) return jsonError(c, 404, 'Flag not found');
+    const removed = await removeUserFlag(flagId);
+    if (!removed) return jsonError(c, 404, 'Flag not found');
+    return c.json({ success: true });
+});
+
+const banSchema = z.object({
+    reason: z.string().max(500).optional(),
+    expiresAt: z.iso.datetime().nullable().optional(),
+});
+
+app.post('/users/:id/ban', requireAdmin, async (c) => {
+    const id = c.req.param('id');
+    if (!id) return jsonError(c, 404, 'User not found');
+    const parsed = banSchema.safeParse(await c.req.json().catch(() => ({})));
+    if (!parsed.success) {
+        return jsonError(c, 400, 'Invalid ban payload');
+    }
+    const row = await setUserBan(
+        id,
+        true,
+        parsed.data.reason,
+        parsed.data.expiresAt ? new Date(parsed.data.expiresAt) : null,
+    );
+    if (!row) return jsonError(c, 404, 'User not found');
+    return c.json({ success: true, message: 'User banned' });
+});
+
+app.delete('/users/:id/ban', requireAdmin, async (c) => {
+    const id = c.req.param('id');
+    if (!id) return jsonError(c, 404, 'User not found');
+    const row = await setUserBan(id, false);
+    if (!row) return jsonError(c, 404, 'User not found');
+    return c.json({ success: true, message: 'User unbanned' });
+});
+
+// Per-user payment log.
+app.get('/users/:id/payments', requireAdmin, async (c) => {
+    const id = c.req.param('id');
+    if (!id) return jsonError(c, 404, 'User not found');
+    const data = await getUserPayments(id);
+    return c.json({ success: true, data });
+});
+
+// Per-user activations (both services, including expired ones) with live
+// RADIUS usage.
+app.get('/users/:id/activations', requireAdmin, async (c) => {
+    const id = c.req.param('id');
+    if (!id) return jsonError(c, 404, 'User not found');
+    try {
+        const data = await radiusClient.getAdminActivations({ userId: id });
+        return c.json({ success: true, data });
+    } catch (err) {
+        console.error('[radius] admin activation listing failed:', err);
+        return jsonError(c, 502, 'Could not contact the RADIUS system');
+    }
+});
+
+// --- PPPoE password management ------------------------------------------------
+
+// Sets (or rotates, when no password is supplied) the customer's stable PPPoE
+// dialer password and disconnects live sessions so it applies on next dial.
+const pppoePasswordSchema = z.object({
+    password: z.string().min(6).max(64).optional(),
+});
+
+app.post('/users/:id/pppoe-password', requireAdmin, async (c) => {
+    const id = c.req.param('id');
+    if (!id) return jsonError(c, 404, 'User not found');
+    const parsed = pppoePasswordSchema.safeParse(
+        await c.req.json().catch(() => ({})),
+    );
+    if (!parsed.success) {
+        return jsonError(c, 400, 'Invalid password payload');
+    }
+    try {
+        const data = await radiusClient.setPppoePassword(id, parsed.data.password);
+        return c.json({
+            success: true,
+            message:
+                data.sessionsDisconnected > 0
+                    ? `Password updated; ${data.sessionsDisconnected} live session(s) disconnected`
+                    : 'Password updated',
+            data,
+        });
+    } catch (err) {
+        console.error('[radius] admin pppoe password set failed:', err);
+        return jsonError(c, 502, 'Could not contact the RADIUS system');
+    }
+});
+
+// --- Payment log ---------------------------------------------------------------
+
+const paymentStatusSchema = z.enum(['pending', 'paid', 'failed']);
+
+app.get('/payments', requireAdmin, async (c) => {
+    const statusParam = c.req.query('status');
+    if (statusParam && !paymentStatusSchema.safeParse(statusParam).success) {
+        return jsonError(c, 400, 'Invalid payment status filter');
+    }
+    const fromParam = c.req.query('from');
+    const toParam = c.req.query('to');
+    const from = fromParam ? new Date(fromParam) : undefined;
+    const to = toParam ? new Date(toParam) : undefined;
+    if (
+        (fromParam && Number.isNaN(from?.getTime())) ||
+        (toParam && Number.isNaN(to?.getTime()))
+    ) {
+        return jsonError(c, 400, 'Invalid date range');
+    }
+    const page = Number(c.req.query('page') ?? 1);
+    const perPage = Number(c.req.query('perPage') ?? 50);
+    const data = await listPayments({
+        status: statusParam as 'pending' | 'paid' | 'failed' | undefined,
+        q: c.req.query('q')?.trim() || undefined,
+        from,
+        to,
+        page: Number.isFinite(page) ? page : 1,
+        perPage: Number.isFinite(perPage) ? perPage : 50,
+    });
+    return c.json({ success: true, data });
+});
+
+// --- Reports ---------------------------------------------------------------------
+
+// Aggregate reporting for a date range (defaults to the trailing 30 days):
+// revenue trend, totals, top packages/users, heaviest consumers.
+app.get('/reports', requireAdmin, async (c) => {
+    const toParam = c.req.query('to');
+    const fromParam = c.req.query('from');
+    const to = toParam ? new Date(toParam) : new Date();
+    const from = fromParam
+        ? new Date(fromParam)
+        : new Date(to.getTime() - 30 * 24 * 60 * 60 * 1000);
+    if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) {
+        return jsonError(c, 400, 'Invalid date range');
+    }
+    if (from.getTime() > to.getTime()) {
+        return jsonError(c, 400, 'Invalid date range');
+    }
+    const data = await getAdminReports(from, to);
+    return c.json({ success: true, data });
+});
+
+// --- Activation management --------------------------------------------------------
+
+// Re-activates a deactivated/expired activation: the expiry restarts from now
+// and the RADIUS provisioning is rebuilt (PPPoE re-authorizes the customer's
+// stable dialer account).
+app.post('/activations/:id/activate', requireAdmin, async (c) => {
+    const id = c.req.param('id');
+    if (!id) return jsonError(c, 404, 'Unknown activation');
+    try {
+        const result = await radiusClient.reactivateActivation(id);
+        if (!result.ok && !result.expireAt) {
+            return jsonError(c, 400, result.message);
+        }
+        return c.json({ success: result.ok, message: result.message, data: result });
+    } catch (err) {
+        console.error('[radius] admin activation failed:', err);
+        return jsonError(c, 502, 'Could not contact the RADIUS system');
+    }
+});
+
+// Edits an activation's expiry (extend/cut). RADIUS provisioning is kept in
+// step (Expiration check-attribute, Session-Timeout caps, CoA on live
+// sessions).
+const activationEditSchema = z.object({
+    expireAt: z.iso.datetime(),
+});
+
+app.put('/activations/:id', requireAdmin, async (c) => {
+    const id = c.req.param('id');
+    if (!id) return jsonError(c, 404, 'Unknown activation');
+    const parsed = activationEditSchema.safeParse(
+        await c.req.json().catch(() => ({})),
+    );
+    if (!parsed.success) {
+        return jsonError(c, 400, 'Invalid activation payload');
+    }
+    try {
+        const result = await radiusClient.setActivationExpiry(
+            id,
+            new Date(parsed.data.expireAt),
+        );
+        if (!result.ok) return jsonError(c, 404, result.message);
+        return c.json({ success: true, message: result.message, data: result });
+    } catch (err) {
+        console.error('[radius] admin activation edit failed:', err);
+        return jsonError(c, 502, 'Could not contact the RADIUS system');
+    }
+});
+
 // --- RADIUS -----------------------------------------------------------------
 
 // Aggregate network usage from RADIUS accounting over a trailing window:
@@ -377,6 +654,51 @@ app.post('/radius/check-credentials', requireAdmin, async (c) => {
             502,
             err instanceof Error ? err.message : 'RADIUS check failed',
         );
+    }
+});
+
+// Disconnects one live session (any user/service) addressed by its radacct id.
+app.post('/radius/sessions/:radacctId/disconnect', requireAdmin, async (c) => {
+    const radacctId = c.req.param('radacctId');
+    if (!radacctId || !/^\d+$/.test(radacctId)) {
+        return jsonError(c, 404, 'Unknown session');
+    }
+    try {
+        const result = await radiusClient.disconnectSessionByRadacctId(radacctId);
+        if (!result.ok) return jsonError(c, 400, result.message);
+        return c.json({ success: true, message: result.message, data: result });
+    } catch (err) {
+        console.error('[radius] admin session disconnect failed:', err);
+        return jsonError(c, 502, 'Could not contact the RADIUS system');
+    }
+});
+
+// Live-edits a session's remaining time (CoA Session-Timeout to the NAS).
+const sessionEditSchema = z.object({
+    sessionTimeout: z.number().int().min(1).max(365 * 24 * 3600),
+});
+
+app.put('/radius/sessions/:radacctId', requireAdmin, async (c) => {
+    const radacctId = c.req.param('radacctId');
+    if (!radacctId || !/^\d+$/.test(radacctId)) {
+        return jsonError(c, 404, 'Unknown session');
+    }
+    const parsed = sessionEditSchema.safeParse(
+        await c.req.json().catch(() => ({})),
+    );
+    if (!parsed.success) {
+        return jsonError(c, 400, 'Invalid session payload');
+    }
+    try {
+        const result = await radiusClient.setSessionTimeoutByRadacctId(
+            radacctId,
+            parsed.data.sessionTimeout,
+        );
+        if (!result.ok) return jsonError(c, 400, result.message);
+        return c.json({ success: true, message: result.message, data: result });
+    } catch (err) {
+        console.error('[radius] admin session edit failed:', err);
+        return jsonError(c, 502, 'Could not contact the RADIUS system');
     }
 });
 

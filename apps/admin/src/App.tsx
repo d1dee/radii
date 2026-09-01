@@ -1,5 +1,7 @@
 import '@mantine/core/styles.css';
 import '@mantine/notifications/styles.css';
+import '@mantine/dates/styles.css';
+import '@mantine/charts/styles.css';
 
 import { MantineProvider } from '@mantine/core';
 import { Notifications } from '@mantine/notifications';
@@ -11,6 +13,10 @@ import NasDeviceFormPage from '@/pages/NasDeviceFormPage';
 import NasDevicesPage from '@/pages/NasDevicesPage';
 import PackageFormPage from '@/pages/PackageFormPage';
 import PackagesPage from '@/pages/PackagesPage';
+import PaymentsPage from '@/pages/PaymentsPage';
+import ReportsPage from '@/pages/ReportsPage';
+import SessionsPage from '@/pages/SessionsPage';
+import UsersPage from '@/pages/UsersPage';
 
 export default function App() {
     return (
@@ -20,6 +26,10 @@ export default function App() {
                 <AppLayout>
                     <Routes>
                         <Route path='/' element={<DashboardPage />} />
+                        <Route path='/users' element={<UsersPage />} />
+                        <Route path='/payments' element={<PaymentsPage />} />
+                        <Route path='/sessions' element={<SessionsPage />} />
+                        <Route path='/reports' element={<ReportsPage />} />
                         <Route path='/packages' element={<PackagesPage />} />
                         <Route
                             path='/packages/add'

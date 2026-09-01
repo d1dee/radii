@@ -1,5 +1,12 @@
 import { relations } from 'drizzle-orm';
-import { boolean, index, pgTable, text, timestamp } from 'drizzle-orm/pg-core';
+import {
+    boolean,
+    index,
+    pgTable,
+    text,
+    timestamp,
+    uuid,
+} from 'drizzle-orm/pg-core';
 
 export const user = pgTable('user', {
     id: text('id').primaryKey(),
@@ -80,9 +87,44 @@ export const verification = pgTable(
     (table) => [index('verification_identifier_idx').on(table.identifier)],
 );
 
+// Admin moderation flag on a customer user. Multiple flags accumulate so a
+// user can be flagged for several independent reasons; removing a flag deletes
+// the row. A user is considered "flagged" while at least one row exists.
+export const userFlag = pgTable(
+    'user_flag',
+    {
+        id: uuid('id').defaultRandom().primaryKey(),
+        userId: text('user_id')
+            .notNull()
+            .references(() => user.id, { onDelete: 'cascade' }),
+        reason: text('reason').notNull(),
+        note: text('note'),
+        // The admin user who raised the flag.
+        createdBy: text('created_by').references(() => user.id, {
+            onDelete: 'set null',
+        }),
+        createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+            .defaultNow()
+            .notNull(),
+    },
+    (table) => [index('user_flag_user_id_idx').on(table.userId)],
+);
+
 export const userRelations = relations(user, ({ many }) => ({
     sessions: many(session),
     accounts: many(account),
+    flags: many(userFlag),
+}));
+
+export const userFlagRelations = relations(userFlag, ({ one }) => ({
+    user: one(user, {
+        fields: [userFlag.userId],
+        references: [user.id],
+    }),
+    creator: one(user, {
+        fields: [userFlag.createdBy],
+        references: [user.id],
+    }),
 }));
 
 export const sessionRelations = relations(session, ({ one }) => ({
