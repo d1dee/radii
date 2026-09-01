@@ -830,55 +830,21 @@ $radiiLog "IP management services restricted to {{WG_ALLOWED_ADDRESS}}";
     # reduced by 20) to avoid fragmentation. An empty service name means
     # the server accepts any PADI; the property is only set when one is
     # configured (it cannot be unset once present).
-    :local pppServerIds [/interface/pppoe-server/server/find where name="radii-pppoe"];
-    :local pppServiceName "{{PPP_SERVICE_NAME}}";
+   :local pppServiceName "{{PPP_SERVICE_NAME}}";
 
-    :if ([:len $pppServerIds] = 0) do={
-        :if ([:len $pppServiceName] > 0) do={
-            /interface/pppoe-server/server/add \
-                interface=$pppIf \
-                service-name=$pppServiceName \
-                authentication=mschap2,mschap1,chap,pap \
-                max-mtu={{PPP_MTU}} \
-                max-mru={{PPP_MRU}} \
-                default-profile="radii-ppp" \
-                disabled=no\
-                keepalive-timeout=10;
-        } else={
-            /interface/pppoe-server/server/add \
-                service-name=$pppServiceName \
-                interface=$pppIf \
-                authentication=mschap2,mschap1,chap,pap \
-                max-mtu={{PPP_MTU}} \
-                max-mru={{PPP_MRU}} \
-                default-profile="radii-ppp" \
-                disabled=no\
-                keepalive-timeout=10;
-        };
-    } else={
-        :local pppServerId [:pick $pppServerIds 0];
-        /interface/pppoe-server/server/set $pppServerId \
-            interface=$pppIf \
-            authentication=mschap2,mschap1,chap,pap \
-            max-mtu={{PPP_MTU}} \
-            max-mru={{PPP_MRU}} \
-            default-profile="radii-ppp" \
-            keepalive-timeout=10 \
-            disabled=no;
-        :if ([:len $pppServiceName] > 0) do={
-            /interface/pppoe-server/server/set $pppServerId \
-                service-name=$pppServiceName;
-        };
-    };
+    /interface/pppoe-server/server/remove \
+        [find where service-name=$pppServiceName];
 
-    # Remove duplicate managed PPPoE servers.\
-    :local duplicatePpp [/interface/pppoe-server/server/find where name="radii-pppoe"];
-
-    :if ([:len $duplicatePpp] > 1) do={
-        :for i from=1 to=([:len $duplicatePpp] - 1) do={
-            /interface/pppoe-server/server/remove [:pick $duplicatePpp $i];
-        };
-    };
+    /interface/pppoe-server/server/add \
+        service-name=$pppServiceName \
+        interface=$pppIf \
+        authentication=mschap2,mschap1,chap,pap \
+        max-mtu={{PPP_MTU}} \
+        max-mru={{PPP_MRU}} \
+        default-profile="radii-ppp" \
+        disabled=no \
+        one-session-per-host=yes \
+        keepalive-timeout=10;
 
     # --- NAT -----------------------------------------------------------
 
