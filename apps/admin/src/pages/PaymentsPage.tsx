@@ -139,14 +139,14 @@ export default function PaymentsPage() {
                     w={140}
                 />
                 <DateInput
-                    label='From'
+                    placeholder='Date From'
                     value={from}
                     onChange={(v) => setFrom(v ? new Date(v) : null)}
                     clearable
                     w={150}
                 />
                 <DateInput
-                    label='To'
+                    placeholder='Date To'
                     value={to}
                     onChange={(v) => setTo(v ? new Date(v) : null)}
                     clearable
