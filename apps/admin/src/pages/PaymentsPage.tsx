@@ -1,4 +1,3 @@
-import { DateInput } from '@mantine/dates';
 import {
     Badge,
     Card,
@@ -14,6 +13,7 @@ import {
     TextInput,
     Title,
 } from '@mantine/core';
+import { DateInput } from '@mantine/dates';
 import { useDebouncedValue } from '@mantine/hooks';
 import { useCallback, useEffect, useState } from 'react';
 import { MdSearch } from 'react-icons/md';
@@ -28,12 +28,14 @@ import { formatMoney } from '@/lib/format';
 
 const PER_PAGE = 25;
 
-const STATUS_BADGE: Record<PackagePaymentStatus, { color: string; label: string }> =
-    {
-        paid: { color: 'green', label: 'Paid' },
-        pending: { color: 'orange', label: 'Pending' },
-        failed: { color: 'red', label: 'Failed' },
-    };
+const STATUS_BADGE: Record<
+    PackagePaymentStatus,
+    { color: string; label: string }
+> = {
+    paid: { color: 'green', label: 'Paid' },
+    pending: { color: 'orange', label: 'Pending' },
+    failed: { color: 'red', label: 'Failed' },
+};
 
 function SummaryCard({ label, value }: { label: string; value: string }) {
     return (
@@ -97,63 +99,67 @@ export default function PaymentsPage() {
     const totalPages = data ? Math.max(1, Math.ceil(data.total / PER_PAGE)) : 1;
 
     return (
-        <Stack gap='md'>
-            <Title order={1}>Payment Log</Title>
+        <>
+            <Stack pb='md'>
+                <Title order={1}>Payment Log</Title>
 
-            {data && (
-                <SimpleGrid cols={{ base: 2, lg: 4 }}>
-                    <SummaryCard
-                        label='Revenue (filtered)'
-                        value={formatMoney(data.summary.revenue)}
-                    />
-                    <SummaryCard label='Paid' value={String(data.summary.paid)} />
-                    <SummaryCard
-                        label='Pending'
-                        value={String(data.summary.pending)}
-                    />
-                    <SummaryCard
-                        label='Failed'
-                        value={String(data.summary.failed)}
-                    />
-                </SimpleGrid>
-            )}
+                {data && (
+                    <SimpleGrid cols={{ base: 2, lg: 4 }}>
+                        <SummaryCard
+                            label='Revenue (filtered)'
+                            value={formatMoney(data.summary.revenue)}
+                        />
+                        <SummaryCard
+                            label='Paid'
+                            value={String(data.summary.paid)}
+                        />
+                        <SummaryCard
+                            label='Pending'
+                            value={String(data.summary.pending)}
+                        />
+                        <SummaryCard
+                            label='Failed'
+                            value={String(data.summary.failed)}
+                        />
+                    </SimpleGrid>
+                )}
 
-            <Group wrap='wrap'>
-                <TextInput
-                    placeholder='Search phone, name or receipt code'
-                    leftSection={<MdSearch />}
-                    value={search}
-                    onChange={(e) => setSearch(e.currentTarget.value)}
-                    style={{ flex: 1, minWidth: 220 }}
-                />
-                <Select
-                    placeholder='Status'
-                    clearable
-                    value={status}
-                    onChange={setStatus}
-                    data={[
-                        { value: 'paid', label: 'Paid' },
-                        { value: 'pending', label: 'Pending' },
-                        { value: 'failed', label: 'Failed' },
-                    ]}
-                    w={140}
-                />
-                <DateInput
-                    placeholder='Date From'
-                    value={from}
-                    onChange={(v) => setFrom(v ? new Date(v) : null)}
-                    clearable
-                    w={150}
-                />
-                <DateInput
-                    placeholder='Date To'
-                    value={to}
-                    onChange={(v) => setTo(v ? new Date(v) : null)}
-                    clearable
-                    w={150}
-                />
-            </Group>
-
+                <Group wrap='wrap'>
+                    <TextInput
+                        placeholder='Search phone, name or receipt code'
+                        leftSection={<MdSearch />}
+                        value={search}
+                        onChange={(e) => setSearch(e.currentTarget.value)}
+                        style={{ flex: 1, minWidth: 220 }}
+                    />
+                    <Select
+                        placeholder='Status'
+                        clearable
+                        value={status}
+                        onChange={setStatus}
+                        data={[
+                            { value: 'paid', label: 'Paid' },
+                            { value: 'pending', label: 'Pending' },
+                            { value: 'failed', label: 'Failed' },
+                        ]}
+                        w={140}
+                    />
+                    <DateInput
+                        placeholder='Date From'
+                        value={from}
+                        onChange={(v) => setFrom(v ? new Date(v) : null)}
+                        clearable
+                        w={150}
+                    />
+                    <DateInput
+                        placeholder='Date To'
+                        value={to}
+                        onChange={(v) => setTo(v ? new Date(v) : null)}
+                        clearable
+                        w={150}
+                    />
+                </Group>
+            </Stack>
             {loading ? (
                 <Center py='xl'>
                     <Loader />
@@ -166,10 +172,19 @@ export default function PaymentsPage() {
                 </Text>
             ) : (
                 <>
-                    <Table.ScrollContainer minWidth={900}>
-                        <Table striped highlightOnHover>
+                    <Table.ScrollContainer
+                        minWidth='md'
+                        pb='md'
+                        style={{
+                            flex: 1,
+                            minHeight: 0,
+                            overflowY: 'auto',
+                        }}
+                    >
+                        <Table stickyHeader withRowBorders highlightOnHover>
                             <Table.Thead>
                                 <Table.Tr>
+                                    <Table.Th>#</Table.Th>
                                     <Table.Th>Date</Table.Th>
                                     <Table.Th>Customer</Table.Th>
                                     <Table.Th>Package</Table.Th>
@@ -179,8 +194,9 @@ export default function PaymentsPage() {
                                 </Table.Tr>
                             </Table.Thead>
                             <Table.Tbody>
-                                {data.payments.map((p) => (
+                                {data.payments.map((p, i) => (
                                     <Table.Tr key={p.id}>
+                                        <Table.Td>{i + 1} </Table.Td>{' '}
                                         <Table.Td>
                                             <Text size='sm'>
                                                 {dayjs(p.createdAt).format(
@@ -204,18 +220,20 @@ export default function PaymentsPage() {
                                                 {p.packageType ?? ''}
                                             </Text>
                                         </Table.Td>
-                                        <Table.Td>{formatMoney(p.amount)}</Table.Td>
+                                        <Table.Td>
+                                            {formatMoney(p.amount)}
+                                        </Table.Td>
                                         <Table.Td>
                                             <Badge
                                                 size='sm'
                                                 variant='light'
                                                 color={
-                                                    STATUS_BADGE[p.status]?.color ??
-                                                    'gray'
+                                                    STATUS_BADGE[p.status]
+                                                        ?.color ?? 'gray'
                                                 }
                                             >
-                                                {STATUS_BADGE[p.status]?.label ??
-                                                    p.status}
+                                                {STATUS_BADGE[p.status]
+                                                    ?.label ?? p.status}
                                             </Badge>
                                         </Table.Td>
                                         <Table.Td>
@@ -231,17 +249,17 @@ export default function PaymentsPage() {
                             </Table.Tbody>
                         </Table>
                     </Table.ScrollContainer>
-                    {totalPages > 1 && (
-                        <Group justify='center'>
-                            <Pagination
-                                value={page}
-                                onChange={setPage}
-                                total={totalPages}
-                            />
-                        </Group>
-                    )}
                 </>
             )}
-        </Stack>
+            {totalPages > 1 && (
+                <Group justify='center' style={{ flexShrink: 0 }}>
+                    <Pagination
+                        value={page}
+                        onChange={setPage}
+                        total={totalPages}
+                    />
+                </Group>
+            )}
+        </>
     );
 }

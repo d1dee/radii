@@ -1,7 +1,6 @@
-import { AppShell, AppShellFooter } from '@mantine/core';
+import { AppShell } from '@mantine/core';
 import { useState } from 'react';
 
-import { Footer } from './Footer';
 import { Header } from './Header';
 import { Sidebar } from './Sidebar';
 
@@ -28,10 +27,15 @@ export function AppLayout({ children }: AppLayoutProps) {
             <AppShell.Navbar>
                 <Sidebar onNavClick={() => setOpened(false)} />
             </AppShell.Navbar>
-            <AppShell.Main>{children}</AppShell.Main>
-            <AppShellFooter>
-                <Footer />
-            </AppShellFooter>
+            <AppShell.Main
+                h='100%'
+                style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                }}
+            >
+                {children}
+            </AppShell.Main>
         </AppShell>
     );
 }
