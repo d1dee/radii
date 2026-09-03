@@ -624,6 +624,19 @@ $radiiLog "IP management services restricted to {{WG_ALLOWED_ADDRESS}}";
 
     :local hsServerIds [/ip/hotspot/find where name="radii-hotspot"];
 
+    :local hsBridgePorts [/interface/bridge/port/find where interface=$hsIf];
+
+    :if ([:len $hsBridgePorts] > 0) do={
+
+        $radiiLog (\
+            "WARNING - Hotspots interface " .\
+            $hsIf .\
+            " belongs to a bridge; removing from bridge"\
+        );
+
+        /interface/bridge/port/remove $hsBridgePorts;
+    };
+
     :if ([:len $hsServerIds] = 0) do={
 
         # If another HotSpot server already exists on this interface,
