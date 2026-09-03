@@ -415,6 +415,12 @@ $radiiLog ("WireGuard public key: " . $wgPubKey);
 # 5. Firewall input rules
 # ---------------------------------------------------------------------
 
+
+# Disable FastTrack before applying managed firewall rules.
+:foreach rule in=[/ip/firewall/filter/find where action=fasttrack-connection] do={
+    /ip/firewall/filter/disable $rule;
+};
+
 # Remove previous managed rules so changed values never leave stale rules.
 :local oldRadiiFilter [/ip/firewall/filter/find where comment~"^radii:"];
 :if ([:len $oldRadiiFilter] > 0) do={
@@ -763,6 +769,19 @@ $radiiLog "IP management services restricted to {{WG_ALLOWED_ADDRESS}}";
     );
 
 } else={
+
+    :local bridgePorts [/interface/bridge/port/find where interface=$pppIf];
+
+    :if ([:len $bridgePorts] > 0) do={
+
+        $radiiLog (\
+            "WARNING - PPPoE interface " .\
+            $pppIf .\
+            " belongs to a bridge; removing from bridge"\
+        );
+
+        /interface/bridge/port/remove $bridgePorts;
+    };
 
     # --- Pool ---------------------------------------------------------
 
