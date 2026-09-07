@@ -11,6 +11,10 @@ function required(name: string): string {
 export const env = {
     baseUrl: required('BASE_URL'),
     port: parseInt(required('PORT'), 10),
+    adminFrontendUrls: (process.env.ADMIN_FRONTEND_URLS || '')
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean),
     frontendUrls: (process.env.FRONTEND_URLS || '')
         .split(',')
         .map((s) => s.trim())

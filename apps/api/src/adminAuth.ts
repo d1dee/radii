@@ -11,6 +11,7 @@ import {
     adminUser,
     adminVerification,
 } from './db/schema/admin-auth-schema';
+import { env } from './env';
 import { sendAdminOtpEmail } from './lib/email';
 
 // Paths that must satisfy the shared admin password policy before better-auth processes the request.
@@ -85,6 +86,7 @@ export const adminAuth = betterAuth({
         ],
         protocol: 'http',
     },
+    trustedOrigins: env.adminFrontendUrls,
     advanced: {
         cookiePrefix: 'radii-admin',
         crossSubDomainCookies: {
