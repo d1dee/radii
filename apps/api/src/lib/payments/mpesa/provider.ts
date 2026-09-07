@@ -25,7 +25,6 @@ import {
     type VerifyTransactionContext,
     type VerifyTransactionResult,
 } from '../types';
-import MpesaApi from './deno-mpesa-api/mod';
 import type {
     MpesaExpressCallback,
     StkPushResponse,
@@ -33,6 +32,7 @@ import type {
     TransactionStatusQueryCallback,
     TransactionStatusResponseInterface,
 } from './deno-mpesa-api/@types/types.d';
+import MpesaApi from './deno-mpesa-api/mod';
 
 export const MPESA_PROVIDER_NAME = 'mpesa';
 
@@ -429,8 +429,9 @@ export class MpesaPaymentProvider implements PaymentProvider {
     // { Result: { ResultType, ResultCode, OriginatorConversationID,
     //   ConversationID, TransactionID, ResultDesc, ResultParameters? } }
     private handleStatusCallback(payload: unknown): ProviderCallbackResult {
-        const result = (payload as Partial<TransactionStatusQueryCallback> | null)
-            ?.Result;
+        const result = (
+            payload as Partial<TransactionStatusQueryCallback> | null
+        )?.Result;
         const originatorConversationId = result?.OriginatorConversationID;
         if (!result || typeof originatorConversationId !== 'string') {
             throw new PaymentProviderError(
@@ -479,9 +480,7 @@ export class MpesaPaymentProvider implements PaymentProvider {
         }
 
         const amount =
-            parameters.Amount !== undefined
-                ? Number(parameters.Amount)
-                : null;
+            parameters.Amount !== undefined ? Number(parameters.Amount) : null;
 
         return {
             outcome: 'completed',
@@ -494,7 +493,8 @@ export class MpesaPaymentProvider implements PaymentProvider {
                 'TransactionID' in result ? result.TransactionID : null,
             amount: amount !== null && Number.isFinite(amount) ? amount : null,
             payload: raw,
-            message: `Transaction ${parameters.ReceiptNo ?? ''} completed on M-Pesa.`.trim(),
+            message:
+                `Transaction ${parameters.ReceiptNo ?? ''} completed on M-Pesa.`.trim(),
         };
     }
 
@@ -503,7 +503,9 @@ export class MpesaPaymentProvider implements PaymentProvider {
     private mapClientError(error: Error, operation: string): string {
         const message = error.message.toLowerCase();
         if (message.includes('auth')) {
-            return `M-Pesa authentication failed while attempting the ${operation}. Check the consumer key and consumer secret (${this.config.environment}).`;
+            console.error(
+                `M-Pesa authentication failed while attempting the ${operation}. Check the consumer key and consumer secret (${this.config.environment}).`,
+            );
         }
         if (message.includes('could not be parsed')) {
             return `Could not reach M-Pesa while attempting the ${operation}. Try again in a moment.`;

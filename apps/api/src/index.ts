@@ -2,6 +2,7 @@ import { ApiErrorType } from '@radii/shared';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
+import { adminAuth } from './adminAuth';
 import { auth } from './auth';
 import { closeDb } from './db';
 import { env } from './env';
@@ -30,20 +31,35 @@ app.use(
     }),
 );
 
-// Session middleware: resolve the better-auth session for every request and
-// attach it (or null) to the context for downstream handlers.
+// Session middleware: resolve BOTH better-auth sessions for every request
+// and attach them (or nothing) to the context for downstream handlers.
+// - user/session: customer portal instance (phone+PIN, `user` table)
+// - admin/adminSession: admin console instance (email+OTP, `admin_user`
+//   table). The two never overlap: separate tables, cookie prefixes and
+//   base paths.
 app.use('*', async (c, next) => {
-    const session = await auth.api.getSession({ headers: c.req.raw.headers });
+    const [session, adminSession] = await Promise.all([
+        auth.api.getSession({ headers: c.req.raw.headers }),
+        adminAuth.api.getSession({ headers: c.req.raw.headers }),
+    ]);
     if (session) {
         c.set('user', session.user);
         c.set('session', session.session);
+    }
+    if (adminSession) {
+        c.set('admin', adminSession.user);
+        c.set('adminSession', adminSession.session);
     }
 
     await next();
 });
 
-// Better Auth handler.
+// Better Auth handlers — customers on /api/auth/*, the admin console on
+// /api/admin/auth/* (must run before the /api/admin REST routes).
 app.on(['POST', 'GET'], '/api/auth/*', (c) => auth.handler(c.req.raw));
+app.on(['POST', 'GET'], '/api/admin/auth/*', (c) =>
+    adminAuth.handler(c.req.raw),
+);
 
 // Hotspot REST routes (mounted at /api/hotspot).
 app.route('/api', routes);

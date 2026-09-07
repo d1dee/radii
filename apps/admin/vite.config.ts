@@ -29,7 +29,7 @@ export default defineConfig(({ mode }) => {
             host: '0.0.0.0',
             port: APP_PORT,
             proxy: {
-                '/api': {
+                '/api': { 
                     target: API_URL,
                     changeOrigin: true,
                     secure: false,

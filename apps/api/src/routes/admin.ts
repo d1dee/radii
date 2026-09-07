@@ -97,7 +97,7 @@ app.post('/packages', requireAdmin, async (c) => {
         return jsonError(c, 400, 'Invalid package payload');
     }
     const { nasDeviceIds, ...data } = parsed.data;
-    if (!(await ownsAllNasDevices(c.var.session.userId, nasDeviceIds))) {
+    if (!(await ownsAllNasDevices(c.var.adminSession.userId, nasDeviceIds))) {
         return jsonError(c, 400, 'Unknown NAS device');
     }
     const row = await createPackage(
@@ -144,7 +144,7 @@ app.put('/packages/:id', requireAdmin, async (c) => {
         return jsonError(c, 400, 'Invalid package payload');
     }
     const { nasDeviceIds, ...data } = parsed.data;
-    if (!(await ownsAllNasDevices(c.var.session.userId, nasDeviceIds))) {
+    if (!(await ownsAllNasDevices(c.var.adminSession.userId, nasDeviceIds))) {
         return jsonError(c, 400, 'Unknown NAS device');
     }
     const row = await updatePackage(
@@ -159,7 +159,7 @@ app.put('/packages/:id', requireAdmin, async (c) => {
 });
 
 app.get('/nas-devices', requireAdmin, async (c) => {
-    const rows = await getNasDevices(c.var.session.userId);
+    const rows = await getNasDevices(c.var.adminSession.userId);
     return c.json({ success: true, data: rows });
 });
 
@@ -168,11 +168,30 @@ app.post('/nas-devices', requireAdmin, async (c) => {
     if (!parsed.success) {
         return jsonError(c, 400, 'Invalid NAS device payload');
     }
-    const { os, ...rest } = parsed.data;
+    // Destructured field-by-field (not a rest spread): the zod output type
+    // loses `ipAddress`'s requiredness through rest-spread inference.
+    const {
+        os,
+        name,
+        ipAddress,
+        macAddress,
+        model,
+        serialNumber,
+        firmwareVersion,
+        location,
+        status,
+    } = parsed.data;
     try {
         const row = await createNasDevice({
-            ...rest,
-            ownerId: c.get('session').userId,
+            name,
+            ipAddress,
+            macAddress,
+            model,
+            serialNumber,
+            firmwareVersion,
+            location,
+            status,
+            ownerId: c.get('adminSession').userId,
             // The DB schema has no OS column; keep it in metadata so new
             // platforms can be added without a migration.
             metadata: { os },
@@ -193,7 +212,7 @@ app.post('/nas-devices', requireAdmin, async (c) => {
 app.get('/nas-devices/:id', requireAdmin, async (c) => {
     const id = c.req.param('id');
     if (!id) return jsonError(c, 406, 'missing NAS id');
-    const row = await getNasDeviceById(id, c.get('session').userId);
+    const row = await getNasDeviceById(id, c.get('adminSession').userId);
     if (!row) {
         return jsonError(c, 404, 'NAS device not found');
     }
@@ -203,7 +222,7 @@ app.get('/nas-devices/:id', requireAdmin, async (c) => {
 app.get('/nas-devices/:id/analytics', requireAdmin, async (c) => {
     const id = c.req.param('id');
     if (!id) return jsonError(c, 406, 'missing NAS id');
-    const device = await getNasDeviceById(id, c.get('session').userId);
+    const device = await getNasDeviceById(id, c.get('adminSession').userId);
     if (!device) {
         return jsonError(c, 404, 'NAS device not found');
     }
@@ -216,7 +235,7 @@ app.get('/nas-devices/:id/analytics', requireAdmin, async (c) => {
 app.post('/nas-devices/:id/setup-script', requireAdmin, async (c) => {
     const id = c.req.param('id');
     if (!id) return jsonError(c, 406, 'missing NAS id');
-    const device = await getNasDeviceById(id, c.get('session').userId);
+    const device = await getNasDeviceById(id, c.get('adminSession').userId);
     if (!device) {
         return jsonError(c, 404, 'NAS device not found');
     }
@@ -252,7 +271,7 @@ app.post('/nas-devices/:id/setup-script', requireAdmin, async (c) => {
 app.get('/nas-devices/:id/setup-script', requireAdmin, async (c) => {
     const id = c.req.param('id');
     if (!id) return jsonError(c, 406, 'missing NAS id');
-    const device = await getNasDeviceById(id, c.get('session').userId);
+    const device = await getNasDeviceById(id, c.get('adminSession').userId);
     if (!device) {
         return jsonError(c, 404, 'NAS device not found');
     }
@@ -283,7 +302,7 @@ app.put('/nas-devices/:id', requireAdmin, async (c) => {
         return jsonError(c, 400, 'Invalid NAS device payload');
     }
 
-    const existing = await getNasDeviceById(id, c.get('session').userId);
+    const existing = await getNasDeviceById(id, c.get('adminSession').userId);
     if (!existing) {
         return jsonError(c, 404, 'NAS device not found');
     }
@@ -291,7 +310,7 @@ app.put('/nas-devices/:id', requireAdmin, async (c) => {
     try {
         const row = await updateNasDevice(
             existing.id,
-            c.get('session').userId,
+            c.get('adminSession').userId,
             {
                 ...rest,
                 metadata: {
@@ -378,7 +397,7 @@ app.post('/users/:id/flags', requireAdmin, async (c) => {
     if (!existing) return jsonError(c, 404, 'User not found');
     const flag = await addUserFlag(
         id,
-        c.get('session').userId,
+        c.get('adminSession').userId,
         parsed.data.reason,
         parsed.data.note,
     );

@@ -21,6 +21,7 @@ import {
 import { db } from '../db';
 import {
     activatedPackages,
+    adminUser,
     packagePayments,
     packages,
     radacct,
@@ -264,6 +265,8 @@ export async function getAdminUserDetail(userId: string) {
     const payments = agg.payments.get(userId);
     const activations = agg.activations.get(userId);
 
+    // Flag creators are admins from the isolated admin auth instance
+    // (admin_user), not customers from the `user` table.
     const flags = await db
         .select({
             id: userFlag.id,
@@ -271,10 +274,10 @@ export async function getAdminUserDetail(userId: string) {
             note: userFlag.note,
             createdAt: userFlag.createdAt,
             createdBy: userFlag.createdBy,
-            creatorName: user.name,
+            creatorName: adminUser.name,
         })
         .from(userFlag)
-        .leftJoin(user, eq(userFlag.createdBy, user.id))
+        .leftJoin(adminUser, eq(userFlag.createdBy, adminUser.id))
         .where(eq(userFlag.userId, userId))
         .orderBy(desc(userFlag.createdAt));
 

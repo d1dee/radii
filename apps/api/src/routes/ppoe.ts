@@ -13,13 +13,13 @@ import {
 import { and, desc, eq } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { auth } from '../auth';
 import { db } from '../db';
 import {
     activatedPackages,
     nasDevice,
     packagePayments,
     packages,
+    user,
 } from '../db/schema';
 import { env } from '../env';
 import {
@@ -163,9 +163,9 @@ app.get('/clients/:id/config', requireAuth, async (c) => {
     if (!activationId) return jsonError(c, 400, 'Missing client id');
 
     const currentUser = c.get('user');
-    const client = (
-        await radiusClient.getPppoeClients(currentUser!.id)
-    ).find((v) => v.activationId === activationId);
+    const client = (await radiusClient.getPppoeClients(currentUser!.id)).find(
+        (v) => v.activationId === activationId,
+    );
     if (!client) return jsonError(c, 404, 'Unknown PPPoE client');
 
     return c.json({
@@ -522,12 +522,27 @@ app.post('/deauth/:activationId', requireAuth, async (c) => {
 
 // --- Admin ------------------------------------------------------------------
 
+// Registered portal customers from the customer instance's `user` table.
+// Queried directly: admin sessions live on the separate admin auth instance,
+// so the customer instance's session-bound listUsers API cannot be called
+// cross-instance.
 app.get('/users', requireAdmin, async (c) => {
-    const data = await auth.api.listUsers({
-        query: { limit: 100 },
-        headers: c.req.raw.headers,
+    const users = await db
+        .select({
+            id: user.id,
+            name: user.name,
+            email: user.email,
+            username: user.username,
+            createdAt: user.createdAt,
+            banned: user.banned,
+        })
+        .from(user)
+        .orderBy(desc(user.createdAt))
+        .limit(100);
+    return c.json({
+        success: true,
+        data: { users, total: users.length, limit: 100, offset: 0 },
     });
-    return c.json({ success: true, data });
 });
 
 export default app;

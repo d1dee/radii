@@ -7,6 +7,7 @@ import {
     timestamp,
     uuid,
 } from 'drizzle-orm/pg-core';
+import { adminUser } from './admin-auth-schema';
 
 export const user = pgTable('user', {
     id: text('id').primaryKey(),
@@ -90,6 +91,9 @@ export const verification = pgTable(
 // Admin moderation flag on a customer user. Multiple flags accumulate so a
 // user can be flagged for several independent reasons; removing a flag deletes
 // the row. A user is considered "flagged" while at least one row exists.
+//
+// created_by references the ADMIN instance's user table (admin_user from
+// admin-auth-schema.ts), not the customer `user` table below.
 export const userFlag = pgTable(
     'user_flag',
     {
@@ -99,8 +103,8 @@ export const userFlag = pgTable(
             .references(() => user.id, { onDelete: 'cascade' }),
         reason: text('reason').notNull(),
         note: text('note'),
-        // The admin user who raised the flag.
-        createdBy: text('created_by').references(() => user.id, {
+        // The admin user who raised the flag (admin-auth-schema.ts).
+        createdBy: text('created_by').references(() => adminUser.id, {
             onDelete: 'set null',
         }),
         createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
@@ -121,9 +125,9 @@ export const userFlagRelations = relations(userFlag, ({ one }) => ({
         fields: [userFlag.userId],
         references: [user.id],
     }),
-    creator: one(user, {
+    creator: one(adminUser, {
         fields: [userFlag.createdBy],
-        references: [user.id],
+        references: [adminUser.id],
     }),
 }));
 

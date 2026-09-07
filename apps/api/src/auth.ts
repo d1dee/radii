@@ -37,11 +37,15 @@ export const auth = betterAuth({
         }),
     ],
     secret: process.env.BETTER_AUTH_SECRET || 'change-me-in-production',
-    baseURL:
-        process.env.BASE_URL ||
-        process.env.BETTER_AUTH_URL ||
-        'http://localhost:3000',
+    baseURL: {
+        allowedHosts: process.env.BETTER_AUTH_ALLOWED_HOSTS?.split(',') ?? [
+            'http://localhost:3000',
+        ],
+        protocol: 'http',
+    },
+
     advanced: {
+        cookiePrefix: 'radii-client',
         crossSubDomainCookies: {
             enabled: true,
         },

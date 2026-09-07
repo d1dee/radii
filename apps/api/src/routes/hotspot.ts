@@ -2,7 +2,6 @@ import { paymentTransactionCodeSchema } from '@radii/shared';
 import { and, desc, eq } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { auth } from '../auth';
 import { db } from '../db';
 import {
     activatedPackages,
@@ -10,6 +9,7 @@ import {
     nasDevice,
     packagePayments,
     radcheck,
+    user,
 } from '../db/schema';
 import { env } from '../env';
 import {
@@ -593,12 +593,27 @@ app.post('/login-request/:id/complete', requireAuth, async (c) => {
 
 // --- Admin ------------------------------------------------------------------
 
+// Registered portal customers from the customer instance's `user` table.
+// Queried directly: admin sessions live on the separate admin auth instance,
+// so the customer instance's session-bound listUsers API cannot be called
+// cross-instance.
 app.get('/users', requireAdmin, async (c) => {
-    const data = await auth.api.listUsers({
-        query: { limit: 100 },
-        headers: c.req.raw.headers,
+    const users = await db
+        .select({
+            id: user.id,
+            name: user.name,
+            email: user.email,
+            username: user.username,
+            createdAt: user.createdAt,
+            banned: user.banned,
+        })
+        .from(user)
+        .orderBy(desc(user.createdAt))
+        .limit(100);
+    return c.json({
+        success: true,
+        data: { users, total: users.length, limit: 100, offset: 0 },
     });
-    return c.json({ success: true, data });
 });
 
 // --- Auth helpers -----------------------------------------------------------

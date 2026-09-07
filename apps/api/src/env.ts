@@ -107,4 +107,12 @@ export const env = {
         initiatorPassword: process.env.MPESA_INITIATOR_PASSWORD || '',
         certificatePath: process.env.MPESA_CERTIFICATE_PATH || '',
     },
+    // Admin-console transactional email (Resend HTTP API). Optional: without
+    // RESEND_API_KEY the admin verification codes are printed to the server
+    // console instead (dev fallback). Only the admin BetterAuth instance
+    // sends email; portal customers authenticate with phone+PIN only.
+    resend: {
+        apiKey: process.env.RESEND_API_KEY || '',
+        from: process.env.RESEND_FROM || 'Radii Admin <onboarding@resend.dev>',
+    },
 };

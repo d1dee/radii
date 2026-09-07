@@ -11,6 +11,7 @@ import {
     uuid,
     varchar,
 } from 'drizzle-orm/pg-core';
+import { adminUser } from './admin-auth-schema';
 import { user } from './auth-schema';
 import { packages } from './packages';
 
@@ -26,9 +27,12 @@ export const nasDevice = pgTable(
         serialNumber: text('serial_number').unique(),
         firmwareVersion: text('firmware_version'),
         location: text('location'),
+        // The admin (admin-auth-schema.ts admin_user) who owns this device.
+        // Ownership is the root of the tenant trace: admins -> NAS devices ->
+        // packages/customers.
         ownerId: text('owner_id')
             .notNull()
-            .references(() => user.id, { onDelete: 'restrict' }),
+            .references(() => adminUser.id, { onDelete: 'restrict' }),
         status: text('status', {
             enum: ['active', 'inactive', 'maintenance', 'offline'],
         })
@@ -55,9 +59,9 @@ export const nasDevice = pgTable(
 );
 
 export const nasDeviceRelations = relations(nasDevice, ({ one }) => ({
-    owner: one(user, {
+    owner: one(adminUser, {
         fields: [nasDevice.ownerId],
-        references: [user.id],
+        references: [adminUser.id],
     }),
 }));
 

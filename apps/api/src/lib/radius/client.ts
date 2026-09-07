@@ -41,6 +41,7 @@ import {
     and,
     desc,
     eq,
+    getTableColumns,
     gte,
     isNotNull,
     isNull,
@@ -1151,8 +1152,15 @@ export class RadiusClient {
         failures: Array<{ nasIpAddress: string; reason: string }>;
     }> {
         const [activation] = await db
-            .select()
+            .select({
+                ...getTableColumns(activatedPackages),
+                username: radacct.username,
+            })
             .from(activatedPackages)
+            .leftJoin(
+                radacct,
+                eq(radacct.radacctid, activatedPackages.radacctId),
+            )
             .where(eq(activatedPackages.id, activationId))
             .limit(1);
         if (!activation) {
@@ -1165,7 +1173,9 @@ export class RadiusClient {
             };
         }
 
-        const username = activationUsername(activationId);
+        const username =
+            activation.username ?? activationUsername(activationId);
+
         let liveSessions = await this.getSessions({
             username,
             activationId,
@@ -2444,7 +2454,11 @@ export class RadiusClient {
             pkg.type === 'pppoe'
                 ? pppoeUsername(activation.userId)
                 : activationUsername(activationId);
-        const sessions = await this.getSessions({ username, activationId });
+        const sessions = await this.getSessions({
+            username,
+            activationId,
+            liveOnly: true,
+        });
         const liveSessions = sessions.filter((s) => s.live);
 
         const cumulativeUsed = sessions.reduce((sum, s) => sum + s.seconds, 0);
