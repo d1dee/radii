@@ -80,9 +80,15 @@ export function getStatus() {
 }
 
 export function createOrder(body: { packageId: string; phoneNumber: string }) {
-    return request<OrderResult>('/order', body, {
-        method: 'POST',
-    });
+    // Send the NAS this portal is scoped to so the purchase is attributed to
+    // the owning admin's network (tenant scoping).
+    return request<OrderResult>(
+        '/order',
+        { ...body, nas: currentNasDeviceId() },
+        {
+            method: 'POST',
+        },
+    );
 }
 
 export function getPaymentStatus(paymentId: string) {

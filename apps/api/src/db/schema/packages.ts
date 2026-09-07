@@ -9,8 +9,12 @@ import {
     text,
     timestamp,
     uuid,
+    type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
 import { user } from './auth-schema';
+// Circular module reference (integrations.ts imports packages): the column
+// below resolves nasDevice lazily via an AnyPgColumn callback.
+import { nasDevice } from './integrations';
 import { transaction } from './payments';
 import { radacct } from './radius';
 
@@ -59,6 +63,16 @@ export const packagePayments = pgTable(
         packageId: uuid('package_id')
             .notNull()
             .references(() => packages.id, { onDelete: 'restrict' }),
+        // The NAS device the purchase happened through, stamped at order time
+        // (hotspot: from the login request; PPPoE: from the portal's ?nas=
+        // scoping; fallback: the package's NAS links when they resolve to a
+        // single owner). This column is the tenant-attribution root for
+        // admin-scoped views: payment -> NAS -> owning admin. Null only when
+        // no device could be identified.
+        nasDeviceId: uuid('nas_device_id').references(
+            (): AnyPgColumn => nasDevice.id,
+            { onDelete: 'set null' },
+        ),
         status: text('status', { enum: ['pending', 'paid', 'failed'] })
             .notNull()
             .default('pending'),
@@ -78,6 +92,7 @@ export const packagePayments = pgTable(
     (table) => [
         index('package_payments_user_id_idx').on(table.userId),
         index('package_payments_package_id_idx').on(table.packageId),
+        index('package_payments_nas_device_id_idx').on(table.nasDeviceId),
     ],
 );
 
@@ -91,6 +106,10 @@ export const packagePaymentsRelations = relations(
         package: one(packages, {
             fields: [packagePayments.packageId],
             references: [packages.id],
+        }),
+        nasDevice: one(nasDevice, {
+            fields: [packagePayments.nasDeviceId],
+            references: [nasDevice.id],
         }),
         transaction: one(transaction, {
             fields: [packagePayments.transaction],

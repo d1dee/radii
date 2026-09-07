@@ -27,6 +27,7 @@ import {
     logoutPhonePin,
     registerPhonePin,
 } from '../lib/authHelpers';
+import { customerVisibleToAdmin } from '../lib/adminUsers';
 import { jsonError } from '../lib/error';
 import {
     createPayment,
@@ -280,6 +281,10 @@ app.get('/status', requireAuth, async (c) => {
 const orderSchema = z.object({
     packageId: z.uuid(),
     phoneNumber: z.string().min(10),
+    // The NAS this portal instance is scoped to (captured from ?nas= in the
+    // portal URL). Used for tenant attribution of the purchase; when absent
+    // the package's NAS links resolve it.
+    nas: z.uuid().nullable(),
 });
 
 app.post('/order', requireAuth, async (c) => {
@@ -299,11 +304,26 @@ app.post('/order', requireAuth, async (c) => {
     }
 
     const currentUser = c.get('user');
+
+    // Validate the portal-provided NAS before stamping it on the payment.
+    let nasDeviceId: string | null = parsed.data.nas ?? null;
+    if (nasDeviceId) {
+        const [device] = await db
+            .select({ id: nasDevice.id })
+            .from(nasDevice)
+            .where(eq(nasDevice.id, nasDeviceId))
+            .limit(1);
+        if (!device) {
+            return jsonError(c, 400, 'Unknown NAS device');
+        }
+    }
+
     const row = await createPayment({
         userId: currentUser!.id,
         packageId: pkg.id,
         amount: Number(pkg.price),
         phoneNumber: parsed.data.phoneNumber,
+        nasDeviceId,
     });
 
     // Hand the purchase to the default registered payment provider. On
@@ -522,7 +542,8 @@ app.post('/deauth/:activationId', requireAuth, async (c) => {
 
 // --- Admin ------------------------------------------------------------------
 
-// Registered portal customers from the customer instance's `user` table.
+// Registered portal customers from the customer instance's `user` table,
+// scoped to those who interacted with the requesting admin's NAS devices.
 // Queried directly: admin sessions live on the separate admin auth instance,
 // so the customer instance's session-bound listUsers API cannot be called
 // cross-instance.
@@ -537,6 +558,7 @@ app.get('/users', requireAdmin, async (c) => {
             banned: user.banned,
         })
         .from(user)
+        .where(customerVisibleToAdmin(c.get('adminSession').userId))
         .orderBy(desc(user.createdAt))
         .limit(100);
     return c.json({

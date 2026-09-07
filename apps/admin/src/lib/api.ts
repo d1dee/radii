@@ -597,6 +597,25 @@ export function getRadiusSessions(limit = 100) {
     return request<SessionInfo[]>(`/admin/radius/sessions?limit=${limit}`);
 }
 
+// Mirrors the API's NetworkUsage (apps/api/src/lib/radius/client.ts).
+export type NetworkUsage = {
+    windowMinutes: number;
+    liveSessions: number;
+    liveUsers: number;
+    liveOctets: number;
+    aggregateThroughputBps: number;
+    avgSpeedPerSessionBps: number;
+    sessionsStartedInWindow: number;
+    avgSessionSeconds: number;
+    topUsers: Array<{ username: string; octets: number; sessions: number }>;
+};
+
+export function getRadiusSummary(windowMinutes = 60) {
+    return request<NetworkUsage>(
+        `/admin/radius/summary?windowMinutes=${windowMinutes}`,
+    );
+}
+
 export function disconnectSession(radacctId: string) {
     return request<{ ok: boolean; message: string }>(
         `/admin/radius/sessions/${radacctId}/disconnect`,

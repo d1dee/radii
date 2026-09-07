@@ -17,6 +17,7 @@ import {
     logoutPhonePin,
     registerPhonePin,
 } from '../lib/authHelpers';
+import { customerVisibleToAdmin } from '../lib/adminUsers';
 import { jsonError } from '../lib/error';
 import {
     createPayment,
@@ -202,11 +203,38 @@ app.post('/order', requireAuth, async (c) => {
     if (!pkg) return jsonError(c, 404, 'Package not found');
 
     const currentUser = c.get('user');
+
+    // Tenant attribution: stamp the NAS the purchase happened through. The
+    // portal arrives via a login request, so it identifies the device; fall
+    // back to the customer's most recent login request when the order does
+    // not carry the key.
+    let nasDeviceId: string | null = null;
+    const loginRequestId =
+        parsed.data.loginRequestKey ??
+        (
+            await db
+                .select({ id: hotspotLoginRequest.id })
+                .from(hotspotLoginRequest)
+                .where(eq(hotspotLoginRequest.userId, currentUser!.id))
+                .orderBy(desc(hotspotLoginRequest.createdAt))
+                .limit(1)
+        )[0]?.id ??
+        null;
+    if (loginRequestId) {
+        const [lr] = await db
+            .select({ nasDeviceId: hotspotLoginRequest.nasDeviceId })
+            .from(hotspotLoginRequest)
+            .where(eq(hotspotLoginRequest.id, loginRequestId))
+            .limit(1);
+        nasDeviceId = lr?.nasDeviceId ?? null;
+    }
+
     const row = await createPayment({
         userId: currentUser!.id,
         packageId: pkg.id,
         amount: Number(pkg.price),
         phoneNumber: parsed.data.phoneNumber,
+        nasDeviceId,
     });
 
     // Hand the purchase to the default registered payment provider (gateway
@@ -593,7 +621,8 @@ app.post('/login-request/:id/complete', requireAuth, async (c) => {
 
 // --- Admin ------------------------------------------------------------------
 
-// Registered portal customers from the customer instance's `user` table.
+// Registered portal customers from the customer instance's `user` table,
+// scoped to those who interacted with the requesting admin's NAS devices.
 // Queried directly: admin sessions live on the separate admin auth instance,
 // so the customer instance's session-bound listUsers API cannot be called
 // cross-instance.
@@ -608,6 +637,7 @@ app.get('/users', requireAdmin, async (c) => {
             banned: user.banned,
         })
         .from(user)
+        .where(customerVisibleToAdmin(c.get('adminSession').userId))
         .orderBy(desc(user.createdAt))
         .limit(100);
     return c.json({

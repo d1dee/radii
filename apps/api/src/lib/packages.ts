@@ -13,6 +13,7 @@ import {
 import { db } from '../db';
 import {
     activatedPackages,
+    nasDevice,
     packageNasDevice,
     packagePayments,
     packages,
@@ -375,11 +376,37 @@ export async function getNasDeviceAnalytics(
     };
 }
 
+// Best-effort NAS attribution for a purchase when the portal could not
+// identify the device: the package's NAS links resolve it. Package links can
+// only be created/updated by the admin owning every linked device
+// (ownsAllNasDevices in routes/admin.ts), so a link set with a single owner
+// attributes the payment to that admin's network unambiguously. Returns null
+// when unlinked or when links ever span multiple owners.
+async function resolvePackageNasDevice(
+    packageId: string,
+): Promise<string | null> {
+    const links = await db
+        .select({
+            nasDeviceId: packageNasDevice.nasDeviceId,
+            ownerId: nasDevice.ownerId,
+        })
+        .from(packageNasDevice)
+        .innerJoin(nasDevice, eq(packageNasDevice.nasDeviceId, nasDevice.id))
+        .where(eq(packageNasDevice.packageId, packageId));
+    if (links.length === 0) return null;
+    const owners = new Set(links.map((l) => l.ownerId));
+    if (owners.size !== 1) return null;
+    return links[0].nasDeviceId;
+}
+
 export async function createPayment(data: {
     userId: string;
     packageId: string;
     amount: number;
     phoneNumber: string;
+    // The NAS device the purchase happened through; tenant attribution for
+    // admin-scoped views. Falls back to the package's NAS links when omitted.
+    nasDeviceId?: string | null;
 }) {
     const [row] = await db
         .insert(packagePayments)
@@ -388,6 +415,9 @@ export async function createPayment(data: {
             packageId: data.packageId,
             amount: String(data.amount),
             phoneNumber: data.phoneNumber,
+            nasDeviceId:
+                data.nasDeviceId ??
+                (await resolvePackageNasDevice(data.packageId)),
         })
         .returning();
     return row;

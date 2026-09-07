@@ -8,9 +8,14 @@ import { z } from 'zod';
 import { env } from '../env';
 import {
     addUserFlag,
+    getAdminNasAddresses,
     getAdminReports,
     getAdminUserDetail,
+    getOwnedActivationIds,
     getUserPayments,
+    isAdminActivationVisible,
+    isAdminRadacctVisible,
+    isAdminUserVisible,
     listAdminUsers,
     listPayments,
     removeUserFlag,
@@ -353,6 +358,7 @@ app.get('/users', requireAdmin, async (c) => {
     const page = Number(c.req.query('page') ?? 1);
     const perPage = Number(c.req.query('perPage') ?? 50);
     const data = await listAdminUsers({
+        adminId: c.get('adminSession').userId,
         q,
         type,
         flagged,
@@ -367,7 +373,10 @@ app.get('/users', requireAdmin, async (c) => {
 app.get('/users/:id', requireAdmin, async (c) => {
     const id = c.req.param('id');
     if (!id) return jsonError(c, 404, 'User not found');
-    const detail = await getAdminUserDetail(id);
+    const detail = await getAdminUserDetail(
+        id,
+        c.get('adminSession').userId,
+    );
     if (!detail) return jsonError(c, 404, 'User not found');
 
     // Only surface dialer credentials once the customer actually has a PPPoE
@@ -393,7 +402,10 @@ app.post('/users/:id/flags', requireAdmin, async (c) => {
     if (!parsed.success) {
         return jsonError(c, 400, 'Invalid flag payload');
     }
-    const existing = await getAdminUserDetail(id);
+    const existing = await getAdminUserDetail(
+        id,
+        c.get('adminSession').userId,
+    );
     if (!existing) return jsonError(c, 404, 'User not found');
     const flag = await addUserFlag(
         id,
@@ -407,7 +419,10 @@ app.post('/users/:id/flags', requireAdmin, async (c) => {
 app.delete('/users/:id/flags/:flagId', requireAdmin, async (c) => {
     const flagId = c.req.param('flagId');
     if (!flagId) return jsonError(c, 404, 'Flag not found');
-    const removed = await removeUserFlag(flagId);
+    const removed = await removeUserFlag(
+        flagId,
+        c.get('adminSession').userId,
+    );
     if (!removed) return jsonError(c, 404, 'Flag not found');
     return c.json({ success: true });
 });
@@ -424,6 +439,14 @@ app.post('/users/:id/ban', requireAdmin, async (c) => {
     if (!parsed.success) {
         return jsonError(c, 400, 'Invalid ban payload');
     }
+    // Only customers on this admin's network can be moderated. The ban
+    // itself is account-global (the phone account is shared across portals)
+    // and better-auth enforces it at session resolution.
+    if (
+        !(await isAdminUserVisible(c.get('adminSession').userId, id))
+    ) {
+        return jsonError(c, 404, 'User not found');
+    }
     const row = await setUserBan(
         id,
         true,
@@ -437,6 +460,11 @@ app.post('/users/:id/ban', requireAdmin, async (c) => {
 app.delete('/users/:id/ban', requireAdmin, async (c) => {
     const id = c.req.param('id');
     if (!id) return jsonError(c, 404, 'User not found');
+    if (
+        !(await isAdminUserVisible(c.get('adminSession').userId, id))
+    ) {
+        return jsonError(c, 404, 'User not found');
+    }
     const row = await setUserBan(id, false);
     if (!row) return jsonError(c, 404, 'User not found');
     return c.json({ success: true, message: 'User unbanned' });
@@ -446,18 +474,28 @@ app.delete('/users/:id/ban', requireAdmin, async (c) => {
 app.get('/users/:id/payments', requireAdmin, async (c) => {
     const id = c.req.param('id');
     if (!id) return jsonError(c, 404, 'User not found');
-    const data = await getUserPayments(id);
+    const data = await getUserPayments(id, c.get('adminSession').userId);
     return c.json({ success: true, data });
 });
 
 // Per-user activations (both services, including expired ones) with live
-// RADIUS usage.
+// RADIUS usage, limited to activations on this admin's network.
 app.get('/users/:id/activations', requireAdmin, async (c) => {
     const id = c.req.param('id');
     if (!id) return jsonError(c, 404, 'User not found');
+    const adminId = c.get('adminSession').userId;
+    if (!(await isAdminUserVisible(adminId, id))) {
+        return jsonError(c, 404, 'User not found');
+    }
     try {
-        const data = await radiusClient.getAdminActivations({ userId: id });
-        return c.json({ success: true, data });
+        const all = await radiusClient.getAdminActivations({ userId: id });
+        // The phone account is global; filter to activations this admin's
+        // NAS devices issued (activation -> payment -> NAS -> owner).
+        const owned = new Set(await getOwnedActivationIds(adminId, id));
+        return c.json({
+            success: true,
+            data: all.filter((a) => owned.has(a.activationId)),
+        });
     } catch (err) {
         console.error('[radius] admin activation listing failed:', err);
         return jsonError(c, 502, 'Could not contact the RADIUS system');
@@ -480,6 +518,14 @@ app.post('/users/:id/pppoe-password', requireAdmin, async (c) => {
     );
     if (!parsed.success) {
         return jsonError(c, 400, 'Invalid password payload');
+    }
+    // Restricted to customers on this admin's network. Note the dialer
+    // account itself is global per phone (one stable RADIUS account), so a
+    // rotation also applies wherever else that customer dials.
+    if (
+        !(await isAdminUserVisible(c.get('adminSession').userId, id))
+    ) {
+        return jsonError(c, 404, 'User not found');
     }
     try {
         const data = await radiusClient.setPppoePassword(id, parsed.data.password);
@@ -519,6 +565,7 @@ app.get('/payments', requireAdmin, async (c) => {
     const page = Number(c.req.query('page') ?? 1);
     const perPage = Number(c.req.query('perPage') ?? 50);
     const data = await listPayments({
+        adminId: c.get('adminSession').userId,
         status: statusParam as 'pending' | 'paid' | 'failed' | undefined,
         q: c.req.query('q')?.trim() || undefined,
         from,
@@ -546,7 +593,11 @@ app.get('/reports', requireAdmin, async (c) => {
     if (from.getTime() > to.getTime()) {
         return jsonError(c, 400, 'Invalid date range');
     }
-    const data = await getAdminReports(from, to);
+    const data = await getAdminReports(
+        c.get('adminSession').userId,
+        from,
+        to,
+    );
     return c.json({ success: true, data });
 });
 
@@ -558,6 +609,11 @@ app.get('/reports', requireAdmin, async (c) => {
 app.post('/activations/:id/activate', requireAdmin, async (c) => {
     const id = c.req.param('id');
     if (!id) return jsonError(c, 404, 'Unknown activation');
+    if (
+        !(await isAdminActivationVisible(c.get('adminSession').userId, id))
+    ) {
+        return jsonError(c, 404, 'Unknown activation');
+    }
     try {
         const result = await radiusClient.reactivateActivation(id);
         if (!result.ok && !result.expireAt) {
@@ -586,6 +642,11 @@ app.put('/activations/:id', requireAdmin, async (c) => {
     if (!parsed.success) {
         return jsonError(c, 400, 'Invalid activation payload');
     }
+    if (
+        !(await isAdminActivationVisible(c.get('adminSession').userId, id))
+    ) {
+        return jsonError(c, 404, 'Unknown activation');
+    }
     try {
         const result = await radiusClient.setActivationExpiry(
             id,
@@ -602,8 +663,10 @@ app.put('/activations/:id', requireAdmin, async (c) => {
 // --- RADIUS -----------------------------------------------------------------
 
 // Aggregate network usage from RADIUS accounting over a trailing window:
-// live sessions/users, current throughput, average speed per session, and the
-// heaviest users. ?windowMinutes=<n> (default 60).
+// live sessions/users, current throughput, average speed per session, and
+// the heaviest users. ?windowMinutes=<n> (default 60).
+// NOTE: whole-network aggregate — not yet tenant-scoped (the aggregation
+// happens inside the RADIUS client over all accounting rows).
 app.get('/radius/summary', requireAdmin, async (c) => {
     const raw = Number(c.req.query('windowMinutes') ?? 60);
     const windowMinutes =
@@ -613,18 +676,33 @@ app.get('/radius/summary', requireAdmin, async (c) => {
 });
 
 // Live RADIUS sessions (radacct rows without a stop record), most recent
-// first. ?limit=<n> (default 100).
+// first, limited to sessions on the requesting admin's NAS devices
+// (matched on NAS-IP-Address: direct IP or WireGuard tunnel address).
+// ?limit=<n> (default 100).
 app.get('/radius/sessions', requireAdmin, async (c) => {
     const raw = Number(c.req.query('limit') ?? 100);
     const limit = Number.isFinite(raw) && raw > 0 ? Math.min(raw, 500) : 100;
     const data = await radiusClient.getLiveSessions(limit);
-    return c.json({ success: true, data });
+    const addresses = await getAdminNasAddresses(
+        c.get('adminSession').userId,
+    );
+    return c.json({
+        success: true,
+        data: data.filter((s) =>
+            addresses.has(String(s.nasIpAddress).replace(/\/\d+$/, '')),
+        ),
+    });
 });
 
 // Full status of one activation: remaining time/bytes, live sessions, speeds.
 app.get('/radius/activations/:id', requireAdmin, async (c) => {
     const id = c.req.param('id');
     if (!id) return jsonError(c, 404, 'Unknown activation');
+    if (
+        !(await isAdminActivationVisible(c.get('adminSession').userId, id))
+    ) {
+        return jsonError(c, 404, 'Unknown activation');
+    }
     const data = await radiusClient.getPackageStatus(id);
     if (!data) return jsonError(c, 404, 'Unknown activation');
     return c.json({ success: true, data });
@@ -636,6 +714,11 @@ app.get('/radius/activations/:id', requireAdmin, async (c) => {
 app.post('/radius/activations/:id/deactivate', requireAdmin, async (c) => {
     const id = c.req.param('id');
     if (!id) return jsonError(c, 404, 'Unknown activation');
+    if (
+        !(await isAdminActivationVisible(c.get('adminSession').userId, id))
+    ) {
+        return jsonError(c, 404, 'Unknown activation');
+    }
     try {
         const result = await radiusClient.deactivateActivation(id);
         if (!result.ok && result.sessionsFound === 0) {
@@ -676,10 +759,20 @@ app.post('/radius/check-credentials', requireAdmin, async (c) => {
     }
 });
 
-// Disconnects one live session (any user/service) addressed by its radacct id.
+// Disconnects one live session addressed by its radacct id. Restricted to
+// sessions whose activation belongs to the requesting admin's network
+// (RADIUS Class correlation).
 app.post('/radius/sessions/:radacctId/disconnect', requireAdmin, async (c) => {
     const radacctId = c.req.param('radacctId');
     if (!radacctId || !/^\d+$/.test(radacctId)) {
+        return jsonError(c, 404, 'Unknown session');
+    }
+    if (
+        !(await isAdminRadacctVisible(
+            c.get('adminSession').userId,
+            radacctId,
+        ))
+    ) {
         return jsonError(c, 404, 'Unknown session');
     }
     try {
@@ -693,8 +786,9 @@ app.post('/radius/sessions/:radacctId/disconnect', requireAdmin, async (c) => {
 });
 
 // Live-edits a session's remaining time (CoA Session-Timeout to the NAS).
+// Restricted to sessions on the requesting admin's network.
 const sessionEditSchema = z.object({
-    sessionTimeout: z.number().int().min(1).max(365 * 24 * 3600),
+    sessionTimeout: z.number().int().min(1).max(365 * 24 * 60 * 60),
 });
 
 app.put('/radius/sessions/:radacctId', requireAdmin, async (c) => {
@@ -707,6 +801,14 @@ app.put('/radius/sessions/:radacctId', requireAdmin, async (c) => {
     );
     if (!parsed.success) {
         return jsonError(c, 400, 'Invalid session payload');
+    }
+    if (
+        !(await isAdminRadacctVisible(
+            c.get('adminSession').userId,
+            radacctId,
+        ))
+    ) {
+        return jsonError(c, 404, 'Unknown session');
     }
     try {
         const result = await radiusClient.setSessionTimeoutByRadacctId(

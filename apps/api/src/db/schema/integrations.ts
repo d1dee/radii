@@ -236,6 +236,8 @@ export const hotspotLoginRequest = pgTable(
         index('hotspot_login_request_nas_device_id_idx').on(table.nasDeviceId),
         index('hotspot_login_request_mac_idx').on(table.mac),
         index('hotspot_login_request_status_idx').on(table.status),
+        // Tenant scoping: which customers interacted with an admin's devices.
+        index('hotspot_login_request_user_id_idx').on(table.userId),
     ],
 );
 
