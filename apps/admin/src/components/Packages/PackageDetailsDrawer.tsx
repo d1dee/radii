@@ -23,6 +23,7 @@ import {
     type PackagePaymentStatus,
     type PackageRow,
 } from '@/lib/api';
+import { formatDate } from '@/lib/format';
 
 const STATUS_BADGE: Record<
     PackagePaymentStatus,
@@ -214,9 +215,7 @@ export function PackageDetailsDrawer({
                         <Grid.Col span={6}>
                             <DetailItem
                                 label='Created'
-                                value={new Date(
-                                    pkg.createdAt,
-                                ).toLocaleDateString()}
+                                value={formatDate(pkg.createdAt)}
                             />
                         </Grid.Col>
                         <Grid.Col span={12}>

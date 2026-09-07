@@ -27,6 +27,7 @@ import {
     type PackageRow,
 } from '@/lib/api';
 import { nasDeviceOsLabel, nasDeviceStatusColors } from '@/lib/nas';
+import { formatDate } from '@/lib/format';
 
 const STATUS_BADGE: Record<
     PackagePaymentStatus,
@@ -213,9 +214,7 @@ export function NasDetailsDrawer({
                         <Grid.Col span={6}>
                             <DetailItem
                                 label='Created'
-                                value={new Date(
-                                    device.createdAt,
-                                ).toLocaleDateString()}
+                                value={formatDate(device.createdAt)}
                             />
                         </Grid.Col>
                     </Grid>

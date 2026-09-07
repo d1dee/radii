@@ -7,7 +7,7 @@ import {
     Text,
     UnstyledButton,
 } from '@mantine/core'
-import { MdLogout, MdMenu } from 'react-icons/md'
+import { MdLogout, MdMenu, MdSettings } from 'react-icons/md'
 import { useNavigate } from 'react-router-dom'
 
 import { authClient, useSession } from '@/lib/auth'
@@ -69,6 +69,12 @@ export function Header({ onMenuClick }: HeaderProps) {
                 </Menu.Target>
                 <Menu.Dropdown>
                     <Menu.Label>Admin console</Menu.Label>
+                    <Menu.Item
+                        leftSection={<MdSettings size={16} />}
+                        onClick={() => navigate('/settings')}
+                    >
+                        Settings
+                    </Menu.Item>
                     <Menu.Item
                         color='red'
                         leftSection={<MdLogout size={16} />}

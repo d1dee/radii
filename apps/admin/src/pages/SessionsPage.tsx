@@ -25,8 +25,13 @@ import {
     getRadiusSessions,
     type SessionInfo,
 } from '@/lib/api';
-import { dayjs } from '@/lib/dayjs';
-import { formatBytes, formatSeconds, formatSpeed } from '@/lib/format';
+import {
+    formatBytes,
+    formatDayTime,
+    formatSeconds,
+    formatSpeed,
+    formatTime,
+} from '@/lib/format';
 import { notifyResult } from '@/lib/notify';
 
 const REFRESH_SECONDS = 15;
@@ -110,7 +115,7 @@ export default function SessionsPage() {
                 <Group>
                     {lastLoaded && (
                         <Text size='xs' c='dimmed'>
-                            Updated {dayjs(lastLoaded).format('HH:mm:ss')}
+                            Updated {formatTime(lastLoaded, true)}
                         </Text>
                     )}
                     <Button
@@ -192,9 +197,7 @@ export default function SessionsPage() {
                                     <Table.Td>
                                         <Text size='sm'>
                                             {s.startedAt
-                                                ? dayjs(s.startedAt).format(
-                                                      'D MMM HH:mm',
-                                                  )
+                                                ? formatDayTime(s.startedAt)
                                                 : '—'}
                                         </Text>
                                     </Table.Td>

@@ -24,9 +24,8 @@ import {
     type PackagePaymentStatus,
 } from '@/lib/api';
 import { dayjs } from '@/lib/dayjs';
-import { formatMoney } from '@/lib/format';
-
-const PER_PAGE = 25;
+import { formatDateTime, formatMoney } from '@/lib/format';
+import { useAdminSettings } from '@/lib/settings';
 
 const STATUS_BADGE: Record<
     PackagePaymentStatus,
@@ -51,6 +50,8 @@ function SummaryCard({ label, value }: { label: string; value: string }) {
 }
 
 export default function PaymentsPage() {
+    const { settings, loaded } = useAdminSettings();
+    const perPage = settings.dashboard.perPage;
     const [data, setData] = useState<AdminPaymentList | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -72,7 +73,7 @@ export default function PaymentsPage() {
                 from: from ? from.toISOString() : undefined,
                 to: to ? dayjs(to).endOf('day').toISOString() : undefined,
                 page: pageToLoad,
-                perPage: PER_PAGE,
+                perPage,
             });
             setLoading(false);
             if (!res.success) {
@@ -85,18 +86,19 @@ export default function PaymentsPage() {
             }
             setData(res.data);
         },
-        [status, debouncedSearch, from, to],
+        [status, debouncedSearch, from, to, perPage],
     );
 
     useEffect(() => {
         setPage(1);
-    }, [status, debouncedSearch, from, to]);
+    }, [status, debouncedSearch, from, to, perPage]);
 
     useEffect(() => {
+        if (!loaded) return;
         void load(page);
-    }, [load, page]);
+    }, [loaded, load, page]);
 
-    const totalPages = data ? Math.max(1, Math.ceil(data.total / PER_PAGE)) : 1;
+    const totalPages = data ? Math.max(1, Math.ceil(data.total / perPage)) : 1;
 
     return (
         <>
@@ -199,9 +201,7 @@ export default function PaymentsPage() {
                                         <Table.Td>{i + 1} </Table.Td>{' '}
                                         <Table.Td>
                                             <Text size='sm'>
-                                                {dayjs(p.createdAt).format(
-                                                    'D MMM YYYY HH:mm',
-                                                )}
+                                                {formatDateTime(p.createdAt)}
                                             </Text>
                                         </Table.Td>
                                         <Table.Td>

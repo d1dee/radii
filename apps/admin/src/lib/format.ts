@@ -1,8 +1,73 @@
-// Display formatting shared by the admin pages.
+// Display formatting shared by the admin pages. Date/time and currency
+// rendering follow the signed-in admin's appearance settings (Settings page);
+// until they load, the defaults below apply.
+
+import type { ConfigType } from 'dayjs';
+import type { AdminSettings } from '@shared/index';
+import { dayjs } from './dayjs';
+
+const defaultAppearance: AdminSettings['appearance'] = {
+    timeFormat: '24h',
+    dateFormat: 'D MMM YYYY',
+    timezone: 'Africa/Nairobi',
+    currencyLabel: 'Ksh',
+};
+
+let appearance: AdminSettings['appearance'] = defaultAppearance;
+
+// Called by the SettingsProvider whenever per-admin settings (re)load.
+export function configureAppearance(
+    settings: AdminSettings['appearance'],
+): void {
+    appearance = settings;
+    dayjs.tz.setDefault(settings.timezone);
+}
+
+function timeToken(withSeconds = false): string {
+    if (appearance.timeFormat === '12h')
+        return withSeconds ? 'h:mm:ss A' : 'h:mm A';
+    return withSeconds ? 'HH:mm:ss' : 'HH:mm';
+}
+
+// Date only, in the admin's chosen format and timezone.
+export function formatDate(value: ConfigType): string {
+    return dayjs(value).tz(appearance.timezone).format(appearance.dateFormat);
+}
+
+// Date + time of day (12h/24h per settings).
+export function formatDateTime(value: ConfigType): string {
+    return dayjs(value)
+        .tz(appearance.timezone)
+        .format(`${appearance.dateFormat} ${timeToken()}`);
+}
+
+// Day + time without the year (compact table cells).
+export function formatDayTime(value: ConfigType): string {
+    return dayjs(value).tz(appearance.timezone).format(`D MMM ${timeToken()}`);
+}
+
+export function formatTime(value: ConfigType, withSeconds = false): string {
+    return dayjs(value)
+        .tz(appearance.timezone)
+        .format(timeToken(withSeconds));
+}
+
+// Renders a sample with an arbitrary appearance config (settings-page
+// previews), without touching the active configuration.
+export function previewDateTime(
+    value: ConfigType,
+    candidate: AdminSettings['appearance'],
+): string {
+    return dayjs(value)
+        .tz(candidate.timezone)
+        .format(
+            `${candidate.dateFormat} ${candidate.timeFormat === '12h' ? 'h:mm A' : 'HH:mm'}`,
+        );
+}
 
 export function formatMoney(amount: number | string): string {
     const value = typeof amount === 'string' ? Number(amount) : amount;
-    return `Ksh ${value.toLocaleString(undefined, {
+    return `${appearance.currencyLabel} ${value.toLocaleString(undefined, {
         maximumFractionDigits: 2,
     })}`;
 }

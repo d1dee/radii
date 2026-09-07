@@ -1,4 +1,5 @@
 import {
+    adminSettingsSchema,
     createNasDeviceSchema,
     createPackageSchema,
     generateSetupScriptSchema,
@@ -21,6 +22,7 @@ import {
     removeUserFlag,
     setUserBan,
 } from '../lib/adminUsers';
+import { getAdminSettings, saveAdminSettings } from '../lib/adminSettings';
 import { jsonError } from '../lib/error';
 import {
     createNasDevice,
@@ -821,6 +823,34 @@ app.put('/radius/sessions/:radacctId', requireAdmin, async (c) => {
         console.error('[radius] admin session edit failed:', err);
         return jsonError(c, 502, 'Could not contact the RADIUS system');
     }
+});
+
+// --- Per-admin console settings -------------------------------------------------
+// Only ever affects the signed-in admin: display formatting, dashboard
+// defaults, and their own M-Pesa credentials (server-wide env config remains
+// the fallback when they have not configured any). See lib/adminSettings.ts.
+
+app.get('/settings', requireAdmin, async (c) => {
+    const settings = await getAdminSettings(c.get('adminSession').userId);
+    return c.json({ success: true, data: settings });
+});
+
+app.put('/settings', requireAdmin, async (c) => {
+    const parsed = adminSettingsSchema.safeParse(
+        await c.req.json().catch(() => ({})),
+    );
+    if (!parsed.success) {
+        return jsonError(
+            c,
+            400,
+            parsed.error.issues[0]?.message ?? 'Invalid settings',
+        );
+    }
+    const settings = await saveAdminSettings(
+        c.get('adminSession').userId,
+        parsed.data,
+    );
+    return c.json({ success: true, data: settings });
 });
 
 export default app;

@@ -20,7 +20,7 @@ import {
 } from '@mantine/core';
 import { DateInput } from '@mantine/dates';
 import { notifications } from '@mantine/notifications';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
     MdPeople,
@@ -40,6 +40,7 @@ import {
 } from '@/lib/api';
 import { dayjs } from '@/lib/dayjs';
 import { formatBytes, formatMoney, formatSpeed } from '@/lib/format';
+import { useAdminSettings } from '@/lib/settings';
 
 const rangePresets = [
     { label: 'Today', days: 0 },
@@ -94,6 +95,7 @@ const quickLinks = [
 ];
 
 export default function DashboardPage() {
+    const { settings, loaded } = useAdminSettings();
     const [reports, setReports] = useState<AdminReports | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -131,17 +133,27 @@ export default function DashboardPage() {
         if (res.success && res.data) setUsage(res.data);
     }, []);
 
+    // Initial load waits for the admin's saved settings so their default
+    // date range applies; presets/Apply drive the rest.
+    const initialLoadDone = useRef(false);
     useEffect(() => {
-        void loadReports(from, to);
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []); // initial load only; presets/Apply drive the rest
+        if (!loaded || initialLoadDone.current) return;
+        initialLoadDone.current = true;
+        const days = settings.dashboard.defaultRangeDays;
+        setPreset(rangePresets.find((p) => p.days === days)?.label ?? '30d');
+        const range = presetRange(days);
+        setFrom(range.from);
+        setTo(range.to);
+        void loadReports(range.from, range.to);
+    }, [loaded, settings, loadReports]);
 
-    // Live network figures refresh on their own cadence.
+    // Live network figures refresh on the admin's configured cadence.
+    const refreshMs = settings.dashboard.usageRefreshSeconds * 1000;
     useEffect(() => {
         void loadUsage();
-        const timer = setInterval(() => void loadUsage(), 60_000);
+        const timer = setInterval(() => void loadUsage(), refreshMs);
         return () => clearInterval(timer);
-    }, [loadUsage]);
+    }, [loadUsage, refreshMs]);
 
     const applyPreset = (label: string) => {
         setPreset(label);

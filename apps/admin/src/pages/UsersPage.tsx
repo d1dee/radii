@@ -19,13 +19,14 @@ import { MdSearch } from 'react-icons/md';
 import { UserDetailsDrawer } from '@/components/Users/UserDetailsDrawer';
 import { getAdminUsers, type AdminUserList, type PackageType } from '@/lib/api';
 import { dayjs } from '@/lib/dayjs';
-import { formatMoney } from '@/lib/format';
-
-const PER_PAGE = 25;
+import { formatDate, formatMoney } from '@/lib/format';
+import { useAdminSettings } from '@/lib/settings';
 
 type TypeFilter = 'all' | PackageType;
 
 export default function UsersPage() {
+    const { settings, loaded } = useAdminSettings();
+    const perPage = settings.dashboard.perPage;
     const [data, setData] = useState<AdminUserList | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -46,7 +47,7 @@ export default function UsersPage() {
                 type: typeFilter === 'all' ? undefined : typeFilter,
                 flagged: flaggedOnly || undefined,
                 page: pageToLoad,
-                perPage: PER_PAGE,
+                perPage,
             });
             setLoading(false);
             if (!res.success) {
@@ -59,18 +60,19 @@ export default function UsersPage() {
             }
             setData(res.data);
         },
-        [debouncedSearch, typeFilter, flaggedOnly],
+        [debouncedSearch, typeFilter, flaggedOnly, perPage],
     );
 
     useEffect(() => {
         setPage(1);
-    }, [debouncedSearch, typeFilter, flaggedOnly]);
+    }, [debouncedSearch, typeFilter, flaggedOnly, perPage]);
 
     useEffect(() => {
+        if (!loaded) return;
         void load(page);
-    }, [load, page]);
+    }, [loaded, load, page]);
 
-    const totalPages = data ? Math.max(1, Math.ceil(data.total / PER_PAGE)) : 1;
+    const totalPages = data ? Math.max(1, Math.ceil(data.total / perPage)) : 1;
 
     return (
         <Stack gap='md'>
@@ -207,9 +209,7 @@ export default function UsersPage() {
                                         </Table.Td>
                                         <Table.Td>
                                             <Text size='sm'>
-                                                {dayjs(u.createdAt).format(
-                                                    'D MMM YYYY',
-                                                )}
+                                                {formatDate(u.createdAt)}
                                             </Text>
                                         </Table.Td>
                                     </Table.Tr>

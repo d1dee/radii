@@ -14,11 +14,18 @@
 //                      flipped pending -> paid/failed when the provider
 //                      resolves it
 
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { db } from '../../db';
 import { packagePayments, transaction, transactionLog } from '../../db/schema';
+import { getAdminIdForNasDevice, getAdminIdForUser } from '../adminSettings';
 import { getPaymentByTransactionCode, type PackageRow } from '../packages';
 import { radiusClient, type ActivationRedirect } from '../radius';
+import {
+    getAdminMpesaProvider,
+    parseAdminIdFromProviderName,
+    resolveProviderByName,
+} from './adminProviders';
+import { MPESA_PROVIDER_NAME } from './mpesa/provider';
 import {
     PaymentProviderError,
     type PaymentOutcome,
@@ -90,9 +97,47 @@ export class PaymentService {
             : null;
     }
 
+    // Resolves a provider by its stored name, covering both server-registered
+    // providers and per-admin M-Pesa providers ("mpesa-<adminId>") rebuilt
+    // from that admin's own credentials.
+    private async resolveProvider(
+        name: string,
+    ): Promise<PaymentProvider | null> {
+        return resolveProviderByName(name, (n) => this.providers.get(n));
+    }
+
+    // Picks the provider for a customer flow: the tenant admin's own M-Pesa
+    // credentials when they configured any, otherwise the server-wide
+    // default. Throws PaymentProviderError when the admin enabled their own
+    // credentials but stored an unusable configuration (never silently fall
+    // back to the global shortcode in that case).
+    private async providerForAdmin(
+        adminId: string | null,
+    ): Promise<PaymentProvider | null> {
+        const adminProvider = await getAdminMpesaProvider(adminId);
+        return adminProvider ?? this.defaultProvider;
+    }
+
     callbackBaseUrl(providerName: string): string {
         // return `${env.baseUrl.replace(/\/+$/, '')}/api/payments/callback/${providerName}`;
         return `https://demo.mono.co.ke/api/payments/callback/${providerName}`;
+    }
+
+    // Provider names a receipt/verification lookup should span: the resolved
+    // provider plus the global M-Pesa names, since a customer's earlier
+    // transactions may predate (or postdate) the admin switching to their own
+    // credentials. M-Pesa receipt codes are gateway-unique, so widening the
+    // provider filter cannot mis-attribute a receipt.
+    private providerFamilyNames(primary: string): string[] {
+        const names = new Set([primary]);
+        if (
+            primary === MPESA_PROVIDER_NAME ||
+            parseAdminIdFromProviderName(primary)
+        ) {
+            names.add(MPESA_PROVIDER_NAME);
+            if (this.defaultProviderName) names.add(this.defaultProviderName);
+        }
+        return [...names];
     }
 
     // --- Package purchase flow ------------------------------------------------
@@ -108,7 +153,19 @@ export class PaymentService {
         pkg: PackageRow,
         loginRequestId?: string | null,
     ): Promise<{ success: boolean; message: string }> {
-        const provider = this.defaultProvider;
+        // Tenant attribution: payment -> NAS device -> owning admin. When the
+        // owner stored their own M-Pesa credentials the payment runs through
+        // their till; otherwise the server-wide provider is used.
+        let provider: PaymentProvider | null;
+        try {
+            const adminId = await getAdminIdForNasDevice(payment.nasDeviceId);
+            provider = await this.providerForAdmin(adminId);
+        } catch (err) {
+            if (err instanceof PaymentProviderError) {
+                return { success: false, message: err.message };
+            }
+            throw err;
+        }
         if (!provider) {
             return {
                 success: false,
@@ -195,7 +252,7 @@ export class PaymentService {
         const txRow = await this.getTransaction(payment.transaction);
         if (!txRow) return payment.status;
 
-        const provider = this.providers.get(txRow.provider);
+        const provider = await this.resolveProvider(txRow.provider);
         if (!provider || !txRow.providerReference) return payment.status;
 
         // Callback-capable providers resolve payments via webhook; throttle
@@ -247,7 +304,24 @@ export class PaymentService {
     ): Promise<VerifyByCodeOutcome | null> {
         const code = rawCode.trim().toUpperCase();
 
-        const provider = this.defaultProvider;
+        // Attribute the verification to the tenant admin the customer last
+        // paid (their M-Pesa till issued the receipt); fall back to the
+        // server-wide provider when no attribution exists.
+        let provider: PaymentProvider | null;
+        try {
+            const adminId = await getAdminIdForUser(userId);
+            provider = await this.providerForAdmin(adminId);
+        } catch (err) {
+            if (err instanceof PaymentProviderError) {
+                return {
+                    status: 'pending',
+                    paymentId: null,
+                    message: err.message,
+                    error: true,
+                };
+            }
+            throw err;
+        }
         if (!provider) {
             return {
                 status: 'pending',
@@ -290,7 +364,8 @@ export class PaymentService {
 
         // 2. A verification transaction for this receipt (created when the
         // code was first submitted) — the status callback reconciles it.
-        const known = await this.findTransactionByCode(provider.name, code);
+        const family = this.providerFamilyNames(provider.name);
+        const known = await this.findTransactionByCode(family, code);
         if (known) {
             if (known.userId !== userId) return null;
             if (known.status === 'completed') {
@@ -323,7 +398,7 @@ export class PaymentService {
             .from(transactionLog)
             .where(
                 and(
-                    eq(transactionLog.provider, provider.name),
+                    inArray(transactionLog.provider, family),
                     eq(transactionLog.eventType, STATUS_QUERY_EVENT),
                     sql`${transactionLog.payload}->>'receipt' = ${code}`,
                 ),
@@ -336,7 +411,7 @@ export class PaymentService {
                 .from(transactionLog)
                 .where(
                     and(
-                        eq(transactionLog.provider, provider.name),
+                        inArray(transactionLog.provider, family),
                         eq(transactionLog.eventType, STATUS_CALLBACK_EVENT),
                         eq(
                             transactionLog.providerConversationId,
@@ -427,7 +502,17 @@ export class PaymentService {
         event: string,
         payload: unknown,
     ): Promise<CallbackRouteResponse> {
-        const provider = this.providers.get(providerName);
+        let provider = await this.resolveProvider(providerName);
+        if (
+            !provider &&
+            parseAdminIdFromProviderName(providerName)
+        ) {
+            // The admin's own credentials are no longer resolvable (settings
+            // cleared/disabled). Callback payload parsing is credential-
+            // agnostic, so the global M-Pesa provider can still normalize it
+            // and the referenced transaction is reconciled by its stored row.
+            provider = this.providers.get(MPESA_PROVIDER_NAME) ?? null;
+        }
         if (!provider) {
             return {
                 status: 404,
@@ -530,7 +615,7 @@ export class PaymentService {
     // Covers both linked package payments and standalone receipt-verification
     // rows created by verifyTransactionCode.
     private async findTransactionByCode(
-        providerName: string,
+        providerNames: string[],
         code: string,
     ): Promise<TransactionRow | null> {
         const [row] = await db
@@ -538,7 +623,7 @@ export class PaymentService {
             .from(transaction)
             .where(
                 and(
-                    eq(transaction.provider, providerName),
+                    inArray(transaction.provider, providerNames),
                     eq(transaction.providerTransactionId, code),
                 ),
             )

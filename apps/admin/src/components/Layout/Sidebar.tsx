@@ -6,6 +6,7 @@ import {
     MdPeople,
     MdReceiptLong,
     MdRouter,
+    MdSettings,
     MdStorage,
     MdWifiTethering,
 } from 'react-icons/md'
@@ -22,6 +23,7 @@ const links = [
     { to: '/payments', label: 'Payments', icon: MdReceiptLong },
     { to: '/nas-devices', label: 'NAS Devices', icon: MdStorage },
     { to: '/reports', label: 'Reports', icon: MdBarChart },
+    { to: '/settings', label: 'Settings', icon: MdSettings },
 ]
 
 export function Sidebar({ onNavClick }: SidebarProps) {

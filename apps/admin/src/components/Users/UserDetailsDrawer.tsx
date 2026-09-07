@@ -55,7 +55,13 @@ import {
     type UserPaymentRow,
 } from '@/lib/api';
 import { dayjs } from '@/lib/dayjs';
-import { formatBytes, formatMoney, formatSeconds } from '@/lib/format';
+import {
+    formatBytes,
+    formatDate,
+    formatDateTime,
+    formatMoney,
+    formatSeconds,
+} from '@/lib/format';
 import { notifyResult } from '@/lib/notify';
 
 const PAYMENT_BADGE: Record<string, { color: string; label: string }> = {
@@ -420,10 +426,9 @@ export function UserDetailsDrawer({
                                             label='First purchase'
                                             value={
                                                 detail.payments.firstAt
-                                                    ? dayjs(
-                                                          detail.payments
-                                                              .firstAt,
-                                                      ).format('D MMM YYYY')
+                                                    ? formatDate(
+                                                          detail.payments.firstAt,
+                                                      )
                                                     : '—'
                                             }
                                         />
@@ -452,9 +457,7 @@ export function UserDetailsDrawer({
                                     <Grid.Col span={6}>
                                         <StatCard
                                             label='Registered'
-                                            value={dayjs(detail.createdAt).format(
-                                                'D MMM YYYY',
-                                            )}
+                                            value={formatDate(detail.createdAt)}
                                         />
                                     </Grid.Col>
                                     <Grid.Col span={6}>
@@ -514,9 +517,7 @@ export function UserDetailsDrawer({
                                                     </Text>
                                                 ) : null}
                                                 <Text size='xs' c='dimmed' mt={4}>
-                                                    {dayjs(flag.createdAt).format(
-                                                        'D MMM YYYY HH:mm',
-                                                    )}
+                                                    {formatDateTime(flag.createdAt)}
                                                     {flag.creatorName
                                                         ? ` · by ${flag.creatorName}`
                                                         : ''}
@@ -608,9 +609,7 @@ export function UserDetailsDrawer({
                                                 </Table.Td>
                                                 <Table.Td>
                                                     <Text size='xs'>
-                                                        {dayjs(a.expireAt).format(
-                                                            'D MMM YYYY HH:mm',
-                                                        )}
+                                                        {formatDateTime(a.expireAt)}
                                                     </Text>
                                                     <Text size='xs' c='dimmed'>
                                                         {dayjs(
@@ -716,9 +715,7 @@ export function UserDetailsDrawer({
                                             <Table.Tr key={p.id}>
                                                 <Table.Td>
                                                     <Text size='xs'>
-                                                        {dayjs(p.createdAt).format(
-                                                            'D MMM YYYY HH:mm',
-                                                        )}
+                                                        {formatDateTime(p.createdAt)}
                                                     </Text>
                                                 </Table.Td>
                                                 <Table.Td>
@@ -927,11 +924,7 @@ export function UserDetailsDrawer({
                 <Stack>
                     <Text size='sm' c='dimmed'>
                         Current expiry:{' '}
-                        {expiryEdit
-                            ? dayjs(expiryEdit.current).format(
-                                  'D MMM YYYY HH:mm',
-                              )
-                            : ''}
+                        {expiryEdit ? formatDateTime(expiryEdit.current) : ''}
                     </Text>
                     <DateTimePicker
                         label='New expiry'

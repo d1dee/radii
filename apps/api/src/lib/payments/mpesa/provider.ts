@@ -111,13 +111,17 @@ const FINAL_STK_FAILURE_CODES = new Set([
 ]);
 
 export class MpesaPaymentProvider implements PaymentProvider {
-    readonly name = MPESA_PROVIDER_NAME;
+    // Instance identity used for provider registration, transaction rows and
+    // callback URL routing. The default is the server-wide "mpesa"; per-admin
+    // instances are named "mpesa-<adminId>" (see ../adminProviders.ts).
+    readonly name: string;
 
     private readonly config: z.output<typeof mpesaConfigSchema>;
     private readonly client: MpesaApi;
     private readonly defaultCertificatePath: string;
 
-    constructor(config: MpesaProviderConfig) {
+    constructor(config: MpesaProviderConfig, name = MPESA_PROVIDER_NAME) {
+        this.name = name;
         const parsed = mpesaConfigSchema.safeParse(config);
         if (!parsed.success) {
             const issues = parsed.error.issues
@@ -128,7 +132,7 @@ export class MpesaPaymentProvider implements PaymentProvider {
                 .join('; ');
             throw new PaymentProviderError(
                 `Invalid M-Pesa provider configuration — ${issues}`,
-                MPESA_PROVIDER_NAME,
+                this.name,
                 { cause: parsed.error },
             );
         }
@@ -363,7 +367,7 @@ export class MpesaPaymentProvider implements PaymentProvider {
             default:
                 throw new PaymentProviderError(
                     `Unknown M-Pesa callback event: "${event}" (expected one of: ${Object.values(MPESA_CALLBACK_EVENTS).join(', ')})`,
-                    MPESA_PROVIDER_NAME,
+                    this.name,
                 );
         }
     }
@@ -379,7 +383,7 @@ export class MpesaPaymentProvider implements PaymentProvider {
         if (!stk || typeof stk.CheckoutRequestID !== 'string') {
             throw new PaymentProviderError(
                 'Malformed M-Pesa STK callback payload: missing Body.stkCallback.CheckoutRequestID.',
-                MPESA_PROVIDER_NAME,
+                this.name,
                 { cause: payload },
             );
         }
@@ -436,7 +440,7 @@ export class MpesaPaymentProvider implements PaymentProvider {
         if (!result || typeof originatorConversationId !== 'string') {
             throw new PaymentProviderError(
                 'Malformed M-Pesa transaction status callback payload: missing Result.OriginatorConversationID.',
-                MPESA_PROVIDER_NAME,
+                this.name,
                 { cause: payload },
             );
         }

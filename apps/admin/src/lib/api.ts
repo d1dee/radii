@@ -1,5 +1,7 @@
 import {
     ApiErrorType,
+    type AdminSettings,
+    type AdminSettingsInput,
     type ApiEnvelope,
     type GenerateSetupScriptInput,
     type NasDeviceOs,
@@ -7,6 +9,7 @@ import {
 } from '@shared/index';
 
 export type {
+    AdminSettings,
     GenerateSetupScriptInput,
     NasDeviceOs,
     NasDeviceStatus,
@@ -673,4 +676,14 @@ export function generateNasSetupScript(
         input ?? {},
         { method: 'POST' },
     );
+}
+
+// --- Per-admin console settings ----------------------------------------------
+
+export function getAdminSettings() {
+    return request<AdminSettings>('/admin/settings');
+}
+
+export function updateAdminSettings(body: AdminSettingsInput) {
+    return request<AdminSettings>('/admin/settings', body, { method: 'PUT' });
 }

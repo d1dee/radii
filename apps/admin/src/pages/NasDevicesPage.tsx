@@ -3,11 +3,14 @@ import {
     Badge,
     Box,
     Button,
+    Card,
     Center,
     Code,
     Group,
     Loader,
     Modal,
+    Select,
+    SimpleGrid,
     Stack,
     Table,
     Text,
@@ -15,10 +18,11 @@ import {
     Title,
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
+import { useDebouncedValue } from '@mantine/hooks';
 import { generateSetupScriptSchema } from '@shared/index';
 import { zod4Resolver } from 'mantine-form-zod-resolver';
-import { useCallback, useEffect, useState } from 'react';
-import { MdAdd, MdEdit, MdTerminal } from 'react-icons/md';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { MdAdd, MdEdit, MdSearch, MdTerminal } from 'react-icons/md';
 import { useNavigate } from 'react-router-dom';
 
 import { NasDetailsDrawer } from '@/components/NasDevices/NasDetailsDrawer';
@@ -28,9 +32,14 @@ import {
     getNasSetupScript,
     type GenerateSetupScriptInput,
     type NasDeviceRow,
+    type NasDeviceStatus,
     type NasSetupScriptRow,
 } from '@/lib/api';
-import { nasDeviceOsLabel, nasDeviceStatusColors } from '@/lib/nas';
+import {
+    nasDeviceOsLabel,
+    nasDeviceStatusColors,
+    nasDeviceStatusOptions,
+} from '@/lib/nas';
 import { notifications } from '@mantine/notifications';
 
 const setupScriptStatusColors: Record<NasSetupScriptRow['status'], string> = {
@@ -39,12 +48,42 @@ const setupScriptStatusColors: Record<NasSetupScriptRow['status'], string> = {
     failed: 'red',
 };
 
+function SummaryCard({
+    label,
+    value,
+    sub,
+}: {
+    label: string;
+    value: string;
+    sub?: string;
+}) {
+    return (
+        <Card withBorder padding='md' radius='md'>
+            <Text size='xs' c='dimmed'>
+                {label}
+            </Text>
+            <Text size='xl' fw={700} mt={2}>
+                {value}
+            </Text>
+            {sub ? (
+                <Text size='xs' c='dimmed' mt={2}>
+                    {sub}
+                </Text>
+            ) : null}
+        </Card>
+    );
+}
+
 export default function NasDevicesPage() {
     const navigate = useNavigate();
     const [devices, setDevices] = useState<NasDeviceRow[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [detailsId, setDetailsId] = useState<string | null>(null);
+
+    const [search, setSearch] = useState('');
+    const [debouncedSearch] = useDebouncedValue(search, 300);
+    const [status, setStatus] = useState<string | null>(null);
 
     const [scriptDevice, setScriptDevice] = useState<NasDeviceRow | null>(null);
     const [scriptRow, setScriptRow] = useState<NasSetupScriptRow | null>(null);
@@ -79,6 +118,36 @@ export default function NasDevicesPage() {
     useEffect(() => {
         load();
     }, [load]);
+
+    const filtered = useMemo(() => {
+        const q = debouncedSearch.trim().toLowerCase();
+        return devices.filter((device) => {
+            if (status && device.status !== status) return false;
+            if (!q) return true;
+            return [
+                device.name,
+                device.ipAddress,
+                device.macAddress,
+                device.model,
+                device.serialNumber,
+                device.location,
+            ]
+                .filter(Boolean)
+                .some((field) => String(field).toLowerCase().includes(q));
+        });
+    }, [devices, debouncedSearch, status]);
+
+    const summary = useMemo(() => {
+        const count = (s: NasDeviceStatus) =>
+            filtered.filter((d) => d.status === s).length;
+        return {
+            total: filtered.length,
+            active: count('active'),
+            inactive: count('inactive'),
+            maintenance: count('maintenance'),
+            offline: count('offline'),
+        };
+    }, [filtered]);
 
     const prefillForm = (
         row: NasSetupScriptRow | null,
@@ -169,6 +238,40 @@ export default function NasDevicesPage() {
                 </Button>
             </Group>
 
+            {!loading && !error && devices.length > 0 && (
+                <SimpleGrid cols={{ base: 2, lg: 4 }}>
+                    <SummaryCard
+                        label='Devices (filtered)'
+                        value={String(summary.total)}
+                        sub={`${summary.inactive} inactive`}
+                    />
+                    <SummaryCard label='Active' value={String(summary.active)} />
+                    <SummaryCard
+                        label='Maintenance'
+                        value={String(summary.maintenance)}
+                    />
+                    <SummaryCard label='Offline' value={String(summary.offline)} />
+                </SimpleGrid>
+            )}
+
+            <Group wrap='wrap'>
+                <TextInput
+                    placeholder='Search name, IP, model, serial or location'
+                    leftSection={<MdSearch />}
+                    value={search}
+                    onChange={(e) => setSearch(e.currentTarget.value)}
+                    style={{ flex: 1, minWidth: 220 }}
+                />
+                <Select
+                    placeholder='Status'
+                    clearable
+                    value={status}
+                    onChange={setStatus}
+                    data={nasDeviceStatusOptions}
+                    w={160}
+                />
+            </Group>
+
             {loading ? (
                 <Center py='xl'>
                     <Loader />
@@ -178,6 +281,10 @@ export default function NasDevicesPage() {
             ) : devices.length === 0 ? (
                 <Text c='dimmed' py='xl' ta='center'>
                     No NAS devices yet. Add one to get started.
+                </Text>
+            ) : filtered.length === 0 ? (
+                <Text c='dimmed' py='xl' ta='center'>
+                    No devices match.
                 </Text>
             ) : (
                 <Table.ScrollContainer minWidth={900}>
@@ -196,7 +303,7 @@ export default function NasDevicesPage() {
                             </Table.Tr>
                         </Table.Thead>
                         <Table.Tbody>
-                            {devices.map((device) => (
+                            {filtered.map((device) => (
                                 <Table.Tr
                                     key={device.id}
                                     onClick={() => setDetailsId(device.id)}

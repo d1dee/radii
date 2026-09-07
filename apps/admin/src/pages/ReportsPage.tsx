@@ -21,6 +21,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { getAdminReports, type AdminReports } from '@/lib/api';
 import { dayjs } from '@/lib/dayjs';
 import { formatBytes, formatMoney, formatSeconds } from '@/lib/format';
+import { useAdminSettings } from '@/lib/settings';
 
 function SummaryCard({
     label,
@@ -49,6 +50,7 @@ function SummaryCard({
 }
 
 export default function ReportsPage() {
+    const { settings, loaded } = useAdminSettings();
     const [reports, setReports] = useState<AdminReports | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -76,9 +78,20 @@ export default function ReportsPage() {
         setReports(res.data);
     }, []);
 
+    // Waits once for settings so the admin's default range applies to the
+    // initial load; the Apply button drives the rest.
     useEffect(() => {
-        void load(from, to);
-    }, []); // initial load only; the Apply button drives the rest
+        if (!loaded) return;
+        const rangeFrom = dayjs()
+            .subtract(settings.dashboard.defaultRangeDays, 'day')
+            .startOf('day')
+            .toDate();
+        const rangeTo = dayjs().endOf('day').toDate();
+        setFrom(rangeFrom);
+        setTo(rangeTo);
+        void load(rangeFrom, rangeTo);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [loaded]);
 
     const apply = () => {
         if (from.getTime() > to.getTime()) {

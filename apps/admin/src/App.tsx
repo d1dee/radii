@@ -17,10 +17,12 @@ import PackagesPage from '@/pages/PackagesPage';
 import PaymentsPage from '@/pages/PaymentsPage';
 import ReportsPage from '@/pages/ReportsPage';
 import SessionsPage from '@/pages/SessionsPage';
+import SettingsPage from '@/pages/SettingsPage';
 import UsersPage from '@/pages/UsersPage';
 import LoginPage from '@/pages/auth/LoginPage';
 import RegisterPage from '@/pages/auth/RegisterPage';
 import VerifyEmailPage from '@/pages/auth/VerifyEmailPage';
+import { SettingsProvider } from '@/lib/settings';
 
 export default function App() {
     return (
@@ -40,36 +42,42 @@ export default function App() {
                         path='/*'
                         element={
                             <RequireAdmin>
-                                <AppLayout>
-                                    <Routes>
-                                        <Route path='/' element={<DashboardPage />} />
-                                        <Route path='/users' element={<UsersPage />} />
-                                        <Route path='/payments' element={<PaymentsPage />} />
-                                        <Route path='/sessions' element={<SessionsPage />} />
-                                        <Route path='/reports' element={<ReportsPage />} />
-                                        <Route path='/packages' element={<PackagesPage />} />
-                                        <Route
-                                            path='/packages/add'
-                                            element={<PackageFormPage />}
-                                        />
-                                        <Route
-                                            path='/packages/:id/edit'
-                                            element={<PackageFormPage />}
-                                        />
-                                        <Route
-                                            path='/nas-devices'
-                                            element={<NasDevicesPage />}
-                                        />
-                                        <Route
-                                            path='/nas-devices/add'
-                                            element={<NasDeviceFormPage />}
-                                        />
-                                        <Route
-                                            path='/nas-devices/:id/edit'
-                                            element={<NasDeviceFormPage />}
-                                        />
-                                    </Routes>
-                                </AppLayout>
+                                <SettingsProvider>
+                                    <AppLayout>
+                                        <Routes>
+                                            <Route path='/' element={<DashboardPage />} />
+                                            <Route path='/users' element={<UsersPage />} />
+                                            <Route path='/payments' element={<PaymentsPage />} />
+                                            <Route path='/sessions' element={<SessionsPage />} />
+                                            <Route path='/reports' element={<ReportsPage />} />
+                                            <Route path='/packages' element={<PackagesPage />} />
+                                            <Route
+                                                path='/packages/add'
+                                                element={<PackageFormPage />}
+                                            />
+                                            <Route
+                                                path='/packages/:id/edit'
+                                                element={<PackageFormPage />}
+                                            />
+                                            <Route
+                                                path='/nas-devices'
+                                                element={<NasDevicesPage />}
+                                            />
+                                            <Route
+                                                path='/nas-devices/add'
+                                                element={<NasDeviceFormPage />}
+                                            />
+                                            <Route
+                                                path='/nas-devices/:id/edit'
+                                                element={<NasDeviceFormPage />}
+                                            />
+                                            <Route
+                                                path='/settings'
+                                                element={<SettingsPage />}
+                                            />
+                                        </Routes>
+                                    </AppLayout>
+                                </SettingsProvider>
                             </RequireAdmin>
                         }
                     />
