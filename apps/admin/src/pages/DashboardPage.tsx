@@ -205,7 +205,13 @@ export default function DashboardPage() {
     return (
         <Stack gap='md'>
             <Group justify='space-between' wrap='wrap'>
-                <Title order={1}>Dashboard</Title>
+                <Stack gap={4}>
+                    <Title order={1}>Dashboard</Title>
+                    <Text size='sm' c='dimmed'>
+                        Live network activity and revenue overview for the
+                        selected date range.
+                    </Text>
+                </Stack>
                 <Group wrap='wrap'>
                     <SegmentedControl
                         value={preset}

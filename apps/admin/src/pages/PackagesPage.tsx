@@ -16,15 +16,23 @@ import {
     Title,
 } from '@mantine/core';
 import { useDebouncedValue } from '@mantine/hooks';
-import { MdAdd, MdEdit, MdSearch } from 'react-icons/md';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { MdAdd, MdEdit, MdSearch } from 'react-icons/md';
 import { useNavigate } from 'react-router-dom';
 
+import { PackageDetailsDrawer } from '@/components/Packages/PackageDetailsDrawer';
 import { getAdminPackages, type PackageRow, type PackageType } from '@/lib/api';
 import { formatMoney } from '@/lib/format';
-import { PackageDetailsDrawer } from '@/components/Packages/PackageDetailsDrawer';
 
-function SummaryCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
+function SummaryCard({
+    label,
+    value,
+    sub,
+}: {
+    label: string;
+    value: string;
+    sub?: string;
+}) {
     return (
         <Card withBorder padding='md' radius='md'>
             <Text size='xs' c='dimmed'>
@@ -100,7 +108,13 @@ export default function PackagesPage() {
     return (
         <Stack gap='md'>
             <Group justify='space-between'>
-                <Title order={1}>Packages</Title>
+                <Stack gap={4}>
+                    <Title order={1}>Packages</Title>
+                    <Text size='sm' c='dimmed'>
+                        Internet plans sold through your hotspot and PPPoE NAS
+                        devices.
+                    </Text>
+                </Stack>
                 <Button
                     leftSection={<MdAdd />}
                     onClick={() => navigate(`/packages/add?type=${activeTab}`)}
@@ -109,7 +123,10 @@ export default function PackagesPage() {
                 </Button>
             </Group>
 
-            <Tabs value={activeTab} onChange={(v) => setActiveTab((v as PackageType) ?? 'hotspot')}>
+            <Tabs
+                value={activeTab}
+                onChange={(v) => setActiveTab((v as PackageType) ?? 'hotspot')}
+            >
                 <Tabs.List>
                     <Tabs.Tab value='hotspot'>Hotspot</Tabs.Tab>
                     <Tabs.Tab value='pppoe'>PPPoE</Tabs.Tab>
@@ -117,14 +134,20 @@ export default function PackagesPage() {
 
                 <Tabs.Panel value={activeTab} pt='md'>
                     <Stack gap='md'>
-                        {!loading && !error && packages.length > 0 && (
+                        {!loading && !error && (
                             <SimpleGrid cols={{ base: 2, lg: 4 }}>
                                 <SummaryCard
                                     label='Packages (filtered)'
                                     value={String(summary.total)}
                                 />
-                                <SummaryCard label='Active' value={String(summary.active)} />
-                                <SummaryCard label='Inactive' value={String(summary.inactive)} />
+                                <SummaryCard
+                                    label='Active'
+                                    value={String(summary.active)}
+                                />
+                                <SummaryCard
+                                    label='Inactive'
+                                    value={String(summary.inactive)}
+                                />
                                 <SummaryCard
                                     label='Avg Price'
                                     value={formatMoney(summary.avgPrice)}
@@ -137,7 +160,9 @@ export default function PackagesPage() {
                                 placeholder='Search title, category or description'
                                 leftSection={<MdSearch />}
                                 value={search}
-                                onChange={(e) => setSearch(e.currentTarget.value)}
+                                onChange={(e) =>
+                                    setSearch(e.currentTarget.value)
+                                }
                                 style={{ flex: 1, minWidth: 220 }}
                             />
                             <Select
@@ -177,53 +202,86 @@ export default function PackagesPage() {
                                             <Table.Th>Price</Table.Th>
                                             <Table.Th>Session</Table.Th>
                                             <Table.Th>Devices</Table.Th>
-                                            <Table.Th>Rate Up/Down (Kbps)</Table.Th>
-                                            <Table.Th>Quota Up/Down (KB)</Table.Th>
+                                            <Table.Th>
+                                                Rate Up/Down (Kbps)
+                                            </Table.Th>
+                                            <Table.Th>
+                                                Quota Up/Down (KB)
+                                            </Table.Th>
                                             <Table.Th>Expiry</Table.Th>
                                             <Table.Th>Status</Table.Th>
-                                            <Table.Th ta='right'>Actions</Table.Th>
+                                            <Table.Th ta='right'>
+                                                Actions
+                                            </Table.Th>
                                         </Table.Tr>
                                     </Table.Thead>
                                     <Table.Tbody>
                                         {filtered.map((pkg) => (
                                             <Table.Tr
                                                 key={pkg.id}
-                                                onClick={() => setDetailsId(pkg.id)}
+                                                onClick={() =>
+                                                    setDetailsId(pkg.id)
+                                                }
                                                 style={{ cursor: 'pointer' }}
                                             >
-                                                <Table.Td fw={500}>{pkg.title}</Table.Td>
-                                                <Table.Td>{pkg.category}</Table.Td>
-                                                <Table.Td>{formatMoney(pkg.price)}</Table.Td>
-                                                <Table.Td>
-                                                    {pkg.noExpiry ? '—' : `${pkg.sessionLength} min`}
-                                                </Table.Td>
-                                                <Table.Td>{pkg.maxDevices}</Table.Td>
-                                                <Table.Td>
-                                                    {pkg.uploadRate} / {pkg.downloadRate}
+                                                <Table.Td fw={500}>
+                                                    {pkg.title}
                                                 </Table.Td>
                                                 <Table.Td>
-                                                    {pkg.uploadQuota.toLocaleString()} /{' '}
+                                                    {pkg.category}
+                                                </Table.Td>
+                                                <Table.Td>
+                                                    {formatMoney(pkg.price)}
+                                                </Table.Td>
+                                                <Table.Td>
+                                                    {pkg.noExpiry
+                                                        ? '—'
+                                                        : `${pkg.sessionLength} min`}
+                                                </Table.Td>
+                                                <Table.Td>
+                                                    {pkg.maxDevices}
+                                                </Table.Td>
+                                                <Table.Td>
+                                                    {pkg.uploadRate} /{' '}
+                                                    {pkg.downloadRate}
+                                                </Table.Td>
+                                                <Table.Td>
+                                                    {pkg.uploadQuota.toLocaleString()}{' '}
+                                                    /{' '}
                                                     {pkg.downloadQuota.toLocaleString()}
                                                 </Table.Td>
                                                 <Table.Td>
-                                                    {pkg.noExpiry ? 'No expiry' : 'Expires'}
+                                                    {pkg.noExpiry
+                                                        ? 'No expiry'
+                                                        : 'Expires'}
                                                 </Table.Td>
                                                 <Table.Td>
                                                     <Badge
-                                                        color={pkg.isActive ? 'green' : 'gray'}
+                                                        color={
+                                                            pkg.isActive
+                                                                ? 'green'
+                                                                : 'gray'
+                                                        }
                                                         variant='light'
                                                     >
-                                                        {pkg.isActive ? 'Active' : 'Inactive'}
+                                                        {pkg.isActive
+                                                            ? 'Active'
+                                                            : 'Inactive'}
                                                     </Badge>
                                                 </Table.Td>
                                                 <Table.Td>
-                                                    <Group justify='flex-end' gap='xs'>
+                                                    <Group
+                                                        justify='flex-end'
+                                                        gap='xs'
+                                                    >
                                                         <ActionIcon
                                                             variant='light'
                                                             aria-label={`Edit ${pkg.title}`}
                                                             onClick={(e) => {
                                                                 e.stopPropagation();
-                                                                navigate(`/packages/${pkg.id}/edit`);
+                                                                navigate(
+                                                                    `/packages/${pkg.id}/edit`,
+                                                                );
                                                             }}
                                                         >
                                                             <MdEdit size={16} />
@@ -240,7 +298,10 @@ export default function PackagesPage() {
                 </Tabs.Panel>
             </Tabs>
 
-            <PackageDetailsDrawer packageId={detailsId} onClose={() => setDetailsId(null)} />
+            <PackageDetailsDrawer
+                packageId={detailsId}
+                onClose={() => setDetailsId(null)}
+            />
         </Stack>
     );
 }

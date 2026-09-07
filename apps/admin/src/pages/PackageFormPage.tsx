@@ -2,6 +2,7 @@ import {
     Button,
     Card,
     Center,
+    Container,
     Grid,
     Group,
     Loader,
@@ -157,175 +158,200 @@ export default function PackageFormPage() {
 
     if (fetching) {
         return (
-            <Card padding='lg' radius='md' maw={900}>
-                <Center py='xl'>
-                    <Loader />
-                </Center>
-            </Card>
+            <Container size='xl' mx={0} px={0}>
+                <Card padding='lg' radius='md'>
+                    <Center py='xl'>
+                        <Loader />
+                    </Center>
+                </Card>
+            </Container>
         );
     }
 
     if (fetchError) {
         return (
-            <Card padding='lg' radius='md' maw={900}>
-                <Text c='red'>{fetchError}</Text>
-            </Card>
+            <Container size='xl' mx={0} px={0}>
+                <Card padding='lg' radius='md'>
+                    <Text c='red'>{fetchError}</Text>
+                </Card>
+            </Container>
         );
     }
 
     return (
-        <Card padding='lg' radius='md' maw={900}>
-            <Title order={2} mb='md'>
-                {isEdit ? 'Edit Package' : 'Add Package'}
-            </Title>
-            <form onSubmit={form.onSubmit(handleSubmit)}>
-                <Stack gap='md'>
-                    <TextInput
-                        label='Title'
-                        placeholder='Enter package title'
-                        required
-                        {...form.getInputProps('title')}
-                    />
-                    <Grid>
-                        <Grid.Col span={6}>
-                            <Select
-                                label='Type'
-                                data={[
-                                    { value: 'hotspot', label: 'Hotspot' },
-                                    { value: 'pppoe', label: 'PPPoE' },
-                                ]}
-                                allowDeselect={false}
-                                {...form.getInputProps('type')}
-                            />
-                        </Grid.Col>
-                        <Grid.Col span={6}>
-                            <TextInput
-                                label='Category'
-                                placeholder='e.g. Daily, Weekly'
-                                required
-                                {...form.getInputProps('category')}
-                            />
-                        </Grid.Col>
-                    </Grid>
-                    <Grid>
-                        <Grid.Col span={6}>
-                            <NumberInput
-                                label='Session Length (minutes)'
-                                placeholder='Enter session length'
-                                min={1}
-                                {...form.getInputProps('sessionLength')}
-                            />
-                        </Grid.Col>
-                        <Grid.Col span={6}>
-                            <NumberInput
-                                label='Price'
-                                placeholder='Enter price'
-                                min={0}
-                                {...form.getInputProps('price')}
-                            />
-                        </Grid.Col>
-                    </Grid>
-                    <Grid>
-                        <Grid.Col span={6}>
-                            <NumberInput
-                                label='Max Devices'
-                                placeholder='Enter max devices'
-                                min={1}
-                                {...form.getInputProps('maxDevices')}
-                            />
-                        </Grid.Col>
-                        <Grid.Col span={6}>
-                            <MultiSelect
-                                label='NAS Devices'
-                                description='Devices this package is available on'
-                                placeholder='Select NAS devices'
-                                searchable
-                                required
-                                data={[
-                                    {
-                                        value: ALL_NAS_VALUE,
-                                        label: 'All NAS devices',
-                                    },
-                                    ...nasDevices.map((d) => ({
-                                        value: d.id,
-                                        label: d.name,
-                                    })),
-                                ]}
-                                {...form.getInputProps('nasDeviceIds')}
-                                onChange={handleNasDevicesChange}
-                            />
-                        </Grid.Col>
-                    </Grid>
-                    <Grid>
-                        <Grid.Col span={6}>
-                            <NumberInput
-                                label='Upload Rate (Kbps)'
-                                min={0}
-                                {...form.getInputProps('uploadRate')}
-                            />
-                        </Grid.Col>
-                        <Grid.Col span={6}>
-                            <NumberInput
-                                label='Download Rate (Kbps)'
-                                min={0}
-                                {...form.getInputProps('downloadRate')}
-                            />
-                        </Grid.Col>
-                    </Grid>
-                    <Grid>
-                        <Grid.Col span={6}>
-                            <NumberInput
-                                label='Upload Quota (KB)'
-                                min={0}
-                                {...form.getInputProps('uploadQuota')}
-                            />
-                        </Grid.Col>
-                        <Grid.Col span={6}>
-                            <NumberInput
-                                label='Download Quota (KB)'
-                                min={0}
-                                {...form.getInputProps('downloadQuota')}
-                            />
-                        </Grid.Col>
-                    </Grid>
-                    <Textarea
-                        label='Description'
-                        placeholder='Optional'
-                        rows={2}
-                        {...form.getInputProps('description')}
-                    />
-                    <Textarea
-                        label='Note'
-                        placeholder='Optional'
-                        rows={2}
-                        {...form.getInputProps('note')}
-                    />
-                    <Switch
-                        label='No Expiry'
-                        description='Cumulative time package: the session length becomes a time bank the client consumes across sessions'
-                        {...form.getInputProps('noExpiry', {
-                            type: 'checkbox',
-                        })}
-                    />
-                    <NumberInput
-                        label='Validity (days)'
-                        description='How many days after activation the package stays usable (the time bank must be consumed within this window)'
-                        min={1}
-                        {...form.getInputProps('validityDays')}
-                    />
-                    <Group justify='flex-end'>
-                        <Button
-                            variant='default'
-                            onClick={() => navigate('/packages')}
-                        >
-                            Cancel
-                        </Button>
-                        <Button type='submit' loading={loading}>
-                            {isEdit ? 'Save Changes' : 'Create Package'}
-                        </Button>
-                    </Group>
+        <Container size='xl' mx={0} px={0}>
+            <Card padding='lg' radius='md'>
+                <Stack gap={4} mb='md'>
+                    <Title order={2}>
+                        {isEdit ? 'Edit Package' : 'Add Package'}
+                    </Title>
+                    <Text size='sm' c='dimmed'>
+                        Packages are only sold on the NAS devices you link
+                        below. Rates are in Kbps and quotas in KB; use 0 for
+                        unlimited.
+                    </Text>
                 </Stack>
-            </form>
-        </Card>
+                <form onSubmit={form.onSubmit(handleSubmit)}>
+                    <Stack gap='md'>
+                        <TextInput
+                            label='Title'
+                            placeholder='Enter package title'
+                            description='Shown to customers on the portal'
+                            required
+                            {...form.getInputProps('title')}
+                        />
+                        <Grid>
+                            <Grid.Col span={6}>
+                                <Select
+                                    label='Type'
+                                    description='Hotspot for captive portal, PPPoE for dial-up'
+                                    data={[
+                                        { value: 'hotspot', label: 'Hotspot' },
+                                        { value: 'pppoe', label: 'PPPoE' },
+                                    ]}
+                                    allowDeselect={false}
+                                    {...form.getInputProps('type')}
+                                />
+                            </Grid.Col>
+                            <Grid.Col span={6}>
+                                <TextInput
+                                    label='Category'
+                                    placeholder='e.g. Daily, Weekly'
+                                    description='Groups packages on the portal listing'
+                                    required
+                                    {...form.getInputProps('category')}
+                                />
+                            </Grid.Col>
+                        </Grid>
+                        <Grid>
+                            <Grid.Col span={6}>
+                                <NumberInput
+                                    label='Session Length (minutes)'
+                                    placeholder='Enter session length'
+                                    description='Online time granted per activation (or the time bank when No Expiry is on)'
+                                    min={1}
+                                    {...form.getInputProps('sessionLength')}
+                                />
+                            </Grid.Col>
+                            <Grid.Col span={6}>
+                                <NumberInput
+                                    label='Price'
+                                    placeholder='Enter price'
+                                    description='Amount charged via M-Pesa'
+                                    min={0}
+                                    {...form.getInputProps('price')}
+                                />
+                            </Grid.Col>
+                        </Grid>
+                        <Grid>
+                            <Grid.Col span={6}>
+                                <NumberInput
+                                    label='Max Devices'
+                                    placeholder='Enter max devices'
+                                    description='How many client devices may share one activation'
+                                    min={1}
+                                    {...form.getInputProps('maxDevices')}
+                                />
+                            </Grid.Col>
+                            <Grid.Col span={6}>
+                                <MultiSelect
+                                    label='NAS Devices'
+                                    description='Devices this package is available on'
+                                    placeholder='Select NAS devices'
+                                    searchable
+                                    required
+                                    data={[
+                                        {
+                                            value: ALL_NAS_VALUE,
+                                            label: 'All NAS devices',
+                                        },
+                                        ...nasDevices.map((d) => ({
+                                            value: d.id,
+                                            label: d.name,
+                                        })),
+                                    ]}
+                                    {...form.getInputProps('nasDeviceIds')}
+                                    onChange={handleNasDevicesChange}
+                                />
+                            </Grid.Col>
+                        </Grid>
+                        <Grid>
+                            <Grid.Col span={6}>
+                                <NumberInput
+                                    label='Upload Rate (Kbps)'
+                                    description='0 = unlimited'
+                                    min={0}
+                                    {...form.getInputProps('uploadRate')}
+                                />
+                            </Grid.Col>
+                            <Grid.Col span={6}>
+                                <NumberInput
+                                    label='Download Rate (Kbps)'
+                                    description='0 = unlimited'
+                                    min={0}
+                                    {...form.getInputProps('downloadRate')}
+                                />
+                            </Grid.Col>
+                        </Grid>
+                        <Grid>
+                            <Grid.Col span={6}>
+                                <NumberInput
+                                    label='Upload Quota (KB)'
+                                    description='0 = unlimited'
+                                    min={0}
+                                    {...form.getInputProps('uploadQuota')}
+                                />
+                            </Grid.Col>
+                            <Grid.Col span={6}>
+                                <NumberInput
+                                    label='Download Quota (KB)'
+                                    description='0 = unlimited'
+                                    min={0}
+                                    {...form.getInputProps('downloadQuota')}
+                                />
+                            </Grid.Col>
+                        </Grid>
+                        <Textarea
+                            label='Description'
+                            placeholder='Optional'
+                            description='Marketing copy shown on the portal'
+                            rows={2}
+                            {...form.getInputProps('description')}
+                        />
+                        <Textarea
+                            label='Note'
+                            placeholder='Optional'
+                            description='Internal note, not visible to customers'
+                            rows={2}
+                            {...form.getInputProps('note')}
+                        />
+                        <Switch
+                            label='No Expiry'
+                            description='Cumulative time package: the session length becomes a time bank the client consumes across sessions'
+                            {...form.getInputProps('noExpiry', {
+                                type: 'checkbox',
+                            })}
+                        />
+                        <NumberInput
+                            label='Validity (days)'
+                            description='How many days after activation the package stays usable (the time bank must be consumed within this window)'
+                            min={1}
+                            {...form.getInputProps('validityDays')}
+                        />
+                        <Group justify='flex-end'>
+                            <Button
+                                variant='default'
+                                onClick={() => navigate('/packages')}
+                            >
+                                Cancel
+                            </Button>
+                            <Button type='submit' loading={loading}>
+                                {isEdit ? 'Save Changes' : 'Create Package'}
+                            </Button>
+                        </Group>
+                    </Stack>
+                </form>
+            </Card>
+        </Container>
     );
 }

@@ -111,7 +111,13 @@ export default function SessionsPage() {
     return (
         <Stack gap='md'>
             <Group justify='space-between'>
-                <Title order={1}>Live Sessions</Title>
+                <Stack gap={4}>
+                    <Title order={1}>Live Sessions</Title>
+                    <Text size='sm' c='dimmed'>
+                        Currently connected RADIUS sessions — disconnect users
+                        or adjust their remaining time.
+                    </Text>
+                </Stack>
                 <Group>
                     {lastLoaded && (
                         <Text size='xs' c='dimmed'>

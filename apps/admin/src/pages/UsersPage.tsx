@@ -77,7 +77,13 @@ export default function UsersPage() {
     return (
         <Stack gap='md'>
             <Group justify='space-between'>
-                <Title order={1}>Users</Title>
+                <Stack gap={4}>
+                    <Title order={1}>Users</Title>
+                    <Text size='sm' c='dimmed'>
+                        Customers registered through your portals, with spend
+                        and activation history.
+                    </Text>
+                </Stack>
                 <Text c='dimmed' size='sm'>
                     {data ? `${data.total} customer(s)` : ''}
                 </Text>

@@ -102,9 +102,14 @@ export default function PaymentsPage() {
 
     return (
         <>
-            <Stack pb='md'>
+            <Stack pb='md' gap={4}>
                 <Title order={1}>Payment Log</Title>
-
+                <Text size='sm' c='dimmed'>
+                    Every package purchase across your NAS devices — filter by
+                    status, customer or date range.
+                </Text>
+            </Stack>
+            <Stack pb='md'>
                 {data && (
                     <SimpleGrid cols={{ base: 2, lg: 4 }}>
                         <SummaryCard
@@ -174,16 +179,8 @@ export default function PaymentsPage() {
                 </Text>
             ) : (
                 <>
-                    <Table.ScrollContainer
-                        minWidth='md'
-                        pb='md'
-                        style={{
-                            flex: 1,
-                            minHeight: 0,
-                            overflowY: 'auto',
-                        }}
-                    >
-                        <Table stickyHeader withRowBorders highlightOnHover>
+                    <Table.ScrollContainer minWidth='md' pb='md'>
+                        <Table withRowBorders highlightOnHover>
                             <Table.Thead>
                                 <Table.Tr>
                                     <Table.Th>#</Table.Th>

@@ -75,7 +75,7 @@ export default function SettingsPage() {
 
     if (!loaded) {
         return (
-            <Container size='xl'>
+            <Container size='xl' mx={0} px={0}>
                 <Card padding='lg' radius='md'>
                     <Center py='xl'>
                         <Loader />
@@ -86,7 +86,7 @@ export default function SettingsPage() {
     }
 
     return (
-        <Container size='xl'>
+        <Container size='xl' mx={0} px={0}>
             <Stack gap='md'>
                 <Stack gap={4}>
                     <Title order={2}>Settings</Title>
@@ -212,6 +212,7 @@ function AppearanceSection() {
                         <Grid.Col span={{ base: 12, sm: 6 }}>
                             <Select
                                 label='Date format'
+                                description='How dates appear in tables and reports'
                                 data={DATE_FORMAT_OPTIONS}
                                 allowDeselect={false}
                                 {...form.getInputProps('dateFormat')}
@@ -409,6 +410,7 @@ function MpesaSection() {
                                 <Grid.Col span={{ base: 12, sm: 6 }}>
                                     <TextInput
                                         label='Consumer Key'
+                                        description='From your Safaricom Developer Portal app'
                                         placeholder='e.g. 7sbAVvNyG8u...'
                                         {...form.getInputProps('consumerKey')}
                                     />
@@ -416,6 +418,7 @@ function MpesaSection() {
                                 <Grid.Col span={{ base: 12, sm: 6 }}>
                                     <PasswordInput
                                         label='Consumer Secret'
+                                        description='Paired with the consumer key for API auth'
                                         placeholder='Your app consumer secret'
                                         {...form.getInputProps('consumerSecret')}
                                     />
@@ -425,6 +428,7 @@ function MpesaSection() {
                                 <Grid.Col span={{ base: 12, sm: 6 }}>
                                     <TextInput
                                         label='Shortcode (Paybill / Till)'
+                                        description='Business number customers pay to'
                                         placeholder='e.g. 174379'
                                         inputMode='numeric'
                                         {...form.getInputProps('shortcode')}
@@ -433,6 +437,7 @@ function MpesaSection() {
                                 <Grid.Col span={{ base: 12, sm: 6 }}>
                                     <PasswordInput
                                         label='Passkey'
+                                        description='Lipa Na M-Pesa Online passkey used to sign STK push requests'
                                         placeholder='Lipa Na M-Pesa Online passkey'
                                         {...form.getInputProps('passkey')}
                                     />
@@ -485,6 +490,7 @@ function MpesaSection() {
                                 <Grid.Col span={{ base: 12, sm: 6 }}>
                                     <TextInput
                                         label='Initiator Name'
+                                        description='Operator user configured in the M-Pesa portal'
                                         placeholder='e.g. apiop37'
                                         {...form.getInputProps('initiatorName')}
                                     />
@@ -492,6 +498,7 @@ function MpesaSection() {
                                 <Grid.Col span={{ base: 12, sm: 6 }}>
                                     <PasswordInput
                                         label='Initiator Password'
+                                        description='Security credential for the Transaction Status API'
                                         placeholder='Security credential'
                                         {...form.getInputProps('initiatorPassword')}
                                     />

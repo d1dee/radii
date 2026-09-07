@@ -19,7 +19,7 @@ export function AppLayout({ children }: AppLayoutProps) {
                 breakpoint: 'md',
                 collapsed: { mobile: !opened },
             }}
-            padding='md'
+            padding={{ base: 'md', xl: 'xl' }}
         >
             <AppShell.Header>
                 <Header onMenuClick={() => setOpened((prev) => !prev)} />
@@ -28,10 +28,11 @@ export function AppLayout({ children }: AppLayoutProps) {
                 <Sidebar onNavClick={() => setOpened(false)} />
             </AppShell.Navbar>
             <AppShell.Main
-                h='100%'
+                h='100dvh'
                 style={{
                     display: 'flex',
                     flexDirection: 'column',
+                    overflowY: 'auto',
                 }}
             >
                 {children}

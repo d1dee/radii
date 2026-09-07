@@ -229,7 +229,13 @@ export default function NasDevicesPage() {
     return (
         <Stack gap='md'>
             <Group justify='space-between'>
-                <Title order={1}>NAS Devices</Title>
+                <Stack gap={4}>
+                    <Title order={1}>NAS Devices</Title>
+                    <Text size='sm' c='dimmed'>
+                        Routers that authenticate customers against RADIUS and
+                        serve your packages.
+                    </Text>
+                </Stack>
                 <Button
                     leftSection={<MdAdd />}
                     onClick={() => navigate('/nas-devices/add')}

@@ -1,8 +1,8 @@
 import {
+    Container,
     Button,
     Card,
     Center,
-    Container,
     Grid,
     Group,
     Loader,
@@ -109,7 +109,7 @@ export default function NasDeviceFormPage() {
 
     if (fetching) {
         return (
-            <Container size='xl'>
+            <Container size='xl' mx={0} px={0}>
                 <Card padding='lg' radius='md'>
                     <Center py='xl'>
                         <Loader />
@@ -121,7 +121,7 @@ export default function NasDeviceFormPage() {
 
     if (fetchError) {
         return (
-            <Container size='xl'>
+            <Container size='xl' mx={0} px={0}>
                 <Card padding='lg' radius='md'>
                     <Text c='red'>{fetchError}</Text>
                 </Card>
@@ -130,11 +130,19 @@ export default function NasDeviceFormPage() {
     }
 
     return (
-        <Container size='xl'>
+        <Container size='xl' mx={0} px={0}>
             <Card padding='lg' radius='md'>
-                <Title order={2} mb='md'>
-                    {isEdit ? 'Edit NAS Device' : 'Set Up NAS Device'}
-                </Title>
+                <Stack gap={4} mb='md'>
+                    <Title order={2}>
+                        {isEdit ? 'Edit NAS Device' : 'Set Up NAS Device'}
+                    </Title>
+                    <Text size='sm' c='dimmed'>
+                        Register the router first, then generate its setup
+                        script from the NAS Devices page. Model, serial and
+                        firmware are filled in automatically when the script
+                        runs.
+                    </Text>
+                </Stack>
                 <form onSubmit={form.onSubmit(handleSubmit)}>
                     <Stack gap='md'>
                         <Grid>

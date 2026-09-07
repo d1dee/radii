@@ -124,7 +124,13 @@ export default function ReportsPage() {
     return (
         <>
             <Group justify='space-between' wrap='wrap' mb='md'>
-                <Title order={1}>Reports</Title>
+                <Stack gap={4}>
+                    <Title order={1}>Reports</Title>
+                    <Text size='sm' c='dimmed'>
+                        Revenue, top packages, customers and heaviest network
+                        consumers for a date range.
+                    </Text>
+                </Stack>
                 <Group>
                     <DateInput
                         label='From'
