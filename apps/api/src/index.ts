@@ -22,7 +22,7 @@ app.use(logger());
 app.use(
     '/api/*',
     cors({
-        origin: env.frontendUrls,
+        origin: [...env.frontendUrls, ...env.adminFrontendUrls],
         allowHeaders: ['Content-Type', 'Authorization'],
         allowMethods: ['POST', 'GET', 'OPTIONS', 'PUT', 'DELETE'],
         exposeHeaders: ['Content-Length'],
@@ -85,7 +85,7 @@ app.onError((err, c) => {
     );
 });
 
-console.log(`API listening on http://localhost:${env.port}`);
+console.log(`API listening on http://${env.baseUrl}}:${env.port}`);
 
 // Converge the WireGuard interface to the database (source of truth) after
 // restarts: re-asserts known peers and prunes stale ones. Never fatal.
