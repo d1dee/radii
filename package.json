@@ -1,5 +1,8 @@
 {
   "name": "radii",
   "private": true,
-  "workspaces": ["apps/*"]
+  "workspaces": ["apps/*"],
+  "dependencies": {
+    "@vitejs/plugin-legacy": "^8.2.3"
+  }
 }
