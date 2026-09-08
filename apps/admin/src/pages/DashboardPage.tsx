@@ -21,16 +21,16 @@ import {
 import { DateInput } from '@mantine/dates';
 import { notifications } from '@mantine/notifications';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
 import {
+    MdBarChart,
     MdPeople,
     MdReceiptLong,
     MdRefresh,
     MdRouter,
     MdStorage,
-    MdBarChart,
     MdWifiTethering,
 } from 'react-icons/md';
+import { Link } from 'react-router-dom';
 
 import {
     getAdminReports,
@@ -55,7 +55,10 @@ function presetRange(days: number): { from: Date; to: Date } {
         from:
             days === 0
                 ? dayjs().startOf('day').toDate()
-                : dayjs().subtract(days - 1, 'day').startOf('day').toDate(),
+                : dayjs()
+                      .subtract(days - 1, 'day')
+                      .startOf('day')
+                      .toDate(),
         to: dayjs().endOf('day').toDate(),
     };
 }
@@ -102,9 +105,7 @@ export default function DashboardPage() {
     const [error, setError] = useState<string | null>(null);
     const [usage, setUsage] = useState<NetworkUsage | null>(null);
     const [preset, setPreset] = useState('30d');
-    const [from, setFrom] = useState<Date>(
-        () => presetRange(30).from,
-    );
+    const [from, setFrom] = useState<Date>(() => presetRange(30).from);
     const [to, setTo] = useState<Date>(() => presetRange(30).to);
 
     const loadReports = useCallback(
@@ -211,7 +212,7 @@ export default function DashboardPage() {
         <Stack gap='md'>
             <Group justify='space-between' wrap='wrap'>
                 <Stack gap={4}>
-                    <Title order={1}>Dashboard</Title>
+                    <Title order={3}>Dashboard</Title>
                     <Text size='sm' c='dimmed'>
                         Live network activity and revenue overview for the
                         selected date range.
@@ -392,9 +393,7 @@ export default function DashboardPage() {
                                 <Text fw={600} mb='sm'>
                                     Payments by status
                                 </Text>
-                                {statusBreakdown.every(
-                                    (s) => s.value === 0,
-                                ) ? (
+                                {statusBreakdown.every((s) => s.value === 0) ? (
                                     <Text size='sm' c='dimmed'>
                                         No payments in this range.
                                     </Text>
@@ -469,8 +468,9 @@ export default function DashboardPage() {
                                 ) : (
                                     <Table striped verticalSpacing={6}>
                                         <Table.Tbody>
-                                            {reports.topUsers.slice(0, 6).map(
-                                                (u, i) => (
+                                            {reports.topUsers
+                                                .slice(0, 6)
+                                                .map((u, i) => (
                                                     <Table.Tr key={u.userId}>
                                                         <Table.Td w={30}>
                                                             {i + 1}
@@ -501,8 +501,7 @@ export default function DashboardPage() {
                                                             </Text>
                                                         </Table.Td>
                                                     </Table.Tr>
-                                                ),
-                                            )}
+                                                ))}
                                         </Table.Tbody>
                                     </Table>
                                 )}

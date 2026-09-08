@@ -84,7 +84,7 @@ export default function UsersPage() {
         <Stack gap='md'>
             <Group justify='space-between'>
                 <Stack gap={4}>
-                    <Title order={1}>Users</Title>
+                    <Title order={3}>Users</Title>
                     <Text size='sm' c='dimmed'>
                         Customers registered through your portals, with spend
                         and activation history.

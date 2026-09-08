@@ -109,7 +109,7 @@ export default function PaymentsPage() {
     return (
         <>
             <Stack pb='md' gap={4}>
-                <Title order={1}>Payment Log</Title>
+                <Title order={3}>Payment Log</Title>
                 <Text size='sm' c='dimmed'>
                     Every package purchase across your NAS devices — filter by
                     status, customer or date range.

@@ -35,12 +35,12 @@ import {
     type NasDeviceStatus,
     type NasSetupScriptRow,
 } from '@/lib/api';
+import { useAutoRefresh } from '@/lib/autoRefresh';
 import {
     nasDeviceOsLabel,
     nasDeviceStatusColors,
     nasDeviceStatusOptions,
 } from '@/lib/nas';
-import { useAutoRefresh } from '@/lib/autoRefresh';
 import { notifications } from '@mantine/notifications';
 
 const setupScriptStatusColors: Record<NasSetupScriptRow['status'], string> = {
@@ -112,7 +112,8 @@ export default function NasDevicesPage() {
         const result = await getNasDevices();
         if (!silent) setLoading(false);
         if (!result.success) {
-            if (!silent) setError(result.message || 'Failed to load NAS devices');
+            if (!silent)
+                setError(result.message || 'Failed to load NAS devices');
             return;
         }
         setError(null);
@@ -236,7 +237,7 @@ export default function NasDevicesPage() {
         <Stack gap='md'>
             <Group justify='space-between'>
                 <Stack gap={4}>
-                    <Title order={1}>NAS Devices</Title>
+                    <Title order={3}>NAS Devices</Title>
                     <Text size='sm' c='dimmed'>
                         Routers that authenticate customers against RADIUS and
                         serve your packages.

@@ -47,9 +47,8 @@ export default function SessionsPage() {
     const [search, setSearch] = useState('');
     const [debouncedSearch] = useDebouncedValue(search, 300);
 
-    const [confirmDisconnect, setConfirmDisconnect] = useState<SessionInfo | null>(
-        null,
-    );
+    const [confirmDisconnect, setConfirmDisconnect] =
+        useState<SessionInfo | null>(null);
     const [editSession, setEditSession] = useState<SessionInfo | null>(null);
     const [editMinutes, setEditMinutes] = useState<number | string>('');
     const [busy, setBusy] = useState(false);
@@ -106,7 +105,7 @@ export default function SessionsPage() {
         <Stack gap='md'>
             <Group justify='space-between'>
                 <Stack gap={4}>
-                    <Title order={1}>Live Sessions</Title>
+                    <Title order={3}>Live Sessions</Title>
                     <Text size='sm' c='dimmed'>
                         Currently connected RADIUS sessions — disconnect users
                         or adjust their remaining time.
@@ -129,7 +128,9 @@ export default function SessionsPage() {
                     <Switch
                         label={`Auto (${settings.dashboard.usageRefreshSeconds}s)`}
                         checked={autoRefresh}
-                        onChange={(e) => setAutoRefresh(e.currentTarget.checked)}
+                        onChange={(e) =>
+                            setAutoRefresh(e.currentTarget.checked)
+                        }
                     />
                 </Group>
             </Group>
@@ -263,7 +264,8 @@ export default function SessionsPage() {
             >
                 <Stack>
                     <Text size='sm'>
-                        Disconnect {confirmDisconnect?.username || 'this user'} (
+                        Disconnect {confirmDisconnect?.username || 'this user'}{' '}
+                        (
                         {confirmDisconnect?.framedIpAddress ??
                             confirmDisconnect?.callingStationId ??
                             confirmDisconnect?.acctSessionId}
@@ -312,7 +314,9 @@ export default function SessionsPage() {
                     />
                     <Button
                         onClick={() => void submitEdit()}
-                        disabled={typeof editMinutes !== 'number' || editMinutes < 1}
+                        disabled={
+                            typeof editMinutes !== 'number' || editMinutes < 1
+                        }
                         loading={busy}
                     >
                         Apply

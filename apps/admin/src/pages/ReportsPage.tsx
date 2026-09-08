@@ -138,7 +138,7 @@ export default function ReportsPage() {
         <>
             <Group justify='space-between' wrap='wrap' mb='md'>
                 <Stack gap={4}>
-                    <Title order={1}>Reports</Title>
+                    <Title order={3}>Reports</Title>
                     <Text size='sm' c='dimmed'>
                         Revenue, top packages, customers and heaviest network
                         consumers for a date range.

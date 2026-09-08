@@ -115,7 +115,7 @@ export default function PackagesPage() {
         <Stack gap='md'>
             <Group justify='space-between'>
                 <Stack gap={4}>
-                    <Title order={1}>Packages</Title>
+                    <Title order={3}>Packages</Title>
                     <Text size='sm' c='dimmed'>
                         Internet plans sold through your hotspot and PPPoE NAS
                         devices.
