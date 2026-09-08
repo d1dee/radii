@@ -14,6 +14,7 @@ import {
 import { user } from './auth-schema';
 // Circular module reference (integrations.ts imports packages): the column
 // below resolves nasDevice lazily via an AnyPgColumn callback.
+import { adminUser } from './admin-auth-schema';
 import { nasDevice } from './integrations';
 import { transaction } from './payments';
 import { radacct } from './radius';
@@ -32,6 +33,7 @@ export const packages = pgTable(
         // For cumulative time-bank packages (no_expiry) the bank may be
         // consumed any time within this window; afterwards logins are
         // rejected via the radcheck Expiration date.
+        createdBy: text().references(() => adminUser.id),
         validityDays: integer('validity_days').default(30).notNull(),
         price: numeric('price', { precision: 10, scale: 2 }).notNull(),
         maxDevices: integer('max_devices').notNull(),

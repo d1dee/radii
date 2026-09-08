@@ -89,11 +89,16 @@ export async function getPackagesGroupedByCategory(
 }
 
 // Admin listing: all packages of a given type (or both when omitted).
-export async function getPackages(type?: PackageType) {
+export async function getPackages(ownerId: string, type?: PackageType) {
     const rows = await db
         .select()
         .from(packages)
-        .where(type ? eq(packages.type, type) : undefined)
+        .where(
+            and(
+                eq(packages.createdBy, ownerId),
+                type ? eq(packages.type, type) : undefined,
+            ),
+        )
         .orderBy(packages.type, packages.category, asc(packages.title));
     return rows;
 }

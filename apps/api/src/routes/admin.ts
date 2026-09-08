@@ -86,6 +86,7 @@ app.get('/packages', requireAdmin, async (c) => {
         return jsonError(c, 400, 'Invalid package type filter');
     }
     const rows = await getPackages(
+        c.var.adminSession.userId,
         typeParam as 'hotspot' | 'pppoe' | undefined,
     );
     const links = await getNasDeviceIdsByPackage(rows.map((r) => r.id));
