@@ -1,4 +1,7 @@
-import { defaultAdminSettings, paymentTransactionCodeSchema } from '@radii/shared';
+import {
+    defaultAdminSettings,
+    paymentTransactionCodeSchema,
+} from '@radii/shared';
 import { and, desc, eq } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { z } from 'zod';
@@ -12,16 +15,13 @@ import {
     user,
 } from '../db/schema';
 import { env } from '../env';
+import { getAdminIdForNasDevice, getAdminSettings } from '../lib/adminSettings';
+import { customerVisibleToAdmin } from '../lib/adminUsers';
 import {
     loginPhonePin,
     logoutPhonePin,
     registerPhonePin,
 } from '../lib/authHelpers';
-import {
-    getAdminIdForNasDevice,
-    getAdminSettings,
-} from '../lib/adminSettings';
-import { customerVisibleToAdmin } from '../lib/adminUsers';
 import { jsonError } from '../lib/error';
 import {
     createPayment,
@@ -146,11 +146,7 @@ app.get('/status', requireAuth, async (c) => {
     try {
         const currentUser = c.get('user');
 
-        // Identify the calling device: the portal carries the login-request id
-        // it received on redirect (kept in localStorage), and the login
-        // request's client MAC is what marks the activation currently running
-        // on THIS device (thisDevice) — matched against the MAC the NAS puts
-        // into accounting (Calling-Station-Id) for each live session.
+        // Identify the calling device: the portal carries the login-request id in localstorage
         const loginRequestId = c.req.query('login_request');
         let clientMac = '';
         if (loginRequestId) {

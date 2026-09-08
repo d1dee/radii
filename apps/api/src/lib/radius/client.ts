@@ -1129,18 +1129,7 @@ export class RadiusClient {
         };
     }
 
-    // Disconnects live session(s) of an activation WITHOUT touching the
-    // package: each session is terminated by a Disconnect-Request sent
-    // directly to the NAS holding it (keyed on Acct-Session-Id), while
-    // provisioning (radcheck/radreply) stays intact and the activation
-    // keeps its validity, so the client (or another device) can log straight
-    // back in. This is the "free a device slot" operation used by the portal's
-    // connected-devices screen. Pass sessionId (radacct id) to disconnect one
-    // device only; omit it to disconnect every live session of the package.
-    //
-    // A CoA-ACK also closes the accounting record locally
-    // (Acct-Terminate-Cause Admin-Reset): the session is provably terminated,
-    // and a late Accounting-Stop from the NAS then matches no open row.
+    // Disconnects live session(s) of an activation WITHOUT touching the package
     async disconnectDeviceSessions(
         activationId: string,
         opts: { sessionId?: string } = {},
@@ -2304,7 +2293,7 @@ export class RadiusClient {
         username: string,
         session: SessionInfo,
     ): RadiusOutAttribute[] {
-        return [
+        const attr: { type: number; value: string | Uint8Array }[] = [
             { type: ATTR.USER_NAME, value: username },
             { type: ATTR.ACCT_SESSION_ID, value: session.acctSessionId },
             {
@@ -2312,6 +2301,14 @@ export class RadiusClient {
                 value: ipv4ToOctets(session.nasIpAddress),
             },
         ];
+
+        if (session.framedIpAddress)
+            attr.push({
+                type: ATTR.FRAMED_IP_ADDRESS,
+                value: ipv4ToOctets(session.framedIpAddress),
+            });
+
+        return attr;
     }
 
     // Terminates a live session by sending a Disconnect-Request directly to
@@ -2355,10 +2352,7 @@ export class RadiusClient {
 
     // Closes an accounting record after a confirmed (ACKed) disconnect:
     // stop time + Admin-Reset cause (RFC 2866 §5.10 terminology, the value
-    // FreeRADIUS itself stores for admin kills). Only matches rows still open,
-    // so a concurrent Accounting-Stop can never be double-applied. Session
-    // time is bumped to the actual elapsed time when the last interim update
-    // lagged behind it.
+    // FreeRADIUS itself stores for admin kills).
     private async closeSessionRecord(session: SessionInfo): Promise<void> {
         await db
             .update(radacct)
@@ -2457,7 +2451,6 @@ export class RadiusClient {
         const sessions = await this.getSessions({
             username,
             activationId,
-            liveOnly: true,
         });
         const liveSessions = sessions.filter((s) => s.live);
 
@@ -2494,9 +2487,8 @@ export class RadiusClient {
                 0,
                 Math.round(totalSeconds - cumulativeUsed),
             );
-            if (totalSeconds <= cumulativeUsed) {
+            if (totalSeconds <= cumulativeUsed && liveSessions.length > 0) {
                 await radiusClient.deactivateActivation(activationId);
-                return null;
             }
         }
 
