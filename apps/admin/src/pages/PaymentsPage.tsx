@@ -23,6 +23,7 @@ import {
     type AdminPaymentList,
     type PackagePaymentStatus,
 } from '@/lib/api';
+import { useAutoRefresh } from '@/lib/autoRefresh';
 import { dayjs } from '@/lib/dayjs';
 import { formatDateTime, formatMoney } from '@/lib/format';
 import { useAdminSettings } from '@/lib/settings';
@@ -64,9 +65,11 @@ export default function PaymentsPage() {
     const [page, setPage] = useState(1);
 
     const load = useCallback(
-        async (pageToLoad: number) => {
-            setLoading(true);
-            setError(null);
+        async (pageToLoad: number, silent = false) => {
+            if (!silent) {
+                setLoading(true);
+                setError(null);
+            }
             const res = await getAdminPayments({
                 status: (status as PackagePaymentStatus) || undefined,
                 q: debouncedSearch.trim() || undefined,
@@ -75,15 +78,16 @@ export default function PaymentsPage() {
                 page: pageToLoad,
                 perPage,
             });
-            setLoading(false);
+            if (!silent) setLoading(false);
             if (!res.success) {
-                setError(res.message || 'Failed to load payments');
+                if (!silent) setError(res.message || 'Failed to load payments');
                 return;
             }
             if (!res.data) {
-                setError('Failed to load payments');
+                if (!silent) setError('Failed to load payments');
                 return;
             }
+            setError(null);
             setData(res.data);
         },
         [status, debouncedSearch, from, to, perPage],
@@ -97,6 +101,8 @@ export default function PaymentsPage() {
         if (!loaded) return;
         void load(page);
     }, [loaded, load, page]);
+
+    useAutoRefresh(() => void load(page, true), loaded);
 
     const totalPages = data ? Math.max(1, Math.ceil(data.total / perPage)) : 1;
 

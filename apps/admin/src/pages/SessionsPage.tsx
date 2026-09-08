@@ -16,7 +16,7 @@ import {
     Tooltip,
 } from '@mantine/core';
 import { useDebouncedValue } from '@mantine/hooks';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { MdDelete, MdEdit, MdRefresh, MdSearch } from 'react-icons/md';
 
 import {
@@ -25,6 +25,7 @@ import {
     getRadiusSessions,
     type SessionInfo,
 } from '@/lib/api';
+import { useAutoRefresh } from '@/lib/autoRefresh';
 import {
     formatBytes,
     formatDayTime,
@@ -33,10 +34,10 @@ import {
     formatTime,
 } from '@/lib/format';
 import { notifyResult } from '@/lib/notify';
-
-const REFRESH_SECONDS = 15;
+import { useAdminSettings } from '@/lib/settings';
 
 export default function SessionsPage() {
+    const { settings } = useAdminSettings();
     const [sessions, setSessions] = useState<SessionInfo[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -52,7 +53,6 @@ export default function SessionsPage() {
     const [editSession, setEditSession] = useState<SessionInfo | null>(null);
     const [editMinutes, setEditMinutes] = useState<number | string>('');
     const [busy, setBusy] = useState(false);
-    const timer = useRef<ReturnType<typeof setInterval> | null>(null);
 
     const load = useCallback(async () => {
         const res = await getRadiusSessions(200);
@@ -70,13 +70,7 @@ export default function SessionsPage() {
         void load();
     }, [load]);
 
-    useEffect(() => {
-        if (!autoRefresh) return;
-        timer.current = setInterval(() => void load(), REFRESH_SECONDS * 1000);
-        return () => {
-            if (timer.current) clearInterval(timer.current);
-        };
-    }, [autoRefresh, load]);
+    useAutoRefresh(() => void load(), autoRefresh);
 
     const filtered = debouncedSearch.trim()
         ? sessions.filter((s) =>
@@ -133,7 +127,7 @@ export default function SessionsPage() {
                         Refresh
                     </Button>
                     <Switch
-                        label={`Auto (${REFRESH_SECONDS}s)`}
+                        label={`Auto (${settings.dashboard.usageRefreshSeconds}s)`}
                         checked={autoRefresh}
                         onChange={(e) => setAutoRefresh(e.currentTarget.checked)}
                     />

@@ -326,8 +326,8 @@ function DashboardSection() {
                     <Grid>
                         <Grid.Col span={{ base: 12, sm: 4 }}>
                             <NumberInput
-                                label='Live stats refresh (seconds)'
-                                description='RADIUS network stats auto-refresh'
+                                label='Data auto-refresh (seconds)'
+                                description='How often dashboard, users, payments, sessions and other pages reload their data'
                                 min={10}
                                 max={600}
                                 step={5}

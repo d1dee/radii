@@ -29,7 +29,8 @@ export const adminAppearanceSettingsSchema = z.object({
 });
 
 export const adminDashboardSettingsSchema = z.object({
-    // Auto-refresh cadence (seconds) of the live RADIUS network stats.
+    // Auto-refresh cadence (seconds) for all admin console data pages
+    // (dashboard stats/reports, users, payments, sessions, packages, NAS).
     usageRefreshSeconds: z.number().int().min(10).max(600).default(60),
     // Default dashboard/reports date-range preset, in days.
     defaultRangeDays: z.union([z.literal(7), z.literal(30), z.literal(90)]).default(30),

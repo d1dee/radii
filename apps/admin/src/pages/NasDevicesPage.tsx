@@ -40,6 +40,7 @@ import {
     nasDeviceStatusColors,
     nasDeviceStatusOptions,
 } from '@/lib/nas';
+import { useAutoRefresh } from '@/lib/autoRefresh';
 import { notifications } from '@mantine/notifications';
 
 const setupScriptStatusColors: Record<NasSetupScriptRow['status'], string> = {
@@ -103,21 +104,26 @@ export default function NasDevicesPage() {
         validate: zod4Resolver(generateSetupScriptSchema),
     });
 
-    const load = useCallback(async () => {
-        setLoading(true);
-        setError(null);
+    const load = useCallback(async (silent = false) => {
+        if (!silent) {
+            setLoading(true);
+            setError(null);
+        }
         const result = await getNasDevices();
-        setLoading(false);
+        if (!silent) setLoading(false);
         if (!result.success) {
-            setError(result.message || 'Failed to load NAS devices');
+            if (!silent) setError(result.message || 'Failed to load NAS devices');
             return;
         }
+        setError(null);
         setDevices(result.data ?? []);
     }, []);
 
     useEffect(() => {
         load();
     }, [load]);
+
+    useAutoRefresh(() => void load(true));
 
     const filtered = useMemo(() => {
         const q = debouncedSearch.trim().toLowerCase();

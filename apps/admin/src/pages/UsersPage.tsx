@@ -18,6 +18,7 @@ import { MdSearch } from 'react-icons/md';
 
 import { UserDetailsDrawer } from '@/components/Users/UserDetailsDrawer';
 import { getAdminUsers, type AdminUserList, type PackageType } from '@/lib/api';
+import { useAutoRefresh } from '@/lib/autoRefresh';
 import { dayjs } from '@/lib/dayjs';
 import { formatDate, formatMoney } from '@/lib/format';
 import { useAdminSettings } from '@/lib/settings';
@@ -39,9 +40,11 @@ export default function UsersPage() {
     const [detailsId, setDetailsId] = useState<string | null>(null);
 
     const load = useCallback(
-        async (pageToLoad: number) => {
-            setLoading(true);
-            setError(null);
+        async (pageToLoad: number, silent = false) => {
+            if (!silent) {
+                setLoading(true);
+                setError(null);
+            }
             const res = await getAdminUsers({
                 q: debouncedSearch.trim() || undefined,
                 type: typeFilter === 'all' ? undefined : typeFilter,
@@ -49,15 +52,16 @@ export default function UsersPage() {
                 page: pageToLoad,
                 perPage,
             });
-            setLoading(false);
+            if (!silent) setLoading(false);
             if (!res.success) {
-                setError(res.message || 'Failed to load users');
+                if (!silent) setError(res.message || 'Failed to load users');
                 return;
             }
             if (!res.data) {
-                setError('Failed to load users');
+                if (!silent) setError('Failed to load users');
                 return;
             }
+            setError(null);
             setData(res.data);
         },
         [debouncedSearch, typeFilter, flaggedOnly, perPage],
@@ -71,6 +75,8 @@ export default function UsersPage() {
         if (!loaded) return;
         void load(page);
     }, [loaded, load, page]);
+
+    useAutoRefresh(() => void load(page, true), loaded);
 
     const totalPages = data ? Math.max(1, Math.ceil(data.total / perPage)) : 1;
 

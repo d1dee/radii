@@ -38,6 +38,7 @@ import {
     type AdminReports,
     type NetworkUsage,
 } from '@/lib/api';
+import { useAutoRefresh } from '@/lib/autoRefresh';
 import { dayjs } from '@/lib/dayjs';
 import { formatBytes, formatMoney, formatSpeed } from '@/lib/format';
 import { useAdminSettings } from '@/lib/settings';
@@ -107,14 +108,14 @@ export default function DashboardPage() {
     const [to, setTo] = useState<Date>(() => presetRange(30).to);
 
     const loadReports = useCallback(
-        async (rangeFrom: Date, rangeTo: Date) => {
-            setLoading(true);
+        async (rangeFrom: Date, rangeTo: Date, silent = false) => {
+            if (!silent) setLoading(true);
             setError(null);
             const res = await getAdminReports(
                 rangeFrom.toISOString(),
                 rangeTo.toISOString(),
             );
-            setLoading(false);
+            if (!silent) setLoading(false);
             if (!res.success) {
                 setError(res.message || 'Failed to load dashboard data');
                 return;
@@ -147,13 +148,17 @@ export default function DashboardPage() {
         void loadReports(range.from, range.to);
     }, [loaded, settings, loadReports]);
 
-    // Live network figures refresh on the admin's configured cadence.
-    const refreshMs = settings.dashboard.usageRefreshSeconds * 1000;
+    // Live network figures and the current report range refresh together on
+    // the admin's configured cadence.
     useEffect(() => {
         void loadUsage();
-        const timer = setInterval(() => void loadUsage(), refreshMs);
-        return () => clearInterval(timer);
-    }, [loadUsage, refreshMs]);
+    }, [loadUsage]);
+
+    const autoRefreshData = useCallback(() => {
+        void loadUsage();
+        void loadReports(from, to, true);
+    }, [loadUsage, loadReports, from, to]);
+    useAutoRefresh(autoRefreshData);
 
     const applyPreset = (label: string) => {
         setPreset(label);

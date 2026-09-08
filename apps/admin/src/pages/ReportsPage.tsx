@@ -19,6 +19,7 @@ import { notifications } from '@mantine/notifications';
 import { useCallback, useEffect, useState } from 'react';
 
 import { getAdminReports, type AdminReports } from '@/lib/api';
+import { useAutoRefresh } from '@/lib/autoRefresh';
 import { dayjs } from '@/lib/dayjs';
 import { formatBytes, formatMoney, formatSeconds } from '@/lib/format';
 import { useAdminSettings } from '@/lib/settings';
@@ -59,24 +60,30 @@ export default function ReportsPage() {
     );
     const [to, setTo] = useState<Date>(dayjs().endOf('day').toDate());
 
-    const load = useCallback(async (rangeFrom: Date, rangeTo: Date) => {
-        setLoading(true);
-        setError(null);
-        const res = await getAdminReports(
-            rangeFrom.toISOString(),
-            rangeTo.toISOString(),
-        );
-        setLoading(false);
-        if (!res.success) {
-            setError(res.message || 'Failed to load reports');
-            return;
-        }
-        if (!res.data) {
-            setError('Failed to load reports');
-            return;
-        }
-        setReports(res.data);
-    }, []);
+    const load = useCallback(
+        async (rangeFrom: Date, rangeTo: Date, silent = false) => {
+            if (!silent) {
+                setLoading(true);
+                setError(null);
+            }
+            const res = await getAdminReports(
+                rangeFrom.toISOString(),
+                rangeTo.toISOString(),
+            );
+            if (!silent) setLoading(false);
+            if (!res.success) {
+                if (!silent) setError(res.message || 'Failed to load reports');
+                return;
+            }
+            if (!res.data) {
+                if (!silent) setError('Failed to load reports');
+                return;
+            }
+            setError(null);
+            setReports(res.data);
+        },
+        [],
+    );
 
     // Waits once for settings so the admin's default range applies to the
     // initial load; the Apply button drives the rest.
@@ -92,6 +99,12 @@ export default function ReportsPage() {
         void load(rangeFrom, rangeTo);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [loaded]);
+
+    // Keep the currently selected range up to date on the admin's cadence.
+    const autoRefreshData = useCallback(() => {
+        void load(from, to, true);
+    }, [load, from, to]);
+    useAutoRefresh(autoRefreshData, loaded);
 
     const apply = () => {
         if (from.getTime() > to.getTime()) {

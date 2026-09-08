@@ -22,6 +22,7 @@ import { useNavigate } from 'react-router-dom';
 
 import { PackageDetailsDrawer } from '@/components/Packages/PackageDetailsDrawer';
 import { getAdminPackages, type PackageRow, type PackageType } from '@/lib/api';
+import { useAutoRefresh } from '@/lib/autoRefresh';
 import { formatMoney } from '@/lib/format';
 
 function SummaryCard({
@@ -62,21 +63,26 @@ export default function PackagesPage() {
     const [debouncedSearch] = useDebouncedValue(search, 300);
     const [status, setStatus] = useState<string | null>(null);
 
-    const load = useCallback(async (type: PackageType) => {
-        setLoading(true);
-        setError(null);
+    const load = useCallback(async (type: PackageType, silent = false) => {
+        if (!silent) {
+            setLoading(true);
+            setError(null);
+        }
         const result = await getAdminPackages(type);
-        setLoading(false);
+        if (!silent) setLoading(false);
         if (!result.success) {
-            setError(result.message || 'Failed to load packages');
+            if (!silent) setError(result.message || 'Failed to load packages');
             return;
         }
+        setError(null);
         setPackages(result.data ?? []);
     }, []);
 
     useEffect(() => {
         load(activeTab);
     }, [activeTab, load]);
+
+    useAutoRefresh(() => void load(activeTab, true));
 
     const filtered = useMemo(() => {
         const q = debouncedSearch.trim().toLowerCase();
