@@ -12,7 +12,7 @@ export const timeFormatSchema = z.enum(['12h', '24h']);
 export type TimeFormat = z.infer<typeof timeFormatSchema>;
 
 export const dateFormatSchema = z.enum([
-    'D MMM YYYY',
+    'DD MMM YYYY',
     'DD/MM/YYYY',
     'MM/DD/YYYY',
     'YYYY-MM-DD',
@@ -21,7 +21,7 @@ export type DateFormat = z.infer<typeof dateFormatSchema>;
 
 export const adminAppearanceSettingsSchema = z.object({
     timeFormat: timeFormatSchema.default('24h'),
-    dateFormat: dateFormatSchema.default('D MMM YYYY'),
+    dateFormat: dateFormatSchema.default('DD MMM YYYY'),
     // IANA timezone used to render dates/times in the admin console.
     timezone: z.string().min(1).max(64).default('Africa/Nairobi'),
     // Currency label prefix used by money formatting (e.g. "Ksh").
@@ -33,7 +33,9 @@ export const adminDashboardSettingsSchema = z.object({
     // (dashboard stats/reports, users, payments, sessions, packages, NAS).
     usageRefreshSeconds: z.number().int().min(10).max(600).default(60),
     // Default dashboard/reports date-range preset, in days.
-    defaultRangeDays: z.union([z.literal(7), z.literal(30), z.literal(90)]).default(30),
+    defaultRangeDays: z
+        .union([z.literal(7), z.literal(30), z.literal(90)])
+        .default(30),
     // Default table page size for paginated admin lists.
     perPage: z
         .union([z.literal(10), z.literal(25), z.literal(50), z.literal(100)])
@@ -101,14 +103,20 @@ export const adminContactsSettingsSchema = z
         adminWhatsapp: z.string().max(32).default(''),
     })
     .superRefine((contacts, ctx) => {
-        if (contacts.adminTel && !/^\+?[0-9\s\-()]{7,20}$/.test(contacts.adminTel)) {
+        if (
+            contacts.adminTel &&
+            !/^\+?[0-9\s\-()]{7,20}$/.test(contacts.adminTel)
+        ) {
             ctx.addIssue({
                 code: 'custom',
                 path: ['adminTel'],
                 message: 'Enter a valid phone number, e.g. +254712345678',
             });
         }
-        if (contacts.adminWhatsapp && !/^\+[0-9]{9,15}$/.test(contacts.adminWhatsapp)) {
+        if (
+            contacts.adminWhatsapp &&
+            !/^\+[0-9]{9,15}$/.test(contacts.adminWhatsapp)
+        ) {
             ctx.addIssue({
                 code: 'custom',
                 path: ['adminWhatsapp'],
@@ -118,7 +126,9 @@ export const adminContactsSettingsSchema = z
         }
     });
 
-export type AdminContactsSettings = z.output<typeof adminContactsSettingsSchema>;
+export type AdminContactsSettings = z.output<
+    typeof adminContactsSettingsSchema
+>;
 
 export const adminSettingsSchema = z.object({
     appearance: adminAppearanceSettingsSchema.prefault({}),
@@ -132,4 +142,6 @@ export type AdminSettings = z.output<typeof adminSettingsSchema>;
 // the same defaults the server stores.
 export type AdminSettingsInput = z.input<typeof adminSettingsSchema>;
 
-export const defaultAdminSettings: AdminSettings = adminSettingsSchema.parse({});
+export const defaultAdminSettings: AdminSettings = adminSettingsSchema.parse(
+    {},
+);

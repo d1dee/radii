@@ -21,18 +21,18 @@ import {
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
-import { zod4Resolver } from 'mantine-form-zod-resolver';
 import {
     adminContactsSettingsSchema,
     adminMpesaSettingsSchema,
     type AdminSettings,
 } from '@shared/index';
+import { zod4Resolver } from 'mantine-form-zod-resolver';
 import { useState } from 'react';
 import { MdContacts, MdDashboard, MdPalette, MdPayment } from 'react-icons/md';
 
 import { previewDateTime } from '@/lib/format';
 import { useAdminSettings } from '@/lib/settings';
-
+import { TbInfoTriangle } from 'react-icons/tb';
 // Curated IANA zone list covering the operator's likely locales; searchable,
 // with Africa/Nairobi (server default) first.
 const TIMEZONE_OPTIONS = [
@@ -69,7 +69,12 @@ const TIMEZONE_OPTIONS = [
     'UTC',
 ];
 
-const DATE_FORMAT_OPTIONS = ['D MMM YYYY', 'DD/MM/YYYY', 'MM/DD/YYYY', 'YYYY-MM-DD'];
+const DATE_FORMAT_OPTIONS = [
+    'DD MMM YYYY',
+    'DD/MM/YYYY',
+    'MM/DD/YYYY',
+    'YYYY-MM-DD',
+];
 
 export default function SettingsPage() {
     const { loaded } = useAdminSettings();
@@ -98,49 +103,47 @@ export default function SettingsPage() {
                     </Text>
                 </Stack>
 
-                <Card padding='lg' radius='md' withBorder>
-                    <Tabs defaultValue='appearance'>
-                        <Tabs.List>
-                            <Tabs.Tab
-                                value='appearance'
-                                leftSection={<MdPalette size={16} />}
-                            >
-                                Appearance
-                            </Tabs.Tab>
-                            <Tabs.Tab
-                                value='dashboard'
-                                leftSection={<MdDashboard size={16} />}
-                            >
-                                Dashboard
-                            </Tabs.Tab>
-                            <Tabs.Tab
-                                value='mpesa'
-                                leftSection={<MdPayment size={16} />}
-                            >
-                                M-Pesa
-                            </Tabs.Tab>
-                            <Tabs.Tab
-                                value='contacts'
-                                leftSection={<MdContacts size={16} />}
-                            >
-                                Contacts
-                            </Tabs.Tab>
-                        </Tabs.List>
+                <Tabs defaultValue='appearance'>
+                    <Tabs.List>
+                        <Tabs.Tab
+                            value='appearance'
+                            leftSection={<MdPalette size={16} />}
+                        >
+                            Appearance
+                        </Tabs.Tab>
+                        <Tabs.Tab
+                            value='dashboard'
+                            leftSection={<MdDashboard size={16} />}
+                        >
+                            Dashboard
+                        </Tabs.Tab>
+                        <Tabs.Tab
+                            value='mpesa'
+                            leftSection={<MdPayment size={16} />}
+                        >
+                            M-Pesa
+                        </Tabs.Tab>
+                        <Tabs.Tab
+                            value='contacts'
+                            leftSection={<MdContacts size={16} />}
+                        >
+                            Contacts
+                        </Tabs.Tab>
+                    </Tabs.List>
 
-                        <Tabs.Panel value='appearance' pt='lg'>
-                            <AppearanceSection />
-                        </Tabs.Panel>
-                        <Tabs.Panel value='dashboard' pt='lg'>
-                            <DashboardSection />
-                        </Tabs.Panel>
-                        <Tabs.Panel value='mpesa' pt='lg'>
-                            <MpesaSection />
-                        </Tabs.Panel>
-                        <Tabs.Panel value='contacts' pt='lg'>
-                            <ContactsSection />
-                        </Tabs.Panel>
-                    </Tabs>
-                </Card>
+                    <Tabs.Panel value='appearance' pt='lg'>
+                        <AppearanceSection />
+                    </Tabs.Panel>
+                    <Tabs.Panel value='dashboard' pt='lg'>
+                        <DashboardSection />
+                    </Tabs.Panel>
+                    <Tabs.Panel value='mpesa' pt='lg'>
+                        <MpesaSection />
+                    </Tabs.Panel>
+                    <Tabs.Panel value='contacts' pt='lg'>
+                        <ContactsSection />
+                    </Tabs.Panel>
+                </Tabs>
             </Stack>
         </Container>
     );
@@ -212,8 +215,14 @@ function AppearanceSection() {
                                 </Text>
                                 <SegmentedControl
                                     data={[
-                                        { label: '24-hour (14:30)', value: '24h' },
-                                        { label: '12-hour (2:30 PM)', value: '12h' },
+                                        {
+                                            label: '24-hour (14:30)',
+                                            value: '24h',
+                                        },
+                                        {
+                                            label: '12-hour (2:30 PM)',
+                                            value: '12h',
+                                        },
                                     ]}
                                     {...form.getInputProps('timeFormat')}
                                 />
@@ -303,7 +312,10 @@ function DashboardSection() {
             dashboard: {
                 ...settings.dashboard,
                 usageRefreshSeconds: values.usageRefreshSeconds,
-                defaultRangeDays: Number(values.defaultRangeDays) as 7 | 30 | 90,
+                defaultRangeDays: Number(values.defaultRangeDays) as
+                    | 7
+                    | 30
+                    | 90,
                 perPage: Number(values.perPage) as 10 | 25 | 50 | 100,
             },
         });
@@ -322,45 +334,40 @@ function DashboardSection() {
                 description='Refresh cadence and pagination defaults for your console pages.'
             />
             <form onSubmit={form.onSubmit(handleSubmit)}>
-                <Stack gap='md'>
-                    <Grid>
-                        <Grid.Col span={{ base: 12, sm: 4 }}>
-                            <NumberInput
-                                label='Data auto-refresh (seconds)'
-                                description='How often dashboard, users, payments, sessions and other pages reload their data'
-                                min={10}
-                                max={600}
-                                step={5}
-                                {...form.getInputProps('usageRefreshSeconds')}
-                            />
-                        </Grid.Col>
-                        <Grid.Col span={{ base: 12, sm: 4 }}>
-                            <Stack gap={4}>
-                                <Text size='sm' fw={500}>
-                                    Default dashboard range
-                                </Text>
-                                <SegmentedControl
-                                    data={[
-                                        { label: '7 days', value: '7' },
-                                        { label: '30 days', value: '30' },
-                                        { label: '90 days', value: '90' },
-                                    ]}
-                                    {...form.getInputProps('defaultRangeDays')}
-                                />
-                            </Stack>
-                        </Grid.Col>
-                        <Grid.Col span={{ base: 12, sm: 4 }}>
-                            <Stack gap={4}>
-                                <Text size='sm' fw={500}>
-                                    Table page size
-                                </Text>
-                                <SegmentedControl
-                                    data={['10', '25', '50', '100']}
-                                    {...form.getInputProps('perPage')}
-                                />
-                            </Stack>
-                        </Grid.Col>
-                    </Grid>
+                <Stack gap='md' maw='62em'>
+                    <NumberInput
+                        label='Data auto-refresh (seconds)'
+                        description='How often dashboard, users, payments, sessions and other pages reload their data'
+                        min={10}
+                        max={600}
+                        step={5}
+                        {...form.getInputProps('usageRefreshSeconds')}
+                    />
+
+                    <Stack gap={4}>
+                        <Text size='sm' fw={500}>
+                            Default dashboard range
+                        </Text>
+                        <SegmentedControl
+                            data={[
+                                { label: '7 days', value: '7' },
+                                { label: '30 days', value: '30' },
+                                { label: '90 days', value: '90' },
+                            ]}
+                            {...form.getInputProps('defaultRangeDays')}
+                        />
+                    </Stack>
+
+                    <Stack gap={4}>
+                        <Text size='sm' fw={500}>
+                            Table page size
+                        </Text>
+                        <SegmentedControl
+                            data={['10', '25', '50', '100']}
+                            {...form.getInputProps('perPage')}
+                        />
+                    </Stack>
+
                     <Divider />
                     <Group justify='flex-end'>
                         <Button type='submit' loading={saving}>
@@ -425,7 +432,7 @@ function ContactsSection() {
                             />
                         </Grid.Col>
                     </Grid>
-                    <Alert color='gray' variant='light'>
+                    <Alert icon={<TbInfoTriangle />}>
                         <Text size='sm'>
                             Leave a field empty to hide its button in the
                             customer portals.
@@ -500,7 +507,9 @@ function MpesaSection() {
                                         label='Consumer Secret'
                                         description='Paired with the consumer key for API auth'
                                         placeholder='Your app consumer secret'
-                                        {...form.getInputProps('consumerSecret')}
+                                        {...form.getInputProps(
+                                            'consumerSecret',
+                                        )}
                                     />
                                 </Grid.Col>
                             </Grid>
@@ -531,10 +540,18 @@ function MpesaSection() {
                                         </Text>
                                         <SegmentedControl
                                             data={[
-                                                { label: 'Production', value: 'production' },
-                                                { label: 'Sandbox', value: 'sandbox' },
+                                                {
+                                                    label: 'Production',
+                                                    value: 'production',
+                                                },
+                                                {
+                                                    label: 'Sandbox',
+                                                    value: 'sandbox',
+                                                },
                                             ]}
-                                            {...form.getInputProps('environment')}
+                                            {...form.getInputProps(
+                                                'environment',
+                                            )}
                                         />
                                     </Stack>
                                 </Grid.Col>
@@ -553,7 +570,9 @@ function MpesaSection() {
                                             },
                                         ]}
                                         allowDeselect={false}
-                                        {...form.getInputProps('transactionType')}
+                                        {...form.getInputProps(
+                                            'transactionType',
+                                        )}
                                     />
                                 </Grid.Col>
                             </Grid>
@@ -580,7 +599,9 @@ function MpesaSection() {
                                         label='Initiator Password'
                                         description='Security credential for the Transaction Status API'
                                         placeholder='Security credential'
-                                        {...form.getInputProps('initiatorPassword')}
+                                        {...form.getInputProps(
+                                            'initiatorPassword',
+                                        )}
                                     />
                                 </Grid.Col>
                             </Grid>
@@ -592,7 +613,7 @@ function MpesaSection() {
                             />
                         </>
                     ) : (
-                        <Alert color='gray' variant='light'>
+                        <Alert icon={<TbInfoTriangle />}>
                             <Text size='sm'>
                                 Using the server-wide M-Pesa configuration.
                                 Payments through your NAS devices will charge
