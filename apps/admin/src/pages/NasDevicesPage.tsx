@@ -97,7 +97,7 @@ export default function NasDevicesPage() {
             hotspotNetwork: '10.100.0.0/16',
             hotspotDnsName: '',
             brandName: '',
-            pppoeInterface: 'ether1',
+            pppoeInterface: 'ether3',
             pppoeNetwork: '10.101.0.0/16',
         },
         validate: zod4Resolver(generateSetupScriptSchema),
@@ -159,7 +159,7 @@ export default function NasDevicesPage() {
             hotspotNetwork: row?.hotspotNetwork ?? '10.100.0.0/16',
             hotspotDnsName: row?.hotspotDnsName ?? '',
             brandName: row?.brandName ?? device.name,
-            pppoeInterface: row?.pppoeInterface ?? 'ether1',
+            pppoeInterface: row?.pppoeInterface ?? 'ether3',
             pppoeNetwork: row?.pppoeNetwork ?? '10.101.0.0/16',
         });
     };
@@ -251,12 +251,18 @@ export default function NasDevicesPage() {
                         value={String(summary.total)}
                         sub={`${summary.inactive} inactive`}
                     />
-                    <SummaryCard label='Active' value={String(summary.active)} />
+                    <SummaryCard
+                        label='Active'
+                        value={String(summary.active)}
+                    />
                     <SummaryCard
                         label='Maintenance'
                         value={String(summary.maintenance)}
                     />
-                    <SummaryCard label='Offline' value={String(summary.offline)} />
+                    <SummaryCard
+                        label='Offline'
+                        value={String(summary.offline)}
+                    />
                 </SimpleGrid>
             )}
 

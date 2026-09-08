@@ -1,13 +1,5 @@
 // RouterOS setup-script template. Every {{PLACEHOLDER}} is substituted with a
-// device-specific value by renderMikrotikSetupScript(). The hotspot HTML pages
-// are composed per-device, escaped for embedding into RouterOS string literals
-// and injected as {{PAGE_*}} blocks.\
-//
-// RouterOS quoting rules handled by rosStringLines():
-//   \  -> \\        (escape character)
-//   "  -> \"        (double quote inside a string)
-//   $( -> \$\(      (prevent RouterOS expression substitution in strings)
-//   newline -> \n
+// device-specific value by renderMikrotikSetupScript().
 
 const ROS_CHUNK_SIZE = 700;
 

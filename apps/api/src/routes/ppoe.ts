@@ -7,6 +7,7 @@
 // SQL provisioning and radacct usage).
 
 import {
+    defaultAdminSettings,
     paymentTransactionCodeSchema,
     type PppoeActivation,
 } from '@radii/shared';
@@ -27,6 +28,10 @@ import {
     logoutPhonePin,
     registerPhonePin,
 } from '../lib/authHelpers';
+import {
+    getAdminIdForNasDevice,
+    getAdminSettings,
+} from '../lib/adminSettings';
 import { customerVisibleToAdmin } from '../lib/adminUsers';
 import { jsonError } from '../lib/error';
 import {
@@ -117,6 +122,21 @@ app.get('/client', requireAuth, async (c) => {
             phoneNumber: (user as { username?: string }).username || '',
             prevPaymentMethods,
         },
+    });
+});
+
+// --- Support contacts ---------------------------------------------------------
+
+// Contact details of the admin owning the NAS the portal is scoped to
+// (?nas=<nasDeviceId>, optional like /packages). Public: shown on the
+// "Having Issues?" card before and after sign-in. Falls back to empty
+// defaults when the portal is not linked to a NAS.
+app.get('/contacts', async (c) => {
+    const adminId = await getAdminIdForNasDevice(c.req.query('nas'));
+    const settings = adminId ? await getAdminSettings(adminId) : null;
+    return c.json({
+        success: true,
+        data: settings?.contacts ?? defaultAdminSettings.contacts,
     });
 });
 

@@ -1,4 +1,5 @@
 import type {
+    AdminContactsSettings,
     ApiEnvelope,
     Package,
     PppoeActivation,
@@ -48,6 +49,13 @@ export function getPackages(nasDeviceId?: string | null) {
 
 export function getClientData() {
     return request<Client>('/client');
+}
+
+// Support contacts of the admin owning the NAS the portal is scoped to.
+export function getContacts(nasDeviceId?: string | null) {
+    const nas = nasDeviceId ?? currentNasDeviceId();
+    const query = nas ? `?nas=${encodeURIComponent(nas)}` : '';
+    return request<AdminContactsSettings>(`/contacts${query}`);
 }
 
 export function getServiceConfig() {

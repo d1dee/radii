@@ -1,5 +1,6 @@
 import type {
     ActivationRedirect,
+    AdminContactsSettings,
     ApiEnvelope,
     Package,
     Quota,
@@ -46,6 +47,14 @@ export function getPackages(loginRequestId: string) {
 
 export function getClientData() {
     return request<Client>('/client');
+}
+
+// Support contacts of the admin owning the NAS of the current login request.
+export function getContacts(loginRequestId?: string | null) {
+    const query = loginRequestId
+        ? `?login_request=${encodeURIComponent(loginRequestId)}`
+        : '';
+    return request<AdminContactsSettings>(`/contacts${query}`);
 }
 
 // Pass the login-request id so the API can identify this device (via the

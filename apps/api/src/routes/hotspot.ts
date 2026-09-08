@@ -1,4 +1,4 @@
-import { paymentTransactionCodeSchema } from '@radii/shared';
+import { defaultAdminSettings, paymentTransactionCodeSchema } from '@radii/shared';
 import { and, desc, eq } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { z } from 'zod';
@@ -17,6 +17,10 @@ import {
     logoutPhonePin,
     registerPhonePin,
 } from '../lib/authHelpers';
+import {
+    getAdminIdForNasDevice,
+    getAdminSettings,
+} from '../lib/adminSettings';
 import { customerVisibleToAdmin } from '../lib/adminUsers';
 import { jsonError } from '../lib/error';
 import {
@@ -54,6 +58,30 @@ app.get('/packages', async (c) => {
         loginRequest.nasDeviceId,
     );
     return c.json({ success: true, data: packages });
+});
+
+// --- Support contacts ---------------------------------------------------------
+
+// Contact details of the admin owning the NAS the portal is bound to (via the
+// login-request id). Public: shown on the "Having Issues?" card before and
+// after sign-in. Falls back to empty defaults when the NAS/admin is unknown.
+app.get('/contacts', async (c) => {
+    const loginRequestId = c.req.query('login_request');
+    let nasDeviceId: string | null = null;
+    if (loginRequestId) {
+        const [loginRequest] = await db
+            .select({ nasDeviceId: hotspotLoginRequest.nasDeviceId })
+            .from(hotspotLoginRequest)
+            .where(eq(hotspotLoginRequest.id, loginRequestId))
+            .limit(1);
+        nasDeviceId = loginRequest?.nasDeviceId ?? null;
+    }
+    const adminId = await getAdminIdForNasDevice(nasDeviceId);
+    const settings = adminId ? await getAdminSettings(adminId) : null;
+    return c.json({
+        success: true,
+        data: settings?.contacts ?? defaultAdminSettings.contacts,
+    });
 });
 
 // --- Authentication (phone + PIN) -------------------------------------------

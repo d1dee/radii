@@ -3,7 +3,8 @@ import '@mantine/core/styles.css';
 import { Container, MantineProvider, Stack } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import { Notifications } from '@mantine/notifications';
-import type { Package, Packages } from '@radii/shared';
+import type { AdminContactsSettings, Package, Packages } from '@radii/shared';
+import { defaultAdminSettings } from '@radii/shared';
 import {
     createContext,
     useCallback,
@@ -19,7 +20,7 @@ import { HavingIssues } from './components/Packages/HavingIssues.tsx';
 import { PackagePricing } from './components/Packages/PackagePricing.tsx';
 import { RegisterModal } from './components/RegisterForm/Modal.tsx';
 import { UserAccount } from './components/UserAccounts/UserAccount.tsx';
-import { currentNasDeviceId, getClientData, getPackages, type Client } from './lib/api.ts';
+import { currentNasDeviceId, getClientData, getContacts, getPackages, type Client } from './lib/api.ts';
 import { authClient, useSession } from './lib/auth.ts';
 
 // Operators may link the portal to one NAS with ?nas=<nasDeviceId>;
@@ -69,7 +70,9 @@ export default function App() {
     const [clientData, setClientData] = useState<Client | undefined>();
     const [packages, setPackages] = useState<Packages | undefined>();
 
-    const adminContacts = { ADMIN_TEL: '', ADMIN_WHATSAPP: '' };
+    const [adminContacts, setAdminContacts] = useState<AdminContactsSettings>(
+        defaultAdminSettings.contacts,
+    );
 
     const { data } = useSession();
 
@@ -77,6 +80,8 @@ export default function App() {
         (async () => {
             const clientData = await getClientData();
             if (clientData.success) setClientData(clientData.data);
+            const contacts = await getContacts();
+            if (contacts.success && contacts.data) setAdminContacts(contacts.data);
             // PPPoE has no captive-portal redirect: the package listing is
             // loaded unconditionally, optionally scoped to one NAS (?nas=).
             const packages = await getPackages(currentNasDeviceId());

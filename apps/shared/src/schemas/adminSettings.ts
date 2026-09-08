@@ -1,9 +1,10 @@
 // Per-admin console settings (apps/api GET/PUT /admin/settings, stored in the
 // admin_setting table keyed by admin_user.id). These settings only ever affect
 // the owning admin: display formatting for their console, dashboard/interface
-// defaults, and their own M-Pesa credentials for payments made through the
-// NAS devices they own. When an admin has not configured M-Pesa credentials
-// the server-wide (env) configuration is used instead.
+// defaults, their own M-Pesa credentials for payments made through the NAS
+// devices they own, and the support contacts shown to customers in the
+// portals served by their NAS devices. When an admin has not configured
+// M-Pesa credentials the server-wide (env) configuration is used instead.
 
 import { z } from 'zod';
 
@@ -89,10 +90,40 @@ export const adminMpesaSettingsSchema = z
         }
     });
 
+// Support contacts shown to customers in the hotspot/ppoe portals
+// ("Call Admin" / "WhatsApp Admin" cards). Both numbers are international
+// format; the WhatsApp number must start with '+' (E.164). Empty values hide
+// the corresponding button in the portals.
+export const adminContactsSettingsSchema = z
+    .object({
+        adminTel: z.string().max(32).default(''),
+        adminWhatsapp: z.string().max(32).default(''),
+    })
+    .superRefine((contacts, ctx) => {
+        if (contacts.adminTel && !/^\+?[0-9\s\-()]{7,20}$/.test(contacts.adminTel)) {
+            ctx.addIssue({
+                code: 'custom',
+                path: ['adminTel'],
+                message: 'Enter a valid phone number, e.g. +254712345678',
+            });
+        }
+        if (contacts.adminWhatsapp && !/^\+[0-9]{9,15}$/.test(contacts.adminWhatsapp)) {
+            ctx.addIssue({
+                code: 'custom',
+                path: ['adminWhatsapp'],
+                message:
+                    'Enter a WhatsApp number in international format starting with +, e.g. +254712345678',
+            });
+        }
+    });
+
+export type AdminContactsSettings = z.output<typeof adminContactsSettingsSchema>;
+
 export const adminSettingsSchema = z.object({
     appearance: adminAppearanceSettingsSchema.prefault({}),
     dashboard: adminDashboardSettingsSchema.prefault({}),
     mpesa: adminMpesaSettingsSchema.prefault({}),
+    contacts: adminContactsSettingsSchema.prefault({}),
 });
 
 export type AdminSettings = z.output<typeof adminSettingsSchema>;

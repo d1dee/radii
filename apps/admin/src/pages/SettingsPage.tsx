@@ -23,11 +23,12 @@ import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
 import { zod4Resolver } from 'mantine-form-zod-resolver';
 import {
+    adminContactsSettingsSchema,
     adminMpesaSettingsSchema,
     type AdminSettings,
 } from '@shared/index';
 import { useState } from 'react';
-import { MdDashboard, MdPalette, MdPayment } from 'react-icons/md';
+import { MdContacts, MdDashboard, MdPalette, MdPayment } from 'react-icons/md';
 
 import { previewDateTime } from '@/lib/format';
 import { useAdminSettings } from '@/lib/settings';
@@ -118,6 +119,12 @@ export default function SettingsPage() {
                             >
                                 M-Pesa
                             </Tabs.Tab>
+                            <Tabs.Tab
+                                value='contacts'
+                                leftSection={<MdContacts size={16} />}
+                            >
+                                Contacts
+                            </Tabs.Tab>
                         </Tabs.List>
 
                         <Tabs.Panel value='appearance' pt='lg'>
@@ -128,6 +135,9 @@ export default function SettingsPage() {
                         </Tabs.Panel>
                         <Tabs.Panel value='mpesa' pt='lg'>
                             <MpesaSection />
+                        </Tabs.Panel>
+                        <Tabs.Panel value='contacts' pt='lg'>
+                            <ContactsSection />
                         </Tabs.Panel>
                     </Tabs>
                 </Card>
@@ -355,6 +365,76 @@ function DashboardSection() {
                     <Group justify='flex-end'>
                         <Button type='submit' loading={saving}>
                             Save Defaults
+                        </Button>
+                    </Group>
+                </Stack>
+            </form>
+        </>
+    );
+}
+
+// --- Support contacts -------------------------------------------------------------
+
+type ContactsFormValues = AdminSettings['contacts'];
+
+function ContactsSection() {
+    const { settings, saveSettings } = useAdminSettings();
+    const [saving, setSaving] = useState(false);
+
+    const form = useForm<ContactsFormValues>({
+        initialValues: settings.contacts,
+        validate: zod4Resolver(adminContactsSettingsSchema),
+    });
+
+    const handleSubmit = async (values: ContactsFormValues) => {
+        setSaving(true);
+        const res = await saveSettings({ ...settings, contacts: values });
+        setSaving(false);
+        notifySaved(
+            'Contacts saved',
+            res.success,
+            res.success ? undefined : res.message,
+        );
+    };
+
+    return (
+        <>
+            <SectionHeader
+                title='Support Contacts'
+                description='Phone and WhatsApp numbers customers see on the "Having Issues?" card in your hotspot and PPPoE portals.'
+            />
+            <form onSubmit={form.onSubmit(handleSubmit)}>
+                <Stack gap='md'>
+                    <Grid>
+                        <Grid.Col span={{ base: 12, sm: 6 }}>
+                            <TextInput
+                                label='Support phone'
+                                description='Used for the "Call Admin" button (tel: link)'
+                                placeholder='+254712345678'
+                                inputMode='tel'
+                                {...form.getInputProps('adminTel')}
+                            />
+                        </Grid.Col>
+                        <Grid.Col span={{ base: 12, sm: 6 }}>
+                            <TextInput
+                                label='Support WhatsApp'
+                                description='International format starting with + for the "WhatsApp Admin" button'
+                                placeholder='+254712345678'
+                                inputMode='tel'
+                                {...form.getInputProps('adminWhatsapp')}
+                            />
+                        </Grid.Col>
+                    </Grid>
+                    <Alert color='gray' variant='light'>
+                        <Text size='sm'>
+                            Leave a field empty to hide its button in the
+                            customer portals.
+                        </Text>
+                    </Alert>
+                    <Divider />
+                    <Group justify='flex-end'>
+                        <Button type='submit' loading={saving}>
+                            Save Contacts
                         </Button>
                     </Group>
                 </Stack>

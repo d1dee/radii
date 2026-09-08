@@ -2,12 +2,15 @@ import { Button, Card, Paper, Stack, Text, TextInput } from '@mantine/core';
 import { useEffect, useRef, useState } from 'react';
 
 import { schemaResolver, useForm } from '@mantine/form';
-import { paymentTransactionCodeSchema } from '@radii/shared';
+import {
+    paymentTransactionCodeSchema,
+    type AdminContactsSettings,
+} from '@radii/shared';
 import { AdminContacts } from '../../components/AdminContacts.tsx';
 import { verifyPaymentReceipt } from '../../lib/api.ts';
 
 interface Props {
-    adminContacts: { ADMIN_TEL: string; ADMIN_WHATSAPP: string };
+    adminContacts: AdminContactsSettings;
 }
 
 export function HavingIssues({ adminContacts }: Props) {

@@ -2,7 +2,8 @@ import '@mantine/core/styles.css';
 
 import { Container, MantineProvider, Stack } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
-import type { Package, Packages } from '@radii/shared';
+import type { AdminContactsSettings, Package, Packages } from '@radii/shared';
+import { defaultAdminSettings } from '@radii/shared';
 import {
     createContext,
     useCallback,
@@ -18,7 +19,7 @@ import { HavingIssues } from './components/Packages/HavingIssues.tsx';
 import { PackagePricing } from './components/Packages/PackagePricing.tsx';
 import { RegisterModal } from './components/RegisterForm/Modal.tsx';
 import { UserAccount } from './components/UserAccounts/UserAccount.tsx';
-import { getClientData, getPackages, type Client } from './lib/api.ts';
+import { getClientData, getContacts, getPackages, type Client } from './lib/api.ts';
 import { authClient, useSession } from './lib/auth.ts';
 
 // The NAS hotspot login page hands the client browser to the portal with a
@@ -74,7 +75,9 @@ export default function App() {
     const [clientData, setClientData] = useState<Client | undefined>();
     const [packages, setPackages] = useState<Packages | undefined>();
 
-    const adminContacts = { ADMIN_TEL: '', ADMIN_WHATSAPP: '' };
+    const [adminContacts, setAdminContacts] = useState<AdminContactsSettings>(
+        defaultAdminSettings.contacts,
+    );
 
     const { data } = useSession();
 
@@ -82,6 +85,10 @@ export default function App() {
         (async () => {
             const clientData = await getClientData();
             if (clientData.success) setClientData(clientData.data);
+            const contacts = await getContacts(
+                localStorage.getItem(LOGIN_REQUEST_KEY),
+            );
+            if (contacts.success && contacts.data) setAdminContacts(contacts.data);
             const loginRequestId = localStorage.getItem(LOGIN_REQUEST_KEY);
             if (!loginRequestId) return;
             const packages = await getPackages(loginRequestId);
