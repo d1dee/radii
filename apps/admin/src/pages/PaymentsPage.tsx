@@ -201,7 +201,7 @@ export default function PaymentsPage() {
                             <Table.Tbody>
                                 {data.payments.map((p, i) => (
                                     <Table.Tr key={p.id}>
-                                        <Table.Td>{i + 1} </Table.Td>{' '}
+                                        <Table.Td>{i + 1}</Table.Td>
                                         <Table.Td>
                                             <Text size='sm'>
                                                 {formatDateTime(p.createdAt)}
