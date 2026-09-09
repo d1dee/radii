@@ -22,7 +22,10 @@
         /* Path mapping */
         "paths": {
             "@/*": ["./src/*"],
-            "@shared/*": ["../shared/src/*"]
+            "@shared/*": ["../shared/src/*"],
+            "@lib/*": ["./src/lib/*"],
+            "@components/*": ["./src/components/*"],
+            "@types": ["./src/types/index.ts"]
         }
     },
     "include": ["vite.config.ts"]

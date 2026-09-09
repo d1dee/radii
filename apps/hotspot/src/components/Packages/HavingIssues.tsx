@@ -1,115 +1,143 @@
-import { useSignal } from '../libs/hooks/useSignal.ts';
+import { Button, Card, Paper, Stack, Text, TextInput } from '@mantine/core';
+import { useEffect, useRef, useState } from 'react';
 
+import { schemaResolver, useForm } from '@mantine/form';
+import {
+    paymentTransactionCodeSchema,
+    type AdminContactsSettings,
+} from '@radii/shared';
 import { AdminContacts } from '../../components/AdminContacts.tsx';
-import { fetchXHR } from '../../libs/utils/fetch.ts';
+import { verifyPaymentReceipt } from '../../lib/api.ts';
 
-export function HavingIssues({
-    adminContacts,
-}: {
-    adminContacts: { ADMIN_TEL: string; ADMIN_WHATSAPP: string };
-}) {
-    const message = useSignal(undefined) as import('../libs/hooks/useSignal.ts').Signal<
-        | {
-              success?: true;
-              message: string;
-              data?: Record<PropertyKey, unknown>;
-          }
-        | undefined
-    >;
+interface Props {
+    adminContacts: AdminContactsSettings;
+}
 
-    const verifyTransaction = (e: HTMLFormElement) => {
-        const value = new FormData(e).get('transactionMessage') as string;
-        // Parse first word (M-pesa transaction ID is usually the first word)
-        const transactionId = value.trim().split(/\s+/)[0];
-        console.log('Transaction ID:', transactionId);
+export function HavingIssues({ adminContacts }: Props) {
+    const [message, setMessage] = useState<
+        { success?: true; message: string } | undefined
+    >(undefined);
+    const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-        // validate transaction ID format
-        const isValidTransactionId = /^[0-9A-Z]{10}$/i.test(transactionId);
-        if (!isValidTransactionId) {
-            message.value = { message: 'Invalid transaction ID format' };
+    const form = useForm({
+        mode: 'controlled',
+        initialValues: { transactionCode: '' },
+        validate: schemaResolver(paymentTransactionCodeSchema, { sync: true }),
+        transformValues: paymentTransactionCodeSchema.parse,
+    });
+    const stopPolling = () => {
+        if (!intervalRef.current) return;
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+    };
 
+    useEffect(() => stopPolling, []);
+
+    const verifyTransaction = async (values: typeof form.values) => {
+        stopPolling();
+
+        const transactionId = values.transactionCode;
+        if (!transactionId) {
+            setMessage({
+                message:
+                    'Enter the M-Pesa receipt number (e.g. NEF61H8J60), or paste the whole M-Pesa message.',
+            });
             return;
-        } else {
-            message.value = {
-                success: true,
-                message: 'Processing...',
-            };
         }
 
-        // Call the API to verify the transaction
+        setMessage({ success: true, message: 'Processing...' });
+        /* 
+        const pending = await getLatestPendingPayment();
+        if (!pending.success || !pending.data) {
+            setMessage({
+                message: pending.success
+                    ? 'No pending payment found. Buy a package first, then paste your receipt here.'
+                    : pending.message ||
+                      'Could not look up your pending payment',
+            });
+            return;
+        }
+        const paymentId = pending.data.paymentId; */
 
-        const interval = setInterval(async () => {
-            try {
-                const res = await fetchXHR('/nds/verify-transaction', {
-                    transactionId: transactionId,
+        // The provider may confirm asynchronously (status callback), so repost
+        // the receipt until the payment leaves the pending state; the service
+        // deduplicates in-flight verifications server-side.
+        const pollOnce = async (): Promise<boolean> => {
+            const res = await verifyPaymentReceipt(values.transactionCode);
+            if (!res.success) {
+                setMessage({
+                    message: res.message || 'Transaction verification failed',
                 });
-                if (!res || res.success === false) {
-                    clearInterval(interval);
-                    message.value = {
-                        message:
-                            res?.message || 'Transaction verification failed',
-                    };
-                } else {
-                    if (res.message === 'pending') {
-                        message.value = {
-                            success: true,
-                            message: 'Processing...',
-                        };
-                    } else {
-                        clearInterval(interval);
-                        message.value = {
-                            success: true,
-                            message: res.message,
-                        };
-                    }
-                }
-            } catch (error) {
-                console.error('Error verifying transaction:', error);
-                message.value = { message: 'Error verifying transaction.' };
+                return false;
             }
-        }, 3e3);
+            const { status, message: detail } = res.data!;
+            if (status === 'pending') {
+                setMessage({
+                    success: true,
+                    message: detail || 'Processing...',
+                });
+                return true;
+            }
+            setMessage({
+                success: status === 'paid' ? true : undefined,
+                message: detail || status,
+            });
+            return false;
+        };
+
+        if (await pollOnce()) {
+            let attempts = 1;
+            intervalRef.current = setInterval(async () => {
+                attempts++;
+                if (!(await pollOnce())) {
+                    stopPolling();
+                } else if (attempts >= 60) {
+                    stopPolling();
+                    setMessage({
+                        success: true,
+                        message:
+                            'Verification is taking longer than usual. Your payment may still be confirmed automatically — check back shortly or contact the admin.',
+                    });
+                }
+            }, 3e3);
+        }
     };
 
     return (
-        <div className='flex w-full flex-col gap-4 rounded-2xl bg-white px-4 py-6 shadow-xl'>
-            <h3 className='text-lg font-semibold'>Having Issues?</h3>
+        <Paper shadow='xl' radius='lg' p='lg' withBorder>
+            <Stack gap='md'>
+                <Text size='lg' fw={600}>
+                    Having Issues?
+                </Text>
 
-            {/* Transaction Verification Section */}
-            <div className='flex flex-col gap-3 rounded-2xl bg-purple-100 p-4'>
-                <h4 className='font-medium'>Verify Transaction:</h4>
+                <Card radius='lg' p='md' withBorder>
+                    <Stack gap='sm'>
+                        <Text fw={500}>Verify Transaction:</Text>
 
-                <form
-                    onSubmit={(e) => {
-                        e.preventDefault();
-                        verifyTransaction(e.currentTarget);
-                    }}
-                    className='form-control'
-                >
-                    <div className={`flex gap-4`}>
-                        <input
-                            type='text'
-                            placeholder='Enter transaction ID or paste your M-pesa message here'
-                            className={`input flex-1 rounded-lg text-sm ${!message.value ? 'input-primary' : message.value.success ? 'input-success' : 'input-error'}`}
-                            name='transactionMessage'
-                            required
-                        />
-                        <button
-                            className='btn btn-primary px-4 py-2 text-sm'
-                            type='submit'
-                        >
-                            Verify
-                        </button>
-                    </div>
+                        <form onSubmit={form.onSubmit(verifyTransaction)}>
+                            <Stack gap='xs'>
+                                <TextInput
+                                    placeholder='Enter transaction ID or paste your M-pesa message here'
+                                    name='transactionCode'
+                                    {...form.getInputProps('transactionCode')}
+                                />
+                                <Button type='submit'>Verify</Button>
 
-                    <label
-                        className={`label-text label ${message.value?.success ? 'text-success' : 'text-error'} text-sm`}
-                        htmlFor='transactionMessage'
-                    >
-                        {message.value?.message}
-                    </label>
-                </form>
-            </div>
-            <AdminContacts adminContacts={adminContacts} />
-        </div>
+                                {message ? (
+                                    <Text
+                                        size='sm'
+                                        c={message.success ? 'green' : 'red'}
+                                    >
+                                        {message.message}
+                                    </Text>
+                                ) : null}
+                            </Stack>
+                        </form>
+                    </Stack>
+                </Card>
+
+                <AdminContacts adminContacts={adminContacts} />
+            </Stack>
+        </Paper>
     );
 }

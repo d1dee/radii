@@ -1,117 +1,261 @@
-import { useContext, useEffect } from "react";
-import fetch from 'better-fetch';
+import {
+    Anchor,
+    Group,
+    Loader,
+    Modal,
+    Stack,
+    Table,
+    Text,
+} from '@mantine/core';
+import {
+    useEffect,
+    useRef,
+    useState,
+    type Dispatch,
+    type SetStateAction,
+} from 'react';
 
-import { FaSpinner } from "react-icons/fa";
-import { useSignal } from "../libs/hooks/useSignal.ts";
-import humanFormat from "human-format";
-import { dayjs } from "../../libs/utils/utils.ts";
-import { QuotaContext } from "../Main.tsx";
-import Modal from "../Modal.tsx";
-import { timeRemaining } from "./functions.ts";
-import { dataScale } from "./PackagePricing.tsx";
+import {
+    completeLoginRequest,
+    currentLoginRequestId,
+    deauthDevice,
+    getStatus,
+    type HotspotRedirectData,
+} from '@lib/api.ts';
+import { dayjs } from '@lib/dayjs.ts';
+import { notifications } from '@mantine/notifications';
+import type { Quota } from '@radii/shared';
+import humanFormat from 'human-format';
+import { timeRemaining } from './functions.ts';
+import { dataScale } from './PackagePricing.tsx';
 
-export function ConnectedDevicesModal() {
-    const statusQuotasSignal = useContext(QuotaContext);
-    const deviceId = useSignal<string>("");
-    const pendingDeauth = useSignal<Array<string>>([]);
+interface Props {
+    isOpen: boolean;
+    onClose: () => void;
+    syncQuota: Dispatch<SetStateAction<Quota[]>>;
+}
+export function ConnectedDevicesModal({ isOpen, onClose, syncQuota }: Props) {
+    const [deviceId, setDeviceId] = useState<string>('');
+    const [pendingDeauth, setPendingDeauth] = useState<Array<string>>([]);
+    const [pendingConnect, setPendingConnect] = useState<Array<string>>([]);
+    const [connectRedirect, setConnectRedirect] =
+        useState<HotspotRedirectData | null>(null);
+    const formRef = useRef<HTMLFormElement>(null);
+    const submitted = useRef(false);
+
+    const [quota, setQuota] = useState<Array<Quota>>();
 
     useEffect(() => {
         const deauth = async () => {
-            if (deviceId.value) {
-                pendingDeauth.value = [...pendingDeauth.value, deviceId.value];
-                const params = new URLSearchParams(location.search);
-                params.set("deauth", deviceId.value);
-
-                const res = await fetch(`nds?${params.toString()}`, {
-                    method: "get",
-                });
+            if (deviceId) {
+                setPendingDeauth((prev) => [...prev, deviceId]);
+                try {
+                    // Target the device's live session when known (single
+                    // session); the backend disconnects all sessions of the
+                    // package when no session id is given.
+                    const session = quota?.find((v) => v.id === deviceId)
+                        ?.liveSessions?.[0];
+                    await deauthDevice(deviceId, session?.radacctId);
+                    const refreshed = await getStatus(currentLoginRequestId());
+                    if (refreshed.success) {
+                        setQuota(refreshed.data ?? []);
+                        syncQuota(refreshed.data ?? []);
+                        notifications.show({
+                            title: 'Success',
+                            message:
+                                'Device has been disconnected successfully',
+                        });
+                    }
+                } catch (err) {
+                    console.warn('Deauth failed', err);
+                } finally {
+                    setPendingDeauth((prev) =>
+                        prev.filter((id) => id !== deviceId),
+                    );
+                    setDeviceId('');
+                }
             }
         };
         deauth();
-    }, [deviceId.value]);
+    }, [deviceId]);
+
+    useEffect(() => {
+        (async () => {
+            const quota = await getStatus(currentLoginRequestId());
+            if (quota.success) setQuota(quota.data ?? []);
+        })();
+    }, [isOpen]);
+
+    // Connects this device using an offline activation: the backend returns its
+    // RADIUS credentials plus the NAS servlet link, which are re-submitted as
+    // a form post (same final hop as after a purchase), logging this client
+    // into the hotspot.
+    const connectDevice = async (id: string) => {
+        const loginRequestId = currentLoginRequestId();
+        if (!loginRequestId) {
+            notifications.show({
+                color: 'red',
+                title: 'Cannot connect',
+                message:
+                    'Hotspot session expired. Turn your wifi off and on again.',
+            });
+            return;
+        }
+        setPendingConnect((prev) => [...prev, id]);
+        try {
+            const res = await completeLoginRequest(loginRequestId, id);
+            if (res.success && res.data?.linkLoginOnly) {
+                setConnectRedirect(res.data);
+
+                return; // spinner stays until the form navigates the page away
+            }
+            notifications.show({
+                color: 'red',
+                title: 'Could not connect',
+                message: res.success
+                    ? 'Try again.'
+                    : res.message || 'Try again.',
+            });
+        } catch (err) {
+            console.warn('Connect failed', err);
+        }
+        setPendingConnect((prev) => prev.filter((id) => id !== id));
+    };
+
+    useEffect(() => {
+        if (connectRedirect && !submitted.current && formRef.current) {
+            submitted.current = true;
+            formRef.current.submit();
+        }
+    }, [connectRedirect]);
+
+    const rows = quota
+        ?.toSorted((v) => (v.thisDevice ? -1 : 1))
+        .map((v, i) => {
+            const title = v.downloadRate
+                ? humanFormat(v.downloadRate, {
+                      scale: dataScale,
+                  })
+                : 'Unlimited';
+
+            return (
+                <Table.Tr key={v.id} bg={v.thisDevice ? 'grape.0' : undefined}>
+                    <Table.Td>{i + 1}</Table.Td>
+                    <Table.Td>
+                        <Stack gap={0}>
+                            <span>{v.id}</span>
+                            <Text size='xs' c='dimmed' opacity={0.5}>
+                                {v.clientMac}
+                            </Text>
+                        </Stack>
+                    </Table.Td>
+                    <Table.Td miw='120'>
+                        <Stack gap={0}>
+                            <span>{v.packageTitle}</span>
+                            <Text size='xs' c='dimmed' opacity={0.5}>
+                                {title} - Ksh {v.price.toLocaleString()}
+                            </Text>
+                        </Stack>
+                    </Table.Td>
+                    <Table.Td style={{ maxWidth: 130 }}>
+                        {timeRemaining(
+                            dayjs.duration(v.remainingSessionLength || 0, 'm'),
+                        )}
+                    </Table.Td>
+                    <Table.Td>
+                        {pendingDeauth.includes(v.id) ? (
+                            <Group gap='xs' wrap='nowrap'>
+                                <Loader size={14} />
+                                <Text size='sm' c='dimmed'>
+                                    Disconnecting…
+                                </Text>
+                            </Group>
+                        ) : pendingConnect.includes(v.id) ? (
+                            <Group gap='xs' wrap='nowrap'>
+                                <Loader size={14} color='green' />
+                                <Text size='sm' c='dimmed'>
+                                    Connecting…
+                                </Text>
+                            </Group>
+                        ) : v.online ? (
+                            <Anchor
+                                component='button'
+                                type='button'
+                                size='sm'
+                                c='red'
+                                onClick={() => setDeviceId(v.id)}
+                            >
+                                Disconnect
+                            </Anchor>
+                        ) : (
+                            <Anchor
+                                component='button'
+                                type='button'
+                                size='sm'
+                                c='green'
+                                onClick={() => connectDevice(v.id)}
+                            >
+                                Connect
+                            </Anchor>
+                        )}
+                    </Table.Td>
+                </Table.Tr>
+            );
+        });
 
     return (
-        <Modal>
-            <div className="space-y-4">
-                <div className="space-y-2">
-                    <h3 className="text-xl font-bold ">Connected Devices</h3>
-                    <p className="text-sm text-slate-500 font-extralight">
-                        Manage your connected devices below.
-                    </p>
-                </div>
-                <div className="overflow-auto mt-4">
-                    <table className="table table-sm">
-                        <thead>
-                            <tr>
-                                <th>S/N</th>
-                                <th>Device</th>
-                                <th>Package</th>
-                                <th>Time Left</th>
-                                <th>Action</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {statusQuotasSignal.value?.toSorted((v) => v.thisDevice ? -1 : 1).map(
-                                (v, i) => {
-                                    return (
-                                        <tr
-                                            key={v.deviceQuotaId}
-                                            className={v.thisDevice ? "bg-purple-50" : ""}
-                                        >
-                                            <td>{i + 1}</td>
-                                            <td>
-                                                <div>
-                                                    <p>{v.deviceQuotaId}</p>
-                                                    <p className="font-thin text-xs opacity-50">
-                                                        {v.clientMac}
-                                                    </p>
-                                                </div>
-                                            </td>
-                                            <td>
-                                                <div>
-                                                    <p className="text-wrap">
-                                                        {humanFormat(v.downloadRate, {
-                                                            scale: dataScale,
-                                                        })} - Ksh {v.price.toLocaleString()}
-                                                    </p>
-                                                    <p className="font-thin text-xs opacity-50">
-                                                        {v.parentQuotaId}
-                                                    </p>
-                                                </div>
-                                            </td>
-                                            <td className="text-wrap max-w-[130px]">
-                                                {timeRemaining(
-                                                    dayjs.duration(
-                                                        v.remainingSessionLength || 0,
-                                                        "m",
-                                                    ),
-                                                )}
-                                            </td>
-                                            <td>
-                                                {!pendingDeauth.value?.includes(v.deviceQuotaId)
-                                                    ? (
-                                                        <button
-                                                            className="link link-error btn-link underline-offset-2"
-                                                            onClick={() =>
-                                                                deviceId.value = v.deviceQuotaId}
-                                                        >
-                                                            Disconnect
-                                                        </button>
-                                                    )
-                                                    : (
-                                                        <div className=" items-center text-error cursor-wait">
-                                                            <FaSpinner className="animate-spin" />
-                                                        </div>
-                                                    )}
-                                            </td>
-                                        </tr>
-                                    );
-                                },
-                            )}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
+        <Modal
+            opened={isOpen}
+            onClose={onClose}
+            title={<Text fw={700}>Avaible connections</Text>}
+            size='lg'
+            centered
+        >
+            <Stack gap='md'>
+                <Text size='sm' c='dimmed' fw={300}>
+                    Manage your connected devices below.
+                </Text>
+                <Table.ScrollContainer minWidth={500}>
+                    <Table striped highlightOnHover>
+                        <Table.Thead>
+                            <Table.Tr>
+                                <Table.Th>S/N</Table.Th>
+                                <Table.Th>Device</Table.Th>
+                                <Table.Th>Package</Table.Th>
+                                <Table.Th>Time Left</Table.Th>
+                                <Table.Th>Action</Table.Th>
+                            </Table.Tr>
+                        </Table.Thead>
+                        <Table.Tbody>{rows}</Table.Tbody>
+                    </Table>
+                </Table.ScrollContainer>
+            </Stack>
+
+            {connectRedirect && (
+                <form
+                    ref={formRef}
+                    action={connectRedirect.linkLoginOnly}
+                    method='post'
+                >
+                    <input
+                        type='hidden'
+                        name='username'
+                        value={connectRedirect.username}
+                    />
+                    <input
+                        type='hidden'
+                        name='password'
+                        value={connectRedirect.password}
+                    />
+                    <input type='hidden' name='domain' value='' />
+                    <input
+                        type='hidden'
+                        name='dst'
+                        value={connectRedirect.dst}
+                    />
+                    <input type='hidden' name='popup' value='true' />
+                </form>
+            )}
         </Modal>
     );
 }

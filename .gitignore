@@ -40,5 +40,5 @@ dist-ssr
 *.sw?
 drizzle
 dist
-
+docs/
 _apps

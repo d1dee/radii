@@ -1,71 +1,39 @@
-import { ClientContext, SessionContext } from '../Main.tsx';
+import { Button, Group, Stack, Text } from '@mantine/core';
 
-import { Signal } from '../libs/hooks/useSignal.ts';
+import type { Dispatch, SetStateAction } from 'react';
 import { useContext } from 'react';
-import fetch from 'better-fetch';
+import { ClientContext } from '../../App.tsx';
+import { useSession } from '../../lib/auth.ts';
 
 export function UserSession({
     havingIssues,
 }: {
-    havingIssues: Signal<boolean>;
+    havingIssues: [boolean, Dispatch<SetStateAction<boolean>>];
 }) {
     const client = useContext(ClientContext);
-    const session = useContext(SessionContext);
+    const { data } = useSession();
+    const [havingIssuesVal, setHavingIssues] = havingIssues;
     return (
-        <div className='w-full'>
-            <h2 className='mb-2 text-xl font-semibold'>Hello,</h2>
+        <Stack gap='xs' w='100%'>
+            <Text size='xl' fw={600}>
+                Hello,
+            </Text>
 
-            <div className='flex justify-between'>
-                <p className='text-sm text-slate-300'>{client?.phoneNumber}</p>
+            <Group justify='space-between'>
+                <Text size='sm' c='gray.3'>
+                    {client?.phoneNumber}
+                </Text>
 
-                <div
-                    className='btn btn-ghost border border-purple-400 shadow-sm'
+                <Button
+                    variant='subtle'
+                    color='gray.1'
                     onClick={() => {
-                        session && (havingIssues.value = !havingIssues.value);
+                        data?.session && setHavingIssues(!havingIssuesVal);
                     }}
                 >
-                    {!havingIssues.value ? (
-                        <span className='mx-4'>Having issues?</span>
-                    ) : (
-                        <span className='mx-4'>Active package</span>
-                    )}
-                </div>
-            </div>
-        </div>
+                    {!havingIssuesVal ? 'Having issues?' : 'Active package'}
+                </Button>
+            </Group>
+        </Stack>
     );
-}
-
-function endSession(sessionKey: string) {
-    try {
-        const params = new URLSearchParams(location.search);
-        params.set('dropSession', sessionKey);
-
-        fetch(`nds?${params.toString()}`, {
-            method: 'get',
-        }).then((res: Response) => {
-            if (res.ok) {
-                res.json().then((jsonResponse) => {
-                    if (jsonResponse.success) {
-                        const newParams = new URLSearchParams();
-                        newParams.set('fas', params.get('fas') ?? '');
-
-                        location.replace(
-                            `${location.origin}/nds?${newParams.toString()}`,
-                        );
-                    } else {
-                        console.warn('failed to close session');
-                    }
-                });
-            } else {
-                res.text().then((text) =>
-                    document.documentElement.replaceWith(
-                        new DOMParser().parseFromString(text, 'text/html')
-                            .documentElement,
-                    ),
-                );
-            }
-        });
-    } catch (err) {
-        console.log(err);
-    }
 }

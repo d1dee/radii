@@ -1,182 +1,125 @@
-import { IoMdArrowDown, IoMdArrowUp } from 'react-icons/io';
-import { useContext, useEffect } from 'react';
-import { checkOnlineStatus, checkQuotaStatus, timeRemaining } from './functions.ts';
+import {
+    Box,
+    Grid,
+    Group,
+    Paper,
+    Progress,
+    SimpleGrid,
+    Stack,
+    Text,
+} from '@mantine/core';
+import { useEffect, useState } from 'react';
+import { timeRemaining } from './functions.ts';
 
-import { useSignal } from '../libs/hooks/useSignal.ts';
+import type { Quota } from '@/types/index.ts';
+import { currentLoginRequestId, getStatus } from '@lib/api.ts';
+import { dayjs } from '@lib/dayjs.ts';
+import { useDisclosure, useInterval } from '@mantine/hooks';
+import { IconSelector } from '@tabler/icons-react';
 import humanFormat from 'human-format';
-import { StatusQuotas } from '../../../types/index.d.ts';
-import { dayjs } from '../../libs/utils/utils.ts';
-import { Toast } from '../Alert.tsx';
-import { QuotaContext } from '../Main.tsx';
 import { ConnectedDevice } from './ConnectedDevices.tsx';
+import { ConnectedDevicesModal } from './ConnectedDevicesModal.tsx';
 import { dataScale } from './PackagePricing.tsx';
 
 export function CurrentPackage() {
-    const onlineStatus = useSignal<{
-        state: 'online' | 'offline' | '';
-        prevState: 'online' | 'offline' | '';
-    }>({ state: '', prevState: '' });
-    const statusQuotasSignal = useContext(QuotaContext);
+    const [quota, setQuota] = useState<Array<Quota>>([]);
+    const [isOpen, { open, close }] = useDisclosure();
+    const fetchQuota = async () => {
+        const quota = await getStatus(currentLoginRequestId());
+        if (quota.success) setQuota(quota.data ?? []);
+    };
+    const interval = useInterval(fetchQuota, 5e3);
+    useEffect(() => {
+        fetchQuota().finally(interval.start);
+        return interval.stop;
+    }, []);
 
     // Pick the highest if no token belongs to this devices
-    const deviceQuota =
-        statusQuotasSignal.value?.find((v) => v.thisDevice) ||
-        (statusQuotasSignal.value && statusQuotasSignal.value[0]);
+    const thisDevice = quota.find((v) => v.thisDevice && v.online) || quota[0];
 
-    const signal = useSignal<Partial<StatusQuotas[number]> & { width: string }>({
-        ...deviceQuota,
-        width:
-            !deviceQuota?.initialSessionLength || !deviceQuota?.remainingSessionLength
-                ? '0%'
-                : Math.max(
-                      0,
-                      Math.min(
-                          100,
-                          (dayjs
-                              .duration(deviceQuota?.remainingSessionLength || 0, 'm')
-                              .asSeconds() *
-                              100) /
-                              dayjs
-                                  .duration(deviceQuota?.initialSessionLength || 0, 'm')
-                                  .asSeconds(),
-                      ),
-                  ) + '%',
-        remainingSessionLength: dayjs
-            .duration(deviceQuota?.remainingSessionLength || 0, 'm')
-            .asSeconds(),
-        initialSessionLength: dayjs
-            .duration(deviceQuota?.initialSessionLength || 0, 'm')
-            .asSeconds(),
-    });
+    const progressValue =
+        (thisDevice?.remainingSessionLength / thisDevice?.sessionLength) * 100;
 
-    /* Run quota status check every 10 seconds */
-    useEffect(() => {
-        const statusCheck = async () => {
-            const statusQuotas = await checkQuotaStatus(signal);
-            statusQuotas && (statusQuotasSignal.value = statusQuotas);
-        };
-
-        const interval = setInterval(statusCheck, 10e3);
-
-        return () => clearInterval(interval);
-    }, []);
-
-    /* Run online status check every 20 seconds */
-    useEffect(() => {
-        const check = async () => {
-            const isOnline = await checkOnlineStatus();
-
-            // update online status
-            if (isOnline) {
-                onlineStatus.value = { prevState: onlineStatus.value.state, state: 'online' };
-            } else {
-                onlineStatus.value = { prevState: onlineStatus.value.state, state: 'offline' };
-            }
-        };
-        // use exponensial backoff for online status check and update online status after three attempts
-        check();
-
-        // Poll every 20 seconds
-        const interval = setInterval(check, 20e3);
-
-        return () => clearInterval(interval);
-    }, []);
-
-    const { downloadRate, uploadRate, width, remainingSessionLength, deviceQuotaId } = signal.value;
+    const avgTransferSpeed = thisDevice?.avgSpeedBps
+        ? humanFormat(thisDevice?.avgSpeedBps / 1e3, {
+              scale: dataScale,
+          })
+        : '_';
+    const title = thisDevice?.packageTitle
+        ? `${thisDevice?.packageTitle} @ Ksh ${thisDevice?.price}`
+        : '_';
 
     return (
-        <div className='w-full rounded-2xl bg-white px-4 py-6 shadow-xl'>
-            <h3 className='text-lg font-semibold'>Active Package Details</h3>
-            <div className='mt-4'>
-                <div className='flex items-center justify-between'>
-                    <p className='text-sm font-medium'>Time remaining</p>
-                    <p className='text-sm font-medium'>
-                        {timeRemaining(dayjs.duration(remainingSessionLength || 0, 's'))}
-                    </p>
-                </div>
-                <div className='relative my-2 h-2 rounded-full bg-red-200'>
-                    <div
-                        className={`absolute left-0 top-0 h-2 rounded-full bg-purple-500`}
-                        style={{ width: width }}
-                    ></div>
-                </div>
-                <div className='space-y-2'>
-                    <div className='flex items-center justify-between gap-2 text-sm text-gray-500'>
-                        <div className='flex items-center'>
-                            Devices: {statusQuotasSignal.value?.length || ' _'}
-                        </div>
-                        <div className='flex items-center'>
-                            Package info:{' '}
-                            {deviceQuota?.downloadRate
-                                ? `${humanFormat(deviceQuota.downloadRate, {
-                                      scale: dataScale,
-                                  })} - Ksh ${deviceQuota.price.toLocaleString()}`
-                                : ' _'}
-                        </div>
-                        <div className='flex items-center gap-2'>
-                            <div className='inline-flex items-center gap-2'>
-                                <IoMdArrowDown />
-                                <p>
-                                    {downloadRate && downloadRate !== 0
-                                        ? humanFormat(downloadRate, { scale: dataScale })
-                                        : ' _'}
-                                </p>
-                            </div>
-                            <div className='inline-flex items-center gap-2'>
-                                <IoMdArrowUp />
-                                <p>
-                                    {uploadRate && uploadRate !== 0
-                                        ? humanFormat(uploadRate, { scale: dataScale })
-                                        : ' _'}
-                                </p>
-                            </div>
-                        </div>
-                    </div>
-                    <div className='flex flex-wrap items-center justify-between gap-2 text-sm text-gray-500'>
-                        <div className='flex items-center'>Quota ID: {deviceQuotaId || ' _'}</div>
-                        <div className='flex items-center'>
-                            Parent Quota: {deviceQuota?.parentQuotaId || ' _'}
-                        </div>
-                    </div>
-                    <ConnectedDevice />
-                </div>
-            </div>
-            {/* <button className="w-full mt-4 border border-gray-300 py-2 rounded-lg text-gray-700 hover:bg-gray-100">
-                Sign
-            </button> */}
-            {onlineStatus.value.state === 'online' ? <OnlineAlert /> : null}
+        <>
+            <Paper shadow='xl' radius='lg' p='lg' withBorder key=''>
+                <Stack gap='md'>
+                    <Text size='lg' fw={600}>
+                        Active Package Details
+                    </Text>
 
-            {onlineStatus.value.state === 'offline' ? (
-                <OfflineAlert
-                    hasSession={!!(remainingSessionLength && remainingSessionLength > 0)}
-                />
-            ) : null}
-        </div>
-    );
-}
+                    <Group justify='space-between'>
+                        <Text size='sm' fw={500}>
+                            Time remaining
+                        </Text>
+                        <Text size='sm' fw={500}>
+                            {timeRemaining(
+                                dayjs.duration(
+                                    thisDevice?.remainingSessionLength || 0,
+                                    'm',
+                                ),
+                            )}
+                        </Text>
+                    </Group>
 
-function OnlineAlert() {
-    const msg = (
-        <div>
-            <h3 className='font-bold'>You are back online.</h3>
-            <div className='text-xs'>You can now surf the internet.</div>
-        </div>
-    );
-    return <Toast values={{ message: msg, style: 'alert-soft', type: 'alert-success' }} />;
-}
+                    <Progress
+                        value={progressValue}
+                        size='sm'
+                        radius='xl'
+                        color='grape'
+                    />
 
-function OfflineAlert({ hasSession }: { hasSession: boolean }) {
-    const msg = (
-        <div>
-            <h3 className='font-bold'>You are offline.</h3>
-            {hasSession ? (
-                <div className='text-xs'>Turn your wifi off and on again.</div>
-            ) : (
-                <div className='text-xs'>
-                    Purchase one of the packages below to access the internet.
-                </div>
-            )}
-        </div>
+                    <Stack gap='xs'>
+                        <SimpleGrid cols={3}>
+                            <Text size='sm' c='dimmed'>
+                                Devices:{' '}
+                                {thisDevice?.liveSessions?.length || ' _'}
+                            </Text>
+                            <Text size='sm' c='dimmed'>
+                                Package title: {title}
+                            </Text>
+
+                            <Group gap='xs'>
+                                <IconSelector stroke={1} />
+                                <Text size='sm' c='dimmed'>
+                                    {avgTransferSpeed}
+                                </Text>
+                            </Group>
+                        </SimpleGrid>
+
+                        <Grid>
+                            <Grid.Col span={4}>
+                                <Text size='sm' c='dimmed'>
+                                    Username: {thisDevice?.username || ' _'}
+                                </Text>
+                            </Grid.Col>
+                            <Grid.Col span={8}>
+                                <Text size='sm' c='dimmed'>
+                                    Activation Id: {thisDevice?.id || ' _'}
+                                </Text>
+                            </Grid.Col>
+                        </Grid>
+
+                        <Box>
+                            <ConnectedDevice quota={quota} onOpen={open} />
+                        </Box>
+                    </Stack>
+                </Stack>
+            </Paper>
+            <ConnectedDevicesModal
+                onClose={close}
+                isOpen={isOpen}
+                syncQuota={setQuota}
+            />
+        </>
     );
-    return <Toast values={{ message: msg, style: 'alert-soft', type: 'alert-error' }} />;
 }

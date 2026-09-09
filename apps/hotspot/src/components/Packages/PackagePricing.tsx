@@ -1,17 +1,22 @@
-import { dayjs, upperFirstCase } from '../../libs/utils/utils.ts';
 import {
-    ModalContext,
-    OrderContext,
-    PackagesContext,
-    SessionContext,
-} from '../Main.tsx';
+    Alert,
+    Button,
+    Card,
+    Group,
+    Paper,
+    SimpleGrid,
+    Stack,
+    Text,
+} from '@mantine/core';
+import { upperFirstCase } from '@radii/shared';
+import { dayjs } from '../../lib/dayjs.ts';
 
-import { useSignal } from '../libs/hooks/useSignal.ts';
 import humanFormat from 'human-format';
-import { useContext } from 'react';
-import { Package } from '../../../types/index.d.ts';
-
-type Packages = [string, Array<Package>];
+import { useContext, useState } from 'react';
+import { AiOutlineExclamationCircle } from 'react-icons/ai';
+import { ModalActionsContext } from '../../App.tsx';
+import { useSession } from '../../lib/auth.ts';
+import type { Package, Packages } from '../../types/index.ts';
 
 export const dataScale = new humanFormat.Scale({
     Kbps: 1,
@@ -19,102 +24,144 @@ export const dataScale = new humanFormat.Scale({
     Gbps: 1e6,
 });
 
-function getPackages(title: string, packages: Array<Packages>) {
+function getPackagesByTitle(title: string, packages: Packages) {
     const h = packages.find(
         ([t, _]) => t.toLowerCase() === title.toLowerCase(),
     );
     return h ? h[1] : [];
 }
 
-export function PackagePricing() {
-    const pkgContext = useContext(PackagesContext);
+export function PackagePricing({
+    packages,
+}: {
+    packages: Packages | undefined;
+}) {
+    const [selectedTitle, setSelectedTitle] = useState('');
 
-    const stateSignal = useSignal({
-        selectedTitle: pkgContext[0][0],
-        packages: pkgContext[0][1],
-    });
+    const { startBuy, openLogin } = useContext(ModalActionsContext);
+    const session = useSession();
 
-    const modal = useContext(ModalContext);
-    const session = useContext(SessionContext);
-    const order = useContext(OrderContext);
-    const { selectedTitle, packages } = stateSignal.value;
+    // A category is always selected: fall back to the first one when the
+    // selection is unset (packages still loading) or stale.
+    const activeTitle =
+        packages?.find(
+            ([t]) => t.toLowerCase() === selectedTitle.toLowerCase(),
+        )?.[0] ??
+        packages?.[0]?.[0] ??
+        '';
 
-    function initiateOrderFlow(pkg: Required<Package>) {
-        order.value = {
-            ...order.value,
+    const groupedPackages = getPackagesByTitle(activeTitle, packages ?? []);
+
+    function initiateOrderFlow(pkg: Package) {
+        const seed = {
             packageId: pkg.packageId,
             price: String(pkg.price),
         };
 
-        if (session && session.expiresAt > Date.now()) modal.value = 'payment';
-        else modal.value = 'login';
+        if (session.data?.session) startBuy(seed);
+        else openLogin(pkg.packageId, String(pkg.price));
     }
 
+    if (!packages || packages.length === 0)
+        return (
+            <Paper shadow='xl' radius='lg' p='lg' mt='md' withBorder>
+                {' '}
+                <Stack gap='md' mt='md'>
+                    <Text size='lg' fw={600}>
+                        Available Packages
+                    </Text>
+                    <Alert
+                        color='orange'
+                        title='Warning'
+                        icon={<AiOutlineExclamationCircle size={24} />}
+                    >
+                        Could not find packages linked with your current NAS.
+                        Reconnect your wifi network to resolve.
+                    </Alert>
+                </Stack>
+            </Paper>
+        );
+
     return (
-        <div className='mb-4 w-full rounded-2xl bg-white shadow-xl'>
-            <div className='p-4'>
-                <h3 className='mb-4 w-full justify-center text-lg font-semibold'>
-                    Our Packages
-                </h3>
-                {/* <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,_minmax(min(100%,_calc(100%/5)),_1fr))]">
-                 */}
-                <div className='mx-auto grid max-w-xl gap-4 [grid-template-columns:repeat(auto-fit,_minmax(min(100%,_calc(100%/5)),_1fr))]'>
-                    {pkgContext.map(([title, _]) => (
-                        <div
-                            className={`btn hover:text-primary min-w-fit rounded-lg bg-gray-100 hover:bg-purple-100 ${
-                                title.toLowerCase() ===
-                                    selectedTitle.toLowerCase() &&
-                                'btn-outline bg-purple-200'
-                            }`}
-                            onClick={() => {
-                                stateSignal.value = {
-                                    selectedTitle: title,
-                                    packages: getPackages(title, pkgContext),
-                                };
-                            }}
-                        >
-                            {upperFirstCase(title)}
-                        </div>
-                    ))}
-                </div>
-            </div>
+        <Paper shadow='xl' radius='lg' p='lg' withBorder>
+            <Stack gap='md' mt='md'>
+                <Text size='lg' fw={600}>
+                    Available Packages
+                </Text>
 
-            {packages.map((pkg) => (
-                <div className='card m-4 rounded-2xl bg-gray-100 shadow hover:bg-purple-100'>
-                    <div className='p-4'>
-                        <div className='flex items-center justify-between'>
-                            <div className='flex flex-col justify-between gap-3'>
-                                <p className='text-gray-500'>{pkg.title}</p>
+                <SimpleGrid
+                    cols={{ base: 2, xs: 3, sm: 4, md: 5 }}
+                    spacing='md'
+                >
+                    {packages.map(([title, _]) => {
+                        const active =
+                            title.toLowerCase() === activeTitle.toLowerCase();
+                        return (
+                            <Button
+                                key={title}
+                                variant={active ? 'filled' : 'light'}
+                                onClick={() => setSelectedTitle(title)}
+                            >
+                                {upperFirstCase(title)}
+                            </Button>
+                        );
+                    })}
+                </SimpleGrid>
 
-                                <h2 className='max-w-fit text-4xl font-bold'>
-                                    {humanFormat(pkg.downloadRate, {
-                                        scale: dataScale,
-                                    })}
-                                </h2>
-                            </div>
+                <Stack gap='md'>
+                    {groupedPackages.map((pkg) => {
+                        const title = pkg.downloadRate
+                            ? humanFormat(pkg.downloadRate, {
+                                  scale: dataScale,
+                              })
+                            : 'Unlimited';
+                        const expiry = pkg.noExpiry
+                            ? 'No Expiry'
+                            : dayjs.duration(pkg.sessionLength, 'm').humanize();
 
-                            <div className='flex flex-col items-end justify-between gap-3'>
-                                <p className='text-sm text-gray-500'>
-                                    {dayjs
-                                        .duration(pkg.initialSessionLength, 'm')
-                                        .humanize()}
-                                </p>
+                        return (
+                            <Card
+                                key={pkg.packageId}
+                                shadow='sm'
+                                radius='lg'
+                                withBorder
+                            >
+                                <Stack gap='md'>
+                                    <Group
+                                        justify='space-between'
+                                        align='flex-start'
+                                    >
+                                        <Stack gap='xs'>
+                                            <Text c='dimmed'>
+                                                {upperFirstCase(pkg.title)}
+                                            </Text>
+                                            <Text size='32px' fw={700}>
+                                                {title}
+                                            </Text>
+                                        </Stack>
 
-                                <p className='text-2xl font-bold'>
-                                    Ksh {pkg.price.toLocaleString()}
-                                </p>
-                            </div>
-                        </div>
+                                        <Stack gap='xs' align='flex-end'>
+                                            <Text size='sm' c='dimmed'>
+                                                {expiry}
+                                            </Text>
+                                            <Text size='xl' fw={700}>
+                                                Ksh {pkg.price.toLocaleString()}
+                                            </Text>
+                                        </Stack>
+                                    </Group>
 
-                        <div
-                            className='btn mt-4 w-full rounded-lg bg-purple-600 px-4 py-2 text-white hover:bg-purple-700'
-                            onClick={() => initiateOrderFlow(pkg as Package)}
-                        >
-                            Buy Now
-                        </div>
-                    </div>
-                </div>
-            ))}
-        </div>
+                                    <Button
+                                        fullWidth
+                                        onClick={() => initiateOrderFlow(pkg)}
+                                    >
+                                        Buy Now
+                                    </Button>
+                                </Stack>
+                            </Card>
+                        );
+                    })}
+                </Stack>
+            </Stack>
+        </Paper>
     );
 }

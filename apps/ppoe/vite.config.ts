@@ -4,18 +4,35 @@ import { defineConfig, loadEnv } from 'vite';
 
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, process.cwd(), '');
-    const API_URL = env.VITE_API_URL || 'http://localhost:3000';
-    const APP_PORT = parseInt(env.VITE_APP_PORT || '5174');
+    const API_URL = env.VITE_API_URL;
+    const APP_PORT = parseInt(env.VITE_APP_PORT || '');
+
+    if (!API_URL || isNaN(APP_PORT))
+        throw new Error(
+            'VITE_API_URL and VITE_APP_PORT environment variables are required',
+        );
 
     return {
         plugins: [react()],
         resolve: {
             alias: {
-                '@': path.resolve(__dirname, './src'),
-                '@shared': path.resolve(__dirname, '../shared/src'),
+                '@': path.resolve(import.meta.dirname, './src'),
+                '@shared': path.resolve(import.meta.dirname, '../shared/src'),
+                '@lib': path.resolve(import.meta.dirname, './src/lib'),
+                '@components/*': path.resolve(
+                    import.meta.dirname,
+                    './src/components',
+                ),
+                '@types': path.resolve(import.meta.dirname, './src/types'),
             },
+            // Force a single React/React-DOM instance across the bundle.
+            // Without this, workspace deps like `better-auth` (installed via
+            // bun's .bun cache) can resolve their own React copy, producing
+            // duplicate instances and "Invalid hook call" errors.
+            dedupe: ['react', 'react-dom'],
         },
         server: {
+            host: '0.0.0.0',
             port: APP_PORT,
             proxy: {
                 '/api': {

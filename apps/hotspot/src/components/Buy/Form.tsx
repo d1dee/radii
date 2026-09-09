@@ -1,121 +1,146 @@
-import { Signal, useSignal } from "../libs/hooks/useSignal.ts";
-import { createContext, RefObject, useContext } from "react";
-import { fetchXHR, XHRResultError, XHRResultSuccess } from "../../libs/utils/fetch.ts";
-import { ClientContext, ModalContext, OrderContext, XHRResponse } from "../Main.tsx";
+import { Button, Divider, Input, Stack } from '@mantine/core';
+import { schemaResolver, useForm } from '@mantine/form';
+import { parseServiceProvider, zPhoneNumber } from '@radii/shared';
+import { PhoneNumberInput } from '@radii/ui';
+import { useContext, useState } from 'react';
+import { createOrder } from '../../lib/api.ts';
 
-import { AiOutlineLoading } from "react-icons/ai";
-import { FaPhone } from "react-icons/fa";
-import { parseServiceProvider } from "../../libs/utils/serviceProviderParser.ts";
-import { validateForm } from "./functions.ts";
-import { PreviousNumbers } from "./PrevNumbers.tsx";
+import { AiOutlineLoading } from 'react-icons/ai';
+import z from 'zod';
+import { ClientContext } from '../../App.tsx';
+import { LOGIN_REQUEST_KEY } from '../HotspotLoginRedirect.tsx';
+import { PrevPaymentMethods } from './PrevPaymentMethods.tsx';
 
-export const FormContext = createContext<RefObject<HTMLFormElement>>(null!);
-export const RadioContext = createContext<Signal<HTMLInputElement | null>>(null!);
+type FormValues = {
+    phoneNumber: string;
+};
 
-export function Form() {
-    const order = useContext(OrderContext);
-    const modal = useContext(ModalContext);
-    const XHRSignal = useContext(XHRResponse);
-    const client = useContext(ClientContext)!;
+const buyFormSchema = z.object({
+    phoneNumber: zPhoneNumber.refine(
+        (v) => parseServiceProvider(v)?.name === 'safaricom',
+        {
+            message: 'Only M-Pesa payment is supported at the moment.',
+        },
+    ),
+});
+
+export function BuyForm({
+    packageId,
+    price,
+    onOrder,
+}: {
+    packageId: string;
+    price: string;
+    onOrder: (result: {
+        orderId: string;
+        status: 'pending' | 'errored';
+        message?: string;
+    }) => void;
+}) {
+    const client = useContext(ClientContext);
     const prevPaymentMethods = client?.prevPaymentMethods || [];
-    const radioBtnRefSignal = useSignal<HTMLInputElement | null>(null);
-    const error = useSignal<string | undefined>(undefined);
-    const btnDisabled = useSignal(false);
 
-    // clear loading state and timeout
-    async function submitOrder(e: React.MouseEvent<HTMLButtonElement>) {
-        e.preventDefault();
+    const defaultPhone =
+        [...prevPaymentMethods, client?.phoneNumber || ''].find(
+            (v) => v && parseServiceProvider(v)?.name === 'safaricom',
+        ) || '';
 
-        btnDisabled.value = true;
+    const form = useForm<FormValues>({
+        mode: 'controlled',
+        initialValues: { phoneNumber: defaultPhone },
+        validate: schemaResolver(buyFormSchema, { sync: true }),
+    });
 
-        const phoneNo = radioBtnRefSignal.value
-            ? radioBtnRefSignal.value?.value
-            : prevPaymentMethods.find((v) => parseServiceProvider(v)?.name === "safaricom");
-        const data = validateForm({
-            phoneNumber: phoneNo,
-            packageId: order.value.packageId,
-        });
+    const [inputMethod, setInputMethod] = useState<'radio' | 'input'>(
+        defaultPhone ? 'radio' : 'input',
+    );
 
-        if (data instanceof Error) {
-            error.value = data.message;
-        } else {
-            const jsonResponse = (await fetchXHR("/nds/order", data)) as
-                | XHRResultError
-                | XHRResultSuccess & {
-                    data: { paymentId: string };
-                };
-            console.log("status", jsonResponse);
-
-            if (jsonResponse.success === false) {
-                order.value = {
-                    ...order.value,
-                    orderId: "",
-                    status: "errored",
-                };
-            } else {order.value = {
-                    ...order.value,
-                    orderId: jsonResponse.data.paymentId || "",
-                    status: "pending",
-                };}
-            XHRSignal.value = jsonResponse;
-            modal.value = "status";
-        }
-        btnDisabled.value = false;
+    function setPhone(phone: string, method: 'radio' | 'input') {
+        form.setFieldValue('phoneNumber', phone);
+        setInputMethod(method);
     }
+
+    async function handleSubmit(values: FormValues) {
+        const parsed = buyFormSchema.safeParse(values);
+        if (!parsed.success) {
+            form.setFieldError(
+                'phoneNumber',
+                parsed.error.issues[0]?.message ?? '',
+            );
+            return;
+        }
+
+        try {
+            const result = await createOrder({
+                loginRequestKey: localStorage.getItem(LOGIN_REQUEST_KEY),
+                packageId,
+                phoneNumber: parsed.data.phoneNumber,
+            });
+
+            if (!result.success) {
+                onOrder({
+                    orderId: '',
+                    status: 'errored',
+                    message: result.message || 'Could not submit your order.',
+                });
+                return;
+            }
+
+            onOrder({
+                orderId: result.data!.paymentId,
+                status: 'pending',
+            });
+        } catch (err) {
+            console.warn('Order failed', err);
+            onOrder({
+                orderId: '',
+                status: 'errored',
+                message:
+                    err instanceof Error
+                        ? err.message
+                        : 'Could not submit your order.',
+            });
+        }
+    }
+
     return (
-        <form className="form-control my-4 text-sm">
-            <RadioContext.Provider value={radioBtnRefSignal}>
-                <PreviousNumbers />
-            </RadioContext.Provider>
-            <div className="divider">or</div>
-            <div className="card bg-gray-50 rounded-2xl shadow px-4 py-4  w-full ">
-                <label
-                    htmlFor="phone_number"
-                    className="inline-flex font-semibold items-center relative max-w-xs mb-4"
+        <form onSubmit={form.onSubmit(handleSubmit)}>
+            <Stack gap='md'>
+                <Input.Wrapper
+                    label='Saved Numbers'
+                    description="Choose a number you've paid with before"
                 >
-                    Enter phone number:
-                </label>
-
-                <div className="inline-flex relative items-center min-w-full bg-gray-100 ">
-                    <span className="absolute pl-5  text-primary">
-                        <FaPhone />
-                    </span>
-                    <input
-                        type="text"
-                        id="phone_number"
-                        inputMode="numeric"
-                        onClick={(e) => radioBtnRefSignal.value = e.currentTarget}
-                        placeholder="+254712345678 / 0712345678"
-                        className={`input input-bordered min-w-full pl-12 text-sm ${
-                            error.value ? "input-error" : ""
-                        }`}
+                    <PrevPaymentMethods
+                        selectedPhone={form.values.phoneNumber}
+                        onSelect={(phone) => setPhone(phone, 'radio')}
                     />
-                </div>
-                <div className="label">
-                    {error ? <span className="label-text-alt text-error">{error.value}</span> : null}
-                </div>
-            </div>
+                </Input.Wrapper>
 
-            <div className="flex w-full mt-4">
-                <button
-                    className={`btn btn-primary shadow-lg flex-grow ${
-                        btnDisabled.value ? "btn-disabled btn-outline" : ""
-                    }`}
-                    disabled={btnDisabled.value}
-                    onClick={submitOrder}
-                    type="submit"
+                <Divider label='or' />
+
+                <PhoneNumberInput
+                    label='Enter phone number:'
+                    description='We send an STK push prompt to this phone'
+                    placeholder='712 345 678'
+                    error={form.errors.phoneNumber}
+                    value={
+                        inputMethod === 'input' ? form.values.phoneNumber : ''
+                    }
+                    onChange={(value) => {
+                        setPhone(value ?? '', 'input');
+                    }}
+                />
+
+                <Button
+                    type='submit'
+                    mt='md'
+                    loading={form.submitting}
+                    loaderProps={{ children: <AiOutlineLoading /> }}
+                    fullWidth
                 >
-                    <span className="flex gap-4 align-middle">
-                        <span className=" animate-spin h-full">
-                            {btnDisabled.value ? <AiOutlineLoading /> : null}
-                        </span>
-
-                        <span>
-                            Pay {order.value?.price ? `Ksh ${order.value?.price}` : "for package"}
-                        </span>
-                    </span>
-                </button>
-            </div>
+                    Pay {price ? `Ksh ${price}` : 'for package'}
+                </Button>
+            </Stack>
         </form>
     );
 }

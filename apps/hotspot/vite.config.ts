@@ -16,11 +16,23 @@ export default defineConfig(({ mode }) => {
         plugins: [react()],
         resolve: {
             alias: {
-                '@': path.resolve(__dirname, './src'),
-                '@shared': path.resolve(__dirname, '../shared/src'),
+                '@': path.resolve(import.meta.dirname, './src'),
+                '@shared': path.resolve(import.meta.dirname, '../shared/src'),
+                '@lib': path.resolve(import.meta.dirname, './src/lib'),
+                '@components/*': path.resolve(
+                    import.meta.dirname,
+                    './src/components',
+                ),
+                '@types': path.resolve(import.meta.dirname, './src/types'),
             },
+            // Force a single React/React-DOM instance across the bundle.
+            // Without this, workspace deps like `better-auth` (installed via
+            // bun's .bun cache) can resolve their own React copy, producing
+            // duplicate instances and "Invalid hook call" errors.
+            dedupe: ['react', 'react-dom'],
         },
         server: {
+            host: '0.0.0.0',
             port: APP_PORT,
             proxy: {
                 '/api': {
