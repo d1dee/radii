@@ -24,7 +24,7 @@ export type OrderResult = PppoeOrderResult;
 
 export type { PppoeActivation };
 
-const BASE = '/api/ppoe';
+const BASE = import.meta.env.VITE_API_URL + '/api/ppoe';
 
 // Optional NAS scoping for the package listing, captured from the portal URL
 // (?nas=<nasDeviceId>) so an operator can link the portal to one router.

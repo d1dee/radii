@@ -27,7 +27,7 @@ export type OrderResult = {
     activation?: ActivationRedirect | null;
 };
 
-const BASE = '/api/hotspot';
+const BASE = import.meta.env.VITE_API_URL + '/api/hotspot';
 
 // The NAS hotspot login page hands the client over to the portal with a
 // `login_request` id; App.tsx persists it so NAS-bound calls can carry it.
