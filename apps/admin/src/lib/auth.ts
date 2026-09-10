@@ -9,6 +9,7 @@ import { createAuthClient } from 'better-auth/react';
 // The Vite dev server proxies `/api` to the Bun+Hono backend, so the auth
 // server is effectively same-origin and requests flow through the proxy.
 export const authClient = createAuthClient({
+    baseURL: import.meta.env.VITE_API_URL,
     basePath: '/api/admin/auth',
     plugins: [adminClient(), emailOTPClient()],
     sessionOptions: {
