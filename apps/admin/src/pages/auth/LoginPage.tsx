@@ -10,10 +10,9 @@ import {
     TextInput,
     Title,
 } from '@mantine/core';
-import { useForm } from '@mantine/form';
+import { schemaResolver, useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
 import { adminLoginSchema } from '@shared/index';
-import { zod4Resolver } from 'mantine-form-zod-resolver';
 import { useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 
@@ -30,7 +29,7 @@ export default function LoginPage() {
             email: '',
             password: '',
         },
-        validate: zod4Resolver(adminLoginSchema),
+        validate: schemaResolver(adminLoginSchema),
     });
 
     // Already signed in with a verified admin email -> straight to console.

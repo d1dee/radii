@@ -19,14 +19,13 @@ import {
     TextInput,
     Title,
 } from '@mantine/core';
-import { useForm } from '@mantine/form';
+import { schemaResolver, useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
 import {
     adminContactsSettingsSchema,
     adminMpesaSettingsSchema,
     type AdminSettings,
 } from '@shared/index';
-import { zod4Resolver } from 'mantine-form-zod-resolver';
 import { useState } from 'react';
 import { MdContacts, MdDashboard, MdPalette, MdPayment } from 'react-icons/md';
 
@@ -390,7 +389,7 @@ function ContactsSection() {
 
     const form = useForm<ContactsFormValues>({
         initialValues: settings.contacts,
-        validate: zod4Resolver(adminContactsSettingsSchema),
+        validate: schemaResolver(adminContactsSettingsSchema),
     });
 
     const handleSubmit = async (values: ContactsFormValues) => {
@@ -460,7 +459,7 @@ function MpesaSection() {
 
     const form = useForm<MpesaFormValues>({
         initialValues: settings.mpesa,
-        validate: zod4Resolver(adminMpesaSettingsSchema),
+        validate: schemaResolver(adminMpesaSettingsSchema),
     });
 
     const handleSubmit = async (values: MpesaFormValues) => {

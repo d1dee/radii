@@ -17,10 +17,9 @@ import {
     TextInput,
     Title,
 } from '@mantine/core';
-import { useForm } from '@mantine/form';
+import { schemaResolver, useForm } from '@mantine/form';
 import { useDebouncedValue } from '@mantine/hooks';
 import { generateSetupScriptSchema } from '@shared/index';
-import { zod4Resolver } from 'mantine-form-zod-resolver';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { MdAdd, MdEdit, MdSearch, MdTerminal } from 'react-icons/md';
 import { useNavigate } from 'react-router-dom';
@@ -101,7 +100,7 @@ export default function NasDevicesPage() {
             pppoeInterface: 'ether3',
             pppoeNetwork: '10.101.0.0/16',
         },
-        validate: zod4Resolver(generateSetupScriptSchema),
+        validate: schemaResolver(generateSetupScriptSchema),
     });
 
     const load = useCallback(async (silent = false) => {

@@ -1,8 +1,8 @@
 import {
-    Container,
     Button,
     Card,
     Center,
+    Container,
     Grid,
     Group,
     Loader,
@@ -12,10 +12,9 @@ import {
     TextInput,
     Title,
 } from '@mantine/core';
-import { useForm } from '@mantine/form';
+import { schemaResolver, useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
 import { createNasDeviceSchema, type NasDeviceOs } from '@shared/index';
-import { zod4Resolver } from 'mantine-form-zod-resolver';
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
@@ -47,7 +46,7 @@ export default function NasDeviceFormPage() {
             location: '',
             status: 'active',
         },
-        validate: zod4Resolver(createNasDeviceSchema),
+        validate: schemaResolver(createNasDeviceSchema),
     });
 
     useEffect(() => {
