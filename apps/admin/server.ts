@@ -1,11 +1,16 @@
 const PORT = parseInt(Bun.env.PORT || '9090');
-const HOSTNAME = Bun.env.HOSTNAME;
+const SERVER_ADDRESS = Bun.env.SERVER_ADDRESS;
+
+if (!SERVER_ADDRESS) {
+    console.error('SERVER_ADDRESS not specified');
+    process.exit('SERVER_ADDRESS_ERROR');
+}
 
 import { join } from 'path';
 
 const server = Bun.serve({
     port: PORT,
-    hostname: HOSTNAME,
+    hostname: SERVER_ADDRESS,
     async fetch(req) {
         const url = new URL(req.url);
 
