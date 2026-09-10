@@ -89,10 +89,7 @@ void reconcileWireGuardPeers().catch((err) =>
     console.error('[wg] reconciliation error:', err),
 );
 
-// Flush the Bun SQL connection pool on shutdown. Without this, SIGINT/SIGTERM
-// (and `bun run --watch` restarts) leave pooled Postgres connections open
-// until they time out server-side. Guarded by globalThis so `bun --hot`
-// re-evaluations of this module don't stack duplicate signal listeners.
+// Flush the Bun SQL connection pool on shutdown.
 const shutdownFlags = globalThis as unknown as {
     __pgShutdownRegistered?: boolean;
 };
