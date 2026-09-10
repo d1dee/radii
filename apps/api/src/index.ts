@@ -33,10 +33,6 @@ app.use(
 
 // Session middleware: resolve BOTH better-auth sessions for every request
 // and attach them (or nothing) to the context for downstream handlers.
-// - user/session: customer portal instance (phone+PIN, `user` table)
-// - admin/adminSession: admin console instance (email+OTP, `admin_user`
-//   table). The two never overlap: separate tables, cookie prefixes and
-//   base paths.
 app.use('*', async (c, next) => {
     const [session, adminSession] = await Promise.all([
         auth.api.getSession({ headers: c.req.raw.headers }),
