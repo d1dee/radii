@@ -10,10 +10,9 @@ import {
     TextInput,
     Title,
 } from '@mantine/core';
-import { useForm } from '@mantine/form';
+import { schemaResolver, useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
 import { adminRegisterSchema } from '@shared/index';
-import { zod4Resolver } from 'mantine-form-zod-resolver';
 import { useState } from 'react';
 import { Link, Navigate, useNavigate } from 'react-router-dom';
 
@@ -31,7 +30,7 @@ export default function RegisterPage() {
             password: '',
             confirmPassword: '',
         },
-        validate: zod4Resolver(adminRegisterSchema),
+        validate: schemaResolver(adminRegisterSchema),
     });
 
     // Registration is open (no manual approval), but an admin with a verified
@@ -55,7 +54,8 @@ export default function RegisterPage() {
             if (error) {
                 notifications.show({
                     color: 'red',
-                    message: error.message || 'Could not create the admin account',
+                    message:
+                        error.message || 'Could not create the admin account',
                 });
                 return;
             }

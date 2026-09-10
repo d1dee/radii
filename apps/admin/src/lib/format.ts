@@ -2,13 +2,13 @@
 // rendering follow the signed-in admin's appearance settings (Settings page);
 // until they load, the defaults below apply.
 
-import type { ConfigType } from 'dayjs';
 import type { AdminSettings } from '@shared/index';
+import type { ConfigType } from 'dayjs';
 import { dayjs } from './dayjs';
 
 const defaultAppearance: AdminSettings['appearance'] = {
     timeFormat: '24h',
-    dateFormat: 'D MMM YYYY',
+    dateFormat: 'DD MMM YYYY',
     timezone: 'Africa/Nairobi',
     currencyLabel: 'Ksh',
 };
@@ -47,9 +47,7 @@ export function formatDayTime(value: ConfigType): string {
 }
 
 export function formatTime(value: ConfigType, withSeconds = false): string {
-    return dayjs(value)
-        .tz(appearance.timezone)
-        .format(timeToken(withSeconds));
+    return dayjs(value).tz(appearance.timezone).format(timeToken(withSeconds));
 }
 
 // Renders a sample with an arbitrary appearance config (settings-page

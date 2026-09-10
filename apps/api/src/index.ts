@@ -33,10 +33,6 @@ app.use(
 
 // Session middleware: resolve BOTH better-auth sessions for every request
 // and attach them (or nothing) to the context for downstream handlers.
-// - user/session: customer portal instance (phone+PIN, `user` table)
-// - admin/adminSession: admin console instance (email+OTP, `admin_user`
-//   table). The two never overlap: separate tables, cookie prefixes and
-//   base paths.
 app.use('*', async (c, next) => {
     const [session, adminSession] = await Promise.all([
         auth.api.getSession({ headers: c.req.raw.headers }),
@@ -93,10 +89,7 @@ void reconcileWireGuardPeers().catch((err) =>
     console.error('[wg] reconciliation error:', err),
 );
 
-// Flush the Bun SQL connection pool on shutdown. Without this, SIGINT/SIGTERM
-// (and `bun run --watch` restarts) leave pooled Postgres connections open
-// until they time out server-side. Guarded by globalThis so `bun --hot`
-// re-evaluations of this module don't stack duplicate signal listeners.
+// Flush the Bun SQL connection pool on shutdown.
 const shutdownFlags = globalThis as unknown as {
     __pgShutdownRegistered?: boolean;
 };

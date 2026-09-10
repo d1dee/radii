@@ -1,8 +1,42 @@
 {
-  "name": "radii",
-  "private": true,
-  "workspaces": ["apps/*"],
-  "dependencies": {
-    "@vitejs/plugin-legacy": "^8.2.3"
-  }
+    "name": "radii",
+    "version": "0.1.0",
+    "private": true,
+    "description": "ISP customer self-service portal with Hotspot and PPPoE portals, admin console, and backend integrations for FreeRADIUS, MikroTik NAS, WireGuard, and M-Pesa.",
+    "workspaces": [
+        "apps/*"
+    ],
+    "scripts": {
+        "dev:api": "bun run --filter api dev",
+        "dev:hotspot": "bun run --filter hotspot dev",
+        "dev:ppoe": "bun run --filter pppoe dev",
+        "dev:admin": "bun run --filter admin dev",
+        "build": "bun run --filter './apps/*' build",
+        "typecheck": "bun run --filter './apps/*' typecheck",
+        "serve": "bun run --filter './apps/*' serve",
+        "serve:admin": "bun run --filter admin serve",
+        "serve:hotspot": "bun run --filter hotspot serve",
+        "serve:ppoe": "bun run --filter pppoe serve",
+        "db:generate": "bun run --filter api db:generate",
+        "db:migrate": "bun run --filter api db:migrate",
+        "wg:reconcile": "bun run --filter api wg:reconcile"
+    },
+    "keywords": [
+        "isp",
+        "hotspot",
+        "pppoe",
+        "radius",
+        "mikrotik",
+        "wireguard",
+        "mpesa",
+        "self-service-portal"
+    ],
+    "author": "Maina Derrick(d1dee)",
+    "license": "AGPL-3.0-only",
+    "engines": {
+        "bun": ">=1.4.0"
+    },
+    "devDependencies": {
+        "@vitejs/plugin-legacy": "^8.2.3"
+    }
 }
