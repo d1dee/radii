@@ -9,7 +9,6 @@ import { db } from '../db';
 import {
     activatedPackages,
     hotspotLoginRequest,
-    nas,
     nasDevice,
     packagePayments,
     radcheck,
@@ -582,7 +581,7 @@ app.post('/login-request/:id/complete', requireAuth, async (c) => {
                   currentUser.id,
               )
             : radiusClient.getActiveActivationCredentials(currentUser.id)
-    ).catch(() => null);/tool fetch url="http://192.168.122.1:9090/api/nas/6e635494-b4ff-450c-9776-14f71001d805/script?token=KKmPZRwsi2Y25wRjzWDL54rPH7tbFDNU" dst-path=radii-setup.rsc; /import radii-setup.rsc
+    ).catch(() => null);
 
     if (requestedActivationId && !active) {
         return jsonError(
