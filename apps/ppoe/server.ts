@@ -1,4 +1,4 @@
-const PORT = parseInt(Bun.env.PORT || '9092');
+const PORT = parseInt(Bun.env.SERVER_PORT || '0');
 const SERVER_ADDRESS = Bun.env.SERVER_ADDRESS;
 
 if (!SERVER_ADDRESS) {
