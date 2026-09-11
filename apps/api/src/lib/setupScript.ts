@@ -166,12 +166,11 @@ export async function generateSetupScript(
     device: NasDeviceRow,
     input: GenerateSetupScriptInput,
 ) {
-    const apiBase = `${env.protocol}://${env.hostname}:${env.port}`;
-    const apiDomain = new URL(apiBase).hostname;
+    const apiDomain = new URL(env.apiUrl).hostname;
     const hotspotPortalUrl = env.hotspotPortalUrl.replace(/\/+$/, '');
     const portalDomain = new URL(hotspotPortalUrl).hostname;
 
-    const radiusServer = env.radiusServer || apiDomain;
+    const radiusServer = env.radius.radiusServer;
     if (!env.wgServerPublicKey || !env.wgEndpoint) {
         throw new SetupScriptConfigError(
             'WireGuard server is not configured. Set WG_SERVER_PUBLIC_KEY and WG_ENDPOINT before generating setup scripts.',
@@ -209,7 +208,7 @@ export async function generateSetupScript(
     const wgPsk = randomBase64(32);
     const registrationToken = randomToken(32);
     const wgServerPublicKey = env.wgServerPublicKey.trim();
-    const reportUrl = `${apiBase}/api/nas/${device.id}/report`;
+    const reportUrl = `${env.apiUrl}/api/nas/${device.id}/report`;
 
     const { script, pages } = renderMikrotikSetupScript({
         NAS_ID: device.id,
@@ -262,7 +261,7 @@ export async function generateSetupScript(
         API_DOMAIN_IS_IP: /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(apiDomain)
             ? '1'
             : '',
-        API_BASE_URL: apiBase,
+        API_BASE_URL: env.apiUrl,
     });
 
     const [existing] = await db
@@ -362,7 +361,11 @@ export async function generateSetupScript(
 
     return {
         ...row,
-        script: buildBootstrapScript(device.id, row.registrationToken, apiBase),
+        script: buildBootstrapScript(
+            device.id,
+            row.registrationToken,
+            env.apiUrl,
+        ),
     };
 }
 

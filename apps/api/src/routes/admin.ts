@@ -287,7 +287,7 @@ app.get('/nas-devices/:id/setup-script', requireAdmin, async (c) => {
     if (!row) {
         return jsonError(c, 404, 'No setup script generated yet');
     }
-    const apiBase = `${env.protocol}://${env.hostname}:${env.port}`;
+
     return c.json({
         success: true,
         data: {
@@ -295,7 +295,7 @@ app.get('/nas-devices/:id/setup-script', requireAdmin, async (c) => {
             script: buildBootstrapScript(
                 device.id,
                 row.registrationToken,
-                apiBase,
+                env.apiUrl,
             ),
         },
     });

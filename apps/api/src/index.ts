@@ -107,8 +107,8 @@ if (!shutdownFlags.__pgShutdownRegistered) {
 }
 
 const server = Bun.serve({
-    hostname: env.hostname,
-    port: env.port,
+    hostname: process.env.SERVER_ADDRESS,
+    port: process.env.SERVER_PORT,
     fetch: app.fetch,
 });
 

@@ -11,9 +11,7 @@ function required(name: string): string {
 }
 
 export const env = {
-    protocol: required('API_PROTOCOL'),
-    hostname: required('API_HOSTNAME'),
-    port: parseInt(required('API_PORT'), 10),
+    apiUrl: required('API_URL'),
     adminFrontendUrls: (process.env.ADMIN_FRONTEND_URLS || '')
         .split(',')
         .map((s) => s.trim())
@@ -26,7 +24,7 @@ export const env = {
     // NAS setup-script generation (all optional, defaults applied in the
     // generator). RADIUS_SERVER/WG_* values are substituted into the
     // RouterOS template rendered for each NAS device.
-    radiusServer: process.env.RADIUS_SERVER || '',
+
     hotspotPortalUrl: required('HOTSPOT_PORTAL_URL'),
     ntpServers: process.env.NTP_SERVERS || '0.pool.ntp.org,1.pool.ntp.org',
     wgManagementSubnet: process.env.WG_MANAGEMENT_SUBNET || '10.99.0.0/16',
@@ -67,6 +65,7 @@ export const env = {
     // stored in nas_setup_script; the NAS is resolved from the session's
     // NAS-IP-Address.
     radius: {
+        radiusServer: required('RADIUS_SERVER'),
         url: process.env.RADIUS_URL || '',
         secret: process.env.RADIUS_SECRET || '',
         acctPort: parseInt(process.env.RADIUS_ACCT_PORT || '1813', 10),
