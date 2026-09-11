@@ -3,8 +3,10 @@
 
 function required(name: string): string {
     const value = process.env[name];
-    if (!value)
-        throw new Error(`Missing required environment variable: ${name}`);
+    if (!value) {
+        console.error(`Missing required environment variable: ${name}`);
+        process.exit(1);
+    }
     return value;
 }
 
@@ -19,6 +21,7 @@ export const env = {
         .split(',')
         .map((s) => s.trim())
         .filter(Boolean),
+    databaseUrl: required('DATABASE_URL'),
     // NAS setup-script generation (all optional, defaults applied in the
     // generator). RADIUS_SERVER/WG_* values are substituted into the
     // RouterOS template rendered for each NAS device.

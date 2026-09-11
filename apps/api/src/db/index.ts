@@ -1,10 +1,9 @@
 import { SQL } from 'bun';
 import { drizzle } from 'drizzle-orm/bun-sql';
+import { env } from '../env';
 import * as schema from './schema';
 
-const connectionString =
-    process.env.DATABASE_URL ||
-    'postgresql://postgres:lookup0p0...@127.0.0.1:5432/radii';
+const connectionString = env.databaseUrl;
 
 // Bun SQL pool tuning to avoid Postgres rejecting new clients with ("too many clients already").
 const poolOptions = {

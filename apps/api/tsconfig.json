@@ -6,8 +6,8 @@
         "sourceMap": true,
         "skipLibCheck": true,
         "outDir": "./dist",
-        "rootDir": "./src",
+        "rootDir": "./",
         "types": ["bun", "node"]
     },
-    "include": ["src/**/*"]
+    "include": ["src/**/*", "./drizzle.config.ts"]
 }
