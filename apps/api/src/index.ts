@@ -81,8 +81,6 @@ app.onError((err, c) => {
     );
 });
 
-console.log(`API listening on http://${env.baseUrl}}:${env.port}`);
-
 // Converge the WireGuard interface to the database (source of truth) after
 // restarts: re-asserts known peers and prunes stale ones. Never fatal.
 void reconcileWireGuardPeers().catch((err) =>
@@ -108,7 +106,12 @@ if (!shutdownFlags.__pgShutdownRegistered) {
     process.on('SIGTERM', () => void shutdown('SIGTERM'));
 }
 
-export default {
+const server = Bun.serve({
+    hostname: env.hostname,
     port: env.port,
     fetch: app.fetch,
-};
+});
+
+console.info(
+    `Bun server started at: ${server.protocol}://${server.hostname}:${server.port}`,
+);

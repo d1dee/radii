@@ -11,8 +11,9 @@ function required(name: string): string {
 }
 
 export const env = {
-    baseUrl: required('BASE_URL'),
-    port: parseInt(required('PORT'), 10),
+    protocol: required('API_PROTOCOL'),
+    hostname: required('API_HOSTNAME'),
+    port: parseInt(required('API_PORT'), 10),
     adminFrontendUrls: (process.env.ADMIN_FRONTEND_URLS || '')
         .split(',')
         .map((s) => s.trim())
