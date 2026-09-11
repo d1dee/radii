@@ -27,7 +27,7 @@ export const env = {
     // generator). RADIUS_SERVER/WG_* values are substituted into the
     // RouterOS template rendered for each NAS device.
     radiusServer: process.env.RADIUS_SERVER || '',
-    portalUrl: process.env.PORTAL_URL || '',
+    hotspotPortalUrl: required('HOTSPOT_PORTAL_URL'),
     ntpServers: process.env.NTP_SERVERS || '0.pool.ntp.org,1.pool.ntp.org',
     wgManagementSubnet: process.env.WG_MANAGEMENT_SUBNET || '10.99.0.0/16',
     // The radii server's own WireGuard interface address inside

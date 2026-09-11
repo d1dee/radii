@@ -166,10 +166,10 @@ export async function generateSetupScript(
     device: NasDeviceRow,
     input: GenerateSetupScriptInput,
 ) {
-    const apiBase = env.baseUrl.replace(/\/+$/, '');
-    const apiDomain = new URL(env.baseUrl).hostname;
-    const portalUrl = (env.portalUrl || apiBase).replace(/\/+$/, '');
-    const portalDomain = new URL(portalUrl).hostname;
+    const apiBase = `${env.protocol}://${env.hostname}:${env.port}`;
+    const apiDomain = new URL(apiBase).hostname;
+    const hotspotPortalUrl = env.hotspotPortalUrl.replace(/\/+$/, '');
+    const portalDomain = new URL(hotspotPortalUrl).hostname;
 
     const radiusServer = env.radiusServer || apiDomain;
     if (!env.wgServerPublicKey || !env.wgEndpoint) {
@@ -251,7 +251,7 @@ export async function generateSetupScript(
         PPP_INTERIM_UPDATE: `${env.radius.bankInterimSeconds}s`,
         NTP_SERVERS: env.ntpServers,
         BRAND_NAME: brandName,
-        PORTAL_URL: portalUrl,
+        PORTAL_URL: hotspotPortalUrl,
         PORTAL_DOMAIN: portalDomain,
         PORTAL_DOMAIN_IS_IP: /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(
             portalDomain,
