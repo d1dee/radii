@@ -34,6 +34,7 @@ export default defineConfig(({ mode }) => {
         server: {
             host: '0.0.0.0',
             port: APP_PORT,
+            cors: false,
             proxy: {
                 '/api': {
                     target: API_URL,
