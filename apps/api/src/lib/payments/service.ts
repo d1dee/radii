@@ -17,6 +17,7 @@
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { db } from '../../db';
 import { packagePayments, transaction, transactionLog } from '../../db/schema';
+import { env } from '../../env';
 import { getAdminIdForNasDevice, getAdminIdForUser } from '../adminSettings';
 import { getPaymentByTransactionCode, type PackageRow } from '../packages';
 import { radiusClient, type ActivationRedirect } from '../radius';
@@ -119,8 +120,7 @@ export class PaymentService {
     }
 
     callbackBaseUrl(providerName: string): string {
-        // return `${env.baseUrl.replace(/\/+$/, '')}/api/payments/callback/${providerName}`;
-        return `https://demo.mono.co.ke/api/payments/callback/${providerName}`;
+        return `${env.apiUrl}/api/payments/callback/${providerName}`;
     }
 
     // Provider names a receipt/verification lookup should span: the resolved
@@ -503,10 +503,7 @@ export class PaymentService {
         payload: unknown,
     ): Promise<CallbackRouteResponse> {
         let provider = await this.resolveProvider(providerName);
-        if (
-            !provider &&
-            parseAdminIdFromProviderName(providerName)
-        ) {
+        if (!provider && parseAdminIdFromProviderName(providerName)) {
             // The admin's own credentials are no longer resolvable (settings
             // cleared/disabled). Callback payload parsing is credential-
             // agnostic, so the global M-Pesa provider can still normalize it

@@ -262,10 +262,7 @@ app.post('/order', requireAuth, async (c) => {
     });
 
     // Hand the purchase to the default registered payment provider (gateway
-    // specifics live inside the provider; see lib/payments). On failure the
-    // payment row stays pending so the customer can retry. The login request
-    // is recorded with the transaction so activation can later find the NAS
-    // servlet links for the redirect back to MikroTik.
+    // specifics live inside the provider; see lib/payments).
     const initiated = await paymentService.initiatePackagePayment(
         row,
         pkg,
