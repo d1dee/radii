@@ -109,7 +109,7 @@ app.post('/packages', requireAdmin, async (c) => {
         return jsonError(c, 400, 'Unknown NAS device');
     }
     const row = await createPackage(
-        { ...data, price: String(data.price) },
+        { ...data, price: String(data.price), createdBy: c.var.admin.id },
         nasDeviceIds,
     );
 
