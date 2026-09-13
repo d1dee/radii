@@ -29,12 +29,12 @@ export const packages = pgTable(
             .notNull(),
         category: text('category').notNull(),
         sessionLength: integer('session_length').notNull(),
-        // Static validity of an activation in days, counted from activation.
-        // For cumulative time-bank packages (no_expiry) the bank may be
-        // consumed any time within this window; afterwards logins are
-        // rejected via the radcheck Expiration date.
-        createdBy: text().references(() => adminUser.id),
+        // Legacy/configurable validity retained for package records. Runtime
+        // expiry packages use their persisted activation expiry; no-expiry
+        // packages use a fixed six-month validity and a cumulative time bank.
+
         validityDays: integer('validity_days').default(30).notNull(),
+        createdBy: text().references(() => adminUser.id),
         price: numeric('price', { precision: 10, scale: 2 }).notNull(),
         maxDevices: integer('max_devices').notNull(),
         noExpiry: boolean('no_expiry').notNull(),

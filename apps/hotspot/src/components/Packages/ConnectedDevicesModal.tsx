@@ -22,7 +22,6 @@ import {
     getStatus,
     type HotspotRedirectData,
 } from '@lib/api.ts';
-import { dayjs } from '@lib/dayjs.ts';
 import { notifications } from '@mantine/notifications';
 import type { Quota } from '@radii/shared';
 import humanFormat from 'human-format';
@@ -158,9 +157,7 @@ export function ConnectedDevicesModal({ isOpen, onClose, syncQuota }: Props) {
                         </Stack>
                     </Table.Td>
                     <Table.Td style={{ maxWidth: 130 }}>
-                        {timeRemaining(
-                            dayjs.duration(v.remainingSessionLength || 0, 'm'),
-                        )}
+                        {timeRemaining(v.remainingSeconds)}
                     </Table.Td>
                     <Table.Td>
                         {pendingDeauth.includes(v.id) ? (

@@ -20,6 +20,7 @@ export type Package = {
 export type Quota = {
     remainingSessionLength: number;
     sessionLength: number;
+    remainingSeconds: number;
     id: string;
     lastActive?: string;
     clientMac?: string;
@@ -41,7 +42,7 @@ export type Quota = {
     remainingOctets?: number | null;
     avgSpeedBps?: number;
     // Cumulative time-bank packages (noExpiry): total/used/remaining bank
-    // seconds within the static validity window. Null for regular packages.
+    // seconds. Null for regular expiry packages.
     bankTotalSeconds?: number | null;
     bankUsedSeconds?: number | null;
     bankRemainingSeconds?: number | null;

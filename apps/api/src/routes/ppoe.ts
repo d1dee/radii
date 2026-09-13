@@ -256,14 +256,12 @@ app.get('/status', requireAuth, async (c) => {
         .filter((v) => v)
         .map((a) => ({
             id: a.activationId,
-            // PPPoE time is governed by the package's validity window (the
-            // session lives until the expiry date), so both figures derive
-            // from it instead of the per-session allowance.
             sessionLength: Math.ceil(a.sessionLimitSeconds / 60),
             remainingSessionLength:
                 a.remainingSeconds === null
                     ? 0
                     : Math.ceil(a.remainingSeconds / 60),
+            remainingSeconds: a.remainingSeconds ?? 0,
             price: a.price,
             uploadRate: a.uploadRate,
             downloadRate: a.downloadRate,
@@ -287,6 +285,11 @@ app.get('/status', requireAuth, async (c) => {
             username: a.username,
             usedSeconds: a.usedSeconds,
             sessionLimitSeconds: a.sessionLimitSeconds,
+            bankTotalSeconds: a.noExpiry ? a.sessionLength * 60 : null,
+            bankUsedSeconds: a.noExpiry ? a.usedSeconds : null,
+            bankRemainingSeconds: a.noExpiry
+                ? Math.max(0, a.sessionLength * 60 - a.usedSeconds)
+                : null,
             octetsUsed: a.octetsUsed,
             octetsLimit: a.octetsLimit,
             remainingOctets: a.remainingOctets,

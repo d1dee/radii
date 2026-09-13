@@ -173,6 +173,7 @@ app.get('/status', requireAuth, async (c) => {
                     a.remainingSeconds === null
                         ? 0
                         : Math.ceil(a.remainingSeconds / 60),
+                remainingSeconds: a.remainingSeconds ?? 0,
                 price: a.price,
                 uploadRate: a.uploadRate,
                 downloadRate: a.downloadRate,
@@ -194,6 +195,13 @@ app.get('/status', requireAuth, async (c) => {
                 username: a.username,
                 usedSeconds: a.usedSeconds,
                 sessionLimitSeconds: a.sessionLimitSeconds,
+                bankTotalSeconds: a.noExpiry
+                    ? a.sessionLength * 60
+                    : null,
+                bankUsedSeconds: a.noExpiry ? a.usedSeconds : null,
+                bankRemainingSeconds: a.noExpiry
+                    ? Math.max(0, a.sessionLength * 60 - a.usedSeconds)
+                    : null,
                 octetsUsed: a.octetsUsed,
                 octetsLimit: a.octetsLimit,
                 remainingOctets: a.remainingOctets,

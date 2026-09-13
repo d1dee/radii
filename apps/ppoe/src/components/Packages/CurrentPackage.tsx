@@ -13,7 +13,6 @@ import { timeRemaining } from './functions.ts';
 
 import type { Quota } from '@/types/index.ts';
 import { getStatus } from '@lib/api.ts';
-import { dayjs } from '@lib/dayjs.ts';
 import { useDisclosure, useInterval } from '@mantine/hooks';
 import { IconSelector } from '@tabler/icons-react';
 import humanFormat from 'human-format';
@@ -37,8 +36,17 @@ export function CurrentPackage() {
     // Prefer an online activation; fall back to the most recent one.
     const thisDevice = quota.find((v) => v.online) || quota[0];
 
-    const progressValue =
-        (thisDevice?.remainingSessionLength / thisDevice?.sessionLength) * 100;
+    const progressValue = thisDevice
+        ? Math.max(
+              0,
+              Math.min(
+                  100,
+                  (thisDevice.remainingSeconds /
+                      (thisDevice.sessionLimitSeconds || 1)) *
+                      100,
+              ),
+          )
+        : 0;
 
     const avgTransferSpeed = thisDevice?.avgSpeedBps
         ? humanFormat(thisDevice?.avgSpeedBps / 1e3, {
@@ -62,12 +70,7 @@ export function CurrentPackage() {
                             Time remaining
                         </Text>
                         <Text size='sm' fw={500}>
-                            {timeRemaining(
-                                dayjs.duration(
-                                    thisDevice?.remainingSessionLength || 0,
-                                    'm',
-                                ),
-                            )}
+                            {timeRemaining(thisDevice?.remainingSeconds || 0)}
                         </Text>
                     </Group>
 

@@ -3,26 +3,27 @@ import type { Quota } from '../../types/index.ts';
 import { dayjs } from '../../lib/dayjs.ts';
 import { getStatus } from '../../lib/api.ts';
 
-export function timeRemaining(duration: ReturnType<typeof dayjs.duration>) {
-    return duration
-        .format(
-            'YYYY [year]-MM [month]-DD [day]-HH [hour]-mm [minute]-ss [second]',
-        )
-        .replace(/(?:\s|-){0,}(?:0{2,}\s[a-z]+)/g, '')
-        .split('-')
-        .map((v: string) => {
-            const duration = Number(v.split(' ')[0] || 0);
+export function timeRemaining(totalSeconds: number) {
+    let remaining = Math.max(0, Math.floor(totalSeconds));
+    const units = [
+        ['week', 7 * 24 * 60 * 60],
+        ['day', 24 * 60 * 60],
+        ['hour', 60 * 60],
+        ['minute', 60],
+        ['second', 1],
+    ] as const;
+    const parts: string[] = [];
 
-            if (duration > 7 && v.split(' ')[1] === 'day') {
-                return `${Math.floor(duration)} week${Math.floor(duration) > 1 ? 's' : ''} ${
-                    duration % 7 == 0
-                        ? ''
-                        : `${duration % 7} day${duration % 7 > 1 ? 's' : ''}`
-                }`;
-            }
-            return duration === 0 ? '' : duration > 1 ? v + 's' : v;
-        })
-        .join(' ');
+    for (const [label, seconds] of units) {
+        const value = Math.floor(remaining / seconds);
+        if (value > 0) {
+            parts.push(`${value} ${label}${value === 1 ? '' : 's'}`);
+            remaining %= seconds;
+        }
+        if (parts.length === 2) break;
+    }
+
+    return parts.join(' ') || '0 seconds';
 }
 
 export async function checkQuotaStatus(

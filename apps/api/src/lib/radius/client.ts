@@ -67,6 +67,36 @@ import {
     user,
 } from '../../db/schema';
 
+const NO_EXPIRY_VALIDITY_MONTHS = 6;
+
+function effectiveExpireAt(
+    activation: typeof activatedPackages.$inferSelect,
+    pkg: typeof packages.$inferSelect,
+): Date {
+    return pkg.noExpiry
+        ? dayjs(activation.activatedAt)
+              .add(NO_EXPIRY_VALIDITY_MONTHS, 'month')
+              .toDate()
+        : activation.expireAt;
+}
+
+function activeActivationCondition() {
+    const now = new Date();
+    const bankCutoff = dayjs(now)
+        .subtract(NO_EXPIRY_VALIDITY_MONTHS, 'month')
+        .toDate();
+    return or(
+        and(
+            eq(packages.noExpiry, true),
+            gte(activatedPackages.activatedAt, bankCutoff),
+        ),
+        and(
+            eq(packages.noExpiry, false),
+            gte(activatedPackages.expireAt, now),
+        ),
+    );
+}
+
 export class RadiusError extends Error {
     constructor(
         message: string,
@@ -252,8 +282,8 @@ export interface ActivationStatus {
     expired: boolean;
     sessionLimitSeconds: number;
     usedSeconds: number;
-    // Bank packages report the remaining CUMULATIVE balance here; regular
-    // packages the remaining per-session allowance.
+    // Bank packages report the smaller of their cumulative balance and their
+    // calendar validity; expiry packages report wall-clock time to expireAt.
     remainingSeconds: number | null;
     octetsUsed: number;
     octetsLimit: number | null; // null = unlimited
@@ -495,6 +525,14 @@ export class RadiusClient {
         const activation =
             existing ?? (await this.provisionPppoeActivation(payment, pkg));
 
+        if (effectiveExpireAt(activation, pkg).getTime() <= Date.now()) {
+            return null;
+        }
+        if (pkg.noExpiry) {
+            const usage = await this.getBankUsage(activation.id);
+            if (!usage || usage.remainingSeconds <= 0) return null;
+        }
+
         const username = pppoeUsername(payment.userId);
 
         // Generate credentials only on the very first PPPoE purchase.
@@ -526,16 +564,30 @@ export class RadiusClient {
     ): Promise<void> {
         const username = pppoeUsername(activation.userId);
 
+        const expireAt = effectiveExpireAt(activation, pkg);
         await this.upsertCheckAttribute(
             username,
             'Expiration',
-            dayjs(activation.expireAt).format('DD MMM YYYY HH:mm:ss'),
+            dayjs(expireAt).format('DD MMM YYYY HH:mm:ss'),
         );
 
-        const sessionSeconds = Math.max(
-            1,
-            Math.round((activation.expireAt.getTime() - Date.now()) / 1000),
-        );
+        const usage = pkg.noExpiry
+            ? await this.getBankUsage(activation.id)
+            : null;
+        const sessionSeconds = pkg.noExpiry
+            ? Math.max(
+                  1,
+                  Math.min(
+                      usage?.remainingSeconds ?? 0,
+                      Math.round((expireAt.getTime() - Date.now()) / 1000),
+                  ),
+              )
+            : Math.max(
+                  1,
+                  Math.round(
+                      (expireAt.getTime() - Date.now()) / 1000,
+                  ),
+              );
         await db.delete(radreply).where(eq(radreply.username, username));
         await db
             .insert(radreply)
@@ -584,7 +636,7 @@ export class RadiusClient {
                 and(
                     eq(activatedPackages.userId, userId),
                     eq(packages.type, 'hotspot'),
-                    gte(activatedPackages.expireAt, new Date()),
+                    activeActivationCondition(),
                 ),
             )
             .orderBy(desc(activatedPackages.activatedAt))
@@ -625,7 +677,7 @@ export class RadiusClient {
                     eq(activatedPackages.id, activationId),
                     eq(activatedPackages.userId, userId),
                     eq(packages.type, 'hotspot'),
-                    gte(activatedPackages.expireAt, new Date()),
+                    activeActivationCondition(),
                 ),
             )
             .limit(1);
@@ -666,7 +718,7 @@ export class RadiusClient {
             .where(
                 and(
                     eq(activatedPackages.userId, userId),
-                    gte(activatedPackages.expireAt, new Date()),
+                    activeActivationCondition(),
                     type ? eq(packages.type, type) : undefined,
                 ),
             )
@@ -739,7 +791,7 @@ export class RadiusClient {
                 and(
                     eq(activatedPackages.userId, userId),
                     eq(packages.type, 'pppoe'),
-                    gte(activatedPackages.expireAt, new Date()),
+                    activeActivationCondition(),
                 ),
             )
             .orderBy(desc(activatedPackages.activatedAt))
@@ -771,7 +823,7 @@ export class RadiusClient {
             password: password!,
             packageTitle: row.pkg.title,
             activatedAt: row.activation.activatedAt,
-            expireAt: row.activation.expireAt,
+            expireAt: effectiveExpireAt(row.activation, row.pkg),
             online,
         }));
     }
@@ -794,7 +846,7 @@ export class RadiusClient {
                     eq(activatedPackages.id, activationId),
                     eq(activatedPackages.userId, userId),
                     eq(packages.type, 'pppoe'),
-                    gte(activatedPackages.expireAt, new Date()),
+                    activeActivationCondition(),
                 ),
             )
             .limit(1);
@@ -921,17 +973,23 @@ export class RadiusClient {
     > {
         const row = await this.resolveActivationByUsername(username);
         if (!row) return this.restAuthorizePppoe(username);
-        if (row.activation.expireAt.getTime() < Date.now()) {
+        const expireAt = effectiveExpireAt(row.activation, row.pkg);
+        if (expireAt.getTime() < Date.now()) {
             return { verdict: 'expired' };
         }
-        let sessionSeconds = row.pkg.sessionLength * 60;
-
-        const sync = await this.syncBankAuthorization(
-            row.activation.id,
-            row.pkg,
+        let sessionSeconds = Math.max(
+            1,
+            Math.round((expireAt.getTime() - Date.now()) / 1000),
         );
-        if (!sync.active) return { verdict: 'exhausted' };
-        sessionSeconds = sync.remainingSeconds;
+
+        if (row.pkg.noExpiry) {
+            const sync = await this.syncBankAuthorization(
+                row.activation.id,
+                row.pkg,
+            );
+            if (!sync.active) return { verdict: 'exhausted' };
+            sessionSeconds = sync.remainingSeconds;
+        }
 
         return {
             verdict: 'ok',
@@ -951,6 +1009,7 @@ export class RadiusClient {
     ): Promise<
         | { verdict: 'unknown' }
         | { verdict: 'expired' }
+        | { verdict: 'exhausted' }
         | { verdict: 'ok'; attributes: RadiusRestReply }
     > {
         const userId = await this.resolvePppoeUserByUsername(username);
@@ -969,17 +1028,23 @@ export class RadiusClient {
             .orderBy(desc(activatedPackages.activatedAt))
             .limit(1);
         if (!row) return { verdict: 'unknown' };
-        if (row.activation.expireAt.getTime() < Date.now()) {
+        const expireAt = effectiveExpireAt(row.activation, row.pkg);
+        if (expireAt.getTime() < Date.now()) {
             return { verdict: 'expired' };
         }
 
-        // Session-Timeout = time remaining until the activation's expiry
-        // date, so the PPP session lives exactly as long as the package
-        // (identical to the radreply rows written at activation/renewal).
-        const sessionSeconds = Math.max(
+        let sessionSeconds = Math.max(
             1,
-            Math.round((row.activation.expireAt.getTime() - Date.now()) / 1000),
+            Math.round((expireAt.getTime() - Date.now()) / 1000),
         );
+        if (row.pkg.noExpiry) {
+            const sync = await this.syncBankAuthorization(
+                row.activation.id,
+                row.pkg,
+            );
+            if (!sync.active) return { verdict: 'exhausted' };
+            sessionSeconds = sync.remainingSeconds;
+        }
         return {
             verdict: 'ok',
             attributes: this.buildRestReplyAttributes(
@@ -1087,7 +1152,7 @@ export class RadiusClient {
                         eq(activatedPackages.userId, activation.userId),
                         ne(activatedPackages.id, activationId),
                         eq(packages.type, 'pppoe'),
-                        gte(activatedPackages.expireAt, new Date()),
+                        activeActivationCondition(),
                     ),
                 )
                 .orderBy(desc(activatedPackages.activatedAt))
@@ -1288,14 +1353,18 @@ export class RadiusClient {
 
         const { activation, pkg } = row;
         const expireAt = pkg.noExpiry
-            ? dayjs()
-                  .add(pkg.validityDays ?? 30, 'day')
-                  .toDate()
+            ? dayjs().add(NO_EXPIRY_VALIDITY_MONTHS, 'month').toDate()
             : dayjs().add(pkg.sessionLength, 'minute').toDate();
         activation.expireAt = expireAt;
+        if (pkg.noExpiry) activation.activatedAt = new Date();
         await db
             .update(activatedPackages)
-            .set({ expireAt })
+            .set({
+                expireAt,
+                ...(pkg.noExpiry
+                    ? { activatedAt: activation.activatedAt }
+                    : {}),
+            })
             .where(eq(activatedPackages.id, activationId));
 
         if (pkg.type === 'pppoe') {
@@ -1735,16 +1804,18 @@ export class RadiusClient {
     // =========================================================================
 
     // Balance of an activation's time bank: the package's sessionLength is the
-    // TOTAL minutes consumable across sessions within the validity window.
+    // TOTAL minutes consumable across sessions within the six-month validity.
     // Usage = closed sessions' Acct-Session-Time + live sessions' elapsed
     // time (accounting interim updates keep the closed-figure side fresh).
     async getBankUsage(activationId: string): Promise<{
         totalSeconds: number;
         usedSeconds: number;
         remainingSeconds: number;
+        username: string;
+        expireAt: Date;
     } | null> {
         const [row] = await db
-            .select({ pkg: packages })
+            .select({ activation: activatedPackages, pkg: packages })
             .from(activatedPackages)
             .innerJoin(packages, eq(activatedPackages.packageId, packages.id))
             .where(eq(activatedPackages.id, activationId))
@@ -1752,8 +1823,12 @@ export class RadiusClient {
         if (!row) return null;
 
         const totalSeconds = row.pkg.sessionLength * 60;
+        const username =
+            row.pkg.type === 'pppoe'
+                ? pppoeUsername(row.activation.userId)
+                : activationUsername(activationId);
         const sessions = await this.getSessions({
-            username: activationUsername(activationId),
+            username,
             activationId,
         });
         let usedSeconds = 0;
@@ -1767,6 +1842,8 @@ export class RadiusClient {
                 0,
                 Math.round(totalSeconds - usedSeconds),
             ),
+            username,
+            expireAt: effectiveExpireAt(row.activation, row.pkg),
         };
     }
 
@@ -1785,8 +1862,8 @@ export class RadiusClient {
         activationId: string,
         pkg: typeof packages.$inferSelect,
     ): Promise<{ active: boolean; remainingSeconds: number }> {
-        const username = activationUsername(activationId);
         const usage = await this.getBankUsage(activationId);
+        const username = usage?.username ?? activationUsername(activationId);
         const remainingSeconds = usage?.remainingSeconds ?? 0;
         const liveSessions = await this.getSessions({
             username,
@@ -1794,21 +1871,37 @@ export class RadiusClient {
             liveOnly: true,
         });
 
-        if (remainingSeconds <= 0) {
+        if (
+            remainingSeconds <= 0 ||
+            !usage ||
+            usage.expireAt.getTime() <= Date.now()
+        ) {
             await this.deactivateActivation(activationId);
             return { active: false, remainingSeconds: 0 };
         }
 
+        const enforcedSeconds = Math.min(
+            remainingSeconds,
+            Math.max(
+                1,
+                Math.round((usage.expireAt.getTime() - Date.now()) / 1000),
+            ),
+        );
         await this.upsertReplyAttribute(
             username,
             'Session-Timeout',
-            String(remainingSeconds),
+            String(enforcedSeconds),
+        );
+        await this.upsertCheckAttribute(
+            username,
+            'Expiration',
+            dayjs(usage.expireAt).format('DD MMM YYYY HH:mm:ss'),
         );
         for (const session of liveSessions) {
             await this.coaSessionTimeout(
                 username,
                 session,
-                remainingSeconds,
+                enforcedSeconds,
             ).catch((err) =>
                 console.error(
                     `[radius] bank CoA failed on ${session.nasIpAddress}:`,
@@ -1816,53 +1909,27 @@ export class RadiusClient {
                 ),
             );
         }
-        return { active: true, remainingSeconds };
+        return { active: true, remainingSeconds: enforcedSeconds };
     }
 
-    // Periodic bank reconciliation: every active bank activation gets its
-    // balance re-checked (caps pushed / exhausted ones cut), and activations
-    // whose validity window has closed still get their live sessions
-    // disconnected (the radcheck Expiration date already blocks fresh logins,
-    // but running sessions survive without this sweep). Hotspot only: PPPoE
-    // uses stable credentials whose sessions are capped at the package's
-    // expiry date at authorization time (no cumulative bank accounting).
+    // Periodic bank reconciliation keeps both hotspot and PPPoE bank balances
+    // synchronized with their live Session-Timeout caps.
     async reconcileBankPackages(): Promise<number> {
         const rows = await db
             .select({ activation: activatedPackages, pkg: packages })
             .from(activatedPackages)
             .innerJoin(packages, eq(activatedPackages.packageId, packages.id))
-            .where(
-                and(eq(packages.noExpiry, true), eq(packages.type, 'hotspot')),
-            );
+            .where(eq(packages.noExpiry, true));
 
         let touched = 0;
         for (const row of rows) {
             try {
-                if (row.activation.expireAt.getTime() < Date.now()) {
-                    const username = activationUsername(row.activation.id);
-                    const liveSessions = await this.getSessions({
-                        username,
-                        activationId: row.activation.id,
-                        liveOnly: true,
-                    });
-                    for (const session of liveSessions) {
-                        try {
-                            if (
-                                await this.terminateSessionAtNas(
-                                    username,
-                                    session,
-                                )
-                            ) {
-                                await this.closeSessionRecord(session);
-                            }
-                        } catch (err) {
-                            console.error(
-                                `[radius] expiry disconnect failed on ${session.nasIpAddress}:`,
-                                err,
-                            );
-                        }
-                    }
-                    if (liveSessions.length) touched++;
+                if (
+                    effectiveExpireAt(row.activation, row.pkg).getTime() <=
+                    Date.now()
+                ) {
+                    await this.deactivateActivation(row.activation.id);
+                    touched++;
                     continue;
                 }
                 await this.syncBankAuthorization(row.activation.id, row.pkg);
@@ -1901,7 +1968,7 @@ export class RadiusClient {
         pkg: typeof packages.$inferSelect,
     ) {
         const expireAt = pkg.noExpiry
-            ? dayjs().add(pkg.validityDays ?? 30, 'days')
+            ? dayjs().add(NO_EXPIRY_VALIDITY_MONTHS, 'month')
             : dayjs().add(pkg.sessionLength, 'minutes');
 
         const activationId = randomUUID();
@@ -1936,11 +2003,10 @@ export class RadiusClient {
                     op: ':=',
                     value: password,
                 },
-
                 {
                     username,
                     attribute: 'Expiration',
-                    op: ':=',
+                    op: ':=' as const,
                     value: expireAt.format('DD MMM YYYY HH:mm:ss'),
                 },
             ]);
@@ -1982,7 +2048,7 @@ export class RadiusClient {
         pkg: typeof packages.$inferSelect,
     ) {
         const expireAt = pkg.noExpiry
-            ? dayjs().add(pkg.validityDays ?? 30, 'days')
+            ? dayjs().add(NO_EXPIRY_VALIDITY_MONTHS, 'month')
             : dayjs().add(pkg.sessionLength, 'minutes');
 
         const activationId = randomUUID();
@@ -2383,10 +2449,12 @@ export class RadiusClient {
         liveOnly?: boolean;
         limit?: number;
     }): Promise<SessionInfo[]> {
-        const match = or(
-            eq(radacct.username, opts.username),
-            eq(radacct.class, opts.activationId),
-        );
+        const match = opts.username.startsWith('PPP-')
+            ? eq(radacct.class, opts.activationId)
+            : or(
+                  eq(radacct.username, opts.username),
+                  eq(radacct.class, opts.activationId),
+              );
         const rows = await db
             .select()
             .from(radacct)
@@ -2457,39 +2525,34 @@ export class RadiusClient {
         const cumulativeUsed = sessions.reduce((sum, s) => sum + s.seconds, 0);
         const usedSeconds = Math.round(cumulativeUsed);
 
-        let sessionLimitSeconds: number;
-        let remainingSeconds: number;
-        if (pkg.type === 'pppoe') {
-            // PPPoE dialers hold STABLE credentials and their session is
-            // capped at the package's expiry date (Session-Timeout set to the
-            // time remaining until expiry at activation/renewal), so time is
-            // reported against the validity window — not a per-session
-            // allowance, and never auto-deactivated for time usage.
-            sessionLimitSeconds = Math.max(
-                1,
-                Math.round(
-                    (activation.expireAt.getTime() -
-                        activation.activatedAt.getTime()) /
-                        1000,
-                ),
-            );
-            remainingSeconds = Math.max(
-                0,
-                Math.round((activation.expireAt.getTime() - Date.now()) / 1000),
-            );
-        } else {
-            const totalSeconds = pkg.sessionLength * 60;
-            // Bank (noExpiry) packages: time is cumulative across sessions
-            // within the validity window. Regular packages: per-session
-            // allowance.
-            sessionLimitSeconds = totalSeconds;
-            remainingSeconds = Math.max(
-                0,
-                Math.round(totalSeconds - cumulativeUsed),
-            );
-            if (totalSeconds <= cumulativeUsed && liveSessions.length > 0) {
-                await radiusClient.deactivateActivation(activationId);
-            }
+        const expireAt = effectiveExpireAt(activation, pkg);
+        const calendarLimitSeconds = Math.max(
+            1,
+            Math.round(
+                (expireAt.getTime() - activation.activatedAt.getTime()) / 1000,
+            ),
+        );
+        const bankTotalSeconds = pkg.sessionLength * 60;
+        const sessionLimitSeconds = pkg.noExpiry
+            ? Math.min(bankTotalSeconds, calendarLimitSeconds)
+            : calendarLimitSeconds;
+        const bankRemainingSeconds = Math.max(
+            0,
+            Math.round(bankTotalSeconds - cumulativeUsed),
+        );
+        const calendarRemainingSeconds = Math.max(
+            0,
+            Math.round((expireAt.getTime() - Date.now()) / 1000),
+        );
+        const remainingSeconds = pkg.noExpiry
+            ? Math.min(bankRemainingSeconds, calendarRemainingSeconds)
+            : calendarRemainingSeconds;
+        if (
+            pkg.noExpiry &&
+            remainingSeconds <= 0 &&
+            liveSessions.length > 0
+        ) {
+            await radiusClient.deactivateActivation(activationId);
         }
 
         const octetsUsed = sessions.reduce((sum, s) => sum + s.totalOctets, 0);
@@ -2507,8 +2570,8 @@ export class RadiusClient {
             packageTitle: pkg.title,
             paymentId: activation.packagePaymentId,
             activatedAt: activation.activatedAt,
-            expireAt: activation.expireAt,
-            expired: activation.expireAt.getTime() < Date.now(),
+            expireAt,
+            expired: expireAt.getTime() < Date.now(),
             sessionLimitSeconds,
             usedSeconds,
             remainingSeconds,
