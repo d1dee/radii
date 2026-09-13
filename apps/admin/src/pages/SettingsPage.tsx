@@ -474,6 +474,7 @@ function MpesaSection() {
     };
 
     const own = form.values.useOwnCredentials;
+    const transactionType = form.useWatchValue('transactionType');
 
     return (
         <>
@@ -492,45 +493,6 @@ function MpesaSection() {
                     />
                     {own ? (
                         <>
-                            <Grid>
-                                <Grid.Col span={{ base: 12, sm: 6 }}>
-                                    <TextInput
-                                        label='Consumer Key'
-                                        description='From your Safaricom Developer Portal app'
-                                        placeholder='e.g. 7sbAVvNyG8u...'
-                                        {...form.getInputProps('consumerKey')}
-                                    />
-                                </Grid.Col>
-                                <Grid.Col span={{ base: 12, sm: 6 }}>
-                                    <PasswordInput
-                                        label='Consumer Secret'
-                                        description='Paired with the consumer key for API auth'
-                                        placeholder='Your app consumer secret'
-                                        {...form.getInputProps(
-                                            'consumerSecret',
-                                        )}
-                                    />
-                                </Grid.Col>
-                            </Grid>
-                            <Grid>
-                                <Grid.Col span={{ base: 12, sm: 6 }}>
-                                    <TextInput
-                                        label='Shortcode (Paybill / Till)'
-                                        description='Business number customers pay to'
-                                        placeholder='e.g. 174379'
-                                        inputMode='numeric'
-                                        {...form.getInputProps('shortcode')}
-                                    />
-                                </Grid.Col>
-                                <Grid.Col span={{ base: 12, sm: 6 }}>
-                                    <PasswordInput
-                                        label='Passkey'
-                                        description='Lipa Na M-Pesa Online passkey used to sign STK push requests'
-                                        placeholder='Lipa Na M-Pesa Online passkey'
-                                        {...form.getInputProps('passkey')}
-                                    />
-                                </Grid.Col>
-                            </Grid>
                             <Grid>
                                 <Grid.Col span={{ base: 12, sm: 6 }}>
                                     <Stack gap={4}>
@@ -557,7 +519,7 @@ function MpesaSection() {
                                 <Grid.Col span={{ base: 12, sm: 6 }}>
                                     <Select
                                         label='Transaction type'
-                                        description='Paybill vs Till number'
+                                        description='Choose whether customers pay a PayBill or Buy Goods till'
                                         data={[
                                             {
                                                 label: 'Paybill (CustomerPayBillOnline)',
@@ -572,6 +534,64 @@ function MpesaSection() {
                                         {...form.getInputProps(
                                             'transactionType',
                                         )}
+                                    />
+                                </Grid.Col>
+                            </Grid>
+                            <Grid>
+                                <Grid.Col span={{ base: 12, sm: 6 }}>
+                                    <TextInput
+                                        label='Consumer Key'
+                                        description='From your Safaricom Developer Portal app'
+                                        placeholder='e.g. 7sbAVvNyG8u...'
+                                        {...form.getInputProps('consumerKey')}
+                                    />
+                                </Grid.Col>
+                                <Grid.Col span={{ base: 12, sm: 6 }}>
+                                    <PasswordInput
+                                        label='Consumer Secret'
+                                        description='Paired with the consumer key for API auth'
+                                        placeholder='Your app consumer secret'
+                                        {...form.getInputProps(
+                                            'consumerSecret',
+                                        )}
+                                    />
+                                </Grid.Col>
+                            </Grid>
+                            <Grid>
+                                <Grid.Col span={{ base: 12, sm: 6 }}>
+                                    <TextInput
+                                        label='Organization Shortcode'
+                                        description={
+                                            transactionType ===
+                                            'CustomerBuyGoodsOnline'
+                                                ? 'Business shortcode provided by M-Pesa for API authentication'
+                                                : 'PayBill business number customers pay to'
+                                        }
+                                        placeholder='e.g. 174379'
+                                        inputMode='numeric'
+                                        {...form.getInputProps('shortcode')}
+                                    />
+                                </Grid.Col>
+                                {transactionType ===
+                                    'CustomerBuyGoodsOnline' && (
+                                    <Grid.Col span={{ base: 12, sm: 6 }}>
+                                        <TextInput
+                                            label='Till Number'
+                                            description='Buy Goods till number customers pay to'
+                                            placeholder='e.g. 174379'
+                                            inputMode='numeric'
+                                            {...form.getInputProps(
+                                                'tillNumber',
+                                            )}
+                                        />
+                                    </Grid.Col>
+                                )}
+                                <Grid.Col span={{ base: 12, sm: 6 }}>
+                                    <PasswordInput
+                                        label='Passkey'
+                                        description='Lipa Na M-Pesa Online passkey used to sign STK push requests'
+                                        placeholder='Lipa Na M-Pesa Online passkey'
+                                        {...form.getInputProps('passkey')}
                                     />
                                 </Grid.Col>
                             </Grid>

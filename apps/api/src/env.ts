@@ -106,6 +106,7 @@ export const env = {
         consumerKey: process.env.MPESA_CONSUMER_KEY || '',
         consumerSecret: process.env.MPESA_CONSUMER_SECRET || '',
         shortcode: process.env.MPESA_SHORTCODE || '',
+        tillNumber: process.env.MPESA_TILL_NUMBER || '',
         passkey: process.env.MPESA_PASSKEY || '',
         environment: (process.env.MPESA_ENVIRONMENT === 'production'
             ? 'production'
@@ -113,6 +114,10 @@ export const env = {
         initiatorName: process.env.MPESA_INITIATOR_NAME || '',
         initiatorPassword: process.env.MPESA_INITIATOR_PASSWORD || '',
         certificatePath: process.env.MPESA_CERTIFICATE_PATH || '',
+        transactionType: (process.env.MPESA_TRANSACTION_TYPE ||
+            'CustomerPayBillOnline') as
+            | 'CustomerPayBillOnline'
+            | 'CustomerBuyGoodsOnline',
     },
     // Admin-console transactional email (Resend HTTP API). Optional: without
     // RESEND_API_KEY the admin verification codes are printed to the server

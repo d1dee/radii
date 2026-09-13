@@ -49,10 +49,15 @@ export type MpesaCallbackEvent =
 const mpesaConfigSchema = z.object({
     consumerKey: z.string().min(1, 'consumerKey is required'),
     consumerSecret: z.string().min(1, 'consumerSecret is required'),
-    // Safaricom shortcodes are 5-6 digits (tills up to 7).
+    // Organization shortcode used for API authentication and STK signing.
     shortcode: z
         .string()
         .regex(/^\d{5,7}$/, 'shortcode must be a 5-7 digit Safaricom number'),
+    // Buy Goods sends the till number as PartyB; PayBill uses shortcode.
+    tillNumber: z
+        .string()
+        .regex(/^\d{5,7}$/, 'tillNumber must be a 5-7 digit Safaricom number')
+        .optional(),
     passkey: z.string().min(1, 'passkey is required'),
     environment: z
         .enum(['sandbox', 'production'], {
@@ -70,6 +75,17 @@ const mpesaConfigSchema = z.object({
     transactionType: z
         .enum(['CustomerPayBillOnline', 'CustomerBuyGoodsOnline'])
         .default('CustomerPayBillOnline'),
+}).superRefine((config, ctx) => {
+    if (
+        config.transactionType === 'CustomerBuyGoodsOnline' &&
+        !config.tillNumber
+    ) {
+        ctx.addIssue({
+            code: 'custom',
+            path: ['tillNumber'],
+            message: 'tillNumber is required for CustomerBuyGoodsOnline',
+        });
+    }
 });
 
 export type MpesaProviderConfig = z.input<typeof mpesaConfigSchema>;
@@ -108,6 +124,8 @@ function toMpesaPhoneNumber(phoneNumber: string): string | null {
 const FINAL_STK_FAILURE_CODES = new Set([
     '1032', // Request cancelled by user
     '1037', // DS timeout (user never entered PIN)
+    '2029', // Failed due to unresolved reason type
+    '2002', // The Agent number and Store number entered do not match.
 ]);
 
 export class MpesaPaymentProvider implements PaymentProvider {
@@ -187,11 +205,15 @@ export class MpesaPaymentProvider implements PaymentProvider {
         }
 
         const shortcode = Number(this.config.shortcode);
+        const partyB =
+            this.config.transactionType === 'CustomerBuyGoodsOnline'
+                ? Number(this.config.tillNumber)
+                : shortcode;
         const response = await this.client.lipaNaMpesaOnline({
             BusinessShortCode: shortcode,
             Amount: amount,
             PartyA: Number(phoneNumber),
-            PartyB: shortcode,
+            PartyB: partyB,
             PhoneNumber: Number(phoneNumber),
             CallBackURL: `${request.callbackBaseUrl}/${MPESA_CALLBACK_EVENTS.stk}`,
             passKey: this.config.passkey,

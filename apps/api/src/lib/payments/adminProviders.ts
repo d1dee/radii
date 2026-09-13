@@ -6,12 +6,9 @@
 // credentials the caller falls back to the server-wide provider registered
 // from env (see ./index.ts).
 
-import { PaymentProviderError, type PaymentProvider } from './types';
-import {
-    MpesaPaymentProvider,
-    MPESA_PROVIDER_NAME,
-} from './mpesa/provider';
 import { getAdminSettings } from '../adminSettings';
+import { MPESA_PROVIDER_NAME, MpesaPaymentProvider } from './mpesa/provider';
+import { PaymentProviderError, type PaymentProvider } from './types';
 
 // Provider-name prefix encoding the owning admin: "mpesa-<adminId>".
 const MPESA_ADMIN_PREFIX = `${MPESA_PROVIDER_NAME}-`;
@@ -65,6 +62,7 @@ export async function getAdminMpesaProvider(
         mpesa.consumerKey,
         mpesa.consumerSecret,
         mpesa.shortcode,
+        mpesa.tillNumber,
         mpesa.passkey,
         mpesa.environment,
         mpesa.initiatorName,
@@ -80,6 +78,7 @@ export async function getAdminMpesaProvider(
             consumerKey: mpesa.consumerKey,
             consumerSecret: mpesa.consumerSecret,
             shortcode: mpesa.shortcode,
+            tillNumber: mpesa.tillNumber || undefined,
             passkey: mpesa.passkey,
             environment: mpesa.environment,
             initiatorName: mpesa.initiatorName || undefined,

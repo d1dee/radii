@@ -55,8 +55,10 @@ export const adminMpesaSettingsSchema = z
         useOwnCredentials: z.boolean().default(false),
         consumerKey: z.string().max(255).default(''),
         consumerSecret: z.string().max(255).default(''),
-        // Safaricom shortcode: 5-7 digits (tills up to 7).
+        // Organization shortcode used for API authentication and STK signing.
         shortcode: z.string().max(7).default(''),
+        // Buy Goods destination. PayBill payments use shortcode as PartyB.
+        tillNumber: z.string().max(7).default(''),
         passkey: z.string().max(255).default(''),
         environment: z.enum(['sandbox', 'production']).default('production'),
         // Only needed for receipt verification (Transaction Status API); STK
@@ -75,6 +77,17 @@ export const adminMpesaSettingsSchema = z
                 code: 'custom',
                 path: ['shortcode'],
                 message: 'shortcode must be a 5-7 digit Safaricom number',
+            });
+        }
+        if (
+            mpesa.transactionType === 'CustomerBuyGoodsOnline' &&
+            !/^\d{5,7}$/.test(mpesa.tillNumber)
+        ) {
+            ctx.addIssue({
+                code: 'custom',
+                path: ['tillNumber'],
+                message:
+                    'tillNumber must be a 5-7 digit Safaricom number for Buy Goods payments',
             });
         }
         const required = [

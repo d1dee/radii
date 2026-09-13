@@ -19,6 +19,7 @@ function buildPaymentService(): PaymentService {
         mpesa.consumerKey ||
         mpesa.consumerSecret ||
         mpesa.shortcode ||
+        mpesa.tillNumber ||
         mpesa.passkey
     ) {
         service.register(
@@ -26,11 +27,13 @@ function buildPaymentService(): PaymentService {
                 consumerKey: mpesa.consumerKey,
                 consumerSecret: mpesa.consumerSecret,
                 shortcode: mpesa.shortcode,
+                tillNumber: mpesa.tillNumber || undefined,
                 passkey: mpesa.passkey,
                 environment: mpesa.environment,
                 initiatorName: mpesa.initiatorName || undefined,
                 initiatorPassword: mpesa.initiatorPassword || undefined,
                 certificatePath: mpesa.certificatePath || undefined,
+                transactionType: mpesa.transactionType,
             }),
         );
     } else {
