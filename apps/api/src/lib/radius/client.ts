@@ -43,6 +43,7 @@ import {
     eq,
     getTableColumns,
     gte,
+    inArray,
     isNotNull,
     isNull,
     ne,
@@ -1703,17 +1704,20 @@ export class RadiusClient {
         };
     }
 
-    // Live session board for admins (most recent first). Anchor rows (the
-    // NOT-NULL-locked activation placeholders) have no accounting start time,
-    // so a real live session is: no stop record yet, but already started.
-    async getLiveSessions(limit = 100): Promise<SessionInfo[]> {
+    // Session board for admins (most recent first). Exclude anchor rows, which
+    // are activation placeholders and were never started by accounting.
+    async getAdminSessions(
+        nasIpAddresses: string[],
+        limit = 100,
+    ): Promise<SessionInfo[]> {
+        if (nasIpAddresses.length === 0) return [];
         const rows = await db
             .select()
             .from(radacct)
             .where(
                 and(
-                    isNull(radacct.acctstoptime),
                     isNotNull(radacct.acctstarttime),
+                    inArray(radacct.nasipaddress, nasIpAddresses),
                 ),
             )
             .orderBy(desc(radacct.acctstarttime))

@@ -18,6 +18,7 @@ import { useDebouncedValue } from '@mantine/hooks';
 import { useCallback, useEffect, useState } from 'react';
 import { MdSearch } from 'react-icons/md';
 
+import { PaymentDetailsDrawer } from '@/components/Payments/PaymentDetailsDrawer';
 import {
     getAdminPayments,
     type AdminPaymentList,
@@ -56,6 +57,7 @@ export default function PaymentsPage() {
     const [data, setData] = useState<AdminPaymentList | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [detailsId, setDetailsId] = useState<string | null>(null);
 
     const [status, setStatus] = useState<string | null>(null);
     const [search, setSearch] = useState('');
@@ -200,7 +202,11 @@ export default function PaymentsPage() {
                             </Table.Thead>
                             <Table.Tbody>
                                 {data.payments.map((p, i) => (
-                                    <Table.Tr key={p.id}>
+                                    <Table.Tr
+                                        key={p.id}
+                                        onClick={() => setDetailsId(p.id)}
+                                        style={{ cursor: 'pointer' }}
+                                    >
                                         <Table.Td>{i + 1}</Table.Td>
                                         <Table.Td>
                                             <Text size='sm'>
@@ -263,6 +269,10 @@ export default function PaymentsPage() {
                     />
                 </Group>
             )}
+            <PaymentDetailsDrawer
+                paymentId={detailsId}
+                onClose={() => setDetailsId(null)}
+            />
         </>
     );
 }

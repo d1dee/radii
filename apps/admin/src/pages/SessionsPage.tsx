@@ -19,6 +19,7 @@ import { useDebouncedValue } from '@mantine/hooks';
 import { useCallback, useEffect, useState } from 'react';
 import { MdDelete, MdEdit, MdRefresh, MdSearch } from 'react-icons/md';
 
+import { SessionDetailsDrawer } from '@/components/Sessions/SessionDetailsDrawer';
 import {
     disconnectSession,
     editSessionTimeout,
@@ -34,18 +35,17 @@ import {
     formatTime,
 } from '@/lib/format';
 import { notifyResult } from '@/lib/notify';
-import { useAdminSettings } from '@/lib/settings';
 
 export default function SessionsPage() {
-    const { settings } = useAdminSettings();
     const [sessions, setSessions] = useState<SessionInfo[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
-    const [autoRefresh, setAutoRefresh] = useState(true);
     const [lastLoaded, setLastLoaded] = useState<Date | null>(null);
+    const [detailsId, setDetailsId] = useState<string | null>(null);
 
     const [search, setSearch] = useState('');
     const [debouncedSearch] = useDebouncedValue(search, 300);
+    const [liveOnly, setLiveOnly] = useState(false);
 
     const [confirmDisconnect, setConfirmDisconnect] =
         useState<SessionInfo | null>(null);
@@ -54,7 +54,7 @@ export default function SessionsPage() {
     const [busy, setBusy] = useState(false);
 
     const load = useCallback(async () => {
-        const res = await getRadiusSessions(200);
+        const res = await getRadiusSessions(500);
         setLoading(false);
         if (!res.success) {
             setError(res.message || 'Failed to load sessions');
@@ -69,15 +69,17 @@ export default function SessionsPage() {
         void load();
     }, [load]);
 
-    useAutoRefresh(() => void load(), autoRefresh);
+    useAutoRefresh(() => void load());
 
-    const filtered = debouncedSearch.trim()
-        ? sessions.filter((s) =>
-              `${s.username} ${s.callingStationId ?? ''} ${s.framedIpAddress ?? ''} ${s.nasIpAddress}`
-                  .toLowerCase()
-                  .includes(debouncedSearch.trim().toLowerCase()),
-          )
-        : sessions;
+    const query = debouncedSearch.trim().toLowerCase();
+    const filtered = sessions.filter(
+        (session) =>
+            (!liveOnly || session.live) &&
+            (!query ||
+                `${session.username} ${session.callingStationId ?? ''} ${session.framedIpAddress ?? ''} ${session.nasIpAddress}`
+                    .toLowerCase()
+                    .includes(query)),
+    );
 
     const doDisconnect = async (session: SessionInfo) => {
         setBusy(true);
@@ -85,7 +87,10 @@ export default function SessionsPage() {
         setBusy(false);
         setConfirmDisconnect(null);
         notifyResult(res, 'Session disconnected');
-        if (res.success) void load();
+        if (res.success) {
+            setDetailsId(null);
+            void load();
+        }
     };
 
     const submitEdit = async () => {
@@ -105,10 +110,9 @@ export default function SessionsPage() {
         <Stack gap='md'>
             <Group justify='space-between'>
                 <Stack gap={4}>
-                    <Title order={3}>Live Sessions</Title>
+                    <Title order={3}>Sessions</Title>
                     <Text size='sm' c='dimmed'>
-                        Currently connected RADIUS sessions — disconnect users
-                        or adjust their remaining time.
+                        RADIUS accounting history and currently connected users.
                     </Text>
                 </Stack>
                 <Group>
@@ -125,13 +129,6 @@ export default function SessionsPage() {
                     >
                         Refresh
                     </Button>
-                    <Switch
-                        label={`Auto (${settings.dashboard.usageRefreshSeconds}s)`}
-                        checked={autoRefresh}
-                        onChange={(e) =>
-                            setAutoRefresh(e.currentTarget.checked)
-                        }
-                    />
                 </Group>
             </Group>
 
@@ -143,8 +140,13 @@ export default function SessionsPage() {
                     onChange={(e) => setSearch(e.currentTarget.value)}
                     style={{ flex: 1, minWidth: 220 }}
                 />
+                <Switch
+                    label='Live only'
+                    checked={liveOnly}
+                    onChange={(e) => setLiveOnly(e.currentTarget.checked)}
+                />
                 <Badge variant='light' size='lg'>
-                    {filtered.length} live
+                    {filtered.length} {liveOnly ? 'live' : 'sessions'}
                 </Badge>
             </Group>
 
@@ -156,17 +158,19 @@ export default function SessionsPage() {
                 <Text c='red'>{error}</Text>
             ) : filtered.length === 0 ? (
                 <Text c='dimmed' py='xl' ta='center'>
-                    No live sessions.
+                    No sessions match.
                 </Text>
             ) : (
-                <Table.ScrollContainer minWidth={1000}>
+                <Table.ScrollContainer minWidth={1200}>
                     <Table striped highlightOnHover>
                         <Table.Thead>
                             <Table.Tr>
                                 <Table.Th>User</Table.Th>
                                 <Table.Th>Client</Table.Th>
                                 <Table.Th>NAS</Table.Th>
+                                <Table.Th>Status</Table.Th>
                                 <Table.Th>Started</Table.Th>
+                                <Table.Th>Ended</Table.Th>
                                 <Table.Th>Duration</Table.Th>
                                 <Table.Th>Data</Table.Th>
                                 <Table.Th>Avg speed</Table.Th>
@@ -175,7 +179,11 @@ export default function SessionsPage() {
                         </Table.Thead>
                         <Table.Tbody>
                             {filtered.map((s) => (
-                                <Table.Tr key={s.radacctId}>
+                                <Table.Tr
+                                    key={s.radacctId}
+                                    onClick={() => setDetailsId(s.radacctId)}
+                                    style={{ cursor: 'pointer' }}
+                                >
                                     <Table.Td>
                                         <Text size='sm' fw={500}>
                                             {s.username || '—'}
@@ -196,9 +204,25 @@ export default function SessionsPage() {
                                         <Text size='sm'>{s.nasIpAddress}</Text>
                                     </Table.Td>
                                     <Table.Td>
+                                        <Badge
+                                            color={s.live ? 'green' : 'gray'}
+                                            variant='light'
+                                            size='sm'
+                                        >
+                                            {s.live ? 'Live' : 'Ended'}
+                                        </Badge>
+                                    </Table.Td>
+                                    <Table.Td>
                                         <Text size='sm'>
                                             {s.startedAt
                                                 ? formatDayTime(s.startedAt)
+                                                : '—'}
+                                        </Text>
+                                    </Table.Td>
+                                    <Table.Td>
+                                        <Text size='sm'>
+                                            {s.stoppedAt
+                                                ? formatDayTime(s.stoppedAt)
                                                 : '—'}
                                         </Text>
                                     </Table.Td>
@@ -222,32 +246,42 @@ export default function SessionsPage() {
                                         </Text>
                                     </Table.Td>
                                     <Table.Td>
-                                        <Group justify='flex-end' gap={4}>
-                                            <Tooltip label='Edit remaining time'>
-                                                <ActionIcon
-                                                    variant='light'
-                                                    aria-label='Edit session'
-                                                    onClick={() => {
-                                                        setEditSession(s);
-                                                        setEditMinutes(60);
-                                                    }}
-                                                >
-                                                    <MdEdit size={16} />
-                                                </ActionIcon>
-                                            </Tooltip>
-                                            <Tooltip label='Disconnect'>
-                                                <ActionIcon
-                                                    variant='light'
-                                                    color='red'
-                                                    aria-label='Disconnect session'
-                                                    onClick={() =>
-                                                        setConfirmDisconnect(s)
-                                                    }
-                                                >
-                                                    <MdDelete size={16} />
-                                                </ActionIcon>
-                                            </Tooltip>
-                                        </Group>
+                                        {s.live ? (
+                                            <Group justify='flex-end' gap={4}>
+                                                <Tooltip label='Edit remaining time'>
+                                                    <ActionIcon
+                                                        variant='light'
+                                                        aria-label='Edit session'
+                                                        onClick={(event) => {
+                                                            event.stopPropagation();
+                                                            setEditSession(s);
+                                                            setEditMinutes(60);
+                                                        }}
+                                                    >
+                                                        <MdEdit size={16} />
+                                                    </ActionIcon>
+                                                </Tooltip>
+                                                <Tooltip label='Disconnect'>
+                                                    <ActionIcon
+                                                        variant='light'
+                                                        color='red'
+                                                        aria-label='Disconnect session'
+                                                        onClick={(event) => {
+                                                            event.stopPropagation();
+                                                            setConfirmDisconnect(
+                                                                s,
+                                                            );
+                                                        }}
+                                                    >
+                                                        <MdDelete size={16} />
+                                                    </ActionIcon>
+                                                </Tooltip>
+                                            </Group>
+                                        ) : (
+                                            <Text ta='right' c='dimmed'>
+                                                —
+                                            </Text>
+                                        )}
                                     </Table.Td>
                                 </Table.Tr>
                             ))}
@@ -255,6 +289,12 @@ export default function SessionsPage() {
                     </Table>
                 </Table.ScrollContainer>
             )}
+
+            <SessionDetailsDrawer
+                sessionId={detailsId}
+                onClose={() => setDetailsId(null)}
+                onDisconnect={setConfirmDisconnect}
+            />
 
             <Modal
                 opened={confirmDisconnect !== null}

@@ -11,7 +11,9 @@ import { getAdminSettings, saveAdminSettings } from '../lib/adminSettings';
 import {
     addUserFlag,
     getAdminNasAddresses,
+    getAdminPaymentDetail,
     getAdminReports,
+    getAdminSessionDetail,
     getAdminUserDetail,
     getOwnedActivationIds,
     getUserPayments,
@@ -567,6 +569,15 @@ app.get('/payments', requireAdmin, async (c) => {
     return c.json({ success: true, data });
 });
 
+app.get('/payments/:id', requireAdmin, async (c) => {
+    const data = await getAdminPaymentDetail(
+        c.req.param('id'),
+        c.get('adminSession').userId,
+    );
+    if (!data) return jsonError(c, 404, 'Payment not found');
+    return c.json({ success: true, data });
+});
+
 // --- Reports ---------------------------------------------------------------------
 
 // Aggregate reporting for a date range (defaults to the trailing 30 days):
@@ -662,21 +673,29 @@ app.get('/radius/summary', requireAdmin, async (c) => {
     return c.json({ success: true, data });
 });
 
-// Live RADIUS sessions (radacct rows without a stop record), most recent
-// first, limited to sessions on the requesting admin's NAS devices
+// RADIUS accounting sessions, most recent first, limited to sessions on the
+// requesting admin's NAS devices
 // (matched on NAS-IP-Address: direct IP or WireGuard tunnel address).
 // ?limit=<n> (default 100).
 app.get('/radius/sessions', requireAdmin, async (c) => {
     const raw = Number(c.req.query('limit') ?? 100);
     const limit = Number.isFinite(raw) && raw > 0 ? Math.min(raw, 500) : 100;
-    const data = await radiusClient.getLiveSessions(limit);
     const addresses = await getAdminNasAddresses(c.get('adminSession').userId);
-    return c.json({
-        success: true,
-        data: data.filter((s) =>
-            addresses.has(String(s.nasIpAddress).replace(/\/\d+$/, '')),
-        ),
-    });
+    const data = await radiusClient.getAdminSessions([...addresses], limit);
+    return c.json({ success: true, data });
+});
+
+app.get('/radius/sessions/:radacctId', requireAdmin, async (c) => {
+    const radacctId = c.req.param('radacctId');
+    if (!radacctId || !/^\d+$/.test(radacctId)) {
+        return jsonError(c, 404, 'Unknown session');
+    }
+    const data = await getAdminSessionDetail(
+        c.get('adminSession').userId,
+        radacctId,
+    );
+    if (!data) return jsonError(c, 404, 'Unknown session');
+    return c.json({ success: true, data });
 });
 
 // Full status of one activation: remaining time/bytes, live sessions, speeds.
@@ -740,9 +759,8 @@ app.post('/radius/check-credentials', requireAdmin, async (c) => {
     }
 });
 
-// Disconnects one live session addressed by its radacct id. Restricted to
-// sessions whose activation belongs to the requesting admin's network
-// (RADIUS Class correlation).
+// Disconnects one live session addressed by its radacct id. Restricted to the
+// admin that owns the NAS which emitted the accounting row.
 app.post('/radius/sessions/:radacctId/disconnect', requireAdmin, async (c) => {
     const radacctId = c.req.param('radacctId');
     if (!radacctId || !/^\d+$/.test(radacctId)) {

@@ -424,6 +424,41 @@ export type AdminPaymentList = {
     payments: AdminPaymentRow[];
 };
 
+export type AdminPaymentEvent = {
+    id: string;
+    provider: string;
+    eventType: string;
+    providerRequestId: string | null;
+    providerConversationId: string | null;
+    resultCode: string | null;
+    message: string | null;
+    amount: number | null;
+    receipt: string | null;
+    transactionDate: string | null;
+    transactionStatus: string | null;
+    createdAt: string;
+};
+
+export type AdminPaymentDetail = {
+    id: string;
+    userName: string | null;
+    phoneNumber: string;
+    amount: string;
+    status: PackagePaymentStatus;
+    packageTitle: string;
+    packageType: PackageType;
+    nasDeviceName: string;
+    provider: string | null;
+    providerTransactionId: string | null;
+    providerReference: string | null;
+    transactionStatus: string | null;
+    currency: string | null;
+    description: string | null;
+    createdAt: string;
+    updatedAt: string;
+    events: AdminPaymentEvent[];
+};
+
 export type UserPaymentRow = {
     id: string;
     amount: string;
@@ -523,6 +558,10 @@ export function getAdminPayments(query: ListPaymentsQuery = {}) {
     return request<AdminPaymentList>(`/admin/payments${qs ? `?${qs}` : ''}`);
 }
 
+export function getAdminPayment(id: string) {
+    return request<AdminPaymentDetail>(`/admin/payments/${id}`);
+}
+
 // --- Reports ---------------------------------------------------------------------
 
 export type AdminReports = {
@@ -598,6 +637,53 @@ export function updateActivation(id: string, body: { expireAt: string }) {
 
 export function getRadiusSessions(limit = 100) {
     return request<SessionInfo[]>(`/admin/radius/sessions?limit=${limit}`);
+}
+
+export type AdminSessionDetail = {
+    session: SessionInfo & {
+        acctUniqueId: string;
+        realm: string | null;
+        nasPortId: string | null;
+        nasPortType: string | null;
+        serviceType: string | null;
+        framedProtocol: string | null;
+        calledStationId: string | null;
+        connectInfoStart: string | null;
+        connectInfoStop: string | null;
+    };
+    nasDevice: {
+        id: string;
+        name: string;
+        ipAddress: string;
+        model: string | null;
+        location: string | null;
+    };
+    activation: {
+        id: string;
+        activatedAt: string;
+        expireAt: string;
+    } | null;
+    customer: {
+        id: string;
+        name: string;
+        phoneNumber: string;
+    } | null;
+    payment: {
+        id: string;
+        status: PackagePaymentStatus;
+        amount: string;
+        createdAt: string;
+    } | null;
+    package: {
+        id: string;
+        title: string;
+        type: PackageType;
+        category: string;
+    } | null;
+};
+
+export function getAdminSession(id: string) {
+    return request<AdminSessionDetail>(`/admin/radius/sessions/${id}`);
 }
 
 // Mirrors the API's NetworkUsage (apps/api/src/lib/radius/client.ts).

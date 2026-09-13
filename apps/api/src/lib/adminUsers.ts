@@ -36,6 +36,7 @@ import {
     packages,
     radacct,
     transaction,
+    transactionLog,
     user,
     userFlag,
 } from '../db/schema';
@@ -549,21 +550,39 @@ export async function isAdminActivationVisible(
     return rows.length > 0;
 }
 
-// Whether one accounting session belongs to an activation on the admin's
-// network. Sessions carry the activation id in the RADIUS Class attribute;
-// rows without that correlation (or correlating to a foreign activation)
-// are not visible. Guards session disconnect / timeout edits.
+function scopedSessionToAdminNas(adminId: string): SQL {
+    return and(
+        eq(nasDevice.ownerId, adminId),
+        or(
+            eq(radacct.nasipaddress, nasDevice.ipAddress),
+            eq(radacct.nasipaddress, nasSetupScript.wgClientIp),
+        ),
+    ) as SQL;
+}
+
+// Session operations are authorized against the NAS that actually emitted the
+// accounting row. Class is business correlation data, not the tenant boundary.
 export async function isAdminRadacctVisible(
     adminId: string,
     radacctId: string,
 ): Promise<boolean> {
     const [row] = await db
-        .select({ class: radacct.class })
+        .select({ id: radacct.radacctid })
         .from(radacct)
-        .where(eq(radacct.radacctid, BigInt(radacctId)))
+        .innerJoin(nasDevice, eq(nasDevice.ownerId, adminId))
+        .leftJoin(
+            nasSetupScript,
+            eq(nasSetupScript.nasDeviceId, nasDevice.id),
+        )
+        .where(
+            and(
+                eq(radacct.radacctid, BigInt(radacctId)),
+                isNotNull(radacct.acctstarttime),
+                scopedSessionToAdminNas(adminId),
+            ),
+        )
         .limit(1);
-    if (!row?.class) return false;
-    return isAdminActivationVisible(adminId, row.class);
+    return Boolean(row);
 }
 
 // Every IP address the admin's NAS devices can appear under in accounting
@@ -592,6 +611,126 @@ export async function getAdminNasAddresses(
         }
     }
     return ips;
+}
+
+export async function getAdminSessionDetail(
+    adminId: string,
+    radacctId: string,
+) {
+    const [row] = await db
+        .select({
+            accounting: radacct,
+            nasDevice: {
+                id: nasDevice.id,
+                name: nasDevice.name,
+                ipAddress: nasDevice.ipAddress,
+                model: nasDevice.model,
+                location: nasDevice.location,
+            },
+            activation: {
+                id: activatedPackages.id,
+                activatedAt: activatedPackages.activatedAt,
+                expireAt: activatedPackages.expireAt,
+            },
+            customer: {
+                id: user.id,
+                name: user.name,
+                phoneNumber: user.username,
+            },
+            payment: {
+                id: packagePayments.id,
+                status: packagePayments.status,
+                amount: packagePayments.amount,
+                createdAt: packagePayments.createdAt,
+            },
+            package: {
+                id: packages.id,
+                title: packages.title,
+                type: packages.type,
+                category: packages.category,
+            },
+        })
+        .from(radacct)
+        .innerJoin(nasDevice, eq(nasDevice.ownerId, adminId))
+        .leftJoin(
+            nasSetupScript,
+            eq(nasSetupScript.nasDeviceId, nasDevice.id),
+        )
+        .leftJoin(
+            activatedPackages,
+            sql`${radacct.class} = ${activatedPackages.id}::text`,
+        )
+        .leftJoin(
+            packagePayments,
+            and(
+                eq(
+                    activatedPackages.packagePaymentId,
+                    packagePayments.id,
+                ),
+                eq(activatedPackages.userId, packagePayments.userId),
+                eq(activatedPackages.packageId, packagePayments.packageId),
+            ),
+        )
+        .leftJoin(user, eq(packagePayments.userId, user.id))
+        .leftJoin(packages, eq(packagePayments.packageId, packages.id))
+        .where(
+            and(
+                eq(radacct.radacctid, BigInt(radacctId)),
+                isNotNull(radacct.acctstarttime),
+                scopedSessionToAdminNas(adminId),
+            ),
+        )
+        .limit(1);
+
+    if (!row) return null;
+
+    const inputOctets = Number(row.accounting.acctinputoctets ?? 0);
+    const outputOctets = Number(row.accounting.acctoutputoctets ?? 0);
+    const live = row.accounting.acctstoptime === null;
+    const seconds = live
+        ? Math.max(
+              0,
+              (Date.now() - row.accounting.acctstarttime!.getTime()) / 1000,
+          )
+        : Number(row.accounting.acctsessiontime ?? 0);
+
+    return {
+        session: {
+            radacctId: String(row.accounting.radacctid),
+            acctSessionId: row.accounting.acctsessionid,
+            acctUniqueId: row.accounting.acctuniqueid,
+            username: row.accounting.username ?? '',
+            realm: row.accounting.realm,
+            nasIpAddress: row.accounting.nasipaddress,
+            nasPortId: row.accounting.nasportid,
+            nasPortType: row.accounting.nasporttype,
+            serviceType: row.accounting.servicetype,
+            framedProtocol: row.accounting.framedprotocol,
+            callingStationId: row.accounting.callingstationid,
+            calledStationId: row.accounting.calledstationid,
+            framedIpAddress: row.accounting.framedipaddress,
+            startedAt: row.accounting.acctstarttime,
+            updatedAt: row.accounting.acctupdatetime,
+            stoppedAt: row.accounting.acctstoptime,
+            terminateCause: row.accounting.acctterminatecause,
+            connectInfoStart: row.accounting.connectinfoStart,
+            connectInfoStop: row.accounting.connectinfoStop,
+            live,
+            seconds: Math.round(seconds),
+            inputOctets,
+            outputOctets,
+            totalOctets: inputOctets + outputOctets,
+            avgSpeedBps:
+                seconds > 0
+                    ? Math.round(((inputOctets + outputOctets) * 8) / seconds)
+                    : 0,
+        },
+        nasDevice: row.nasDevice,
+        activation: row.activation.id ? row.activation : null,
+        customer: row.customer.id ? row.customer : null,
+        payment: row.payment.id ? row.payment : null,
+        package: row.package.id ? row.package : null,
+    };
 }
 
 // --- Flags --------------------------------------------------------------------
@@ -739,6 +878,144 @@ export async function listPayments(opts: ListPaymentsOpts) {
         page,
         perPage,
         payments: rows,
+    };
+}
+
+type PaymentEventDetails = {
+    resultCode: string | null;
+    message: string | null;
+    amount: number | null;
+    receipt: string | null;
+    transactionDate: string | null;
+    transactionStatus: string | null;
+};
+
+function record(value: unknown): Record<string, unknown> | null {
+    return value && typeof value === 'object'
+        ? (value as Record<string, unknown>)
+        : null;
+}
+
+function stringValue(value: unknown): string | null {
+    return typeof value === 'string' || typeof value === 'number'
+        ? String(value)
+        : null;
+}
+
+// Provider payloads are stored verbatim for diagnostics. Only copy the small
+// reconciliation allowlist below into admin responses; names, phone numbers,
+// account data, arbitrary metadata and the raw payload never leave the API.
+function sanitizePaymentEvent(payload: unknown): PaymentEventDetails {
+    const root = record(payload);
+    const stk = record(record(root?.Body)?.stkCallback);
+    const result = record(root?.Result);
+    const callbackMetadataRoot = record(stk?.CallbackMetadata);
+    const resultParametersRoot = record(result?.ResultParameters);
+    const callbackItems = Array.isArray(callbackMetadataRoot?.Item)
+        ? (callbackMetadataRoot.Item as unknown[])
+        : [];
+    const resultItems = Array.isArray(resultParametersRoot?.ResultParameter)
+        ? (resultParametersRoot.ResultParameter as unknown[])
+        : [];
+    const callbackMetadata = Object.fromEntries(
+        callbackItems.flatMap((item) => {
+            const row = record(item);
+            return typeof row?.Name === 'string' ? [[row.Name, row.Value]] : [];
+        }),
+    );
+    const resultParameters = Object.fromEntries(
+        resultItems.flatMap((item) => {
+            const row = record(item);
+            return typeof row?.Key === 'string' ? [[row.Key, row.Value]] : [];
+        }),
+    );
+    const amountValue = callbackMetadata.Amount ?? resultParameters.Amount;
+    const amount = Number(amountValue);
+
+    return {
+        resultCode: stringValue(stk?.ResultCode ?? result?.ResultCode),
+        message: stringValue(
+            stk?.ResultDesc ?? result?.ResultDesc ?? root?.message,
+        ),
+        amount: Number.isFinite(amount) ? amount : null,
+        receipt: stringValue(
+            callbackMetadata.MpesaReceiptNumber ??
+                resultParameters.ReceiptNo ??
+                result?.TransactionID,
+        ),
+        transactionDate: stringValue(
+            callbackMetadata.TransactionDate ?? resultParameters.FinalisedTime,
+        ),
+        transactionStatus: stringValue(resultParameters.TransactionStatus),
+    };
+}
+
+export async function getAdminPaymentDetail(
+    paymentId: string,
+    adminId: string,
+) {
+    const [payment] = await db
+        .select({
+            id: packagePayments.id,
+            userName: user.name,
+            phoneNumber: packagePayments.phoneNumber,
+            amount: packagePayments.amount,
+            status: packagePayments.status,
+            packageTitle: packages.title,
+            packageType: packages.type,
+            nasDeviceName: nasDevice.name,
+            provider: transaction.provider,
+            providerTransactionId: transaction.providerTransactionId,
+            providerReference: transaction.providerReference,
+            transactionId: transaction.id,
+            transactionStatus: transaction.status,
+            currency: transaction.currency,
+            description: transaction.description,
+            createdAt: packagePayments.createdAt,
+            updatedAt: packagePayments.updatedAt,
+        })
+        .from(packagePayments)
+        .innerJoin(
+            nasDevice,
+            eq(packagePayments.nasDeviceId, nasDevice.id),
+        )
+        .leftJoin(user, eq(packagePayments.userId, user.id))
+        .innerJoin(packages, eq(packagePayments.packageId, packages.id))
+        .leftJoin(transaction, eq(packagePayments.transaction, transaction.id))
+        .where(
+            and(
+                eq(packagePayments.id, paymentId),
+                scopedToAdminNas(adminId),
+            ),
+        )
+        .limit(1);
+
+    if (!payment) return null;
+
+    const logs = payment.transactionId
+        ? await db
+              .select({
+                  id: transactionLog.id,
+                  provider: transactionLog.provider,
+                  eventType: transactionLog.eventType,
+                  payload: transactionLog.payload,
+                  providerRequestId: transactionLog.providerRequestId,
+                  providerConversationId:
+                      transactionLog.providerConversationId,
+                  createdAt: transactionLog.createdAt,
+              })
+              .from(transactionLog)
+              .where(eq(transactionLog.transactionId, payment.transactionId))
+              .orderBy(desc(transactionLog.createdAt))
+        : [];
+
+    const { transactionId: _, ...detail } = payment;
+    return {
+        ...detail,
+        events: logs.map(({ payload, ...log }) => ({
+            ...log,
+            ...sanitizePaymentEvent(payload),
+        })),
     };
 }
 
