@@ -13,6 +13,7 @@ import {
     Group,
     Loader,
     Modal,
+    NumberInput,
     Stack,
     Table,
     Tabs,
@@ -121,8 +122,10 @@ export function UserDetailsDrawer({
     const [expiryEdit, setExpiryEdit] = useState<{
         activationId: string;
         current: Date;
+        currentRemainingSeconds: number;
     } | null>(null);
     const [expiryValue, setExpiryValue] = useState<Date | null>(null);
+    const [remainingMinutes, setRemainingMinutes] = useState<number | string>(0);
     const [confirmDeactivate, setConfirmDeactivate] = useState<string | null>(
         null,
     );
@@ -251,13 +254,23 @@ export function UserDetailsDrawer({
     };
 
     const submitExpiry = async () => {
-        if (!userId || !expiryEdit || !expiryValue) return;
+        if (
+            !userId ||
+            !expiryEdit ||
+            !expiryValue ||
+            typeof remainingMinutes !== 'number' ||
+            !Number.isFinite(remainingMinutes) ||
+            remainingMinutes < 0
+        ) {
+            return;
+        }
         setBusy(true);
         const res = await updateActivation(expiryEdit.activationId, {
             expireAt: expiryValue.toISOString(),
+            remainingSeconds: Math.round(remainingMinutes * 60),
         });
         setBusy(false);
-        notifyResult(res, 'Expiry updated');
+        notifyResult(res, 'Activation limits updated');
         if (res.success) {
             setExpiryEdit(null);
             void loadActivations(userId);
@@ -601,6 +614,12 @@ export function UserDetailsDrawer({
                                                         )}
                                                     </Text>
                                                     <Text size='xs' c='dimmed'>
+                                                        {formatSeconds(
+                                                            a.remainingSeconds ?? 0,
+                                                        )}{' '}
+                                                        remaining
+                                                    </Text>
+                                                    <Text size='xs' c='dimmed'>
                                                         {formatBytes(a.octetsUsed)}
                                                         {a.octetsLimit
                                                             ? ` / ${formatBytes(a.octetsLimit)}`
@@ -658,10 +677,10 @@ export function UserDetailsDrawer({
                                                                 </ActionIcon>
                                                             </Tooltip>
                                                         )}
-                                                        <Tooltip label='Edit expiry'>
+                                                        <Tooltip label='Edit expiry and time remaining'>
                                                             <ActionIcon
                                                                 variant='light'
-                                                                aria-label='Edit expiry'
+                                                                aria-label='Edit activation limits'
                                                                 onClick={() => {
                                                                     setExpiryEdit({
                                                                         activationId:
@@ -669,10 +688,20 @@ export function UserDetailsDrawer({
                                                                         current: new Date(
                                                                             a.expireAt,
                                                                         ),
+                                                                        currentRemainingSeconds:
+                                                                            a.remainingSeconds ??
+                                                                            0,
                                                                     });
                                                                     setExpiryValue(
                                                                         new Date(
                                                                             a.expireAt,
+                                                                        ),
+                                                                    );
+                                                                    setRemainingMinutes(
+                                                                        Math.ceil(
+                                                                            (a.remainingSeconds ??
+                                                                                0) /
+                                                                                60,
                                                                         ),
                                                                     );
                                                                 }}
@@ -918,7 +947,7 @@ export function UserDetailsDrawer({
             <Modal
                 opened={expiryEdit !== null}
                 onClose={() => setExpiryEdit(null)}
-                title='Edit activation expiry'
+                title='Edit activation limits'
                 centered
             >
                 <Stack>
@@ -932,12 +961,28 @@ export function UserDetailsDrawer({
                         onChange={(v) => setExpiryValue(v ? new Date(v) : null)}
                         clearable
                     />
+                    <NumberInput
+                        label='Time remaining (minutes)'
+                        description={
+                            expiryEdit
+                                ? `Currently ${formatSeconds(expiryEdit.currentRemainingSeconds)}`
+                                : undefined
+                        }
+                        min={0}
+                        allowDecimal={false}
+                        value={remainingMinutes}
+                        onChange={setRemainingMinutes}
+                    />
                     <Button
                         onClick={() => void submitExpiry()}
-                        disabled={!expiryValue}
+                        disabled={
+                            !expiryValue ||
+                            typeof remainingMinutes !== 'number' ||
+                            remainingMinutes < 0
+                        }
                         loading={busy}
                     >
-                        Save expiry
+                        Save limits
                     </Button>
                 </Stack>
             </Modal>

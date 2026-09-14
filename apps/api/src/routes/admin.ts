@@ -626,11 +626,11 @@ app.post('/activations/:id/activate', requireAdmin, async (c) => {
     }
 });
 
-// Edits an activation's expiry (extend/cut). RADIUS provisioning is kept in
-// step (Expiration check-attribute, Session-Timeout caps, CoA on live
-// sessions).
+// Edits an activation's calendar expiry and usable online-time balance.
+// RADIUS provisioning and live Session-Timeout caps are updated immediately.
 const activationEditSchema = z.object({
     expireAt: z.iso.datetime(),
+    remainingSeconds: z.number().int().min(0),
 });
 
 app.put('/activations/:id', requireAdmin, async (c) => {
@@ -646,9 +646,10 @@ app.put('/activations/:id', requireAdmin, async (c) => {
         return jsonError(c, 404, 'Unknown activation');
     }
     try {
-        const result = await radiusClient.setActivationExpiry(
+        const result = await radiusClient.setActivationLimits(
             id,
             new Date(parsed.data.expireAt),
+            parsed.data.remainingSeconds,
         );
         if (!result.ok) return jsonError(c, 404, result.message);
         return c.json({ success: true, message: result.message, data: result });

@@ -149,6 +149,7 @@ export const activatedPackages = pgTable(
             withTimezone: true,
             mode: 'date',
         }).notNull(),
+        timeAllowanceSeconds: integer('time_allowance_seconds'),
     },
     (table) => [
         index('activated_packages_payment_id_idx').on(table.packagePaymentId),

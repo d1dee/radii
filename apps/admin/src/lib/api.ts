@@ -627,7 +627,10 @@ export function deactivateActivation(id: string) {
     });
 }
 
-export function updateActivation(id: string, body: { expireAt: string }) {
+export function updateActivation(
+    id: string,
+    body: { expireAt: string; remainingSeconds: number },
+) {
     return request<{ ok: boolean; message: string }>(
         `/admin/activations/${id}`,
         body,
