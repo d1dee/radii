@@ -4,6 +4,7 @@ import {
     boolean,
     index,
     integer,
+    jsonb,
     numeric,
     pgTable,
     text,
@@ -159,6 +160,46 @@ export const activatedPackages = pgTable(
         index('activated_packages_payment_id_idx').on(table.packagePaymentId),
         index('activated_packages_radacct_id_idx').on(table.radacctId),
         index('activated_packages_user_id_idx').on(table.userId),
+    ],
+);
+
+export const activationEvents = pgTable(
+    'activation_event',
+    {
+        id: uuid('id').defaultRandom().primaryKey(),
+        activationId: uuid('activation_id')
+            .notNull()
+            .references(() => activatedPackages.id, { onDelete: 'cascade' }),
+        eventType: text('event_type', {
+            enum: [
+                'created',
+                'reactivated',
+                'deactivated',
+                'limits_adjusted',
+                'session_timeout_adjusted',
+            ],
+        }).notNull(),
+        actorType: text('actor_type', {
+            enum: ['admin', 'customer', 'system'],
+        }).notNull(),
+        actorId: text('actor_id'),
+        source: text('source').notNull(),
+        metadata: jsonb('metadata')
+            .$type<Record<string, unknown>>()
+            .notNull()
+            .default({}),
+        createdAt: timestamp('created_at', {
+            withTimezone: true,
+            mode: 'date',
+        })
+            .defaultNow()
+            .notNull(),
+    },
+    (table) => [
+        index('activation_event_activation_created_at_idx').on(
+            table.activationId,
+            table.createdAt,
+        ),
     ],
 );
 

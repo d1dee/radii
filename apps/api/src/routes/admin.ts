@@ -609,7 +609,10 @@ app.post('/activations/:id/activate', requireAdmin, async (c) => {
         return jsonError(c, 404, 'Unknown activation');
     }
     try {
-        const result = await radiusClient.reactivateActivation(id);
+        const result = await radiusClient.reactivateActivation(
+            id,
+            c.get('adminSession').userId,
+        );
         if (!result.ok) {
             return jsonError(c, 400, result.message);
         }
@@ -648,6 +651,7 @@ app.put('/activations/:id', requireAdmin, async (c) => {
             id,
             new Date(parsed.data.expireAt),
             parsed.data.remainingSeconds,
+            c.get('adminSession').userId,
         );
         if (!result.ok) return jsonError(c, 404, result.message);
         return c.json({ success: true, message: result.message, data: result });
@@ -719,7 +723,9 @@ app.post('/radius/activations/:id/deactivate', requireAdmin, async (c) => {
         return jsonError(c, 404, 'Unknown activation');
     }
     try {
-        const result = await radiusClient.deactivateActivation(id);
+        const result = await radiusClient.deactivateActivation(id, {
+            actorId: c.get('adminSession').userId,
+        });
         if (!result.ok && result.sessionsFound === 0) {
             return jsonError(c, 404, result.message);
         }
@@ -811,6 +817,7 @@ app.put('/radius/sessions/:radacctId', requireAdmin, async (c) => {
         const result = await radiusClient.setSessionTimeoutByRadacctId(
             radacctId,
             parsed.data.sessionTimeout,
+            c.get('adminSession').userId,
         );
         if (!result.ok) return jsonError(c, 400, result.message);
         return c.json({ success: true, message: result.message, data: result });

@@ -38,6 +38,28 @@ const PAYMENT_STATUS_COLOR: Record<PackagePaymentStatus, string> = {
     failed: 'red',
 };
 
+type ActivationEvent = NonNullable<
+    AdminSessionDetail['activation']
+>['events'][number];
+
+const EVENT_LABELS: Record<ActivationEvent['type'], string> = {
+    created: 'Package activated',
+    reactivated: 'Activation restored',
+    deactivated: 'Activation deactivated',
+    limits_adjusted: 'Activation limits adjusted',
+    session_timeout_adjusted: 'Session timeout adjusted',
+};
+
+function metadataNumber(metadata: Record<string, unknown>, key: string) {
+    const value = metadata[key];
+    return typeof value === 'number' ? value : null;
+}
+
+function metadataDate(metadata: Record<string, unknown>, key: string) {
+    const value = metadata[key];
+    return typeof value === 'string' ? value : null;
+}
+
 function DetailItem({ label, value }: { label: string; value: ReactNode }) {
     return (
         <Stack gap={2}>
@@ -106,6 +128,20 @@ export function SessionDetailsDrawer({
     }, [sessionId]);
 
     const session = detail?.session;
+    const auditItems = detail?.activation
+        ? [
+              ...detail.activation.events.map((event) => ({
+                  kind: 'event' as const,
+                  at: event.createdAt,
+                  event,
+              })),
+              ...detail.activation.consumption.map((consumption) => ({
+                  kind: 'consumption' as const,
+                  at: consumption.startedAt,
+                  consumption,
+              })),
+          ].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
+        : [];
 
     return (
         <Drawer
@@ -357,7 +393,7 @@ export function SessionDetailsDrawer({
 
                     {detail.activation ? (
                         <LinkedCard label='Activation'>
-                            <Group justify='space-between'>
+                            <Group justify='space-between' align='flex-start'>
                                 <Code>{detail.activation.id}</Code>
                                 <Text size='xs' c='dimmed'>
                                     {formatDateTime(
@@ -366,7 +402,221 @@ export function SessionDetailsDrawer({
                                     to {formatDateTime(detail.activation.expireAt)}
                                 </Text>
                             </Group>
+                            <SimpleGrid cols={{ base: 1, sm: 3 }} mt='sm'>
+                                <DetailItem
+                                    label={
+                                        detail.activation.balance.mode ===
+                                        'cumulative'
+                                            ? 'Total allowance'
+                                            : 'Validity window'
+                                    }
+                                    value={formatSeconds(
+                                        detail.activation.balance.totalSeconds,
+                                    )}
+                                />
+                                <DetailItem
+                                    label='Accounting usage'
+                                    value={formatSeconds(
+                                        detail.activation.balance.usedSeconds,
+                                    )}
+                                />
+                                <DetailItem
+                                    label={
+                                        detail.activation.balance.mode ===
+                                        'cumulative'
+                                            ? 'Balance remaining'
+                                            : 'Validity remaining'
+                                    }
+                                    value={formatSeconds(
+                                        detail.activation.balance
+                                            .remainingSeconds,
+                                    )}
+                                />
+                            </SimpleGrid>
                         </LinkedCard>
+                    ) : null}
+
+                    {detail.activation ? (
+                        <>
+                            <Divider
+                                label='Activation audit'
+                                labelPosition='left'
+                            />
+                            {auditItems.length === 0 ? (
+                                <Text size='sm' c='dimmed'>
+                                    No lifecycle or accounting history recorded.
+                                </Text>
+                            ) : (
+                                <Stack gap='xs'>
+                                    {auditItems.map((item) => {
+                                        if (item.kind === 'consumption') {
+                                            const usage = item.consumption;
+                                            return (
+                                                <Card
+                                                    key={`usage-${usage.radacctId}`}
+                                                    withBorder
+                                                    padding='sm'
+                                                    radius='md'
+                                                    bg={
+                                                        usage.radacctId ===
+                                                        session.radacctId
+                                                            ? 'var(--mantine-color-blue-light)'
+                                                            : undefined
+                                                    }
+                                                >
+                                                    <Group
+                                                        justify='space-between'
+                                                        align='flex-start'
+                                                    >
+                                                        <Stack gap={2}>
+                                                            <Group gap='xs'>
+                                                                <Badge
+                                                                    size='xs'
+                                                                    variant='light'
+                                                                    color='blue'
+                                                                >
+                                                                    Usage
+                                                                </Badge>
+                                                                <Text
+                                                                    size='sm'
+                                                                    fw={600}
+                                                                >
+                                                                    Session consumed{' '}
+                                                                    {formatSeconds(
+                                                                        usage.seconds,
+                                                                    )}
+                                                                </Text>
+                                                            </Group>
+                                                            <Text
+                                                                size='xs'
+                                                                c='dimmed'
+                                                            >
+                                                                {formatBytes(
+                                                                    usage.totalOctets,
+                                                                )}{' '}
+                                                                ·{' '}
+                                                                {usage.callingStationId ??
+                                                                    usage.framedIpAddress ??
+                                                                    'Unknown device'}
+                                                                {usage.terminateCause
+                                                                    ? ` · ${usage.terminateCause}`
+                                                                    : ''}
+                                                            </Text>
+                                                        </Stack>
+                                                        <Text
+                                                            size='xs'
+                                                            c='dimmed'
+                                                            ta='right'
+                                                        >
+                                                            {formatDateTime(
+                                                                usage.startedAt,
+                                                            )}
+                                                            {usage.stoppedAt
+                                                                ? ` to ${formatDateTime(usage.stoppedAt)}`
+                                                                : ' · Live'}
+                                                        </Text>
+                                                    </Group>
+                                                </Card>
+                                            );
+                                        }
+
+                                        const event = item.event;
+                                        const previousExpiry = metadataDate(
+                                            event.metadata,
+                                            'previousExpireAt',
+                                        );
+                                        const expiry = metadataDate(
+                                            event.metadata,
+                                            'expireAt',
+                                        );
+                                        const remaining = metadataNumber(
+                                            event.metadata,
+                                            'requestedRemainingSeconds',
+                                        );
+                                        const timeout = metadataNumber(
+                                            event.metadata,
+                                            'sessionTimeoutSeconds',
+                                        );
+                                        return (
+                                            <Card
+                                                key={`event-${event.id}`}
+                                                withBorder
+                                                padding='sm'
+                                                radius='md'
+                                            >
+                                                <Group
+                                                    justify='space-between'
+                                                    align='flex-start'
+                                                >
+                                                    <Stack gap={2}>
+                                                        <Group gap='xs'>
+                                                            <Badge
+                                                                size='xs'
+                                                                variant='light'
+                                                                color='grape'
+                                                            >
+                                                                Audit
+                                                            </Badge>
+                                                            <Text
+                                                                size='sm'
+                                                                fw={600}
+                                                            >
+                                                                {
+                                                                    EVENT_LABELS[
+                                                                        event.type
+                                                                    ]
+                                                                }
+                                                            </Text>
+                                                        </Group>
+                                                        <Text
+                                                            size='xs'
+                                                            c='dimmed'
+                                                        >
+                                                            {event.actor.label} ·{' '}
+                                                            {event.source.replaceAll(
+                                                                '_',
+                                                                ' ',
+                                                            )}
+                                                        </Text>
+                                                        {event.type ===
+                                                            'limits_adjusted' &&
+                                                        expiry ? (
+                                                            <Text size='xs'>
+                                                                Expiry:{' '}
+                                                                {previousExpiry
+                                                                    ? `${formatDateTime(previousExpiry)} → `
+                                                                    : ''}
+                                                                {formatDateTime(expiry)}
+                                                                {remaining !== null
+                                                                    ? ` · Balance set to ${formatSeconds(remaining)}`
+                                                                    : ''}
+                                                            </Text>
+                                                        ) : null}
+                                                        {event.type ===
+                                                            'session_timeout_adjusted' &&
+                                                        timeout !== null ? (
+                                                            <Text size='xs'>
+                                                                Session timeout set to{' '}
+                                                                {formatSeconds(timeout)}
+                                                            </Text>
+                                                        ) : null}
+                                                    </Stack>
+                                                    <Text
+                                                        size='xs'
+                                                        c='dimmed'
+                                                        ta='right'
+                                                    >
+                                                        {formatDateTime(
+                                                            event.createdAt,
+                                                        )}
+                                                    </Text>
+                                                </Group>
+                                            </Card>
+                                        );
+                                    })}
+                                </Stack>
+                            )}
+                        </>
                     ) : null}
                 </Stack>
             )}

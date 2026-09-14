@@ -53,14 +53,10 @@ import {
 import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
 import * as dgram from 'node:dgram';
 import { radiusClient } from '.';
-import {
-    activationIsAvailable,
-    allowanceForRemainingTime,
-    calculateActivationTime,
-} from './activationLimits';
 import { db } from '../../db';
 import {
     activatedPackages,
+    activationEvents,
     hotspotLoginRequest,
     nasDevice,
     nasSetupScript,
@@ -72,6 +68,11 @@ import {
     transaction,
     user,
 } from '../../db/schema';
+import {
+    activationIsAvailable,
+    allowanceForRemainingTime,
+    calculateActivationTime,
+} from './activationLimits';
 
 const NO_EXPIRY_VALIDITY_MONTHS = 6;
 
@@ -571,8 +572,8 @@ export class RadiusClient {
 
         const usage =
             pkg.noExpiry || activation.timeAllowanceSeconds !== null
-            ? await this.getBankUsage(activation.id)
-            : null;
+                ? await this.getBankUsage(activation.id)
+                : null;
         const sessionSeconds = usage
             ? Math.max(
                   1,
@@ -581,12 +582,7 @@ export class RadiusClient {
                       Math.round((expireAt.getTime() - Date.now()) / 1000),
                   ),
               )
-            : Math.max(
-                  1,
-                  Math.round(
-                      (expireAt.getTime() - Date.now()) / 1000,
-                  ),
-              );
+            : Math.max(1, Math.round((expireAt.getTime() - Date.now()) / 1000));
         await db.delete(radreply).where(eq(radreply.username, username));
         await db
             .insert(radreply)
@@ -684,10 +680,7 @@ export class RadiusClient {
             )
             .limit(1);
         if (!row) return null;
-        if (
-            row.pkg.noExpiry ||
-            row.activation.timeAllowanceSeconds !== null
-        ) {
+        if (row.pkg.noExpiry || row.activation.timeAllowanceSeconds !== null) {
             const sync = await this.syncBankAuthorization(
                 row.activation.id,
                 row.pkg,
@@ -1037,10 +1030,7 @@ export class RadiusClient {
             Math.round((expireAt.getTime() - Date.now()) / 1000),
         );
 
-        if (
-            row.pkg.noExpiry ||
-            row.activation.timeAllowanceSeconds !== null
-        ) {
+        if (row.pkg.noExpiry || row.activation.timeAllowanceSeconds !== null) {
             const sync = await this.syncBankAuthorization(
                 row.activation.id,
                 row.pkg,
@@ -1097,10 +1087,7 @@ export class RadiusClient {
             1,
             Math.round((expireAt.getTime() - Date.now()) / 1000),
         );
-        if (
-            row.pkg.noExpiry ||
-            row.activation.timeAllowanceSeconds !== null
-        ) {
+        if (row.pkg.noExpiry || row.activation.timeAllowanceSeconds !== null) {
             const sync = await this.syncBankAuthorization(
                 row.activation.id,
                 row.pkg,
@@ -1129,7 +1116,7 @@ export class RadiusClient {
     // it is re-authorized from that one instead of being deleted.
     async deactivateActivation(
         activationId: string,
-        markDeactivated = true,
+        opts: { markDeactivated?: boolean; actorId?: string } = {},
     ): Promise<{
         ok: boolean;
         message: string;
@@ -1152,12 +1139,28 @@ export class RadiusClient {
             };
         }
 
+        const markDeactivated = opts.markDeactivated ?? true;
         if (markDeactivated && activation.deactivatedAt === null) {
-            activation.deactivatedAt = new Date();
-            await db
-                .update(activatedPackages)
-                .set({ deactivatedAt: activation.deactivatedAt })
-                .where(eq(activatedPackages.id, activationId));
+            const deactivatedAt = new Date();
+            activation.deactivatedAt = deactivatedAt;
+            await db.transaction(async (tx) => {
+                await tx
+                    .update(activatedPackages)
+                    .set({ deactivatedAt })
+                    .where(eq(activatedPackages.id, activationId));
+                await tx.insert(activationEvents).values({
+                    activationId,
+                    eventType: 'deactivated',
+                    actorType: opts.actorId ? 'admin' : 'system',
+                    actorId: opts.actorId ?? null,
+                    source: opts.actorId ? 'admin_api' : 'system',
+                    metadata: {
+                        deactivatedAt: deactivatedAt.toISOString(),
+                        expireAt: activation.expireAt.toISOString(),
+                        timeAllowanceSeconds: activation.timeAllowanceSeconds,
+                    },
+                });
+            });
         }
 
         const [pkg] = await db
@@ -1401,7 +1404,10 @@ export class RadiusClient {
     // Restores an administratively deactivated activation without changing its
     // expiry or time allowance. Expired or exhausted activations must have
     // their limits edited before they can be restored.
-    async reactivateActivation(activationId: string): Promise<{
+    async reactivateActivation(
+        activationId: string,
+        actorId?: string,
+    ): Promise<{
         ok: boolean;
         message: string;
         expireAt: Date | null;
@@ -1437,11 +1443,30 @@ export class RadiusClient {
             };
         }
 
+        const previousDeactivatedAt = activation.deactivatedAt;
         activation.deactivatedAt = null;
-        await db
-            .update(activatedPackages)
-            .set({ deactivatedAt: null })
-            .where(eq(activatedPackages.id, activationId));
+        await db.transaction(async (tx) => {
+            await tx
+                .update(activatedPackages)
+                .set({ deactivatedAt: null })
+                .where(eq(activatedPackages.id, activationId));
+            if (previousDeactivatedAt !== null) {
+                await tx.insert(activationEvents).values({
+                    activationId,
+                    eventType: 'reactivated',
+                    actorType: actorId ? 'admin' : 'system',
+                    actorId: actorId ?? null,
+                    source: actorId ? 'admin_api' : 'system',
+                    metadata: {
+                        previousDeactivatedAt:
+                            previousDeactivatedAt.toISOString(),
+                        expireAt: expireAt.toISOString(),
+                        timeAllowanceSeconds: activation.timeAllowanceSeconds,
+                        remainingSeconds: usage?.remainingSeconds ?? null,
+                    },
+                });
+            }
+        });
 
         if (pkg.type === 'pppoe') {
             const username = pppoeUsername(activation.userId);
@@ -1505,6 +1530,7 @@ export class RadiusClient {
         activationId: string,
         expireAt: Date,
         remainingSeconds: number,
+        actorId?: string,
     ): Promise<{ ok: boolean; message: string }> {
         const [row] = await db
             .select({ activation: activatedPackages, pkg: packages })
@@ -1527,22 +1553,45 @@ export class RadiusClient {
             remainingSeconds,
         );
 
+        const previousExpireAt = row.activation.expireAt;
+        const previousTimeAllowanceSeconds =
+            row.activation.timeAllowanceSeconds;
         row.activation.expireAt = expireAt;
         row.activation.timeAllowanceSeconds = timeAllowanceSeconds;
-        await db
-            .update(activatedPackages)
-            .set({ expireAt, timeAllowanceSeconds })
-            .where(eq(activatedPackages.id, activationId));
+        await db.transaction(async (tx) => {
+            await tx
+                .update(activatedPackages)
+                .set({ expireAt, timeAllowanceSeconds })
+                .where(eq(activatedPackages.id, activationId));
+            await tx.insert(activationEvents).values({
+                activationId,
+                eventType: 'limits_adjusted',
+                actorType: actorId ? 'admin' : 'system',
+                actorId: actorId ?? null,
+                source: actorId ? 'admin_api' : 'system',
+                metadata: {
+                    previousExpireAt: previousExpireAt.toISOString(),
+                    expireAt: expireAt.toISOString(),
+                    previousTimeAllowanceSeconds,
+                    timeAllowanceSeconds,
+                    usedSeconds,
+                    requestedRemainingSeconds: remainingSeconds,
+                },
+            });
+        });
 
         if (row.activation.deactivatedAt !== null) {
             return {
                 ok: true,
-                message: 'Activation limits updated; activation remains deactivated',
+                message:
+                    'Activation limits updated; activation remains deactivated',
             };
         }
 
         if (expireAt.getTime() <= Date.now() || remainingSeconds <= 0) {
-            await this.deactivateActivation(activationId, false);
+            await this.deactivateActivation(activationId, {
+                markDeactivated: false,
+            });
             return { ok: true, message: 'Activation limits updated' };
         }
 
@@ -1613,6 +1662,7 @@ export class RadiusClient {
     async setSessionTimeoutByRadacctId(
         radacctId: string,
         seconds: number,
+        actorId?: string,
     ): Promise<{ ok: boolean; message: string }> {
         const [row] = await db
             .select()
@@ -1633,6 +1683,24 @@ export class RadiusClient {
             );
             if (!ack) {
                 return { ok: false, message: 'NAS answered CoA-NAK' };
+            }
+            if (
+                row.class &&
+                /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+                    row.class,
+                )
+            ) {
+                await db.insert(activationEvents).values({
+                    activationId: row.class,
+                    eventType: 'session_timeout_adjusted',
+                    actorType: actorId ? 'admin' : 'system',
+                    actorId: actorId ?? null,
+                    source: actorId ? 'admin_api' : 'system',
+                    metadata: {
+                        radacctId,
+                        sessionTimeoutSeconds: Math.max(1, Math.round(seconds)),
+                    },
+                });
             }
             return { ok: true, message: 'Session time updated' };
         } catch (err) {
@@ -1978,11 +2046,10 @@ export class RadiusClient {
             liveOnly: true,
         });
 
-        if (
-            remainingSeconds <= 0 ||
-            usage.expireAt.getTime() <= Date.now()
-        ) {
-            await this.deactivateActivation(activationId, false);
+        if (remainingSeconds <= 0 || usage.expireAt.getTime() <= Date.now()) {
+            await this.deactivateActivation(activationId, {
+                markDeactivated: false,
+            });
             return { active: false, remainingSeconds: 0 };
         }
 
@@ -2042,7 +2109,9 @@ export class RadiusClient {
                     effectiveExpireAt(row.activation, row.pkg).getTime() <=
                     Date.now()
                 ) {
-                    await this.deactivateActivation(row.activation.id, false);
+                    await this.deactivateActivation(row.activation.id, {
+                        markDeactivated: false,
+                    });
                     touched++;
                     continue;
                 }
@@ -2148,6 +2217,22 @@ export class RadiusClient {
                     expireAt: expireAt.toDate(),
                 })
                 .returning();
+            await tx.insert(activationEvents).values({
+                activationId: row!.id,
+                eventType: 'created',
+                actorType: 'customer',
+                actorId: payment.userId,
+                source: 'payment_activation',
+                metadata: {
+                    paymentId: payment.id,
+                    packageId: pkg.id,
+                    packageType: pkg.type,
+                    expireAt: row!.expireAt.toISOString(),
+                    timeAllowanceSeconds: pkg.noExpiry
+                        ? pkg.sessionLength * 60
+                        : null,
+                },
+            });
             return [row];
         });
         return activation;
@@ -2195,6 +2280,22 @@ export class RadiusClient {
                     expireAt: expireAt.toDate(),
                 })
                 .returning();
+            await tx.insert(activationEvents).values({
+                activationId: row!.id,
+                eventType: 'created',
+                actorType: 'customer',
+                actorId: payment.userId,
+                source: 'payment_activation',
+                metadata: {
+                    paymentId: payment.id,
+                    packageId: pkg.id,
+                    packageType: pkg.type,
+                    expireAt: row!.expireAt.toISOString(),
+                    timeAllowanceSeconds: pkg.noExpiry
+                        ? pkg.sessionLength * 60
+                        : null,
+                },
+            });
             return [row];
         });
         return activation;
@@ -2657,7 +2758,9 @@ export class RadiusClient {
             remainingSeconds <= 0 &&
             liveSessions.length > 0
         ) {
-            await radiusClient.deactivateActivation(activationId, false);
+            await radiusClient.deactivateActivation(activationId, {
+                markDeactivated: false,
+            });
         }
 
         const octetsUsed = sessions.reduce((sum, s) => sum + s.totalOctets, 0);
@@ -2676,8 +2779,7 @@ export class RadiusClient {
             paymentId: activation.packagePaymentId,
             activatedAt: activation.activatedAt,
             expireAt,
-            expired:
-                expireAt.getTime() < Date.now() || remainingSeconds <= 0,
+            expired: expireAt.getTime() < Date.now() || remainingSeconds <= 0,
             deactivated: activation.deactivatedAt !== null,
             deactivatedAt: activation.deactivatedAt,
             sessionLimitSeconds,

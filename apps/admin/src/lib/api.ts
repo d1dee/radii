@@ -667,6 +667,45 @@ export type AdminSessionDetail = {
         id: string;
         activatedAt: string;
         expireAt: string;
+        deactivatedAt: string | null;
+        timeAllowanceSeconds: number | null;
+        balance: {
+            mode: 'calendar' | 'cumulative';
+            totalSeconds: number;
+            usedSeconds: number;
+            remainingSeconds: number;
+        };
+        events: Array<{
+            id: string;
+            type:
+                | 'created'
+                | 'reactivated'
+                | 'deactivated'
+                | 'limits_adjusted'
+                | 'session_timeout_adjusted';
+            actor: {
+                type: 'admin' | 'customer' | 'system';
+                id: string | null;
+                label: string;
+            };
+            source: string;
+            metadata: Record<string, unknown>;
+            createdAt: string;
+        }>;
+        consumption: Array<{
+            radacctId: string;
+            acctSessionId: string;
+            startedAt: string;
+            stoppedAt: string | null;
+            live: boolean;
+            seconds: number;
+            inputOctets: number;
+            outputOctets: number;
+            totalOctets: number;
+            callingStationId: string | null;
+            framedIpAddress: string | null;
+            terminateCause: string | null;
+        }>;
     } | null;
     customer: {
         id: string;

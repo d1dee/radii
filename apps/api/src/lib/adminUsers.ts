@@ -27,6 +27,7 @@ import {
 } from 'drizzle-orm';
 import { db } from '../db';
 import {
+    activationEvents,
     activatedPackages,
     adminUser,
     hotspotLoginRequest,
@@ -40,6 +41,7 @@ import {
     user,
     userFlag,
 } from '../db/schema';
+import { calculateActivationTime } from './radius/activationLimits';
 
 export type AdminUserTypeFilter = 'hotspot' | 'pppoe';
 
@@ -631,7 +633,11 @@ export async function getAdminSessionDetail(
                 id: activatedPackages.id,
                 activatedAt: activatedPackages.activatedAt,
                 expireAt: activatedPackages.expireAt,
+                deactivatedAt: activatedPackages.deactivatedAt,
+                timeAllowanceSeconds: activatedPackages.timeAllowanceSeconds,
             },
+            packageSessionLength: packages.sessionLength,
+            packageNoExpiry: packages.noExpiry,
             customer: {
                 id: user.id,
                 name: user.name,
@@ -694,6 +700,136 @@ export async function getAdminSessionDetail(
           )
         : Number(row.accounting.acctsessiontime ?? 0);
 
+    let activationDetail = null;
+    if (row.activation.id) {
+        const activationId = row.activation.id;
+        const nasAddresses = [...(await getAdminNasAddresses(adminId))];
+        const [events, accountingRows] = await Promise.all([
+            db
+                .select()
+                .from(activationEvents)
+                .where(eq(activationEvents.activationId, activationId))
+                .orderBy(desc(activationEvents.createdAt)),
+            nasAddresses.length > 0
+                ? db
+                      .select()
+                      .from(radacct)
+                      .where(
+                          and(
+                              eq(radacct.class, activationId),
+                              isNotNull(radacct.acctstarttime),
+                              inArray(radacct.nasipaddress, nasAddresses),
+                          ),
+                      )
+                      .orderBy(desc(radacct.acctstarttime))
+                : Promise.resolve([]),
+        ]);
+
+        const adminActorIds = events.flatMap((event) =>
+            event.actorType === 'admin' && event.actorId
+                ? [event.actorId]
+                : [],
+        );
+        const customerActorIds = events.flatMap((event) =>
+            event.actorType === 'customer' && event.actorId
+                ? [event.actorId]
+                : [],
+        );
+        const [adminActors, customerActors] = await Promise.all([
+            adminActorIds.length
+                ? db
+                      .select({ id: adminUser.id, name: adminUser.name })
+                      .from(adminUser)
+                      .where(inArray(adminUser.id, adminActorIds))
+                : Promise.resolve([]),
+            customerActorIds.length
+                ? db
+                      .select({ id: user.id, name: user.name })
+                      .from(user)
+                      .where(inArray(user.id, customerActorIds))
+                : Promise.resolve([]),
+        ]);
+        const actorNames = new Map(
+            [...adminActors, ...customerActors].map((actor) => [
+                actor.id,
+                actor.name,
+            ]),
+        );
+
+        const consumption = accountingRows.map((accounting) => {
+            const sessionLive = accounting.acctstoptime === null;
+            const sessionSeconds = sessionLive
+                ? Math.max(
+                      0,
+                      (Date.now() - accounting.acctstarttime!.getTime()) / 1000,
+                  )
+                : Number(accounting.acctsessiontime ?? 0);
+            const sessionInputOctets = Number(accounting.acctinputoctets ?? 0);
+            const sessionOutputOctets = Number(accounting.acctoutputoctets ?? 0);
+            return {
+                radacctId: String(accounting.radacctid),
+                acctSessionId: accounting.acctsessionid,
+                startedAt: accounting.acctstarttime!,
+                stoppedAt: accounting.acctstoptime,
+                live: sessionLive,
+                seconds: Math.round(sessionSeconds),
+                inputOctets: sessionInputOctets,
+                outputOctets: sessionOutputOctets,
+                totalOctets: sessionInputOctets + sessionOutputOctets,
+                callingStationId: accounting.callingstationid,
+                framedIpAddress: accounting.framedipaddress,
+                terminateCause: accounting.acctterminatecause,
+            };
+        });
+        const usedSeconds = consumption.reduce(
+            (total, item) => total + item.seconds,
+            0,
+        );
+        const packageAllowanceSeconds =
+            (row.packageSessionLength ?? 0) * 60;
+        const cumulative =
+            Boolean(row.packageNoExpiry) ||
+            row.activation.timeAllowanceSeconds !== null;
+        const balance = calculateActivationTime({
+            activatedAt: row.activation.activatedAt!,
+            expireAt: row.activation.expireAt!,
+            packageAllowanceSeconds,
+            allowanceOverrideSeconds: row.activation.timeAllowanceSeconds,
+            usedSeconds,
+            cumulative: Boolean(row.packageNoExpiry),
+            now: new Date(),
+        });
+
+        activationDetail = {
+            ...row.activation,
+            balance: {
+                mode: cumulative ? ('cumulative' as const) : ('calendar' as const),
+                totalSeconds: balance.sessionLimitSeconds,
+                usedSeconds,
+                remainingSeconds: balance.remainingSeconds,
+            },
+            events: events.map((event) => ({
+                id: event.id,
+                type: event.eventType,
+                actor: {
+                    type: event.actorType,
+                    id: event.actorId,
+                    label:
+                        (event.actorId && actorNames.get(event.actorId)) ||
+                        (event.actorType === 'system'
+                            ? 'System'
+                            : event.actorType === 'admin'
+                              ? 'Administrator'
+                              : 'Customer'),
+                },
+                source: event.source,
+                metadata: event.metadata,
+                createdAt: event.createdAt,
+            })),
+            consumption,
+        };
+    }
+
     return {
         session: {
             radacctId: String(row.accounting.radacctid),
@@ -726,7 +862,7 @@ export async function getAdminSessionDetail(
                     : 0,
         },
         nasDevice: row.nasDevice,
-        activation: row.activation.id ? row.activation : null,
+        activation: activationDetail,
         customer: row.customer.id ? row.customer : null,
         payment: row.payment.id ? row.payment : null,
         package: row.package.id ? row.package : null,
