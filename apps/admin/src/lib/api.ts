@@ -488,6 +488,8 @@ export type AdminActivationRow = {
     activatedAt: string;
     expireAt: string;
     expired: boolean;
+    deactivated: boolean;
+    deactivatedAt: string | null;
     noExpiry: boolean;
     maxDevices: number;
     sessionLimitSeconds: number;

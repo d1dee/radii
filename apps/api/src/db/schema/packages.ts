@@ -150,6 +150,10 @@ export const activatedPackages = pgTable(
             mode: 'date',
         }).notNull(),
         timeAllowanceSeconds: integer('time_allowance_seconds'),
+        deactivatedAt: timestamp('deactivated_at', {
+            withTimezone: true,
+            mode: 'date',
+        }),
     },
     (table) => [
         index('activated_packages_payment_id_idx').on(table.packagePaymentId),

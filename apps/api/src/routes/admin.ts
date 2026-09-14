@@ -601,9 +601,7 @@ app.get('/reports', requireAdmin, async (c) => {
 
 // --- Activation management --------------------------------------------------------
 
-// Re-activates a deactivated/expired activation: the expiry restarts from now
-// and the RADIUS provisioning is rebuilt (PPPoE re-authorizes the customer's
-// stable dialer account).
+// Restores a deactivated activation with its existing expiry and balance.
 app.post('/activations/:id/activate', requireAdmin, async (c) => {
     const id = c.req.param('id');
     if (!id) return jsonError(c, 404, 'Unknown activation');
@@ -612,7 +610,7 @@ app.post('/activations/:id/activate', requireAdmin, async (c) => {
     }
     try {
         const result = await radiusClient.reactivateActivation(id);
-        if (!result.ok && !result.expireAt) {
+        if (!result.ok) {
             return jsonError(c, 400, result.message);
         }
         return c.json({

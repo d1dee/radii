@@ -55,6 +55,8 @@ app.on(['GET', 'POST'], '/user/:userName/mac/:calledStationId', async (c) => {
                     return jsonError(c, 404, 'User not found');
                 case 'expired':
                     return jsonError(c, 403, 'Package validity expired');
+                case 'deactivated':
+                    return jsonError(c, 403, 'Package deactivated');
                 case 'exhausted':
                     return jsonError(c, 403, 'Time bank exhausted');
                 default:

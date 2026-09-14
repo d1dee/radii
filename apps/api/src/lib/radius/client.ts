@@ -54,6 +54,7 @@ import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
 import * as dgram from 'node:dgram';
 import { radiusClient } from '.';
 import {
+    activationIsAvailable,
     allowanceForRemainingTime,
     calculateActivationTime,
 } from './activationLimits';
@@ -83,7 +84,10 @@ function effectiveExpireAt(
 
 function activeActivationCondition() {
     const now = new Date();
-    return gte(activatedPackages.expireAt, now);
+    return and(
+        isNull(activatedPackages.deactivatedAt),
+        gte(activatedPackages.expireAt, now),
+    );
 }
 
 export class RadiusError extends Error {
@@ -269,6 +273,8 @@ export interface ActivationStatus {
     activatedAt: Date;
     expireAt: Date;
     expired: boolean;
+    deactivated: boolean;
+    deactivatedAt: Date | null;
     sessionLimitSeconds: number;
     usedSeconds: number;
     // Bank packages report the smaller of their cumulative balance and their
@@ -468,9 +474,10 @@ export class RadiusClient {
 
         const existing = await this.getActivationByPayment(payment.id);
         if (existing) {
+            if (existing.deactivatedAt !== null) return null;
             // Bank packages must show the current balance before the client
             // is handed credentials; an exhausted bank gets nothing.
-            if (pkg.noExpiry) {
+            if (pkg.noExpiry || existing.timeAllowanceSeconds !== null) {
                 const sync = await this.syncBankAuthorization(existing.id, pkg);
                 if (!sync.active) return null;
             }
@@ -514,6 +521,7 @@ export class RadiusClient {
         const activation =
             existing ?? (await this.provisionPppoeActivation(payment, pkg));
 
+        if (activation.deactivatedAt !== null) return null;
         if (effectiveExpireAt(activation, pkg).getTime() <= Date.now()) {
             return null;
         }
@@ -551,6 +559,7 @@ export class RadiusClient {
         activation: typeof activatedPackages.$inferSelect,
         pkg: typeof packages.$inferSelect,
     ): Promise<void> {
+        if (activation.deactivatedAt !== null) return;
         const username = pppoeUsername(activation.userId);
 
         const expireAt = effectiveExpireAt(activation, pkg);
@@ -632,7 +641,10 @@ export class RadiusClient {
             .orderBy(desc(activatedPackages.activatedAt))
             .limit(5);
         for (const row of rows) {
-            if (row.pkg.noExpiry) {
+            if (
+                row.pkg.noExpiry ||
+                row.activation.timeAllowanceSeconds !== null
+            ) {
                 const sync = await this.syncBankAuthorization(
                     row.activation.id,
                     row.pkg,
@@ -724,7 +736,17 @@ export class RadiusClient {
                 row.activation,
                 row.pkg,
             );
-            if (!status) continue;
+            if (
+                !status ||
+                !activationIsAvailable({
+                    deactivatedAt: status.deactivatedAt,
+                    expireAt: status.expireAt,
+                    remainingSeconds: status.remainingSeconds ?? 0,
+                    now: new Date(),
+                })
+            ) {
+                continue;
+            }
             out.push({
                 ...status,
                 maxDevices: row.pkg.maxDevices,
@@ -789,7 +811,26 @@ export class RadiusClient {
             )
             .orderBy(desc(activatedPackages.activatedAt))
             .limit(20);
-        if (rows.length === 0) return [];
+        const usableRows = [];
+        for (const row of rows) {
+            const status = await this.activationStatusFromRows(
+                row.activation.id,
+                row.activation,
+                row.pkg,
+            );
+            if (
+                status &&
+                activationIsAvailable({
+                    deactivatedAt: status.deactivatedAt,
+                    expireAt: status.expireAt,
+                    remainingSeconds: status.remainingSeconds ?? 0,
+                    now: new Date(),
+                })
+            ) {
+                usableRows.push(row);
+            }
+        }
+        if (usableRows.length === 0) return [];
 
         const username = pppoeUsername(userId);
         let password = await this.getProvisionedPassword(username);
@@ -805,12 +846,12 @@ export class RadiusClient {
 
         const liveSessions = await this.getSessions({
             username,
-            activationId: rows[0]!.activation.id,
+            activationId: usableRows[0]!.activation.id,
             liveOnly: true,
         });
         const online = liveSessions.length > 0;
 
-        return rows.map((row) => ({
+        return usableRows.map((row) => ({
             activationId: row.activation.id,
             username,
             password: password!,
@@ -844,6 +885,23 @@ export class RadiusClient {
             )
             .limit(1);
         if (!row) return null;
+
+        const status = await this.activationStatusFromRows(
+            activationId,
+            row.activation,
+            row.pkg,
+        );
+        if (
+            !status ||
+            !activationIsAvailable({
+                deactivatedAt: status.deactivatedAt,
+                expireAt: status.expireAt,
+                remainingSeconds: status.remainingSeconds ?? 0,
+                now: new Date(),
+            })
+        ) {
+            return null;
+        }
 
         const username = pppoeUsername(userId);
         const password = randomCredentialPassword(12);
@@ -960,12 +1018,16 @@ export class RadiusClient {
         username: string,
     ): Promise<
         | { verdict: 'unknown' }
+        | { verdict: 'deactivated' }
         | { verdict: 'expired' }
         | { verdict: 'exhausted' }
         | { verdict: 'ok'; attributes: RadiusRestReply }
     > {
         const row = await this.resolveActivationByUsername(username);
         if (!row) return this.restAuthorizePppoe(username);
+        if (row.activation.deactivatedAt !== null) {
+            return { verdict: 'deactivated' };
+        }
         const expireAt = effectiveExpireAt(row.activation, row.pkg);
         if (expireAt.getTime() < Date.now()) {
             return { verdict: 'expired' };
@@ -1004,6 +1066,7 @@ export class RadiusClient {
         username: string,
     ): Promise<
         | { verdict: 'unknown' }
+        | { verdict: 'deactivated' }
         | { verdict: 'expired' }
         | { verdict: 'exhausted' }
         | { verdict: 'ok'; attributes: RadiusRestReply }
@@ -1019,11 +1082,12 @@ export class RadiusClient {
                 and(
                     eq(activatedPackages.userId, userId),
                     eq(packages.type, 'pppoe'),
+                    activeActivationCondition(),
                 ),
             )
             .orderBy(desc(activatedPackages.activatedAt))
             .limit(1);
-        if (!row) return { verdict: 'unknown' };
+        if (!row) return { verdict: 'deactivated' };
         const expireAt = effectiveExpireAt(row.activation, row.pkg);
         if (expireAt.getTime() < Date.now()) {
             return { verdict: 'expired' };
@@ -1054,8 +1118,8 @@ export class RadiusClient {
         };
     }
 
-    // Deactivates a package: removes the RADIUS provisioning (no further
-    // logins), expires the activation record, and terminates every live
+    // Makes a package unavailable without changing its expiry or allowance.
+    // RADIUS provisioning is removed and every live
     // session by sending a session-targeted Disconnect-Request directly to
     // the NAS holding it (keyed on Acct-Session-Id, signed with the NAS's own
     // shared secret). Provisioning removal is authoritative; a missed
@@ -1065,7 +1129,7 @@ export class RadiusClient {
     // it is re-authorized from that one instead of being deleted.
     async deactivateActivation(
         activationId: string,
-        preserveExpiry = false,
+        markDeactivated = true,
     ): Promise<{
         ok: boolean;
         message: string;
@@ -1086,6 +1150,14 @@ export class RadiusClient {
                 sessionsDisconnected: 0,
                 failures: [],
             };
+        }
+
+        if (markDeactivated && activation.deactivatedAt === null) {
+            activation.deactivatedAt = new Date();
+            await db
+                .update(activatedPackages)
+                .set({ deactivatedAt: activation.deactivatedAt })
+                .where(eq(activatedPackages.id, activationId));
         }
 
         const [pkg] = await db
@@ -1134,12 +1206,6 @@ export class RadiusClient {
 
         if (isPppoe) {
             await disconnectAll();
-            if (!preserveExpiry) {
-                await db
-                    .update(activatedPackages)
-                    .set({ expireAt: new Date() })
-                    .where(eq(activatedPackages.id, activationId));
-            }
 
             // The stable dialer account belongs to the CUSTOMER, not this
             // activation: keep it (re-authorized from the newest remaining
@@ -1173,14 +1239,6 @@ export class RadiusClient {
             await Promise.all([
                 db.delete(radcheck).where(eq(radcheck.username, username)),
                 db.delete(radreply).where(eq(radreply.username, username)),
-                ...(preserveExpiry
-                    ? []
-                    : [
-                          db
-                              .update(activatedPackages)
-                              .set({ expireAt: new Date() })
-                              .where(eq(activatedPackages.id, activationId)),
-                      ]),
             ]);
             // One session-targeted Disconnect per live session, sent directly
             // to the NAS holding it (keyed on Acct-Session-Id).
@@ -1340,10 +1398,9 @@ export class RadiusClient {
         return out;
     }
 
-    // Restores a deactivated/expired activation: the expiry restarts from now
-    // (the package's validity rules) and the RADIUS provisioning is rebuilt so
-    // the user can log back in. For PPPoE the customer's stable dialer
-    // account is re-authorized from this activation. Returns the new expiry.
+    // Restores an administratively deactivated activation without changing its
+    // expiry or time allowance. Expired or exhausted activations must have
+    // their limits edited before they can be restored.
     async reactivateActivation(activationId: string): Promise<{
         ok: boolean;
         message: string;
@@ -1360,22 +1417,30 @@ export class RadiusClient {
         }
 
         const { activation, pkg } = row;
-        const usage = pkg.noExpiry
-            ? await this.getBankUsage(activationId)
-            : null;
-        const expireAt = pkg.noExpiry
-            ? dayjs().add(NO_EXPIRY_VALIDITY_MONTHS, 'month').toDate()
-            : dayjs().add(pkg.sessionLength, 'minute').toDate();
-        activation.expireAt = expireAt;
-        activation.timeAllowanceSeconds = pkg.noExpiry
-            ? (usage?.usedSeconds ?? 0) + pkg.sessionLength * 60
-            : null;
+        const expireAt = activation.expireAt;
+        if (expireAt.getTime() <= Date.now()) {
+            return {
+                ok: false,
+                message: 'The activation expiry must be extended first',
+                expireAt,
+            };
+        }
+        const usage =
+            pkg.noExpiry || activation.timeAllowanceSeconds !== null
+                ? await this.getBankUsage(activationId)
+                : null;
+        if (usage && usage.remainingSeconds <= 0) {
+            return {
+                ok: false,
+                message: 'The activation time balance must be increased first',
+                expireAt,
+            };
+        }
+
+        activation.deactivatedAt = null;
         await db
             .update(activatedPackages)
-            .set({
-                expireAt,
-                timeAllowanceSeconds: activation.timeAllowanceSeconds,
-            })
+            .set({ deactivatedAt: null })
             .where(eq(activatedPackages.id, activationId));
 
         if (pkg.type === 'pppoe') {
@@ -1411,12 +1476,12 @@ export class RadiusClient {
             dayjs(expireAt).format('DD MMM YYYY HH:mm:ss'),
         );
 
-        // Bank packages advertise the remaining cumulative balance as their
-        // Session-Timeout; regular packages the per-session allowance.
-        let sessionSeconds = pkg.sessionLength * 60;
-        if (pkg.noExpiry) {
-            const usage = await this.getBankUsage(activationId);
-            sessionSeconds = usage?.remainingSeconds ?? 0;
+        let sessionSeconds = Math.max(
+            1,
+            Math.round((expireAt.getTime() - Date.now()) / 1000),
+        );
+        if (usage) {
+            sessionSeconds = Math.min(sessionSeconds, usage.remainingSeconds);
         }
         await db.delete(radreply).where(eq(radreply.username, username));
         await db
@@ -1430,15 +1495,6 @@ export class RadiusClient {
                 ),
             );
 
-        if (pkg.noExpiry && sessionSeconds <= 0) {
-            await this.deactivateActivation(activationId);
-            return {
-                ok: false,
-                message:
-                    'The cumulative time bank is exhausted; reactivation was rolled back',
-                expireAt: null,
-            };
-        }
         return { ok: true, message: 'Activation restored', expireAt };
     }
 
@@ -1478,8 +1534,15 @@ export class RadiusClient {
             .set({ expireAt, timeAllowanceSeconds })
             .where(eq(activatedPackages.id, activationId));
 
+        if (row.activation.deactivatedAt !== null) {
+            return {
+                ok: true,
+                message: 'Activation limits updated; activation remains deactivated',
+            };
+        }
+
         if (expireAt.getTime() <= Date.now() || remainingSeconds <= 0) {
-            await this.deactivateActivation(activationId, true);
+            await this.deactivateActivation(activationId, false);
             return { ok: true, message: 'Activation limits updated' };
         }
 
@@ -1851,6 +1914,7 @@ export class RadiusClient {
         remainingSeconds: number;
         username: string;
         expireAt: Date;
+        deactivated: boolean;
     } | null> {
         const [row] = await db
             .select({ activation: activatedPackages, pkg: packages })
@@ -1883,6 +1947,7 @@ export class RadiusClient {
             ),
             username,
             expireAt: effectiveExpireAt(row.activation, row.pkg),
+            deactivated: row.activation.deactivatedAt !== null,
         };
     }
 
@@ -1904,6 +1969,9 @@ export class RadiusClient {
         const usage = await this.getBankUsage(activationId);
         const username = usage?.username ?? activationUsername(activationId);
         const remainingSeconds = usage?.remainingSeconds ?? 0;
+        if (!usage || usage.deactivated) {
+            return { active: false, remainingSeconds };
+        }
         const liveSessions = await this.getSessions({
             username,
             activationId,
@@ -1912,10 +1980,9 @@ export class RadiusClient {
 
         if (
             remainingSeconds <= 0 ||
-            !usage ||
             usage.expireAt.getTime() <= Date.now()
         ) {
-            await this.deactivateActivation(activationId, true);
+            await this.deactivateActivation(activationId, false);
             return { active: false, remainingSeconds: 0 };
         }
 
@@ -1958,7 +2025,15 @@ export class RadiusClient {
             .select({ activation: activatedPackages, pkg: packages })
             .from(activatedPackages)
             .innerJoin(packages, eq(activatedPackages.packageId, packages.id))
-            .where(eq(packages.noExpiry, true));
+            .where(
+                and(
+                    isNull(activatedPackages.deactivatedAt),
+                    or(
+                        eq(packages.noExpiry, true),
+                        isNotNull(activatedPackages.timeAllowanceSeconds),
+                    ),
+                ),
+            );
 
         let touched = 0;
         for (const row of rows) {
@@ -1967,7 +2042,7 @@ export class RadiusClient {
                     effectiveExpireAt(row.activation, row.pkg).getTime() <=
                     Date.now()
                 ) {
-                    await this.deactivateActivation(row.activation.id);
+                    await this.deactivateActivation(row.activation.id, false);
                     touched++;
                     continue;
                 }
@@ -2582,7 +2657,7 @@ export class RadiusClient {
             remainingSeconds <= 0 &&
             liveSessions.length > 0
         ) {
-            await radiusClient.deactivateActivation(activationId, true);
+            await radiusClient.deactivateActivation(activationId, false);
         }
 
         const octetsUsed = sessions.reduce((sum, s) => sum + s.totalOctets, 0);
@@ -2603,6 +2678,8 @@ export class RadiusClient {
             expireAt,
             expired:
                 expireAt.getTime() < Date.now() || remainingSeconds <= 0,
+            deactivated: activation.deactivatedAt !== null,
+            deactivatedAt: activation.deactivatedAt,
             sessionLimitSeconds,
             usedSeconds,
             remainingSeconds,

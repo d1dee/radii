@@ -5,6 +5,24 @@ export function allowanceForRemainingTime(
     return Math.round(usedSeconds + remainingSeconds);
 }
 
+export function activationIsAvailable({
+    deactivatedAt,
+    expireAt,
+    remainingSeconds,
+    now,
+}: {
+    deactivatedAt: Date | null;
+    expireAt: Date;
+    remainingSeconds: number;
+    now: Date;
+}): boolean {
+    return (
+        deactivatedAt === null &&
+        expireAt.getTime() > now.getTime() &&
+        remainingSeconds > 0
+    );
+}
+
 export function calculateActivationTime({
     activatedAt,
     expireAt,

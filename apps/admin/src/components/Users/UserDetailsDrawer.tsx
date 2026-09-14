@@ -590,14 +590,18 @@ export function UserDetailsDrawer({
                                                         ) : null}
                                                         <Badge
                                                             color={
-                                                                a.expired
+                                                                a.deactivated
+                                                                    ? 'red'
+                                                                    : a.expired
                                                                     ? 'gray'
                                                                     : 'blue'
                                                             }
                                                             variant='light'
                                                             size='sm'
                                                         >
-                                                            {a.expired
+                                                            {a.deactivated
+                                                                ? 'Deactivated'
+                                                                : a.expired
                                                                 ? 'Expired'
                                                                 : 'Active'}
                                                         </Badge>
@@ -631,9 +635,9 @@ export function UserDetailsDrawer({
                                                         {formatDateTime(a.expireAt)}
                                                     </Text>
                                                     <Text size='xs' c='dimmed'>
-                                                        {dayjs(
-                                                            a.activatedAt,
-                                                        ).fromNow()}
+                                                        {a.deactivatedAt
+                                                            ? `Deactivated ${dayjs(a.deactivatedAt).fromNow()}`
+                                                            : `Activated ${dayjs(a.activatedAt).fromNow()}`}
                                                     </Text>
                                                 </Table.Td>
                                                 <Table.Td>
@@ -641,8 +645,8 @@ export function UserDetailsDrawer({
                                                         justify='flex-end'
                                                         gap={4}
                                                     >
-                                                        {a.expired ? (
-                                                            <Tooltip label='Re-activate (restart validity now)'>
+                                                        {a.deactivated ? (
+                                                            <Tooltip label='Reactivate with current limits'>
                                                                 <ActionIcon
                                                                     variant='light'
                                                                     color='green'
@@ -659,7 +663,7 @@ export function UserDetailsDrawer({
                                                                     />
                                                                 </ActionIcon>
                                                             </Tooltip>
-                                                        ) : (
+                                                        ) : !a.expired ? (
                                                             <Tooltip label='Deactivate'>
                                                                 <ActionIcon
                                                                     variant='light'
@@ -676,7 +680,7 @@ export function UserDetailsDrawer({
                                                                     />
                                                                 </ActionIcon>
                                                             </Tooltip>
-                                                        )}
+                                                        ) : null}
                                                         <Tooltip label='Edit expiry and time remaining'>
                                                             <ActionIcon
                                                                 variant='light'
@@ -996,8 +1000,9 @@ export function UserDetailsDrawer({
                 <Stack>
                     <Text size='sm'>
                         This removes the RADIUS provisioning and terminates every
-                        live session of this activation. The customer keeps the
-                        payment record; the package can be re-activated later.
+                        live session of this activation. Expiry and remaining
+                        time are preserved, but the package is hidden from the
+                        customer until it is reactivated.
                     </Text>
                     <Group justify='flex-end'>
                         <Button

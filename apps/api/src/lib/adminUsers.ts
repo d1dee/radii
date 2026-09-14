@@ -171,7 +171,7 @@ async function userAggregates(userIds: string[], adminId: string) {
         .select({
             userId: activatedPackages.userId,
             total: count(activatedPackages.id),
-            active: sql<number>`count(*) filter (where ${activatedPackages.expireAt} > now())`,
+            active: sql<number>`count(*) filter (where ${activatedPackages.expireAt} > now() and ${activatedPackages.deactivatedAt} is null)`,
             hotspot: sql<number>`count(*) filter (where ${packages.type} = 'hotspot')`,
             pppoe: sql<number>`count(*) filter (where ${packages.type} = 'pppoe')`,
         })
