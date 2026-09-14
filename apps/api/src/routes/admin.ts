@@ -10,8 +10,8 @@ import { env } from '../env';
 import { getAdminSettings, saveAdminSettings } from '../lib/adminSettings';
 import {
     addUserFlag,
-    canAdminManageGlobalUser,
     canAdminManageActivation,
+    canAdminManageGlobalUser,
     canAdminManagePppoeAccount,
     getAdminNasAddresses,
     getAdminPaymentDetail,
@@ -538,11 +538,7 @@ app.post('/users/:id/pppoe-password', requireAdmin, async (c) => {
             id,
             parsed.data.password,
             c.get('adminSession').userId,
-            [
-                ...(await getAdminNasAddresses(
-                    c.get('adminSession').userId,
-                )),
-            ],
+            [...(await getAdminNasAddresses(c.get('adminSession').userId))],
         );
         return c.json({
             success: true,
@@ -592,8 +588,10 @@ app.get('/payments', requireAdmin, async (c) => {
 });
 
 app.get('/payments/:id', requireAdmin, async (c) => {
+    const paymentId = c.req.param('id');
+    if (!paymentId) return jsonError(c, 404, 'Payment not found');
     const data = await getAdminPaymentDetail(
-        c.req.param('id'),
+        paymentId,
         c.get('adminSession').userId,
     );
     if (!data) return jsonError(c, 404, 'Payment not found');
@@ -631,18 +629,13 @@ app.post('/activations/:id/activate', requireAdmin, async (c) => {
         return jsonError(c, 404, 'Unknown activation');
     }
     try {
-        const result = await radiusClient.reactivateActivation(
-            id,
-            {
-                adminId: c.get('adminSession').userId,
-                actorId: c.get('adminSession').userId,
-                nasIpAddresses: [
-                    ...(await getAdminNasAddresses(
-                        c.get('adminSession').userId,
-                    )),
-                ],
-            },
-        );
+        const result = await radiusClient.reactivateActivation(id, {
+            adminId: c.get('adminSession').userId,
+            actorId: c.get('adminSession').userId,
+            nasIpAddresses: [
+                ...(await getAdminNasAddresses(c.get('adminSession').userId)),
+            ],
+        });
         if (!result.ok) {
             return jsonError(c, 400, result.message);
         }
@@ -708,9 +701,7 @@ app.get('/radius/summary', requireAdmin, async (c) => {
     const raw = Number(c.req.query('windowMinutes') ?? 60);
     const windowMinutes =
         Number.isFinite(raw) && raw > 0 ? Math.min(raw, 1440) : 60;
-    const addresses = await getAdminNasAddresses(
-        c.get('adminSession').userId,
-    );
+    const addresses = await getAdminNasAddresses(c.get('adminSession').userId);
     const data = await radiusClient.getNetworkUsage(windowMinutes, [
         ...addresses,
     ]);
@@ -770,9 +761,7 @@ app.post('/radius/activations/:id/deactivate', requireAdmin, async (c) => {
             actorId: c.get('adminSession').userId,
             adminId: c.get('adminSession').userId,
             nasIpAddresses: [
-                ...(await getAdminNasAddresses(
-                    c.get('adminSession').userId,
-                )),
+                ...(await getAdminNasAddresses(c.get('adminSession').userId)),
             ],
         });
         if (!result.ok && result.sessionsFound === 0) {
