@@ -37,6 +37,7 @@ import { jsonError } from '../lib/error';
 import {
     createPayment,
     getPackageById,
+    getOrderPackageForNas,
     getPackagesGroupedByCategory,
     getPaymentById,
 } from '../lib/packages';
@@ -317,29 +318,18 @@ app.post('/order', requireAuth, async (c) => {
         return jsonError(c, 400, 'Invalid order payload');
     }
 
-    const pkg = await getPackageById(parsed.data.packageId);
-    if (!pkg) return jsonError(c, 404, 'Package not found');
-    if (pkg.type !== 'pppoe') {
-        return jsonError(c, 400, 'Package is not a PPPoE package');
-    }
-    if (!pkg.isActive) {
-        return jsonError(c, 400, 'Package is not available');
-    }
-
     const currentUser = c.get('user');
 
-    // Validate the portal-provided NAS before stamping it on the payment.
-    let nasDeviceId: string | null = parsed.data.nas ?? null;
-    if (nasDeviceId) {
-        const [device] = await db
-            .select({ id: nasDevice.id })
-            .from(nasDevice)
-            .where(eq(nasDevice.id, nasDeviceId))
-            .limit(1);
-        if (!device) {
-            return jsonError(c, 400, 'Unknown NAS device');
-        }
+    const nasDeviceId = parsed.data.nas;
+    if (!nasDeviceId) {
+        return jsonError(c, 400, 'A NAS device is required');
     }
+    const pkg = await getOrderPackageForNas(
+        parsed.data.packageId,
+        nasDeviceId,
+        'pppoe',
+    );
+    if (!pkg) return jsonError(c, 404, 'Package not found');
 
     const row = await createPayment({
         userId: currentUser!.id,

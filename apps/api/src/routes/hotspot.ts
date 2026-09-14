@@ -26,6 +26,7 @@ import { jsonError } from '../lib/error';
 import {
     createPayment,
     getPackageById,
+    getOrderPackageForNas,
     getPackagesGroupedByCategory,
     getPaymentById,
 } from '../lib/packages';
@@ -230,10 +231,6 @@ app.post('/order', requireAuth, async (c) => {
         return jsonError(c, 400, 'Invalid order payload');
     }
 
-    const pkg = await getPackageById(parsed.data.packageId);
-
-    if (!pkg) return jsonError(c, 404, 'Package not found');
-
     const currentUser = c.get('user');
 
     // Tenant attribution: stamp the NAS the purchase happened through. The
@@ -256,10 +253,24 @@ app.post('/order', requireAuth, async (c) => {
         const [lr] = await db
             .select({ nasDeviceId: hotspotLoginRequest.nasDeviceId })
             .from(hotspotLoginRequest)
-            .where(eq(hotspotLoginRequest.id, loginRequestId))
+            .where(
+                and(
+                    eq(hotspotLoginRequest.id, loginRequestId),
+                    eq(hotspotLoginRequest.userId, currentUser!.id),
+                ),
+            )
             .limit(1);
         nasDeviceId = lr?.nasDeviceId ?? null;
     }
+    if (!nasDeviceId) {
+        return jsonError(c, 400, 'A valid hotspot login request is required');
+    }
+    const pkg = await getOrderPackageForNas(
+        parsed.data.packageId,
+        nasDeviceId,
+        'hotspot',
+    );
+    if (!pkg) return jsonError(c, 404, 'Package not found');
 
     const row = await createPayment({
         userId: currentUser!.id,

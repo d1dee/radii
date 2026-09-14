@@ -180,6 +180,7 @@ export const nasSetupScript = pgTable(
     },
     (table) => [
         unique('nas_setup_script_nas_device_id_key').on(table.nasDeviceId),
+        unique('nas_setup_script_wg_client_ip_key').on(table.wgClientIp),
         index('nas_setup_script_status_idx').on(table.status),
     ],
 );

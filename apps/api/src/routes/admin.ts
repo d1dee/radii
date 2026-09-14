@@ -10,6 +10,9 @@ import { env } from '../env';
 import { getAdminSettings, saveAdminSettings } from '../lib/adminSettings';
 import {
     addUserFlag,
+    canAdminManageGlobalUser,
+    canAdminManageActivation,
+    canAdminManagePppoeAccount,
     getAdminNasAddresses,
     getAdminPaymentDetail,
     getAdminReports,
@@ -123,7 +126,7 @@ app.get('/packages/:id', requireAdmin, async (c) => {
     if (!packageId) {
         return jsonError(c, 404, 'Package not found');
     }
-    const row = await getPackageById(packageId);
+    const row = await getPackageById(packageId, c.var.adminSession.userId);
     if (!row) {
         return jsonError(c, 404, 'Package not found');
     }
@@ -136,11 +139,12 @@ app.get('/packages/:id/analytics', requireAdmin, async (c) => {
     if (!packageId) {
         return jsonError(c, 404, 'Package not found');
     }
-    const pkg = await getPackageById(packageId);
+    const adminId = c.var.adminSession.userId;
+    const pkg = await getPackageById(packageId, adminId);
     if (!pkg) {
         return jsonError(c, 404, 'Package not found');
     }
-    const data = await getPackageAnalytics(packageId);
+    const data = await getPackageAnalytics(packageId, adminId);
     return c.json({ success: true, data });
 });
 
@@ -159,6 +163,7 @@ app.put('/packages/:id', requireAdmin, async (c) => {
     }
     const row = await updatePackage(
         packageId,
+        c.var.adminSession.userId,
         { ...data, price: String(data.price) },
         nasDeviceIds,
     );
@@ -212,7 +217,7 @@ app.post('/nas-devices', requireAdmin, async (c) => {
             return jsonError(
                 c,
                 409,
-                'A NAS device with this serial number already exists',
+                'NAS device conflicts with an existing device',
             );
         }
         throw e;
@@ -236,7 +241,12 @@ app.get('/nas-devices/:id/analytics', requireAdmin, async (c) => {
     if (!device) {
         return jsonError(c, 404, 'NAS device not found');
     }
-    const data = await getNasDeviceAnalytics(device.id, device.ipAddress);
+    const data = await getNasDeviceAnalytics(device.id, [
+        ...(await getAdminNasAddresses(
+            c.get('adminSession').userId,
+            device.id,
+        )),
+    ]);
     return c.json({ success: true, data });
 });
 
@@ -335,7 +345,7 @@ app.put('/nas-devices/:id', requireAdmin, async (c) => {
             return jsonError(
                 c,
                 409,
-                'A NAS device with this serial number already exists',
+                'NAS device conflicts with an existing device',
             );
         }
         throw e;
@@ -384,7 +394,10 @@ app.get('/users/:id', requireAdmin, async (c) => {
     // Only surface dialer credentials once the customer actually has a PPPoE
     // history (the username derivation is deterministic for every user).
     let pppoe: { username: string; password: string | null } | null = null;
-    if (detail.activations.pppoe > 0) {
+    if (
+        detail.activations.pppoe > 0 &&
+        (await canAdminManagePppoeAccount(c.get('adminSession').userId, id))
+    ) {
         const credentials = await radiusClient.getPppoeCredentials(id);
         pppoe = credentials.password ? credentials : null;
     }
@@ -438,7 +451,7 @@ app.post('/users/:id/ban', requireAdmin, async (c) => {
     // Only customers on this admin's network can be moderated. The ban
     // itself is account-global (the phone account is shared across portals)
     // and better-auth enforces it at session resolution.
-    if (!(await isAdminUserVisible(c.get('adminSession').userId, id))) {
+    if (!(await canAdminManageGlobalUser(c.get('adminSession').userId, id))) {
         return jsonError(c, 404, 'User not found');
     }
     const row = await setUserBan(
@@ -454,7 +467,7 @@ app.post('/users/:id/ban', requireAdmin, async (c) => {
 app.delete('/users/:id/ban', requireAdmin, async (c) => {
     const id = c.req.param('id');
     if (!id) return jsonError(c, 404, 'User not found');
-    if (!(await isAdminUserVisible(c.get('adminSession').userId, id))) {
+    if (!(await canAdminManageGlobalUser(c.get('adminSession').userId, id))) {
         return jsonError(c, 404, 'User not found');
     }
     const row = await setUserBan(id, false);
@@ -480,13 +493,16 @@ app.get('/users/:id/activations', requireAdmin, async (c) => {
         return jsonError(c, 404, 'User not found');
     }
     try {
-        const all = await radiusClient.getAdminActivations({ userId: id });
-        // The phone account is global; filter to activations this admin's
-        // NAS devices issued (activation -> payment -> NAS -> owner).
-        const owned = new Set(await getOwnedActivationIds(adminId, id));
+        const activationIds = await getOwnedActivationIds(adminId, id);
+        const addresses = [...(await getAdminNasAddresses(adminId))];
+        const all = await radiusClient.getAdminActivations({
+            userId: id,
+            activationIds,
+            nasIpAddresses: addresses,
+        });
         return c.json({
             success: true,
-            data: all.filter((a) => owned.has(a.activationId)),
+            data: all,
         });
     } catch (err) {
         console.error('[radius] admin activation listing failed:', err);
@@ -514,13 +530,19 @@ app.post('/users/:id/pppoe-password', requireAdmin, async (c) => {
     // Restricted to customers on this admin's network. Note the dialer
     // account itself is global per phone (one stable RADIUS account), so a
     // rotation also applies wherever else that customer dials.
-    if (!(await isAdminUserVisible(c.get('adminSession').userId, id))) {
+    if (!(await canAdminManagePppoeAccount(c.get('adminSession').userId, id))) {
         return jsonError(c, 404, 'User not found');
     }
     try {
         const data = await radiusClient.setPppoePassword(
             id,
             parsed.data.password,
+            c.get('adminSession').userId,
+            [
+                ...(await getAdminNasAddresses(
+                    c.get('adminSession').userId,
+                )),
+            ],
         );
         return c.json({
             success: true,
@@ -605,13 +627,21 @@ app.get('/reports', requireAdmin, async (c) => {
 app.post('/activations/:id/activate', requireAdmin, async (c) => {
     const id = c.req.param('id');
     if (!id) return jsonError(c, 404, 'Unknown activation');
-    if (!(await isAdminActivationVisible(c.get('adminSession').userId, id))) {
+    if (!(await canAdminManageActivation(c.get('adminSession').userId, id))) {
         return jsonError(c, 404, 'Unknown activation');
     }
     try {
         const result = await radiusClient.reactivateActivation(
             id,
-            c.get('adminSession').userId,
+            {
+                adminId: c.get('adminSession').userId,
+                actorId: c.get('adminSession').userId,
+                nasIpAddresses: [
+                    ...(await getAdminNasAddresses(
+                        c.get('adminSession').userId,
+                    )),
+                ],
+            },
         );
         if (!result.ok) {
             return jsonError(c, 400, result.message);
@@ -643,7 +673,7 @@ app.put('/activations/:id', requireAdmin, async (c) => {
     if (!parsed.success) {
         return jsonError(c, 400, 'Invalid activation payload');
     }
-    if (!(await isAdminActivationVisible(c.get('adminSession').userId, id))) {
+    if (!(await canAdminManageActivation(c.get('adminSession').userId, id))) {
         return jsonError(c, 404, 'Unknown activation');
     }
     try {
@@ -651,7 +681,15 @@ app.put('/activations/:id', requireAdmin, async (c) => {
             id,
             new Date(parsed.data.expireAt),
             parsed.data.remainingSeconds,
-            c.get('adminSession').userId,
+            {
+                adminId: c.get('adminSession').userId,
+                actorId: c.get('adminSession').userId,
+                nasIpAddresses: [
+                    ...(await getAdminNasAddresses(
+                        c.get('adminSession').userId,
+                    )),
+                ],
+            },
         );
         if (!result.ok) return jsonError(c, 404, result.message);
         return c.json({ success: true, message: result.message, data: result });
@@ -666,13 +704,16 @@ app.put('/activations/:id', requireAdmin, async (c) => {
 // Aggregate network usage from RADIUS accounting over a trailing window:
 // live sessions/users, current throughput, average speed per session, and
 // the heaviest users. ?windowMinutes=<n> (default 60).
-// NOTE: whole-network aggregate — not yet tenant-scoped (the aggregation
-// happens inside the RADIUS client over all accounting rows).
 app.get('/radius/summary', requireAdmin, async (c) => {
     const raw = Number(c.req.query('windowMinutes') ?? 60);
     const windowMinutes =
         Number.isFinite(raw) && raw > 0 ? Math.min(raw, 1440) : 60;
-    const data = await radiusClient.getNetworkUsage(windowMinutes);
+    const addresses = await getAdminNasAddresses(
+        c.get('adminSession').userId,
+    );
+    const data = await radiusClient.getNetworkUsage(windowMinutes, [
+        ...addresses,
+    ]);
     return c.json({ success: true, data });
 });
 
@@ -708,7 +749,9 @@ app.get('/radius/activations/:id', requireAdmin, async (c) => {
     if (!(await isAdminActivationVisible(c.get('adminSession').userId, id))) {
         return jsonError(c, 404, 'Unknown activation');
     }
-    const data = await radiusClient.getPackageStatus(id);
+    const data = await radiusClient.getPackageStatus(id, [
+        ...(await getAdminNasAddresses(c.get('adminSession').userId)),
+    ]);
     if (!data) return jsonError(c, 404, 'Unknown activation');
     return c.json({ success: true, data });
 });
@@ -719,12 +762,18 @@ app.get('/radius/activations/:id', requireAdmin, async (c) => {
 app.post('/radius/activations/:id/deactivate', requireAdmin, async (c) => {
     const id = c.req.param('id');
     if (!id) return jsonError(c, 404, 'Unknown activation');
-    if (!(await isAdminActivationVisible(c.get('adminSession').userId, id))) {
+    if (!(await canAdminManageActivation(c.get('adminSession').userId, id))) {
         return jsonError(c, 404, 'Unknown activation');
     }
     try {
         const result = await radiusClient.deactivateActivation(id, {
             actorId: c.get('adminSession').userId,
+            adminId: c.get('adminSession').userId,
+            nasIpAddresses: [
+                ...(await getAdminNasAddresses(
+                    c.get('adminSession').userId,
+                )),
+            ],
         });
         if (!result.ok && result.sessionsFound === 0) {
             return jsonError(c, 404, result.message);
@@ -750,6 +799,14 @@ app.post('/radius/check-credentials', requireAdmin, async (c) => {
         return jsonError(c, 400, 'Invalid payload');
     }
     try {
+        if (
+            !(await radiusClient.isCredentialOwnedByAdmin(
+                parsed.data.username,
+                c.get('adminSession').userId,
+            ))
+        ) {
+            return jsonError(c, 404, 'Unknown RADIUS credential');
+        }
         const data = await radiusClient.checkCredentials(
             parsed.data.username,
             parsed.data.password,
@@ -777,8 +834,12 @@ app.post('/radius/sessions/:radacctId/disconnect', requireAdmin, async (c) => {
         return jsonError(c, 404, 'Unknown session');
     }
     try {
-        const result =
-            await radiusClient.disconnectSessionByRadacctId(radacctId);
+        const adminId = c.get('adminSession').userId;
+        const result = await radiusClient.disconnectSessionByRadacctId(
+            radacctId,
+            adminId,
+            [...(await getAdminNasAddresses(adminId))],
+        );
         if (!result.ok) return jsonError(c, 400, result.message);
         return c.json({ success: true, message: result.message, data: result });
     } catch (err) {
@@ -817,7 +878,15 @@ app.put('/radius/sessions/:radacctId', requireAdmin, async (c) => {
         const result = await radiusClient.setSessionTimeoutByRadacctId(
             radacctId,
             parsed.data.sessionTimeout,
-            c.get('adminSession').userId,
+            {
+                adminId: c.get('adminSession').userId,
+                actorId: c.get('adminSession').userId,
+                nasIpAddresses: [
+                    ...(await getAdminNasAddresses(
+                        c.get('adminSession').userId,
+                    )),
+                ],
+            },
         );
         if (!result.ok) return jsonError(c, 400, result.message);
         return c.json({ success: true, message: result.message, data: result });

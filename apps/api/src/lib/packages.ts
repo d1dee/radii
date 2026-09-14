@@ -103,11 +103,46 @@ export async function getPackages(ownerId: string, type?: PackageType) {
     return rows;
 }
 
-export async function getPackageById(id: string) {
+export async function getPackageById(id: string, ownerId?: string) {
     const [row] = await db
         .select()
         .from(packages)
-        .where(eq(packages.id, id))
+        .where(
+            and(
+                eq(packages.id, id),
+                ownerId ? eq(packages.createdBy, ownerId) : undefined,
+            ),
+        )
+        .limit(1);
+    return row;
+}
+
+// Public order authorization: the selected package and NAS must belong to the
+// same tenant, and the package must be explicitly linked to that NAS.
+export async function getOrderPackageForNas(
+    packageId: string,
+    nasDeviceId: string,
+    type: PackageType,
+) {
+    const [row] = await db
+        .select({ ...getTableColumns(packages) })
+        .from(packages)
+        .innerJoin(
+            packageNasDevice,
+            and(
+                eq(packageNasDevice.packageId, packages.id),
+                eq(packageNasDevice.nasDeviceId, nasDeviceId),
+            ),
+        )
+        .innerJoin(nasDevice, eq(packageNasDevice.nasDeviceId, nasDevice.id))
+        .where(
+            and(
+                eq(packages.id, packageId),
+                eq(packages.type, type),
+                eq(packages.isActive, true),
+                eq(packages.createdBy, nasDevice.ownerId),
+            ),
+        )
         .limit(1);
     return row;
 }
@@ -134,6 +169,7 @@ export async function createPackage(
 
 export async function updatePackage(
     id: string,
+    ownerId: string,
     data: InsertPackage,
     nasDeviceIds: string[],
 ) {
@@ -141,7 +177,7 @@ export async function updatePackage(
         const [row] = await tx
             .update(packages)
             .set(data)
-            .where(eq(packages.id, id))
+            .where(and(eq(packages.id, id), eq(packages.createdBy, ownerId)))
             .returning();
         if (!row) return row;
         await tx
@@ -189,7 +225,11 @@ export async function getNasDeviceIdsByPackage(
     return map;
 }
 
-export async function getPackageAnalytics(packageId: string) {
+export async function getPackageAnalytics(packageId: string, ownerId: string) {
+    const ownedPayments = and(
+        eq(packagePayments.packageId, packageId),
+        eq(nasDevice.ownerId, ownerId),
+    );
     const [paymentStats] = await db
         .select({
             total: count(packagePayments.id),
@@ -200,14 +240,16 @@ export async function getPackageAnalytics(packageId: string) {
             uniqueBuyers: sql<number>`count(distinct ${packagePayments.userId}) filter (where ${packagePayments.status} = 'paid')`,
         })
         .from(packagePayments)
-        .where(eq(packagePayments.packageId, packageId));
+        .innerJoin(nasDevice, eq(packagePayments.nasDeviceId, nasDevice.id))
+        .where(ownedPayments);
 
     const repeatBuyers = db
         .select({ userId: packagePayments.userId })
         .from(packagePayments)
+        .innerJoin(nasDevice, eq(packagePayments.nasDeviceId, nasDevice.id))
         .where(
             and(
-                eq(packagePayments.packageId, packageId),
+                ownedPayments,
                 eq(packagePayments.status, 'paid'),
             ),
         )
@@ -225,7 +267,17 @@ export async function getPackageAnalytics(packageId: string) {
             active: sql<number>`count(*) filter (where ${activatedPackages.expireAt} > now() and ${activatedPackages.deactivatedAt} is null)`,
         })
         .from(activatedPackages)
-        .where(eq(activatedPackages.packageId, packageId));
+        .innerJoin(
+            packagePayments,
+            eq(activatedPackages.packagePaymentId, packagePayments.id),
+        )
+        .innerJoin(nasDevice, eq(packagePayments.nasDeviceId, nasDevice.id))
+        .where(
+            and(
+                eq(activatedPackages.packageId, packageId),
+                eq(nasDevice.ownerId, ownerId),
+            ),
+        );
 
     const recentPayments = await db
         .select({
@@ -236,7 +288,8 @@ export async function getPackageAnalytics(packageId: string) {
             createdAt: packagePayments.createdAt,
         })
         .from(packagePayments)
-        .where(eq(packagePayments.packageId, packageId))
+        .innerJoin(nasDevice, eq(packagePayments.nasDeviceId, nasDevice.id))
+        .where(ownedPayments)
         .orderBy(desc(packagePayments.createdAt))
         .limit(10);
 
@@ -265,7 +318,7 @@ export async function getPackageAnalytics(packageId: string) {
 // accounting matched by the device's IP address.
 export async function getNasDeviceAnalytics(
     nasDeviceId: string,
-    nasIpAddress: string,
+    nasIpAddresses: string[],
 ) {
     const linkedPackageIds = () =>
         db
@@ -303,14 +356,14 @@ export async function getNasDeviceAnalytics(
             uniqueBuyers: sql<number>`count(distinct ${packagePayments.userId}) filter (where ${packagePayments.status} = 'paid')`,
         })
         .from(packagePayments)
-        .where(inArray(packagePayments.packageId, linkedPackageIds()));
+        .where(eq(packagePayments.nasDeviceId, nasDeviceId));
 
     const repeatBuyers = db
         .select({ userId: packagePayments.userId })
         .from(packagePayments)
         .where(
             and(
-                inArray(packagePayments.packageId, linkedPackageIds()),
+                eq(packagePayments.nasDeviceId, nasDeviceId),
                 eq(packagePayments.status, 'paid'),
             ),
         )
@@ -328,7 +381,11 @@ export async function getNasDeviceAnalytics(
             active: sql<number>`count(*) filter (where ${activatedPackages.expireAt} > now() and ${activatedPackages.deactivatedAt} is null)`,
         })
         .from(activatedPackages)
-        .where(inArray(activatedPackages.packageId, linkedPackageIds()));
+        .innerJoin(
+            packagePayments,
+            eq(activatedPackages.packagePaymentId, packagePayments.id),
+        )
+        .where(eq(packagePayments.nasDeviceId, nasDeviceId));
 
     const [sessionStats] = await db
         .select({
@@ -336,7 +393,11 @@ export async function getNasDeviceAnalytics(
             active: sql<number>`count(*) filter (where ${radacct.acctstoptime} is null)`,
         })
         .from(radacct)
-        .where(eq(radacct.nasipaddress, nasIpAddress));
+        .where(
+            nasIpAddresses.length > 0
+                ? inArray(radacct.nasipaddress, nasIpAddresses)
+                : sql`false`,
+        );
 
     const recentPayments = await db
         .select({
@@ -349,7 +410,7 @@ export async function getNasDeviceAnalytics(
         })
         .from(packagePayments)
         .innerJoin(packages, eq(packagePayments.packageId, packages.id))
-        .where(inArray(packagePayments.packageId, linkedPackageIds()))
+        .where(eq(packagePayments.nasDeviceId, nasDeviceId))
         .orderBy(desc(packagePayments.createdAt))
         .limit(10);
 

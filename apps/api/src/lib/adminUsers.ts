@@ -27,8 +27,8 @@ import {
 } from 'drizzle-orm';
 import { db } from '../db';
 import {
-    activationEvents,
     activatedPackages,
+    activationEvents,
     adminUser,
     hotspotLoginRequest,
     nasDevice,
@@ -99,10 +99,89 @@ export async function isAdminUserVisible(
     return rows.length > 0;
 }
 
+async function getUserAdminIds(userId: string): Promise<Set<string>> {
+    const [paymentOwners, loginOwners] = await Promise.all([
+        db
+            .selectDistinct({ ownerId: nasDevice.ownerId })
+            .from(packagePayments)
+            .innerJoin(nasDevice, eq(packagePayments.nasDeviceId, nasDevice.id))
+            .where(eq(packagePayments.userId, userId)),
+        db
+            .selectDistinct({ ownerId: nasDevice.ownerId })
+            .from(hotspotLoginRequest)
+            .innerJoin(
+                nasDevice,
+                eq(hotspotLoginRequest.nasDeviceId, nasDevice.id),
+            )
+            .where(eq(hotspotLoginRequest.userId, userId)),
+    ]);
+    return new Set(
+        [...paymentOwners, ...loginOwners].map((row) => row.ownerId),
+    );
+}
+
+// Global better-auth bans are safe for a tenant admin only when the customer
+// has no relationship with another tenant.
+export async function canAdminManageGlobalUser(
+    adminId: string,
+    userId: string,
+): Promise<boolean> {
+    const owners = await getUserAdminIds(userId);
+    return owners.size === 1 && owners.has(adminId);
+}
+
+// PPPoE currently uses one stable account per customer. Until credentials are
+// tenant-specific, prevent one admin from reading or rotating an account used
+// by another admin's PPPoE activation.
+export async function canAdminManagePppoeAccount(
+    adminId: string,
+    userId: string,
+): Promise<boolean> {
+    const rows = await db
+        .selectDistinct({ ownerId: nasDevice.ownerId })
+        .from(activatedPackages)
+        .innerJoin(packages, eq(activatedPackages.packageId, packages.id))
+        .innerJoin(
+            packagePayments,
+            eq(activatedPackages.packagePaymentId, packagePayments.id),
+        )
+        .innerJoin(nasDevice, eq(packagePayments.nasDeviceId, nasDevice.id))
+        .where(
+            and(
+                eq(activatedPackages.userId, userId),
+                eq(packages.type, 'pppoe'),
+            ),
+        );
+    const owners = new Set(rows.map((row) => row.ownerId));
+    return owners.size === 1 && owners.has(adminId);
+}
+
 // Payments attributed to one of the admin's NAS devices (join used across the
 // scoped aggregates, payment log and reports).
 function scopedToAdminNas(adminId: string): SQL {
     return eq(nasDevice.ownerId, adminId);
+}
+
+// Accounting tenancy follows the NAS that emitted the row. An address is
+// usable as an authorization boundary only when no other admin has registered
+// the same direct or WireGuard address.
+function scopedAccountingToAdminNas(adminId: string): SQL {
+    return sql`${radacct.nasipaddress} in (
+        select owned.ip_address from nas_device owned
+        where owned.owner_id = ${adminId}
+        union
+        select owned_setup.wg_client_ip
+        from nas_setup_script owned_setup
+        inner join nas_device owned on owned.id = owned_setup.nas_device_id
+        where owned.owner_id = ${adminId}
+    ) and not exists (
+        select 1
+        from nas_device other
+        left join nas_setup_script other_setup on other_setup.nas_device_id = other.id
+        where other.owner_id <> ${adminId}
+          and (${radacct.nasipaddress} = other.ip_address
+               or ${radacct.nasipaddress} = other_setup.wg_client_ip)
+    )`;
 }
 
 // --- User listing -----------------------------------------------------------
@@ -135,7 +214,12 @@ async function userAggregates(userIds: string[], adminId: string) {
             >(),
             activations: new Map<
                 string,
-                { total: number; active: number; hotspot: number; pppoe: number }
+                {
+                    total: number;
+                    active: number;
+                    hotspot: number;
+                    pppoe: number;
+                }
             >(),
             flags: new Map<string, number>(),
             online: new Set<string>(),
@@ -156,10 +240,7 @@ async function userAggregates(userIds: string[], adminId: string) {
             lastAt: sql<Date>`max(${packagePayments.createdAt})`,
         })
         .from(packagePayments)
-        .innerJoin(
-            nasDevice,
-            eq(packagePayments.nasDeviceId, nasDevice.id),
-        )
+        .innerJoin(nasDevice, eq(packagePayments.nasDeviceId, nasDevice.id))
         .where(
             and(
                 inArray(packagePayments.userId, userIds),
@@ -183,10 +264,7 @@ async function userAggregates(userIds: string[], adminId: string) {
             packagePayments,
             eq(activatedPackages.packagePaymentId, packagePayments.id),
         )
-        .innerJoin(
-            nasDevice,
-            eq(packagePayments.nasDeviceId, nasDevice.id),
-        )
+        .innerJoin(nasDevice, eq(packagePayments.nasDeviceId, nasDevice.id))
         .where(
             and(
                 inArray(activatedPackages.userId, userIds),
@@ -224,14 +302,12 @@ async function userAggregates(userIds: string[], adminId: string) {
             packagePayments,
             eq(activatedPackages.packagePaymentId, packagePayments.id),
         )
-        .innerJoin(
-            nasDevice,
-            eq(packagePayments.nasDeviceId, nasDevice.id),
-        )
+        .innerJoin(nasDevice, eq(packagePayments.nasDeviceId, nasDevice.id))
         .where(
             and(
                 inArray(activatedPackages.userId, userIds),
                 scopedToAdminNas(adminId),
+                scopedAccountingToAdminNas(adminId),
                 isNull(radacct.acctstoptime),
                 isNotNull(radacct.acctstarttime),
             ),
@@ -263,9 +339,7 @@ async function userAggregates(userIds: string[], adminId: string) {
         ),
         flags: new Map(flagRows.map((r) => [r.userId, Number(r.total)])),
         online: new Set(onlineRows.map((r) => r.userId)),
-        lastPayment: new Map(
-            paymentRows.map((r) => [r.userId, r.lastAt]),
-        ),
+        lastPayment: new Map(paymentRows.map((r) => [r.userId, r.lastAt])),
     };
 }
 
@@ -279,7 +353,11 @@ export async function listAdminUsers(opts: ListAdminUsersOpts) {
     if (opts.q) {
         const q = `%${opts.q.trim()}%`;
         conditions.push(
-            or(ilike(user.name, q), ilike(user.username, q), ilike(user.email, q))!,
+            or(
+                ilike(user.name, q),
+                ilike(user.username, q),
+                ilike(user.email, q),
+            )!,
         );
     }
     if (opts.flagged) {
@@ -309,7 +387,10 @@ export async function listAdminUsers(opts: ListAdminUsersOpts) {
                     )
                     .innerJoin(
                         packagePayments,
-                        eq(activatedPackages.packagePaymentId, packagePayments.id),
+                        eq(
+                            activatedPackages.packagePaymentId,
+                            packagePayments.id,
+                        ),
                     )
                     .innerJoin(
                         nasDevice,
@@ -417,20 +498,14 @@ export async function getAdminUserDetail(userId: string, adminId: string) {
         .from(userFlag)
         .leftJoin(adminUser, eq(userFlag.createdBy, adminUser.id))
         .where(
-            and(
-                eq(userFlag.userId, userId),
-                eq(userFlag.createdBy, adminId),
-            ),
+            and(eq(userFlag.userId, userId), eq(userFlag.createdBy, adminId)),
         )
         .orderBy(desc(userFlag.createdAt));
 
     const [firstPayment] = await db
         .select({ at: sql<Date>`min(${packagePayments.createdAt})` })
         .from(packagePayments)
-        .innerJoin(
-            nasDevice,
-            eq(packagePayments.nasDeviceId, nasDevice.id),
-        )
+        .innerJoin(nasDevice, eq(packagePayments.nasDeviceId, nasDevice.id))
         .where(
             and(
                 eq(packagePayments.userId, userId),
@@ -451,13 +526,16 @@ export async function getAdminUserDetail(userId: string, adminId: string) {
         })
         .from(radacct)
         .where(
-            sql`${radacct.class} in (
+            and(
+                sql`${radacct.class} in (
                 select ${activatedPackages.id}::text
                 from ${activatedPackages}
                 inner join ${packagePayments} on ${packagePayments.id} = ${activatedPackages.packagePaymentId}
                 inner join ${nasDevice} on ${nasDevice.id} = ${packagePayments.nasDeviceId}
                 where ${activatedPackages.userId} = ${userId} and ${nasDevice.ownerId} = ${adminId}
-            )`,
+                )`,
+                scopedAccountingToAdminNas(adminId),
+            ),
         );
 
     return {
@@ -511,10 +589,7 @@ export async function getOwnedActivationIds(
             packagePayments,
             eq(activatedPackages.packagePaymentId, packagePayments.id),
         )
-        .innerJoin(
-            nasDevice,
-            eq(packagePayments.nasDeviceId, nasDevice.id),
-        )
+        .innerJoin(nasDevice, eq(packagePayments.nasDeviceId, nasDevice.id))
         .where(
             and(
                 eq(activatedPackages.userId, userId),
@@ -538,10 +613,7 @@ export async function isAdminActivationVisible(
             packagePayments,
             eq(activatedPackages.packagePaymentId, packagePayments.id),
         )
-        .innerJoin(
-            nasDevice,
-            eq(packagePayments.nasDeviceId, nasDevice.id),
-        )
+        .innerJoin(nasDevice, eq(packagePayments.nasDeviceId, nasDevice.id))
         .where(
             and(
                 eq(activatedPackages.id, activationId),
@@ -552,6 +624,32 @@ export async function isAdminActivationVisible(
     return rows.length > 0;
 }
 
+export async function canAdminManageActivation(
+    adminId: string,
+    activationId: string,
+): Promise<boolean> {
+    const [row] = await db
+        .select({ userId: activatedPackages.userId, type: packages.type })
+        .from(activatedPackages)
+        .innerJoin(packages, eq(activatedPackages.packageId, packages.id))
+        .innerJoin(
+            packagePayments,
+            eq(activatedPackages.packagePaymentId, packagePayments.id),
+        )
+        .innerJoin(nasDevice, eq(packagePayments.nasDeviceId, nasDevice.id))
+        .where(
+            and(
+                eq(activatedPackages.id, activationId),
+                eq(nasDevice.ownerId, adminId),
+            ),
+        )
+        .limit(1);
+    if (!row) return false;
+    return row.type !== 'pppoe'
+        ? true
+        : canAdminManagePppoeAccount(adminId, row.userId);
+}
+
 function scopedSessionToAdminNas(adminId: string): SQL {
     return and(
         eq(nasDevice.ownerId, adminId),
@@ -559,6 +657,7 @@ function scopedSessionToAdminNas(adminId: string): SQL {
             eq(radacct.nasipaddress, nasDevice.ipAddress),
             eq(radacct.nasipaddress, nasSetupScript.wgClientIp),
         ),
+        scopedAccountingToAdminNas(adminId),
     ) as SQL;
 }
 
@@ -572,10 +671,7 @@ export async function isAdminRadacctVisible(
         .select({ id: radacct.radacctid })
         .from(radacct)
         .innerJoin(nasDevice, eq(nasDevice.ownerId, adminId))
-        .leftJoin(
-            nasSetupScript,
-            eq(nasSetupScript.nasDeviceId, nasDevice.id),
-        )
+        .leftJoin(nasSetupScript, eq(nasSetupScript.nasDeviceId, nasDevice.id))
         .where(
             and(
                 eq(radacct.radacctid, BigInt(radacctId)),
@@ -593,26 +689,63 @@ export async function isAdminRadacctVisible(
 // filter cross-NAS listings without touching the RADIUS client.
 export async function getAdminNasAddresses(
     adminId: string,
+    nasDeviceId?: string,
 ): Promise<Set<string>> {
     const rows = await db
         .select({
+            ownerId: nasDevice.ownerId,
             ip: nasDevice.ipAddress,
             wgIp: nasSetupScript.wgClientIp,
         })
         .from(nasDevice)
-        .leftJoin(
-            nasSetupScript,
-            eq(nasSetupScript.nasDeviceId, nasDevice.id),
-        )
-        .where(eq(nasDevice.ownerId, adminId));
-    const ips = new Set<string>();
+        .leftJoin(nasSetupScript, eq(nasSetupScript.nasDeviceId, nasDevice.id));
+    const ownersByIp = new Map<string, Set<string>>();
     for (const r of rows) {
         for (const value of [r.ip, r.wgIp]) {
-            // inet columns may render as CIDR; compare on the bare address.
-            if (value) ips.add(value.replace(/\/\d+$/, ''));
+            if (!value) continue;
+            const ip = value.replace(/\/\d+$/, '');
+            const owners = ownersByIp.get(ip) ?? new Set<string>();
+            owners.add(r.ownerId);
+            ownersByIp.set(ip, owners);
         }
     }
-    return ips;
+    const targetAddresses = new Set(
+        rows
+            .filter((row) => row.ownerId === adminId)
+            .flatMap((row) => [row.ip, row.wgIp])
+            .filter((value): value is string => Boolean(value))
+            .map((value) => value.replace(/\/\d+$/, '')),
+    );
+    if (nasDeviceId) {
+        const [target] = await db
+            .select({
+                ip: nasDevice.ipAddress,
+                wgIp: nasSetupScript.wgClientIp,
+            })
+            .from(nasDevice)
+            .leftJoin(
+                nasSetupScript,
+                eq(nasSetupScript.nasDeviceId, nasDevice.id),
+            )
+            .where(
+                and(
+                    eq(nasDevice.id, nasDeviceId),
+                    eq(nasDevice.ownerId, adminId),
+                ),
+            )
+            .limit(1);
+        targetAddresses.clear();
+        for (const value of [target?.ip, target?.wgIp]) {
+            if (value) targetAddresses.add(value.replace(/\/\d+$/, ''));
+        }
+    }
+    return new Set(
+        [...ownersByIp.entries()].flatMap(([ip, owners]) =>
+            owners.size === 1 && owners.has(adminId) && targetAddresses.has(ip)
+                ? [ip]
+                : [],
+        ),
+    );
 }
 
 export async function getAdminSessionDetail(
@@ -658,21 +791,25 @@ export async function getAdminSessionDetail(
         })
         .from(radacct)
         .innerJoin(nasDevice, eq(nasDevice.ownerId, adminId))
-        .leftJoin(
-            nasSetupScript,
-            eq(nasSetupScript.nasDeviceId, nasDevice.id),
-        )
+        .leftJoin(nasSetupScript, eq(nasSetupScript.nasDeviceId, nasDevice.id))
         .leftJoin(
             activatedPackages,
-            sql`${radacct.class} = ${activatedPackages.id}::text`,
+            and(
+                sql`${radacct.class} = ${activatedPackages.id}::text`,
+                sql`exists (
+                    select 1
+                    from package_payments activation_payment
+                    inner join nas_device activation_nas
+                        on activation_nas.id = activation_payment.nas_device_id
+                    where activation_payment.id = ${activatedPackages.packagePaymentId}
+                      and activation_nas.owner_id = ${adminId}
+                )`,
+            ),
         )
         .leftJoin(
             packagePayments,
             and(
-                eq(
-                    activatedPackages.packagePaymentId,
-                    packagePayments.id,
-                ),
+                eq(activatedPackages.packagePaymentId, packagePayments.id),
                 eq(activatedPackages.userId, packagePayments.userId),
                 eq(activatedPackages.packageId, packagePayments.packageId),
             ),
@@ -701,7 +838,7 @@ export async function getAdminSessionDetail(
         : Number(row.accounting.acctsessiontime ?? 0);
 
     let activationDetail = null;
-    if (row.activation.id) {
+    if (row.activation?.id) {
         const activationId = row.activation.id;
         const nasAddresses = [...(await getAdminNasAddresses(adminId))];
         const [events, accountingRows] = await Promise.all([
@@ -726,9 +863,7 @@ export async function getAdminSessionDetail(
         ]);
 
         const adminActorIds = events.flatMap((event) =>
-            event.actorType === 'admin' && event.actorId
-                ? [event.actorId]
-                : [],
+            event.actorType === 'admin' && event.actorId ? [event.actorId] : [],
         );
         const customerActorIds = events.flatMap((event) =>
             event.actorType === 'customer' && event.actorId
@@ -765,7 +900,9 @@ export async function getAdminSessionDetail(
                   )
                 : Number(accounting.acctsessiontime ?? 0);
             const sessionInputOctets = Number(accounting.acctinputoctets ?? 0);
-            const sessionOutputOctets = Number(accounting.acctoutputoctets ?? 0);
+            const sessionOutputOctets = Number(
+                accounting.acctoutputoctets ?? 0,
+            );
             return {
                 radacctId: String(accounting.radacctid),
                 acctSessionId: accounting.acctsessionid,
@@ -785,8 +922,7 @@ export async function getAdminSessionDetail(
             (total, item) => total + item.seconds,
             0,
         );
-        const packageAllowanceSeconds =
-            (row.packageSessionLength ?? 0) * 60;
+        const packageAllowanceSeconds = (row.packageSessionLength ?? 0) * 60;
         const cumulative =
             Boolean(row.packageNoExpiry) ||
             row.activation.timeAllowanceSeconds !== null;
@@ -803,7 +939,9 @@ export async function getAdminSessionDetail(
         activationDetail = {
             ...row.activation,
             balance: {
-                mode: cumulative ? ('cumulative' as const) : ('calendar' as const),
+                mode: cumulative
+                    ? ('cumulative' as const)
+                    : ('calendar' as const),
                 totalSeconds: balance.sessionLimitSeconds,
                 usedSeconds,
                 remainingSeconds: balance.remainingSeconds,
@@ -863,9 +1001,9 @@ export async function getAdminSessionDetail(
         },
         nasDevice: row.nasDevice,
         activation: activationDetail,
-        customer: row.customer.id ? row.customer : null,
-        payment: row.payment.id ? row.payment : null,
-        package: row.package.id ? row.package : null,
+        customer: row.customer?.id ? row.customer : null,
+        payment: row.payment?.id ? row.payment : null,
+        package: row.package?.id ? row.package : null,
     };
 }
 
@@ -966,10 +1104,7 @@ export async function listPayments(opts: ListPaymentsOpts) {
             revenue: sql<number>`coalesce(sum(${packagePayments.amount}) filter (where ${packagePayments.status} = 'paid'), 0)::float8`,
         })
         .from(packagePayments)
-        .innerJoin(
-            nasDevice,
-            eq(packagePayments.nasDeviceId, nasDevice.id),
-        )
+        .innerJoin(nasDevice, eq(packagePayments.nasDeviceId, nasDevice.id))
         .leftJoin(user, eq(packagePayments.userId, user.id))
         .leftJoin(transaction, eq(packagePayments.transaction, transaction.id))
         .where(where);
@@ -991,10 +1126,7 @@ export async function listPayments(opts: ListPaymentsOpts) {
             updatedAt: packagePayments.updatedAt,
         })
         .from(packagePayments)
-        .innerJoin(
-            nasDevice,
-            eq(packagePayments.nasDeviceId, nasDevice.id),
-        )
+        .innerJoin(nasDevice, eq(packagePayments.nasDeviceId, nasDevice.id))
         .leftJoin(user, eq(packagePayments.userId, user.id))
         .innerJoin(packages, eq(packagePayments.packageId, packages.id))
         .leftJoin(transaction, eq(packagePayments.transaction, transaction.id))
@@ -1111,18 +1243,12 @@ export async function getAdminPaymentDetail(
             updatedAt: packagePayments.updatedAt,
         })
         .from(packagePayments)
-        .innerJoin(
-            nasDevice,
-            eq(packagePayments.nasDeviceId, nasDevice.id),
-        )
+        .innerJoin(nasDevice, eq(packagePayments.nasDeviceId, nasDevice.id))
         .leftJoin(user, eq(packagePayments.userId, user.id))
         .innerJoin(packages, eq(packagePayments.packageId, packages.id))
         .leftJoin(transaction, eq(packagePayments.transaction, transaction.id))
         .where(
-            and(
-                eq(packagePayments.id, paymentId),
-                scopedToAdminNas(adminId),
-            ),
+            and(eq(packagePayments.id, paymentId), scopedToAdminNas(adminId)),
         )
         .limit(1);
 
@@ -1136,8 +1262,7 @@ export async function getAdminPaymentDetail(
                   eventType: transactionLog.eventType,
                   payload: transactionLog.payload,
                   providerRequestId: transactionLog.providerRequestId,
-                  providerConversationId:
-                      transactionLog.providerConversationId,
+                  providerConversationId: transactionLog.providerConversationId,
                   createdAt: transactionLog.createdAt,
               })
               .from(transactionLog)
@@ -1173,16 +1298,10 @@ export async function getUserPayments(userId: string, adminId: string) {
         })
         .from(packagePayments)
         .innerJoin(packages, eq(packagePayments.packageId, packages.id))
-        .innerJoin(
-            nasDevice,
-            eq(packagePayments.nasDeviceId, nasDevice.id),
-        )
+        .innerJoin(nasDevice, eq(packagePayments.nasDeviceId, nasDevice.id))
         .leftJoin(transaction, eq(packagePayments.transaction, transaction.id))
         .where(
-            and(
-                eq(packagePayments.userId, userId),
-                scopedToAdminNas(adminId),
-            ),
+            and(eq(packagePayments.userId, userId), scopedToAdminNas(adminId)),
         )
         .orderBy(desc(packagePayments.createdAt));
     return rows;
@@ -1190,11 +1309,7 @@ export async function getUserPayments(userId: string, adminId: string) {
 
 // --- Reports --------------------------------------------------------------------
 
-export async function getAdminReports(
-    adminId: string,
-    from: Date,
-    to: Date,
-) {
+export async function getAdminReports(adminId: string, from: Date, to: Date) {
     // Every figure below covers only the admin's network: payments are
     // filtered through their stamped NAS device, activations through the
     // payment that created them, and new customers through the visibility
@@ -1214,10 +1329,7 @@ export async function getAdminReports(
             revenue: sql<number>`coalesce(sum(${packagePayments.amount}) filter (where ${packagePayments.status} = 'paid'), 0)::float8`,
         })
         .from(packagePayments)
-        .innerJoin(
-            nasDevice,
-            eq(packagePayments.nasDeviceId, nasDevice.id),
-        )
+        .innerJoin(nasDevice, eq(packagePayments.nasDeviceId, nasDevice.id))
         .where(inRange)
         .groupBy(sql`to_char(${packagePayments.createdAt}, 'YYYY-MM-DD')`)
         .orderBy(sql`to_char(${packagePayments.createdAt}, 'YYYY-MM-DD')`);
@@ -1229,10 +1341,7 @@ export async function getAdminReports(
             buyers: sql<number>`count(distinct ${packagePayments.userId}) filter (where ${packagePayments.status} = 'paid')`,
         })
         .from(packagePayments)
-        .innerJoin(
-            nasDevice,
-            eq(packagePayments.nasDeviceId, nasDevice.id),
-        )
+        .innerJoin(nasDevice, eq(packagePayments.nasDeviceId, nasDevice.id))
         .where(inRange);
 
     const [newUsers] = await db
@@ -1253,10 +1362,7 @@ export async function getAdminReports(
             packagePayments,
             eq(activatedPackages.packagePaymentId, packagePayments.id),
         )
-        .innerJoin(
-            nasDevice,
-            eq(packagePayments.nasDeviceId, nasDevice.id),
-        )
+        .innerJoin(nasDevice, eq(packagePayments.nasDeviceId, nasDevice.id))
         .where(
             and(
                 gte(activatedPackages.activatedAt, from),
@@ -1275,10 +1381,7 @@ export async function getAdminReports(
         })
         .from(packagePayments)
         .innerJoin(packages, eq(packagePayments.packageId, packages.id))
-        .innerJoin(
-            nasDevice,
-            eq(packagePayments.nasDeviceId, nasDevice.id),
-        )
+        .innerJoin(nasDevice, eq(packagePayments.nasDeviceId, nasDevice.id))
         .where(and(inRange, eq(packagePayments.status, 'paid')))
         .groupBy(packages.id, packages.title, packages.type)
         .orderBy(desc(sql`sum(${packagePayments.amount})`))
@@ -1294,10 +1397,7 @@ export async function getAdminReports(
         })
         .from(packagePayments)
         .innerJoin(user, eq(packagePayments.userId, user.id))
-        .innerJoin(
-            nasDevice,
-            eq(packagePayments.nasDeviceId, nasDevice.id),
-        )
+        .innerJoin(nasDevice, eq(packagePayments.nasDeviceId, nasDevice.id))
         .where(and(inRange, eq(packagePayments.status, 'paid')))
         .groupBy(packagePayments.userId, user.name, user.username)
         .orderBy(desc(sql`sum(${packagePayments.amount})`))
@@ -1322,16 +1422,14 @@ export async function getAdminReports(
             packagePayments,
             eq(activatedPackages.packagePaymentId, packagePayments.id),
         )
-        .innerJoin(
-            nasDevice,
-            eq(packagePayments.nasDeviceId, nasDevice.id),
-        )
+        .innerJoin(nasDevice, eq(packagePayments.nasDeviceId, nasDevice.id))
         .where(
             and(
                 isNotNull(radacct.acctstarttime),
                 gte(radacct.acctstarttime, from),
                 lte(radacct.acctstarttime, to),
                 scopedToAdminNas(adminId),
+                scopedAccountingToAdminNas(adminId),
             ),
         )
         .groupBy(radacct.username)

@@ -41,6 +41,7 @@ import {
     and,
     desc,
     eq,
+    exists,
     getTableColumns,
     gte,
     inArray,
@@ -52,7 +53,6 @@ import {
 } from 'drizzle-orm';
 import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
 import * as dgram from 'node:dgram';
-import { radiusClient } from '.';
 import { db } from '../../db';
 import {
     activatedPackages,
@@ -89,6 +89,29 @@ function activeActivationCondition() {
         isNull(activatedPackages.deactivatedAt),
         gte(activatedPackages.expireAt, now),
     );
+}
+
+function activationOwnedByAdmin(adminId?: string) {
+    return adminId
+        ? exists(
+              db
+                  .select({ one: sql`1` })
+                  .from(packagePayments)
+                  .innerJoin(
+                      nasDevice,
+                      eq(packagePayments.nasDeviceId, nasDevice.id),
+                  )
+                  .where(
+                      and(
+                          eq(
+                              packagePayments.id,
+                              activatedPackages.packagePaymentId,
+                          ),
+                          eq(nasDevice.ownerId, adminId),
+                      ),
+                  ),
+          )
+        : undefined;
 }
 
 export class RadiusError extends Error {
@@ -758,6 +781,7 @@ export class RadiusClient {
     // sessions, average speed.
     async getPackageStatus(
         activationId: string,
+        nasIpAddresses?: string[],
     ): Promise<ActivationStatus | null> {
         const [row] = await db
             .select({ activation: activatedPackages, pkg: packages })
@@ -770,6 +794,7 @@ export class RadiusClient {
             activationId,
             row.activation,
             row.pkg,
+            nasIpAddresses,
         );
     }
 
@@ -1116,7 +1141,12 @@ export class RadiusClient {
     // it is re-authorized from that one instead of being deleted.
     async deactivateActivation(
         activationId: string,
-        opts: { markDeactivated?: boolean; actorId?: string } = {},
+        opts: {
+            markDeactivated?: boolean;
+            actorId?: string;
+            adminId?: string;
+            nasIpAddresses?: string[];
+        } = {},
     ): Promise<{
         ok: boolean;
         message: string;
@@ -1127,9 +1157,36 @@ export class RadiusClient {
         const [activation] = await db
             .select()
             .from(activatedPackages)
-            .where(eq(activatedPackages.id, activationId))
+            .where(
+                and(
+                    eq(activatedPackages.id, activationId),
+                    activationOwnedByAdmin(opts.adminId),
+                ),
+            )
             .limit(1);
         if (!activation) {
+            return {
+                ok: false,
+                message: 'Unknown activation',
+                sessionsFound: 0,
+                sessionsDisconnected: 0,
+                failures: [],
+            };
+        }
+
+        const [pkg] = await db
+            .select()
+            .from(packages)
+            .where(eq(packages.id, activation.packageId))
+            .limit(1);
+        if (
+            opts.adminId &&
+            pkg?.type === 'pppoe' &&
+            !(await this.isCredentialOwnedByAdmin(
+                pppoeUsername(activation.userId),
+                opts.adminId,
+            ))
+        ) {
             return {
                 ok: false,
                 message: 'Unknown activation',
@@ -1163,11 +1220,6 @@ export class RadiusClient {
             });
         }
 
-        const [pkg] = await db
-            .select()
-            .from(packages)
-            .where(eq(packages.id, activation.packageId))
-            .limit(1);
         const isPppoe = pkg?.type === 'pppoe';
 
         const username = isPppoe
@@ -1177,6 +1229,7 @@ export class RadiusClient {
             username,
             activationId,
             liveOnly: true,
+            nasIpAddresses: opts.nasIpAddresses,
         });
 
         let sessionsDisconnected = 0;
@@ -1187,6 +1240,7 @@ export class RadiusClient {
                     const ack = await this.terminateSessionAtNas(
                         username,
                         session,
+                        opts.adminId,
                     );
                     if (ack) {
                         sessionsDisconnected++;
@@ -1365,6 +1419,8 @@ export class RadiusClient {
             userId?: string;
             type?: 'hotspot' | 'pppoe';
             limit?: number;
+            activationIds?: string[];
+            nasIpAddresses?: string[];
         } = {},
     ): Promise<AdminActivationStatus[]> {
         const rows = await db
@@ -1377,6 +1433,11 @@ export class RadiusClient {
                         ? eq(activatedPackages.userId, opts.userId)
                         : undefined,
                     opts.type ? eq(packages.type, opts.type) : undefined,
+                    opts.activationIds
+                        ? opts.activationIds.length > 0
+                            ? inArray(activatedPackages.id, opts.activationIds)
+                            : sql`false`
+                        : undefined,
                 ),
             )
             .orderBy(desc(activatedPackages.activatedAt))
@@ -1388,6 +1449,7 @@ export class RadiusClient {
                 row.activation.id,
                 row.activation,
                 row.pkg,
+                opts.nasIpAddresses,
             );
             if (!status) continue;
             out.push({
@@ -1406,7 +1468,11 @@ export class RadiusClient {
     // their limits edited before they can be restored.
     async reactivateActivation(
         activationId: string,
-        actorId?: string,
+        opts: {
+            adminId?: string;
+            actorId?: string;
+            nasIpAddresses?: string[];
+        } = {},
     ): Promise<{
         ok: boolean;
         message: string;
@@ -1416,13 +1482,28 @@ export class RadiusClient {
             .select({ activation: activatedPackages, pkg: packages })
             .from(activatedPackages)
             .innerJoin(packages, eq(activatedPackages.packageId, packages.id))
-            .where(eq(activatedPackages.id, activationId))
+            .where(
+                and(
+                    eq(activatedPackages.id, activationId),
+                    activationOwnedByAdmin(opts.adminId),
+                ),
+            )
             .limit(1);
         if (!row) {
             return { ok: false, message: 'Unknown activation', expireAt: null };
         }
 
         const { activation, pkg } = row;
+        if (
+            opts.adminId &&
+            pkg.type === 'pppoe' &&
+            !(await this.isCredentialOwnedByAdmin(
+                pppoeUsername(activation.userId),
+                opts.adminId,
+            ))
+        ) {
+            return { ok: false, message: 'Unknown activation', expireAt: null };
+        }
         const expireAt = activation.expireAt;
         if (expireAt.getTime() <= Date.now()) {
             return {
@@ -1433,7 +1514,7 @@ export class RadiusClient {
         }
         const usage =
             pkg.noExpiry || activation.timeAllowanceSeconds !== null
-                ? await this.getBankUsage(activationId)
+                ? await this.getBankUsage(activationId, opts.nasIpAddresses)
                 : null;
         if (usage && usage.remainingSeconds <= 0) {
             return {
@@ -1454,9 +1535,9 @@ export class RadiusClient {
                 await tx.insert(activationEvents).values({
                     activationId,
                     eventType: 'reactivated',
-                    actorType: actorId ? 'admin' : 'system',
-                    actorId: actorId ?? null,
-                    source: actorId ? 'admin_api' : 'system',
+                    actorType: opts.actorId ? 'admin' : 'system',
+                    actorId: opts.actorId ?? null,
+                    source: opts.actorId ? 'admin_api' : 'system',
                     metadata: {
                         previousDeactivatedAt:
                             previousDeactivatedAt.toISOString(),
@@ -1530,21 +1611,44 @@ export class RadiusClient {
         activationId: string,
         expireAt: Date,
         remainingSeconds: number,
-        actorId?: string,
+        opts: {
+            adminId?: string;
+            actorId?: string;
+            nasIpAddresses?: string[];
+        } = {},
     ): Promise<{ ok: boolean; message: string }> {
         const [row] = await db
             .select({ activation: activatedPackages, pkg: packages })
             .from(activatedPackages)
             .innerJoin(packages, eq(activatedPackages.packageId, packages.id))
-            .where(eq(activatedPackages.id, activationId))
+            .where(
+                and(
+                    eq(activatedPackages.id, activationId),
+                    activationOwnedByAdmin(opts.adminId),
+                ),
+            )
             .limit(1);
         if (!row) return { ok: false, message: 'Unknown activation' };
+        if (
+            opts.adminId &&
+            row.pkg.type === 'pppoe' &&
+            !(await this.isCredentialOwnedByAdmin(
+                pppoeUsername(row.activation.userId),
+                opts.adminId,
+            ))
+        ) {
+            return { ok: false, message: 'Unknown activation' };
+        }
 
         const username =
             row.pkg.type === 'pppoe'
                 ? pppoeUsername(row.activation.userId)
                 : activationUsername(activationId);
-        const sessions = await this.getSessions({ username, activationId });
+        const sessions = await this.getSessions({
+            username,
+            activationId,
+            nasIpAddresses: opts.nasIpAddresses,
+        });
         const usedSeconds = Math.round(
             sessions.reduce((sum, session) => sum + session.seconds, 0),
         );
@@ -1566,9 +1670,9 @@ export class RadiusClient {
             await tx.insert(activationEvents).values({
                 activationId,
                 eventType: 'limits_adjusted',
-                actorType: actorId ? 'admin' : 'system',
-                actorId: actorId ?? null,
-                source: actorId ? 'admin_api' : 'system',
+                actorType: opts.actorId ? 'admin' : 'system',
+                actorId: opts.actorId ?? null,
+                source: opts.actorId ? 'admin_api' : 'system',
                 metadata: {
                     previousExpireAt: previousExpireAt.toISOString(),
                     expireAt: expireAt.toISOString(),
@@ -1591,6 +1695,9 @@ export class RadiusClient {
         if (expireAt.getTime() <= Date.now() || remainingSeconds <= 0) {
             await this.deactivateActivation(activationId, {
                 markDeactivated: false,
+                actorId: opts.actorId,
+                adminId: opts.adminId,
+                nasIpAddresses: opts.nasIpAddresses,
             });
             return { ok: true, message: 'Activation limits updated' };
         }
@@ -1627,14 +1734,25 @@ export class RadiusClient {
 
     // Disconnects one live session (of any user) addressed by its radacct id.
     // Termination goes directly to the NAS holding the session.
-    async disconnectSessionByRadacctId(radacctId: string): Promise<{
+    async disconnectSessionByRadacctId(
+        radacctId: string,
+        adminId: string,
+        nasIpAddresses: string[],
+    ): Promise<{
         ok: boolean;
         message: string;
     }> {
         const [row] = await db
             .select()
             .from(radacct)
-            .where(eq(radacct.radacctid, BigInt(radacctId)))
+            .where(
+                and(
+                    eq(radacct.radacctid, BigInt(radacctId)),
+                    nasIpAddresses.length > 0
+                        ? inArray(radacct.nasipaddress, nasIpAddresses)
+                        : sql`false`,
+                ),
+            )
             .limit(1);
         if (!row) return { ok: false, message: 'Unknown session' };
         if (row.acctstoptime !== null || row.acctstarttime === null) {
@@ -1643,7 +1761,11 @@ export class RadiusClient {
         const session = this.sessionInfoFromRow(row);
         const username = row.username ?? '';
         try {
-            const ack = await this.terminateSessionAtNas(username, session);
+            const ack = await this.terminateSessionAtNas(
+                username,
+                session,
+                adminId,
+            );
             if (!ack) {
                 return { ok: false, message: 'NAS answered Disconnect-NAK' };
             }
@@ -1662,12 +1784,23 @@ export class RadiusClient {
     async setSessionTimeoutByRadacctId(
         radacctId: string,
         seconds: number,
-        actorId?: string,
+        opts: {
+            adminId: string;
+            actorId?: string;
+            nasIpAddresses: string[];
+        },
     ): Promise<{ ok: boolean; message: string }> {
         const [row] = await db
             .select()
             .from(radacct)
-            .where(eq(radacct.radacctid, BigInt(radacctId)))
+            .where(
+                and(
+                    eq(radacct.radacctid, BigInt(radacctId)),
+                    opts.nasIpAddresses.length > 0
+                        ? inArray(radacct.nasipaddress, opts.nasIpAddresses)
+                        : sql`false`,
+                ),
+            )
             .limit(1);
         if (!row) return { ok: false, message: 'Unknown session' };
         if (row.acctstoptime !== null || row.acctstarttime === null) {
@@ -1680,6 +1813,7 @@ export class RadiusClient {
                 username,
                 session,
                 Math.max(1, Math.round(seconds)),
+                opts.adminId,
             );
             if (!ack) {
                 return { ok: false, message: 'NAS answered CoA-NAK' };
@@ -1690,17 +1824,32 @@ export class RadiusClient {
                     row.class,
                 )
             ) {
-                await db.insert(activationEvents).values({
-                    activationId: row.class,
-                    eventType: 'session_timeout_adjusted',
-                    actorType: actorId ? 'admin' : 'system',
-                    actorId: actorId ?? null,
-                    source: actorId ? 'admin_api' : 'system',
-                    metadata: {
-                        radacctId,
-                        sessionTimeoutSeconds: Math.max(1, Math.round(seconds)),
-                    },
-                });
+                const [ownedActivation] = await db
+                    .select({ id: activatedPackages.id })
+                    .from(activatedPackages)
+                    .where(
+                        and(
+                            eq(activatedPackages.id, row.class),
+                            activationOwnedByAdmin(opts.adminId),
+                        ),
+                    )
+                    .limit(1);
+                if (ownedActivation) {
+                    await db.insert(activationEvents).values({
+                        activationId: ownedActivation.id,
+                        eventType: 'session_timeout_adjusted',
+                        actorType: opts.actorId ? 'admin' : 'system',
+                        actorId: opts.actorId ?? null,
+                        source: opts.actorId ? 'admin_api' : 'system',
+                        metadata: {
+                            radacctId,
+                            sessionTimeoutSeconds: Math.max(
+                                1,
+                                Math.round(seconds),
+                            ),
+                        },
+                    });
+                }
             }
             return { ok: true, message: 'Session time updated' };
         } catch (err) {
@@ -1728,12 +1877,20 @@ export class RadiusClient {
     async setPppoePassword(
         userId: string,
         password?: string,
+        adminId?: string,
+        nasIpAddresses: string[] = [],
     ): Promise<{
         username: string;
         password: string;
         sessionsDisconnected: number;
     }> {
         const username = pppoeUsername(userId);
+        if (
+            !adminId ||
+            !(await this.isCredentialOwnedByAdmin(username, adminId))
+        ) {
+            throw new RadiusError('Unknown PPPoE account');
+        }
         const newPassword = password ?? randomCredentialPassword(12);
         await db.transaction(async (tx) => {
             await tx
@@ -1754,15 +1911,33 @@ export class RadiusClient {
 
         // Live PPP sessions hold the old credential; cut them so the dialer
         // re-authenticates with the new password.
-        const liveSessions = await this.getSessions({
-            username,
-            activationId: '',
-            liveOnly: true,
-        });
+        const liveRows =
+            nasIpAddresses.length > 0
+                ? await db
+                      .select()
+                      .from(radacct)
+                      .where(
+                          and(
+                              eq(radacct.username, username),
+                              isNull(radacct.acctstoptime),
+                              isNotNull(radacct.acctstarttime),
+                              inArray(radacct.nasipaddress, nasIpAddresses),
+                          ),
+                      )
+                : [];
+        const liveSessions = liveRows.map((row) =>
+            this.sessionInfoFromRow(row),
+        );
         let sessionsDisconnected = 0;
         for (const session of liveSessions) {
             try {
-                if (await this.terminateSessionAtNas(username, session)) {
+                if (
+                    await this.terminateSessionAtNas(
+                        username,
+                        session,
+                        adminId,
+                    )
+                ) {
                     sessionsDisconnected++;
                     await this.closeSessionRecord(session);
                 }
@@ -1783,7 +1958,10 @@ export class RadiusClient {
     // Admin-facing aggregate usage over a trailing window: live session/user
     // counts, current throughput and per-session average speed, sessions
     // started inside the window, and the heaviest users.
-    async getNetworkUsage(windowMinutes: number): Promise<NetworkUsage> {
+    async getNetworkUsage(
+        windowMinutes: number,
+        nasIpAddresses: string[],
+    ): Promise<NetworkUsage> {
         const windowMs = Math.max(1, windowMinutes) * 60_000;
         const windowStart = new Date(Date.now() - windowMs);
         const windowSeconds = windowMs / 1000;
@@ -1796,6 +1974,9 @@ export class RadiusClient {
                 and(
                     isNull(radacct.acctstoptime),
                     isNotNull(radacct.acctstarttime),
+                    nasIpAddresses.length > 0
+                        ? inArray(radacct.nasipaddress, nasIpAddresses)
+                        : sql`false`,
                 ),
             );
 
@@ -1829,7 +2010,14 @@ export class RadiusClient {
                 avgSeconds: sql<number>`coalesce(avg(${radacct.acctsessiontime}), 0)::float8`,
             })
             .from(radacct)
-            .where(gte(radacct.acctstarttime, windowStart));
+            .where(
+                and(
+                    gte(radacct.acctstarttime, windowStart),
+                    nasIpAddresses.length > 0
+                        ? inArray(radacct.nasipaddress, nasIpAddresses)
+                        : sql`false`,
+                ),
+            );
 
         const topUsers = await db
             .select({
@@ -1838,7 +2026,14 @@ export class RadiusClient {
                 sessions: sql<number>`count(*)`,
             })
             .from(radacct)
-            .where(gte(radacct.acctstarttime, windowStart))
+            .where(
+                and(
+                    gte(radacct.acctstarttime, windowStart),
+                    nasIpAddresses.length > 0
+                        ? inArray(radacct.nasipaddress, nasIpAddresses)
+                        : sql`false`,
+                ),
+            )
             .groupBy(radacct.username)
             .orderBy(
                 desc(
@@ -1897,6 +2092,49 @@ export class RadiusClient {
     // Validates credentials against the RADIUS SERVER with a real PAP
     // Access-Request. Hotspot logins from the NAS use CHAP; PAP against the
     // same radcheck row is equivalent for a server-side provisioning check.
+    async isCredentialOwnedByAdmin(
+        username: string,
+        adminId: string,
+    ): Promise<boolean> {
+        const activation = await this.resolveActivationByUsername(username);
+        if (activation) {
+            const [row] = await db
+                .select({ ownerId: nasDevice.ownerId })
+                .from(activatedPackages)
+                .innerJoin(
+                    packagePayments,
+                    eq(activatedPackages.packagePaymentId, packagePayments.id),
+                )
+                .innerJoin(
+                    nasDevice,
+                    eq(packagePayments.nasDeviceId, nasDevice.id),
+                )
+                .where(eq(activatedPackages.id, activation.activation.id))
+                .limit(1);
+            return row?.ownerId === adminId;
+        }
+
+        const userId = await this.resolvePppoeUserByUsername(username);
+        if (!userId) return false;
+        const rows = await db
+            .selectDistinct({ ownerId: nasDevice.ownerId })
+            .from(activatedPackages)
+            .innerJoin(packages, eq(activatedPackages.packageId, packages.id))
+            .innerJoin(
+                packagePayments,
+                eq(activatedPackages.packagePaymentId, packagePayments.id),
+            )
+            .innerJoin(nasDevice, eq(packagePayments.nasDeviceId, nasDevice.id))
+            .where(
+                and(
+                    eq(activatedPackages.userId, userId),
+                    eq(packages.type, 'pppoe'),
+                ),
+            );
+        const owners = new Set(rows.map((row) => row.ownerId));
+        return owners.size === 1 && owners.has(adminId);
+    }
+
     async checkCredentials(
         username: string,
         password: string,
@@ -1976,7 +2214,10 @@ export class RadiusClient {
     // TOTAL minutes consumable across sessions within the six-month validity.
     // Usage = closed sessions' Acct-Session-Time + live sessions' elapsed
     // time (accounting interim updates keep the closed-figure side fresh).
-    async getBankUsage(activationId: string): Promise<{
+    async getBankUsage(
+        activationId: string,
+        nasIpAddresses?: string[],
+    ): Promise<{
         totalSeconds: number;
         usedSeconds: number;
         remainingSeconds: number;
@@ -2001,6 +2242,7 @@ export class RadiusClient {
         const sessions = await this.getSessions({
             username,
             activationId,
+            nasIpAddresses,
         });
         let usedSeconds = 0;
         for (const session of sessions) {
@@ -2535,7 +2777,10 @@ export class RadiusClient {
     // Resolves the DM/CoA target + secret for the NAS that holds a session,
     // keyed on the NAS-IP-Address its accounting carries. Throws when the
     // device is unknown to the DB or has no provisioned secret.
-    private async nasTargetForSession(session: SessionInfo): Promise<{
+    private async nasTargetForSession(
+        session: SessionInfo,
+        adminId?: string,
+    ): Promise<{
         host: string;
         port: number;
         secret: string;
@@ -2549,9 +2794,12 @@ export class RadiusClient {
             .from(nasSetupScript)
             .innerJoin(nasDevice, eq(nasSetupScript.nasDeviceId, nasDevice.id))
             .where(
-                or(
-                    eq(nasSetupScript.wgClientIp, session.nasIpAddress),
-                    eq(nasDevice.ipAddress, session.nasIpAddress),
+                and(
+                    or(
+                        eq(nasSetupScript.wgClientIp, session.nasIpAddress),
+                        eq(nasDevice.ipAddress, session.nasIpAddress),
+                    ),
+                    adminId ? eq(nasDevice.ownerId, adminId) : undefined,
                 ),
             )
             .limit(1);
@@ -2598,8 +2846,9 @@ export class RadiusClient {
     private async terminateSessionAtNas(
         username: string,
         session: SessionInfo,
+        adminId?: string,
     ): Promise<boolean> {
-        const target = await this.nasTargetForSession(session);
+        const target = await this.nasTargetForSession(session, adminId);
         const attrs = this.sessionCoaIdentity(username, session);
         if (session.callingStationId) {
             attrs.push({
@@ -2624,8 +2873,9 @@ export class RadiusClient {
         username: string,
         session: SessionInfo,
         seconds: number,
+        adminId?: string,
     ): Promise<boolean> {
-        const target = await this.nasTargetForSession(session);
+        const target = await this.nasTargetForSession(session, adminId);
         const attrs = this.sessionCoaIdentity(username, session);
         attrs.push({ type: ATTR.SESSION_TIMEOUT, value: seconds });
         return this.sendCoARequest(target, target.secret, attrs);
@@ -2663,7 +2913,9 @@ export class RadiusClient {
         activationId: string;
         liveOnly?: boolean;
         limit?: number;
+        nasIpAddresses?: string[];
     }): Promise<SessionInfo[]> {
+        if (opts.nasIpAddresses?.length === 0) return [];
         const match = opts.username.startsWith('PPP-')
             ? eq(radacct.class, opts.activationId)
             : or(
@@ -2674,15 +2926,16 @@ export class RadiusClient {
             .select()
             .from(radacct)
             .where(
-                opts.liveOnly
-                    ? and(
-                          match,
-                          isNull(radacct.acctstoptime),
-                          // Exclude the activation anchor rows, which were never
-                          // started by accounting (no acctstarttime).
-                          isNotNull(radacct.acctstarttime),
-                      )
-                    : match,
+                and(
+                    match,
+                    opts.liveOnly ? isNull(radacct.acctstoptime) : undefined,
+                    opts.liveOnly
+                        ? isNotNull(radacct.acctstarttime)
+                        : undefined,
+                    opts.nasIpAddresses
+                        ? inArray(radacct.nasipaddress, opts.nasIpAddresses)
+                        : undefined,
+                ),
             )
             .orderBy(desc(radacct.acctstarttime))
             .limit(opts.limit ?? 200);
@@ -2726,6 +2979,7 @@ export class RadiusClient {
         activationId: string,
         activation: typeof activatedPackages.$inferSelect,
         pkg: typeof packages.$inferSelect,
+        nasIpAddresses?: string[],
     ): Promise<ActivationStatus | null> {
         const username =
             pkg.type === 'pppoe'
@@ -2734,6 +2988,7 @@ export class RadiusClient {
         const sessions = await this.getSessions({
             username,
             activationId,
+            nasIpAddresses,
         });
         const liveSessions = sessions.filter((s) => s.live);
 
@@ -2741,8 +2996,6 @@ export class RadiusClient {
         const usedSeconds = Math.round(cumulativeUsed);
 
         const expireAt = effectiveExpireAt(activation, pkg);
-        const hasTimeAllowance =
-            pkg.noExpiry || activation.timeAllowanceSeconds !== null;
         const { sessionLimitSeconds, remainingSeconds } =
             calculateActivationTime({
                 activatedAt: activation.activatedAt,
@@ -2753,16 +3006,6 @@ export class RadiusClient {
                 cumulative: pkg.noExpiry,
                 now: new Date(),
             });
-        if (
-            hasTimeAllowance &&
-            remainingSeconds <= 0 &&
-            liveSessions.length > 0
-        ) {
-            await radiusClient.deactivateActivation(activationId, {
-                markDeactivated: false,
-            });
-        }
-
         const octetsUsed = sessions.reduce((sum, s) => sum + s.totalOctets, 0);
         const quotaBytes = (pkg.downloadQuota + pkg.uploadQuota) * 1024;
         const lastActive = sessions.reduce<Date | null>((acc, s) => {
