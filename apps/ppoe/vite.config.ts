@@ -43,6 +43,52 @@ export default defineConfig(({ mode }) => {
                 },
             },
         },
+        build: {
+            rolldownOptions: {
+                output: {
+                    codeSplitting: {
+                        groups: [
+                            {
+                                name: 'react-vendor',
+                                test: /node_modules[\\/](react|react-dom|scheduler|react-router|react-router-dom)[\\/]/,
+                                entriesAware: true,
+                                priority: 50,
+                            },
+                            {
+                                name: 'mantine-vendor',
+                                test: /node_modules[\\/]@mantine[\\/]/,
+                                entriesAware: true,
+                                priority: 40,
+                            },
+                            {
+                                name: 'charts-vendor',
+                                test: /node_modules[\\/](recharts|d3-[^\\/]+|victory-vendor)[\\/]/,
+                                entriesAware: true,
+                                priority: 60,
+                            },
+                            {
+                                name: 'auth-vendor',
+                                test: /node_modules[\\/](better-auth|better-fetch|nanostores)[\\/]/,
+                                entriesAware: true,
+                                priority: 20,
+                            },
+                            {
+                                name: 'icons-vendor',
+                                test: /node_modules[\\/](@tabler|react-icons)[\\/]/,
+                                entriesAware: true,
+                                priority: 20,
+                            },
+                            {
+                                name: 'vendor',
+                                test: /node_modules/,
+                                entriesAware: true,
+                                priority: 10,
+                            },
+                        ],
+                    },
+                },
+            },
+        },
         publicDir: '../shared/public',
     };
 });
