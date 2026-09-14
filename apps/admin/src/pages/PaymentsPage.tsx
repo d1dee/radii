@@ -246,11 +246,20 @@ export default function PaymentsPage() {
                                             </Badge>
                                         </Table.Td>
                                         <Table.Td>
-                                            <Text size='xs' c='dimmed'>
-                                                {p.providerTransactionId ?? '—'}
-                                                {p.provider
-                                                    ? ` (${p.provider})`
-                                                    : ''}
+                                            <Text
+                                                size='xs'
+                                                c='dimmed'
+                                                truncate
+                                                maw={200}
+                                                title={
+                                                    p.providerTransactionId ??
+                                                    p.provider?.split('-')[0] ??
+                                                    undefined
+                                                }
+                                            >
+                                                {p.providerTransactionId ??
+                                                    p.provider?.split('-')[0] ??
+                                                    '—'}
                                             </Text>
                                         </Table.Td>
                                     </Table.Tr>

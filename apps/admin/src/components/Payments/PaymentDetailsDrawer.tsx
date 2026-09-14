@@ -72,9 +72,7 @@ function PaymentEvent({ event }: { event: AdminPaymentEvent }) {
             }
         >
             <Stack gap={4} mt={4}>
-                {event.message ? (
-                    <Text size='sm'>{event.message}</Text>
-                ) : null}
+                {event.message ? <Text size='sm'>{event.message}</Text> : null}
                 <Group gap='lg'>
                     {event.resultCode ? (
                         <Text size='xs' c='dimmed'>
@@ -114,7 +112,8 @@ function PaymentEvent({ event }: { event: AdminPaymentEvent }) {
                     </Text>
                 ) : null}
                 <Text size='xs' c='dimmed'>
-                    Recorded {formatDateTime(event.createdAt)} via {event.provider}
+                    Recorded {formatDateTime(event.createdAt)} via{' '}
+                    {event.provider}
                 </Text>
             </Stack>
         </Timeline.Item>
@@ -184,7 +183,9 @@ export function PaymentDetailsDrawer({
                             </Badge>
                         ) : null}
                         {payment.provider ? (
-                            <Badge variant='outline'>{payment.provider}</Badge>
+                            <Badge variant='outline'>
+                                {payment.provider?.split('-')[0]}
+                            </Badge>
                         ) : null}
                     </Group>
 
@@ -240,7 +241,9 @@ export function PaymentDetailsDrawer({
                         <Grid.Col span={{ base: 12, sm: 6 }}>
                             <DetailItem
                                 label='Transaction status'
-                                value={payment.transactionStatus ?? 'Not created'}
+                                value={
+                                    payment.transactionStatus ?? 'Not created'
+                                }
                             />
                         </Grid.Col>
                         {payment.description ? (
@@ -261,7 +264,9 @@ export function PaymentDetailsDrawer({
                                 label='Receipt / transaction ID'
                                 value={
                                     payment.providerTransactionId ? (
-                                        <Code>{payment.providerTransactionId}</Code>
+                                        <Code>
+                                            {payment.providerTransactionId}
+                                        </Code>
                                     ) : (
                                         'Not available'
                                     )
@@ -291,7 +296,10 @@ export function PaymentDetailsDrawer({
                     {payment.events.length === 0 ? (
                         <Text c='dimmed'>No provider events recorded.</Text>
                     ) : (
-                        <Timeline active={payment.events.length} bulletSize={18}>
+                        <Timeline
+                            active={payment.events.length}
+                            bulletSize={18}
+                        >
                             {payment.events.map((event) => (
                                 <PaymentEvent key={event.id} event={event} />
                             ))}
