@@ -7,16 +7,15 @@ import {
     Table,
     Text,
 } from '@mantine/core';
-import {
-    useEffect,
-    useState,
-    type Dispatch,
-    type SetStateAction,
-} from 'react';
+import { useState } from 'react';
 
-import { deauthDevice, getStatus } from '@lib/api.ts';
+import { deauthDevice } from '@lib/api.ts';
+import {
+    refreshPppoeAccounts,
+    refreshPppoeQuota,
+    usePppoeQuota,
+} from '@lib/store.ts';
 import { notifications } from '@mantine/notifications';
-import type { Quota } from '@radii/shared';
 import humanFormat from 'human-format';
 import { timeRemaining } from './functions.ts';
 import { dataScale } from './PackagePricing.tsx';
@@ -24,21 +23,10 @@ import { dataScale } from './PackagePricing.tsx';
 interface Props {
     isOpen: boolean;
     onClose: () => void;
-    syncQuota: Dispatch<SetStateAction<Quota[]>>;
 }
-export function ConnectedDevicesModal({ isOpen, onClose, syncQuota }: Props) {
+export function ConnectedDevicesModal({ isOpen, onClose }: Props) {
     const [pendingDeauth, setPendingDeauth] = useState<Array<string>>([]);
-    const [quota, setQuota] = useState<Array<Quota>>();
-
-    useEffect(() => {
-        (async () => {
-            const quota = await getStatus();
-            if (quota.success) {
-                setQuota(quota.data ?? []);
-                syncQuota(quota.data ?? []);
-            }
-        })();
-    }, [isOpen]);
+    const { quota } = usePppoeQuota(false);
 
     // Disconnects one live PPP session (targeted by its radacct id); the
     // package stays active so the dialer can reconnect with the same
@@ -49,16 +37,23 @@ export function ConnectedDevicesModal({ isOpen, onClose, syncQuota }: Props) {
     ) => {
         setPendingDeauth((prev) => [...prev, radacctId]);
         try {
-            await deauthDevice(activationId, radacctId);
-            const refreshed = await getStatus();
-            if (refreshed.success) {
-                setQuota(refreshed.data ?? []);
-                syncQuota(refreshed.data ?? []);
+            const result = await deauthDevice(activationId, radacctId);
+            if (!result.success) {
                 notifications.show({
-                    title: 'Success',
-                    message: 'Session has been disconnected successfully',
+                    color: 'red',
+                    title: 'Disconnect failed',
+                    message: result.message || 'Try again.',
                 });
+                return;
             }
+            await Promise.all([
+                refreshPppoeAccounts(),
+                refreshPppoeQuota(),
+            ]);
+            notifications.show({
+                title: 'Success',
+                message: 'Session has been disconnected successfully',
+            });
         } catch (err) {
             console.warn('Deauth failed', err);
         } finally {
@@ -66,7 +61,7 @@ export function ConnectedDevicesModal({ isOpen, onClose, syncQuota }: Props) {
         }
     };
 
-    const rows = quota?.flatMap((v) => {
+    const rows = quota.flatMap((v) => {
         const title = v.downloadRate
             ? humanFormat(v.downloadRate, { scale: dataScale })
             : 'Unlimited';

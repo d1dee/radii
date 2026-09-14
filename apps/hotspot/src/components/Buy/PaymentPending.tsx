@@ -1,5 +1,5 @@
 import { Button, Loader, Stack, Text } from '@mantine/core';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useEffectEvent, useRef, useState } from 'react';
 import type { OrderResult } from '../../lib/api.ts';
 import { getPaymentStatus } from '../../lib/api.ts';
 import type { FlowStatus } from './PaymentFlow.tsx';
@@ -19,9 +19,24 @@ export function PendingPayment({
 }) {
     const [tick, setTick] = useState(0);
     const tickRef = useRef(0);
-    const pollRef = useRef<ReturnType<typeof setInterval> | undefined>(
-        undefined,
-    );
+    const handlePoll = useEffectEvent(async () => {
+        const result = await getPaymentStatus(orderId);
+        if (!result.success) {
+            onError(result.message || 'Could not check payment status.');
+            return false;
+        }
+
+        const { status } = result.data!;
+        if (status === 'paid') {
+            onStatusChange('success', result.data!);
+            return false;
+        }
+        if (status === 'failed') {
+            onError('Payment failed. Please try again.');
+            return false;
+        }
+        return true;
+    });
 
     useEffect(() => {
         const tickInterval = setInterval(() => {
@@ -29,36 +44,24 @@ export function PendingPayment({
             setTick(tickRef.current);
         }, 500);
 
-        pollRef.current = setInterval(async () => {
+        let cancelled = false;
+        let pollTimer: ReturnType<typeof setTimeout> | undefined;
+        const poll = async () => {
             try {
-                const result = await getPaymentStatus(orderId);
-                if (!result.success) {
-                    clearInterval(pollRef.current);
-                    onError(
-                        result.message || 'Could not check payment status.',
-                    );
-                    return;
-                }
-
-                const { status } = result.data!;
-                if (status === 'paid') {
-                    clearInterval(pollRef.current);
-                    onStatusChange('success', result.data!);
-                } else if (status === 'failed') {
-                    clearInterval(pollRef.current);
-                    onError('Payment failed. Please try again.');
-                }
+                const pending = await handlePoll();
+                if (!cancelled && pending) pollTimer = setTimeout(poll, 2_000);
             } catch {
-                clearInterval(pollRef.current);
-                onError('Could not reach the server. Try again.');
+                if (!cancelled) onError('Could not reach the server. Try again.');
             }
-        }, 2000);
+        };
+        void poll();
 
         return () => {
+            cancelled = true;
             clearInterval(tickInterval);
-            clearInterval(pollRef.current);
+            clearTimeout(pollTimer);
         };
-    }, [orderId, onStatusChange, onError]);
+    }, [orderId]);
 
     return (
         <Stack align='center' gap='lg' p='md'>

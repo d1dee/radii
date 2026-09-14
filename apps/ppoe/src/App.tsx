@@ -3,8 +3,7 @@ import '@mantine/core/styles.css';
 import { Container, MantineProvider, Stack } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import { Notifications } from '@mantine/notifications';
-import type { AdminContactsSettings, Package, Packages } from '@radii/shared';
-import { defaultAdminSettings } from '@radii/shared';
+import type { Package } from '@radii/shared';
 import {
     createContext,
     useCallback,
@@ -20,8 +19,9 @@ import { HavingIssues } from './components/Packages/HavingIssues.tsx';
 import { PackagePricing } from './components/Packages/PackagePricing.tsx';
 import { RegisterModal } from './components/RegisterForm/Modal.tsx';
 import { UserAccount } from './components/UserAccounts/UserAccount.tsx';
-import { currentNasDeviceId, getClientData, getContacts, getPackages, type Client } from './lib/api.ts';
-import { authClient, useSession } from './lib/auth.ts';
+import { currentNasDeviceId, type Client } from './lib/api.ts';
+import { useSession } from './lib/auth.ts';
+import { loadPppoePortal, usePppoePortal } from './lib/store.ts';
 
 // Operators may link the portal to one NAS with ?nas=<nasDeviceId>;
 // lib/api.ts persists the id so package listings stay scoped. Clean the URL.
@@ -67,35 +67,22 @@ function pkgPrice(
 
 export default function App() {
     const [havingIssues, setHavingIssues] = useState(false);
-    const [clientData, setClientData] = useState<Client | undefined>();
-    const [packages, setPackages] = useState<Packages | undefined>();
-
-    const [adminContacts, setAdminContacts] = useState<AdminContactsSettings>(
-        defaultAdminSettings.contacts,
-    );
-
-    const { data } = useSession();
+    const { data, isPending } = useSession();
+    const { client: clientData, packages, contacts: adminContacts } =
+        usePppoePortal();
+    const nasDeviceId = currentNasDeviceId();
 
     useEffect(() => {
-        (async () => {
-            const clientData = await getClientData();
-            if (clientData.success) setClientData(clientData.data);
-            const contacts = await getContacts();
-            if (contacts.success && contacts.data) setAdminContacts(contacts.data);
-            // PPPoE has no captive-portal redirect: the package listing is
-            // loaded unconditionally, optionally scoped to one NAS (?nas=).
-            const packages = await getPackages(currentNasDeviceId());
-            if (packages.success) setPackages(packages.data);
-        })();
-    }, [data]);
-
-    const session = authClient.useSession();
+        if (!isPending) {
+            void loadPppoePortal(data?.user.id ?? null, nasDeviceId);
+        }
+    }, [data?.user.id, isPending, nasDeviceId]);
 
     // Resume an interrupted purchase on first load (e.g. after a login
     // redirect). localStorage is synchronous, so the initial modal state can
     // be derived during render instead of via a setState-in-effect.
     const storedPackageId = localStorage.getItem('packageId');
-    const resumeBuy = !!(session && storedPackageId);
+    const resumeBuy = Boolean(storedPackageId);
 
     // ---- Decoupled modal state (each modal owns its own disclosure) ----
     const [buyOpened, { open: openBuy, close: closeBuy }] =

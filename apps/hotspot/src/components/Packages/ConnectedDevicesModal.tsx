@@ -7,23 +7,16 @@ import {
     Table,
     Text,
 } from '@mantine/core';
-import {
-    useEffect,
-    useRef,
-    useState,
-    type Dispatch,
-    type SetStateAction,
-} from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import {
     completeLoginRequest,
     currentLoginRequestId,
     deauthDevice,
-    getStatus,
     type HotspotRedirectData,
 } from '@lib/api.ts';
+import { refreshHotspotQuota, useHotspotQuota } from '@lib/store.ts';
 import { notifications } from '@mantine/notifications';
-import type { Quota } from '@radii/shared';
 import humanFormat from 'human-format';
 import { timeRemaining } from './functions.ts';
 import { dataScale } from './PackagePricing.tsx';
@@ -31,10 +24,8 @@ import { dataScale } from './PackagePricing.tsx';
 interface Props {
     isOpen: boolean;
     onClose: () => void;
-    syncQuota: Dispatch<SetStateAction<Quota[]>>;
 }
-export function ConnectedDevicesModal({ isOpen, onClose, syncQuota }: Props) {
-    const [deviceId, setDeviceId] = useState<string>('');
+export function ConnectedDevicesModal({ isOpen, onClose }: Props) {
     const [pendingDeauth, setPendingDeauth] = useState<Array<string>>([]);
     const [pendingConnect, setPendingConnect] = useState<Array<string>>([]);
     const [connectRedirect, setConnectRedirect] =
@@ -42,48 +33,32 @@ export function ConnectedDevicesModal({ isOpen, onClose, syncQuota }: Props) {
     const formRef = useRef<HTMLFormElement>(null);
     const submitted = useRef(false);
 
-    const [quota, setQuota] = useState<Array<Quota>>();
+    const { quota } = useHotspotQuota(currentLoginRequestId(), false);
 
-    useEffect(() => {
-        const deauth = async () => {
-            if (deviceId) {
-                setPendingDeauth((prev) => [...prev, deviceId]);
-                try {
-                    // Target the device's live session when known (single
-                    // session); the backend disconnects all sessions of the
-                    // package when no session id is given.
-                    const session = quota?.find((v) => v.id === deviceId)
-                        ?.liveSessions?.[0];
-                    await deauthDevice(deviceId, session?.radacctId);
-                    const refreshed = await getStatus(currentLoginRequestId());
-                    if (refreshed.success) {
-                        setQuota(refreshed.data ?? []);
-                        syncQuota(refreshed.data ?? []);
-                        notifications.show({
-                            title: 'Success',
-                            message:
-                                'Device has been disconnected successfully',
-                        });
-                    }
-                } catch (err) {
-                    console.warn('Deauth failed', err);
-                } finally {
-                    setPendingDeauth((prev) =>
-                        prev.filter((id) => id !== deviceId),
-                    );
-                    setDeviceId('');
-                }
+    const disconnectDevice = async (deviceId: string) => {
+        if (pendingDeauth.includes(deviceId)) return;
+        setPendingDeauth((prev) => [...prev, deviceId]);
+        try {
+            const session = quota.find((v) => v.id === deviceId)
+                ?.liveSessions?.[0];
+            const result = await deauthDevice(deviceId, session?.radacctId);
+            if (!result.success) {
+                notifications.show({
+                    color: 'red',
+                    title: 'Disconnect failed',
+                    message: result.message || 'Try again.',
+                });
+                return;
             }
-        };
-        deauth();
-    }, [deviceId]);
-
-    useEffect(() => {
-        (async () => {
-            const quota = await getStatus(currentLoginRequestId());
-            if (quota.success) setQuota(quota.data ?? []);
-        })();
-    }, [isOpen]);
+            await refreshHotspotQuota(currentLoginRequestId());
+            notifications.show({
+                title: 'Success',
+                message: 'Device has been disconnected successfully',
+            });
+        } finally {
+            setPendingDeauth((prev) => prev.filter((id) => id !== deviceId));
+        }
+    };
 
     // Connects this device using an offline activation: the backend returns its
     // RADIUS credentials plus the NAS servlet link, which are re-submitted as
@@ -118,7 +93,7 @@ export function ConnectedDevicesModal({ isOpen, onClose, syncQuota }: Props) {
         } catch (err) {
             console.warn('Connect failed', err);
         }
-        setPendingConnect((prev) => prev.filter((id) => id !== id));
+        setPendingConnect((prev) => prev.filter((pendingId) => pendingId !== id));
     };
 
     useEffect(() => {
@@ -129,7 +104,7 @@ export function ConnectedDevicesModal({ isOpen, onClose, syncQuota }: Props) {
     }, [connectRedirect]);
 
     const rows = quota
-        ?.toSorted((v) => (v.thisDevice ? -1 : 1))
+        .toSorted((v) => (v.thisDevice ? -1 : 1))
         .map((v, i) => {
             const title = v.downloadRate
                 ? humanFormat(v.downloadRate, {
@@ -180,7 +155,7 @@ export function ConnectedDevicesModal({ isOpen, onClose, syncQuota }: Props) {
                                 type='button'
                                 size='sm'
                                 c='red'
-                                onClick={() => setDeviceId(v.id)}
+                                onClick={() => void disconnectDevice(v.id)}
                             >
                                 Disconnect
                             </Anchor>

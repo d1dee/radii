@@ -1,8 +1,7 @@
 import { Button, Stack, Text } from '@mantine/core';
-import type { PppoeServiceConfig } from '@radii/shared';
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import type { OrderResult } from '../../lib/api.ts';
-import { getServiceConfig } from '../../lib/api.ts';
+import { refreshPppoeAccounts, usePppoeAccounts } from '../../lib/store.ts';
 
 import { IoMdDoneAll } from 'react-icons/io';
 import { CredentialsCard } from '../Credentials/CredentialsCard.tsx';
@@ -14,15 +13,12 @@ export function PaymentSuccess({
     paymentData: OrderResult | null;
     onDone: () => void;
 }) {
-    const [config, setConfig] = useState<PppoeServiceConfig | null>(null);
+    const { config } = usePppoeAccounts();
     const activation = paymentData?.activation ?? null;
 
     useEffect(() => {
         if (!activation) return;
-        (async () => {
-            const res = await getServiceConfig();
-            if (res.success && res.data) setConfig(res.data);
-        })();
+        void refreshPppoeAccounts();
     }, [activation]);
 
     if (activation) {

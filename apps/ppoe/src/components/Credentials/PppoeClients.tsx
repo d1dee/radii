@@ -11,38 +11,30 @@ import {
     Text,
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import type { PppoeClient, PppoeServiceConfig } from '@radii/shared';
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
     deauthDevice,
-    getClients,
-    getServiceConfig,
     rotateClientPassword,
 } from '../../lib/api.ts';
 import { useSession } from '../../lib/auth.ts';
+import {
+    refreshPppoeAccounts,
+    refreshPppoeQuota,
+    usePppoeAccounts,
+} from '../../lib/store.ts';
 import { CredentialsCard } from './CredentialsCard.tsx';
 
 // The caller's PPPoE dialer accounts: credentials and dialer configuration
 // for each active package, with password rotation and session disconnect.
 export function PppoeClients() {
     const { data: session } = useSession();
-    const [clients, setClients] = useState<Array<PppoeClient>>([]);
-    const [config, setConfig] = useState<PppoeServiceConfig | null>(null);
+    const { clients, config } = usePppoeAccounts();
     const [rotating, setRotating] = useState<string | null>(null);
     const [disconnecting, setDisconnecting] = useState<string | null>(null);
 
-    const refresh = useCallback(async () => {
-        const [clientRes, configRes] = await Promise.all([
-            getClients(),
-            getServiceConfig(),
-        ]);
-        if (clientRes.success) setClients(clientRes.data ?? []);
-        if (configRes.success && configRes.data) setConfig(configRes.data);
-    }, []);
-
     useEffect(() => {
-        if (session?.session) void refresh();
-    }, [session, refresh]);
+        if (session?.session) void refreshPppoeAccounts();
+    }, [session?.session]);
 
     if (!session?.session) return null;
 
@@ -57,7 +49,7 @@ export function PppoeClients() {
                     message:
                         'Update your router with the new password — live sessions were disconnected.',
                 });
-                await refresh();
+                await refreshPppoeAccounts();
             } else {
                 notifications.show({
                     color: 'red',
@@ -80,7 +72,10 @@ export function PppoeClients() {
                     title: 'Disconnected',
                     message: 'The session was disconnected.',
                 });
-                await refresh();
+                await Promise.all([
+                    refreshPppoeAccounts(),
+                    refreshPppoeQuota(),
+                ]);
             } else {
                 notifications.show({
                     color: 'red',
@@ -100,7 +95,11 @@ export function PppoeClients() {
                     <Text size='lg' fw={600}>
                         Your PPPoE Accounts
                     </Text>
-                    <Anchor component='button' type='button' onClick={refresh}>
+                    <Anchor
+                        component='button'
+                        type='button'
+                        onClick={() => void refreshPppoeAccounts()}
+                    >
                         Refresh
                     </Anchor>
                 </Group>

@@ -8,12 +8,10 @@ import {
     Stack,
     Text,
 } from '@mantine/core';
-import { useEffect, useState } from 'react';
 import { timeRemaining } from './functions.ts';
 
-import type { Quota } from '@/types/index.ts';
-import { getStatus } from '@lib/api.ts';
-import { useDisclosure, useInterval } from '@mantine/hooks';
+import { usePppoeQuota } from '@lib/store.ts';
+import { useDisclosure } from '@mantine/hooks';
 import { IconSelector } from '@tabler/icons-react';
 import humanFormat from 'human-format';
 import { ConnectedDevice } from './ConnectedDevices.tsx';
@@ -21,17 +19,8 @@ import { ConnectedDevicesModal } from './ConnectedDevicesModal.tsx';
 import { dataScale } from './PackagePricing.tsx';
 
 export function CurrentPackage() {
-    const [quota, setQuota] = useState<Array<Quota>>([]);
+    const { quota } = usePppoeQuota();
     const [isOpen, { open, close }] = useDisclosure();
-    const fetchQuota = async () => {
-        const quota = await getStatus();
-        if (quota.success) setQuota(quota.data ?? []);
-    };
-    const interval = useInterval(fetchQuota, 5e3);
-    useEffect(() => {
-        fetchQuota().finally(interval.start);
-        return interval.stop;
-    }, []);
 
     // Prefer an online activation; fall back to the most recent one.
     const thisDevice = quota.find((v) => v.online) || quota[0];
@@ -118,11 +107,7 @@ export function CurrentPackage() {
                     </Stack>
                 </Stack>
             </Paper>
-            <ConnectedDevicesModal
-                onClose={close}
-                isOpen={isOpen}
-                syncQuota={setQuota}
-            />
+            <ConnectedDevicesModal onClose={close} isOpen={isOpen} />
         </>
     );
 }

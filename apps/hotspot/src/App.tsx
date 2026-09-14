@@ -2,8 +2,7 @@ import '@mantine/core/styles.css';
 
 import { Container, MantineProvider, Stack } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
-import type { AdminContactsSettings, Package, Packages } from '@radii/shared';
-import { defaultAdminSettings } from '@radii/shared';
+import type { Package } from '@radii/shared';
 import {
     createContext,
     useCallback,
@@ -13,14 +12,15 @@ import {
 } from 'react';
 import { PaymentFlow } from './components/Buy/PaymentFlow.tsx';
 import { Footer } from './components/Footer.tsx';
-import { LOGIN_REQUEST_KEY } from './components/HotspotLoginRedirect.tsx';
+import { LOGIN_REQUEST_KEY } from './lib/api.ts';
 import { CurrentPackage } from './components/Packages/CurrentPackage.tsx';
 import { HavingIssues } from './components/Packages/HavingIssues.tsx';
 import { PackagePricing } from './components/Packages/PackagePricing.tsx';
 import { RegisterModal } from './components/RegisterForm/Modal.tsx';
 import { UserAccount } from './components/UserAccounts/UserAccount.tsx';
-import { getClientData, getContacts, getPackages, type Client } from './lib/api.ts';
-import { authClient, useSession } from './lib/auth.ts';
+import type { Client } from './lib/api.ts';
+import { useSession } from './lib/auth.ts';
+import { loadHotspotPortal, useHotspotPortal } from './lib/store.ts';
 
 // The NAS hotspot login page hands the client browser to the portal with a
 // `login_request` id (see POST /api/hotspot/login-request). Persist the id
@@ -72,37 +72,22 @@ function pkgPrice(
 
 export default function App() {
     const [havingIssues, setHavingIssues] = useState(false);
-    const [clientData, setClientData] = useState<Client | undefined>();
-    const [packages, setPackages] = useState<Packages | undefined>();
-
-    const [adminContacts, setAdminContacts] = useState<AdminContactsSettings>(
-        defaultAdminSettings.contacts,
-    );
-
-    const { data } = useSession();
+    const { data, isPending } = useSession();
+    const { client: clientData, packages, contacts: adminContacts } =
+        useHotspotPortal();
+    const loginRequestId = localStorage.getItem(LOGIN_REQUEST_KEY);
 
     useEffect(() => {
-        (async () => {
-            const clientData = await getClientData();
-            if (clientData.success) setClientData(clientData.data);
-            const contacts = await getContacts(
-                localStorage.getItem(LOGIN_REQUEST_KEY),
-            );
-            if (contacts.success && contacts.data) setAdminContacts(contacts.data);
-            const loginRequestId = localStorage.getItem(LOGIN_REQUEST_KEY);
-            if (!loginRequestId) return;
-            const packages = await getPackages(loginRequestId);
-            if (packages.success) setPackages(packages.data);
-        })();
-    }, [data]);
-
-    const session = authClient.useSession();
+        if (!isPending) {
+            void loadHotspotPortal(data?.user.id ?? null, loginRequestId);
+        }
+    }, [data?.user.id, isPending, loginRequestId]);
 
     // Resume an interrupted purchase on first load (e.g. after a login
     // redirect). localStorage is synchronous, so the initial modal state can
     // be derived during render instead of via a setState-in-effect.
     const storedPackageId = localStorage.getItem('packageId');
-    const resumeBuy = !!(session && storedPackageId);
+    const resumeBuy = Boolean(storedPackageId);
 
     // ---- Decoupled modal state (each modal owns its own disclosure) ----
     const [buyOpened, { open: openBuy, close: closeBuy }] =

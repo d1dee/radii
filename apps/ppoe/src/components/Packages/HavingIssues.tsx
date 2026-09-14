@@ -17,7 +17,8 @@ export function HavingIssues({ adminContacts }: Props) {
     const [message, setMessage] = useState<
         { success?: true; message: string } | undefined
     >(undefined);
-    const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const generationRef = useRef(0);
 
     const form = useForm({
         mode: 'controlled',
@@ -26,15 +27,22 @@ export function HavingIssues({ adminContacts }: Props) {
         transformValues: paymentTransactionCodeSchema.parse,
     });
     const stopPolling = () => {
-        if (!intervalRef.current) return;
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
+        if (!timerRef.current) return;
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
     };
 
-    useEffect(() => stopPolling, []);
+    useEffect(
+        () => () => {
+            generationRef.current++;
+            stopPolling();
+        },
+        [],
+    );
 
     const verifyTransaction = async (values: typeof form.values) => {
         stopPolling();
+        const generation = ++generationRef.current;
 
         const transactionId = values.transactionCode;
         if (!transactionId) {
@@ -52,6 +60,7 @@ export function HavingIssues({ adminContacts }: Props) {
         // deduplicates in-flight verifications server-side.
         const pollOnce = async (): Promise<boolean> => {
             const res = await verifyPaymentReceipt(values.transactionCode);
+            if (generationRef.current !== generation) return false;
             if (!res.success) {
                 setMessage({
                     message: res.message || 'Transaction verification failed',
@@ -75,7 +84,7 @@ export function HavingIssues({ adminContacts }: Props) {
 
         if (await pollOnce()) {
             let attempts = 1;
-            intervalRef.current = setInterval(async () => {
+            const poll = async () => {
                 attempts++;
                 if (!(await pollOnce())) {
                     stopPolling();
@@ -86,8 +95,11 @@ export function HavingIssues({ adminContacts }: Props) {
                         message:
                             'Verification is taking longer than usual. Your payment may still be confirmed automatically — check back shortly or contact the admin.',
                     });
+                } else {
+                    timerRef.current = setTimeout(poll, 3_000);
                 }
-            }, 3e3);
+            };
+            timerRef.current = setTimeout(poll, 3_000);
         }
     };
 
