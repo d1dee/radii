@@ -301,6 +301,7 @@ export class PaymentService {
     async verifyTransactionCode(
         userId: string,
         rawCode: string,
+        tenantAdminId?: string,
     ): Promise<VerifyByCodeOutcome | null> {
         const code = rawCode.trim().toUpperCase();
 
@@ -309,7 +310,8 @@ export class PaymentService {
         // server-wide provider when no attribution exists.
         let provider: PaymentProvider | null;
         try {
-            const adminId = await getAdminIdForUser(userId);
+            const adminId =
+                tenantAdminId ?? (await getAdminIdForUser(userId));
             provider = await this.providerForAdmin(adminId);
         } catch (err) {
             if (err instanceof PaymentProviderError) {
@@ -334,7 +336,11 @@ export class PaymentService {
         // 1. A package payment already carries this receipt.
         const payment = await getPaymentByTransactionCode(code);
         if (payment) {
-            if (payment.userId !== userId) return null;
+            if (
+                payment.userId !== userId ||
+                (tenantAdminId && payment.tenantAdminId !== tenantAdminId)
+            )
+                return null;
             // Paid but never activated (e.g. callback arrived before the
             // client polled): activate now — idempotent.
             const activation =

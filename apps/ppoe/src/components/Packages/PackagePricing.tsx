@@ -16,6 +16,7 @@ import { useContext, useState } from 'react';
 import { AiOutlineExclamationCircle } from 'react-icons/ai';
 import { ModalActionsContext } from '../../App.tsx';
 import { useSession } from '../../lib/auth.ts';
+import { usePppoeAccounts } from '../../lib/store.ts';
 import type { Package, Packages } from '../../types/index.ts';
 
 export const dataScale = new humanFormat.Scale({
@@ -40,6 +41,11 @@ export function PackagePricing({
 
     const { startBuy, openLogin } = useContext(ModalActionsContext);
     const session = useSession();
+    const { clients, loading: accountsLoading, selectedAccountId } =
+        usePppoeAccounts();
+    const selectedAccount = clients.find(
+        (client) => client.accountId === selectedAccountId,
+    );
 
     // A category is always selected: fall back to the first one when the
     // selection is unset (packages still loading) or stale.
@@ -152,6 +158,15 @@ export function PackagePricing({
 
                                     <Button
                                         fullWidth
+                                        loading={
+                                            Boolean(session.data?.session) &&
+                                            accountsLoading
+                                        }
+                                        disabled={
+                                            Boolean(session.data?.session) &&
+                                            Boolean(selectedAccount) &&
+                                            selectedAccount?.status !== 'active'
+                                        }
                                         onClick={() => initiateOrderFlow(pkg)}
                                     >
                                         Buy Now

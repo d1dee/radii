@@ -88,6 +88,10 @@ export const radcheck = pgTable(
             table.username.asc().nullsLast().op('text_ops'),
             table.attribute.asc().nullsLast().op('text_ops'),
         ),
+        unique('radcheck_username_attribute_key').on(
+            table.username,
+            table.attribute,
+        ),
     ],
 );
 
@@ -141,6 +145,10 @@ export const radreply = pgTable(
             'btree',
             table.username.asc().nullsLast().op('text_ops'),
             table.attribute.asc().nullsLast().op('text_ops'),
+        ),
+        unique('radreply_username_attribute_key').on(
+            table.username,
+            table.attribute,
         ),
     ],
 );

@@ -304,6 +304,15 @@ export type AdminUserFlagRow = {
     creatorName: string | null;
 };
 
+export type AdminPppoeAccount = {
+    id: string;
+    label: string | null;
+    status: 'active' | 'suspended' | 'closed';
+    username: string;
+    password: string | null;
+    lastUsedAt: string | null;
+};
+
 export type AdminUserDetail = {
     id: string;
     name: string;
@@ -337,7 +346,7 @@ export type AdminUserDetail = {
         lastSeen: string | null;
     };
     online: boolean;
-    pppoe: { username: string; password: string | null } | null;
+    pppoeAccounts: AdminPppoeAccount[];
 };
 
 export type ListAdminUsersQuery = {
@@ -529,12 +538,16 @@ export function getUserActivations(id: string) {
     return request<AdminActivationRow[]>(`/admin/users/${id}/activations`);
 }
 
-export function setPppoePassword(id: string, password?: string) {
+export function setPppoePassword(accountId: string, password?: string) {
     return request<{
         username: string;
         password: string;
         sessionsDisconnected: number;
-    }>(`/admin/users/${id}/pppoe-password`, { password }, { method: 'POST' });
+    }>(
+        `/admin/pppoe-accounts/${accountId}/password`,
+        { password },
+        { method: 'POST' },
+    );
 }
 
 // --- Payment log ---------------------------------------------------------------
@@ -711,6 +724,13 @@ export type AdminSessionDetail = {
         id: string;
         name: string;
         phoneNumber: string;
+    } | null;
+    serviceAccount: {
+        id: string;
+        username: string;
+        label: string | null;
+        status: 'active' | 'suspended' | 'closed';
+        lastUsedAt: string | null;
     } | null;
     payment: {
         id: string;

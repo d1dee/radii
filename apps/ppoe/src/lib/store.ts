@@ -25,6 +25,7 @@ type PortalSnapshot = {
 
 type AccountSnapshot = {
     clients: PppoeClient[];
+    selectedAccountId: string | null;
     config: PppoeServiceConfig | null;
     loading: boolean;
 };
@@ -38,6 +39,7 @@ let portalSnapshot: PortalSnapshot = {
 };
 let accountSnapshot: AccountSnapshot = {
     clients: [],
+    selectedAccountId: null,
     config: null,
     loading: true,
 };
@@ -52,6 +54,7 @@ let clientUserId: string | null | undefined;
 let clientFlight: Promise<void> | null = null;
 let accountFlight: Promise<void> | null = null;
 let quotaFlight: Promise<void> | null = null;
+let quotaFlightAccountId: string | null = null;
 
 function createPublisher<T>(
     read: () => T,
@@ -112,7 +115,15 @@ export function loadPppoePortal(userId: string | null, nasDeviceId: string | nul
     if (clientUserId !== userId) {
         clientUserId = userId;
         publishPortal({ client: undefined });
-        if (!userId) publishAccount({ clients: [], config: null, loading: false });
+        if (!userId) {
+            publishAccount({
+                clients: [],
+                selectedAccountId: null,
+                config: null,
+                loading: false,
+            });
+            publishQuota({ quota: [], loading: false });
+        }
         clientFlight = userId
             ? getClientData()
                   .then((result) => {
@@ -137,8 +148,30 @@ export function refreshPppoeAccounts() {
     accountFlight = Promise.all([getClients(), configRequest])
         .then(([clients, config]) => {
             if (clientUserId !== userId) return;
+            const nextClients = clients.success
+                ? [...(clients.data ?? [])].sort(
+                      (a, b) =>
+                          Number(b.availableOnPortal) -
+                              Number(a.availableOnPortal) ||
+                          Number(b.status === 'active') -
+                              Number(a.status === 'active') ||
+                          Number(Boolean(b.activeActivation)) -
+                              Number(Boolean(a.activeActivation)) ||
+                          Number(b.online) - Number(a.online) ||
+                          (b.lastUsedAt ?? '').localeCompare(a.lastUsedAt ?? ''),
+                  )
+                : accountSnapshot.clients;
+            const selectedAccountId = nextClients.some(
+                (client) => client.accountId === accountSnapshot.selectedAccountId,
+            )
+                ? accountSnapshot.selectedAccountId
+                : (nextClients[0]?.accountId ?? null);
+            if (selectedAccountId !== accountSnapshot.selectedAccountId) {
+                publishQuota({ quota: [], loading: Boolean(selectedAccountId) });
+            }
             publishAccount({
-                clients: clients.success ? (clients.data ?? []) : accountSnapshot.clients,
+                clients: nextClients,
+                selectedAccountId,
                 config:
                     config?.success && config.data
                         ? config.data
@@ -153,18 +186,46 @@ export function refreshPppoeAccounts() {
     return accountFlight;
 }
 
-export function refreshPppoeQuota() {
-    if (quotaFlight) return quotaFlight;
+export function refreshPppoeQuota(
+    accountId = accountSnapshot.selectedAccountId,
+) {
+    if (!accountId) {
+        publishQuota({ quota: [], loading: false });
+        return Promise.resolve();
+    }
+    if (quotaFlight && quotaFlightAccountId === accountId) return quotaFlight;
+    quotaFlightAccountId = accountId;
     publishQuota({ loading: quotaSnapshot.quota.length === 0 });
-    quotaFlight = getStatus()
+    quotaFlight = getStatus(accountId)
         .then((result) => {
-            if (result.success) publishQuota({ quota: result.data ?? [] });
+            if (
+                result.success &&
+                accountSnapshot.selectedAccountId === accountId
+            ) {
+                publishQuota({ quota: result.data ?? [] });
+            }
         })
         .finally(() => {
-            publishQuota({ loading: false });
-            quotaFlight = null;
+            if (accountSnapshot.selectedAccountId === accountId) {
+                publishQuota({ loading: false });
+            }
+            if (quotaFlightAccountId === accountId) {
+                quotaFlight = null;
+                quotaFlightAccountId = null;
+            }
         });
     return quotaFlight;
+}
+
+export function selectPppoeAccount(accountId: string) {
+    if (
+        accountId === accountSnapshot.selectedAccountId ||
+        !accountSnapshot.clients.some((client) => client.accountId === accountId)
+    ) {
+        return;
+    }
+    publishAccount({ selectedAccountId: accountId });
+    publishQuota({ quota: [], loading: true });
 }
 
 export function usePppoePortal() {
@@ -181,7 +242,10 @@ export function usePppoeAccounts() {
     );
 }
 
-export function usePppoeQuota(enabled = true) {
+export function usePppoeQuota(
+    accountId: string | null,
+    enabled = true,
+) {
     const snapshot = useSyncExternalStore(
         (listener) => subscribe(quotaListeners, listener),
         () => quotaSnapshot,
@@ -192,7 +256,7 @@ export function usePppoeQuota(enabled = true) {
         let cancelled = false;
         let timer: number | undefined;
         const poll = async () => {
-            await refreshPppoeQuota();
+            await refreshPppoeQuota(accountId);
             if (!cancelled) timer = window.setTimeout(poll, 5_000);
         };
         void poll();
@@ -200,7 +264,7 @@ export function usePppoeQuota(enabled = true) {
             cancelled = true;
             if (timer !== undefined) window.clearTimeout(timer);
         };
-    }, [enabled]);
+    }, [accountId, enabled]);
 
     return snapshot;
 }

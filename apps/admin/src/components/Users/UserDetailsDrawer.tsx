@@ -71,6 +71,12 @@ const PAYMENT_BADGE: Record<string, { color: string; label: string }> = {
     failed: { color: 'red', label: 'Failed' },
 };
 
+const PPPOE_STATUS_BADGE: Record<string, { color: string; label: string }> = {
+    active: { color: 'green', label: 'Active' },
+    suspended: { color: 'orange', label: 'Suspended' },
+    closed: { color: 'gray', label: 'Closed' },
+};
+
 function StatCard({
     label,
     value,
@@ -129,7 +135,9 @@ export function UserDetailsDrawer({
     const [confirmDeactivate, setConfirmDeactivate] = useState<string | null>(
         null,
     );
-    const [pppoeModal, setPppoeModal] = useState(false);
+    const [selectedPppoeAccountId, setSelectedPppoeAccountId] = useState<
+        string | null
+    >(null);
     const [pppoeNewPassword, setPppoeNewPassword] = useState('');
     const [showPassword, setShowPassword] = useState(false);
 
@@ -169,6 +177,7 @@ export function UserDetailsDrawer({
         setPayments([]);
         setTab('valuation');
         setShowPassword(false);
+        setSelectedPppoeAccountId(null);
         void loadDetail(userId);
     }, [userId, loadDetail]);
 
@@ -279,10 +288,10 @@ export function UserDetailsDrawer({
     };
 
     const submitPppoePassword = async () => {
-        if (!userId) return;
+        if (!userId || !selectedPppoeAccountId) return;
         setBusy(true);
         const res = await setPppoePassword(
-            userId,
+            selectedPppoeAccountId,
             pppoeNewPassword.trim() || undefined,
         );
         setBusy(false);
@@ -293,7 +302,7 @@ export function UserDetailsDrawer({
                 : 'Password updated',
         );
         if (res.success) {
-            setPppoeModal(false);
+            setSelectedPppoeAccountId(null);
             setPppoeNewPassword('');
             setShowPassword(true);
             void loadDetail(userId);
@@ -794,94 +803,186 @@ export function UserDetailsDrawer({
 
                         {/* --- PPPoE ----------------------------------------- */}
                         <Tabs.Panel value='pppoe' pt='md'>
-                            {detail.activations.pppoe === 0 && !detail.pppoe ? (
+                            {detail.activations.pppoe === 0 &&
+                            detail.pppoeAccounts.length === 0 ? (
                                 <Text size='sm' c='dimmed'>
                                     This customer has no PPPoE history.
                                 </Text>
-                            ) : !detail.pppoe ? (
+                            ) : detail.pppoeAccounts.length === 0 ? (
                                 <Text size='sm' c='dimmed'>
-                                    PPPoE account has no credential provisioned.
+                                    No PPPoE account credentials have been
+                                    provisioned.
                                 </Text>
                             ) : (
                                 <Stack gap='md'>
-                                    <TextInput
-                                        label='PPPoE username'
-                                        value={detail.pppoe.username}
-                                        readOnly
-                                        rightSection={
-                                            <CopyButton
-                                                value={detail.pppoe.username}
+                                    {detail.pppoeAccounts.map((account) => {
+                                        const status =
+                                            PPPOE_STATUS_BADGE[account.status];
+
+                                        return (
+                                            <Card
+                                                key={account.id}
+                                                withBorder
+                                                padding='md'
+                                                radius='md'
                                             >
-                                                {({ copy }) => (
-                                                    <ActionIcon
-                                                        variant='subtle'
-                                                        aria-label='Copy username'
-                                                        onClick={copy}
+                                                <Stack gap='sm'>
+                                                    <Group
+                                                        justify='space-between'
+                                                        align='flex-start'
+                                                        wrap='wrap'
                                                     >
-                                                            <MdContentCopy size={14} />
-                                                    </ActionIcon>
-                                                )}
-                                            </CopyButton>
-                                        }
-                                    />
-                                    <TextInput
-                                        label='PPPoE password'
-                                        type={showPassword ? 'text' : 'password'}
-                                        value={detail.pppoe.password ?? ''}
-                                        readOnly
-                                        rightSection={
-                                            <Group gap={2}>
-                                                <ActionIcon
-                                                    variant='subtle'
-                                                    aria-label='Toggle password visibility'
-                                                    onClick={() =>
-                                                        setShowPassword((v) => !v)
-                                                    }
-                                                >
-                                                    {showPassword ? (
-                                                        <MdVisibilityOff
-                                                            size={14}
-                                                        />
-                                                    ) : (
-                                                        <MdVisibility size={14} />
-                                                    )}
-                                                </ActionIcon>
-                                                <CopyButton
-                                                    value={
-                                                        detail.pppoe.password ??
-                                                        ''
-                                                    }
-                                                >
-                                                    {({ copy }) => (
-                                                        <ActionIcon
-                                                            variant='subtle'
-                                                            aria-label='Copy password'
-                                                            onClick={copy}
+                                                        <Stack gap={2}>
+                                                            <Text fw={600}>
+                                                                {account.label ||
+                                                                    'PPPoE account'}
+                                                            </Text>
+                                                            <Text
+                                                                size='xs'
+                                                                c='dimmed'
+                                                            >
+                                                                Last used:{' '}
+                                                                {account.lastUsedAt
+                                                                    ? formatDateTime(
+                                                                          account.lastUsedAt,
+                                                                      )
+                                                                    : 'Never'}
+                                                            </Text>
+                                                        </Stack>
+                                                        <Badge
+                                                            color={
+                                                                status?.color ??
+                                                                'gray'
+                                                            }
+                                                            variant='light'
                                                         >
-                                                        <MdContentCopy size={14} />
-                                                        </ActionIcon>
-                                                    )}
-                                                </CopyButton>
-                                            </Group>
-                                        }
-                                    />
-                                    <Group>
-                                        <Button
-                                            size='xs'
-                                            variant='light'
-                                            leftSection={<MdLockReset size={14} />}
-                                            onClick={() => {
-                                                setPppoeNewPassword('');
-                                                setPppoeModal(true);
-                                            }}
-                                        >
-                                            Change / rotate password
-                                        </Button>
-                                        <Text size='xs' c='dimmed'>
-                                            Changing the password disconnects live
-                                            PPP sessions.
-                                        </Text>
-                                    </Group>
+                                                            {status?.label ??
+                                                                account.status}
+                                                        </Badge>
+                                                    </Group>
+
+                                                    <TextInput
+                                                        label='PPPoE username'
+                                                        value={account.username}
+                                                        readOnly
+                                                        rightSection={
+                                                            <CopyButton
+                                                                value={
+                                                                    account.username
+                                                                }
+                                                            >
+                                                                {({ copy }) => (
+                                                                    <ActionIcon
+                                                                        variant='subtle'
+                                                                        aria-label={`Copy username for ${account.label || account.username}`}
+                                                                        onClick={copy}
+                                                                    >
+                                                                        <MdContentCopy
+                                                                            size={14}
+                                                                        />
+                                                                    </ActionIcon>
+                                                                )}
+                                                            </CopyButton>
+                                                        }
+                                                    />
+                                                    <TextInput
+                                                        label='PPPoE password'
+                                                        type={
+                                                            showPassword
+                                                                ? 'text'
+                                                                : 'password'
+                                                        }
+                                                        value={
+                                                            account.password ?? ''
+                                                        }
+                                                        placeholder='Not provisioned'
+                                                        readOnly
+                                                        rightSectionWidth={68}
+                                                        rightSection={
+                                                            <Group gap={2}>
+                                                                <ActionIcon
+                                                                    variant='subtle'
+                                                                    aria-label={`${showPassword ? 'Hide' : 'Show'} password for ${account.label || account.username}`}
+                                                                    disabled={
+                                                                        !account.password
+                                                                    }
+                                                                    onClick={() =>
+                                                                        setShowPassword(
+                                                                            (v) =>
+                                                                                !v,
+                                                                        )
+                                                                    }
+                                                                >
+                                                                    {showPassword ? (
+                                                                        <MdVisibilityOff
+                                                                            size={14}
+                                                                        />
+                                                                    ) : (
+                                                                        <MdVisibility
+                                                                            size={14}
+                                                                        />
+                                                                    )}
+                                                                </ActionIcon>
+                                                                <CopyButton
+                                                                    value={
+                                                                        account.password ??
+                                                                        ''
+                                                                    }
+                                                                >
+                                                                    {({ copy }) => (
+                                                                        <ActionIcon
+                                                                            variant='subtle'
+                                                                            aria-label={`Copy password for ${account.label || account.username}`}
+                                                                            disabled={
+                                                                                !account.password
+                                                                            }
+                                                                            onClick={
+                                                                                copy
+                                                                            }
+                                                                        >
+                                                                            <MdContentCopy
+                                                                                size={14}
+                                                                            />
+                                                                        </ActionIcon>
+                                                                    )}
+                                                                </CopyButton>
+                                                            </Group>
+                                                        }
+                                                    />
+                                                    <Group align='center'>
+                                                        <Button
+                                                            size='xs'
+                                                            variant='light'
+                                                            leftSection={
+                                                                <MdLockReset
+                                                                    size={14}
+                                                                />
+                                                            }
+                                                            onClick={() => {
+                                                                setPppoeNewPassword(
+                                                                    '',
+                                                                );
+                                                                setSelectedPppoeAccountId(
+                                                                    account.id,
+                                                                );
+                                                            }}
+                                                        >
+                                                            Change / rotate password
+                                                        </Button>
+                                                        <Text
+                                                            size='xs'
+                                                            c='dimmed'
+                                                        >
+                                                            Changing the password
+                                                            disconnects live PPP
+                                                            sessions for this
+                                                            account.
+                                                        </Text>
+                                                    </Group>
+                                                </Stack>
+                                            </Card>
+                                        );
+                                    })}
                                 </Stack>
                             )}
                         </Tabs.Panel>
@@ -1027,8 +1128,8 @@ export function UserDetailsDrawer({
             </Modal>
 
             <Modal
-                opened={pppoeModal}
-                onClose={() => setPppoeModal(false)}
+                opened={selectedPppoeAccountId !== null}
+                onClose={() => setSelectedPppoeAccountId(null)}
                 title='Change PPPoE password'
                 centered
             >

@@ -473,7 +473,20 @@ export async function createPayment(data: {
     // The NAS device the purchase happened through; tenant attribution for
     // admin-scoped views. Falls back to the package's NAS links when omitted.
     nasDeviceId?: string | null;
+    tenantAdminId?: string | null;
+    pppoeServiceAccountId?: string | null;
 }) {
+    const nasDeviceId =
+        data.nasDeviceId ?? (await resolvePackageNasDevice(data.packageId));
+    let tenantAdminId = data.tenantAdminId ?? null;
+    if (!tenantAdminId && nasDeviceId) {
+        const [device] = await db
+            .select({ ownerId: nasDevice.ownerId })
+            .from(nasDevice)
+            .where(eq(nasDevice.id, nasDeviceId))
+            .limit(1);
+        tenantAdminId = device?.ownerId ?? null;
+    }
     const [row] = await db
         .insert(packagePayments)
         .values({
@@ -481,9 +494,9 @@ export async function createPayment(data: {
             packageId: data.packageId,
             amount: String(data.amount),
             phoneNumber: data.phoneNumber,
-            nasDeviceId:
-                data.nasDeviceId ??
-                (await resolvePackageNasDevice(data.packageId)),
+            nasDeviceId,
+            tenantAdminId,
+            pppoeServiceAccountId: data.pppoeServiceAccountId ?? null,
         })
         .returning();
     return row;

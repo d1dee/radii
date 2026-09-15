@@ -12,7 +12,6 @@ import {
     addUserFlag,
     canAdminManageActivation,
     canAdminManageGlobalUser,
-    canAdminManagePppoeAccount,
     getAdminNasAddresses,
     getAdminPaymentDetail,
     getAdminReports,
@@ -393,16 +392,12 @@ app.get('/users/:id', requireAdmin, async (c) => {
 
     // Only surface dialer credentials once the customer actually has a PPPoE
     // history (the username derivation is deterministic for every user).
-    let pppoe: { username: string; password: string | null } | null = null;
-    if (
-        detail.activations.pppoe > 0 &&
-        (await canAdminManagePppoeAccount(c.get('adminSession').userId, id))
-    ) {
-        const credentials = await radiusClient.getPppoeCredentials(id);
-        pppoe = credentials.password ? credentials : null;
-    }
+    const pppoeAccounts = await radiusClient.getPppoeCredentialsForUser(
+        id,
+        c.get('adminSession').userId,
+    );
 
-    return c.json({ success: true, data: { ...detail, pppoe } });
+    return c.json({ success: true, data: { ...detail, pppoeAccounts } });
 });
 
 const flagSchema = z.object({
@@ -518,20 +513,14 @@ const pppoePasswordSchema = z.object({
     password: z.string().min(6).max(64).optional(),
 });
 
-app.post('/users/:id/pppoe-password', requireAdmin, async (c) => {
+app.post('/pppoe-accounts/:id/password', requireAdmin, async (c) => {
     const id = c.req.param('id');
-    if (!id) return jsonError(c, 404, 'User not found');
+    if (!id) return jsonError(c, 404, 'PPPoE account not found');
     const parsed = pppoePasswordSchema.safeParse(
         await c.req.json().catch(() => ({})),
     );
     if (!parsed.success) {
         return jsonError(c, 400, 'Invalid password payload');
-    }
-    // Restricted to customers on this admin's network. Note the dialer
-    // account itself is global per phone (one stable RADIUS account), so a
-    // rotation also applies wherever else that customer dials.
-    if (!(await canAdminManagePppoeAccount(c.get('adminSession').userId, id))) {
-        return jsonError(c, 404, 'User not found');
     }
     try {
         const data = await radiusClient.setPppoePassword(

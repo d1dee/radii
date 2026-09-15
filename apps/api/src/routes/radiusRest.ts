@@ -2,7 +2,7 @@
 // deployment copy lives in docs/radius/rest). rlm_rest pre-checks the
 // configured connect_uri while FreeRADIUS initializes (refusing to start when
 // it is unreachable) and then expands per-section requests into
-// /user/%{User-Name}/mac/%{Called-Station-ID}?action=<section>.
+// /user/%{User-Name}/nas/%{NAS-IP-Address}/mac/%{Called-Station-ID}?action=<section>.
 //
 // authorize answers with the session's Access-Accept attributes in rlm_rest
 // JSON form: list-qualified attribute names (reply:<attribute> — FreeRADIUS
@@ -35,13 +35,17 @@ app.get('/health', (c) => c.json({ status: 'ok' }));
 // the virtual-server section via the `action` query parameter (FreeRADIUS v4
 // builds the same requests with `section=` instead — accept both).
 
-app.on(['GET', 'POST'], '/user/:userName/mac/:calledStationId', async (c) => {
+app.on(
+    ['GET', 'POST'],
+    '/user/:userName/nas/:nasIpAddress/mac/:calledStationId',
+    async (c) => {
     const action = (
         c.req.query('action') ??
         c.req.query('section') ??
         ''
     ).toLowerCase();
     const userName = c.req.param('userName');
+    const nasIpAddress = c.req.param('nasIpAddress');
     const calledStationId = c.req.param('calledStationId');
 
     switch (action) {
@@ -49,7 +53,10 @@ app.on(['GET', 'POST'], '/user/:userName/mac/:calledStationId', async (c) => {
             // 200 + attribute JSON -> rlm_rest "updated": the pairs are added
             // to the request. Rejections map to 403/404 status codes, which
             // rlm_rest translates to its userlock/notfound module codes.
-            const verdict = await radiusClient.restAuthorize(userName);
+            const verdict = await radiusClient.restAuthorize(
+                userName,
+                nasIpAddress,
+            );
             switch (verdict.verdict) {
                 case 'unknown':
                     return jsonError(c, 404, 'User not found');
@@ -83,6 +90,7 @@ app.on(['GET', 'POST'], '/user/:userName/mac/:calledStationId', async (c) => {
                 ? jsonError(c, 404, `Unsupported rlm_rest action: ${action}`)
                 : jsonError(c, 400, 'Missing action query parameter');
     }
-});
+    },
+);
 
 export default app;

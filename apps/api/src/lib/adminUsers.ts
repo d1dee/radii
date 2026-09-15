@@ -35,6 +35,7 @@ import {
     nasSetupScript,
     packagePayments,
     packages,
+    pppoeServiceAccounts,
     radacct,
     transaction,
     transactionLog,
@@ -127,32 +128,6 @@ export async function canAdminManageGlobalUser(
     userId: string,
 ): Promise<boolean> {
     const owners = await getUserAdminIds(userId);
-    return owners.size === 1 && owners.has(adminId);
-}
-
-// PPPoE currently uses one stable account per customer. Until credentials are
-// tenant-specific, prevent one admin from reading or rotating an account used
-// by another admin's PPPoE activation.
-export async function canAdminManagePppoeAccount(
-    adminId: string,
-    userId: string,
-): Promise<boolean> {
-    const rows = await db
-        .selectDistinct({ ownerId: nasDevice.ownerId })
-        .from(activatedPackages)
-        .innerJoin(packages, eq(activatedPackages.packageId, packages.id))
-        .innerJoin(
-            packagePayments,
-            eq(activatedPackages.packagePaymentId, packagePayments.id),
-        )
-        .innerJoin(nasDevice, eq(packagePayments.nasDeviceId, nasDevice.id))
-        .where(
-            and(
-                eq(activatedPackages.userId, userId),
-                eq(packages.type, 'pppoe'),
-            ),
-        );
-    const owners = new Set(rows.map((row) => row.ownerId));
     return owners.size === 1 && owners.has(adminId);
 }
 
@@ -645,9 +620,7 @@ export async function canAdminManageActivation(
         )
         .limit(1);
     if (!row) return false;
-    return row.type !== 'pppoe'
-        ? true
-        : canAdminManagePppoeAccount(adminId, row.userId);
+    return true;
 }
 
 function scopedSessionToAdminNas(adminId: string): SQL {
@@ -788,6 +761,13 @@ export async function getAdminSessionDetail(
                 type: packages.type,
                 category: packages.category,
             },
+            serviceAccount: {
+                id: pppoeServiceAccounts.id,
+                username: pppoeServiceAccounts.username,
+                label: pppoeServiceAccounts.label,
+                status: pppoeServiceAccounts.status,
+                lastUsedAt: pppoeServiceAccounts.lastUsedAt,
+            },
         })
         .from(radacct)
         .innerJoin(nasDevice, eq(nasDevice.ownerId, adminId))
@@ -816,6 +796,16 @@ export async function getAdminSessionDetail(
         )
         .leftJoin(user, eq(packagePayments.userId, user.id))
         .leftJoin(packages, eq(packagePayments.packageId, packages.id))
+        .leftJoin(
+            pppoeServiceAccounts,
+            and(
+                eq(
+                    activatedPackages.pppoeServiceAccountId,
+                    pppoeServiceAccounts.id,
+                ),
+                eq(pppoeServiceAccounts.tenantAdminId, adminId),
+            ),
+        )
         .where(
             and(
                 eq(radacct.radacctid, BigInt(radacctId)),
@@ -1004,6 +994,7 @@ export async function getAdminSessionDetail(
         customer: row.customer?.id ? row.customer : null,
         payment: row.payment?.id ? row.payment : null,
         package: row.package?.id ? row.package : null,
+        serviceAccount: row.serviceAccount?.id ? row.serviceAccount : null,
     };
 }
 

@@ -26,10 +26,12 @@ const buyFormSchema = z.object({
 export function BuyForm({
     packageId,
     price,
+    serviceAccountId,
     onOrder,
 }: {
     packageId: string;
     price: string;
+    serviceAccountId: string | null;
     onOrder: (result: {
         orderId: string;
         status: 'pending' | 'errored';
@@ -73,6 +75,7 @@ export function BuyForm({
             const result = await createOrder({
                 packageId,
                 phoneNumber: parsed.data.phoneNumber,
+                serviceAccountId,
             });
 
             if (!result.success) {

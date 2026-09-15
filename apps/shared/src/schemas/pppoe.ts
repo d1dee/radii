@@ -24,19 +24,33 @@ export type PppoeServiceConfig = {
 
 // One PPPoE dialer account of the current user: an active activation with the
 // credentials to configure on the customer's router/phone dialer.
-export type PppoeClient = PppoeActivation & {
-    packageTitle: string;
-    activatedAt: string;
-    expireAt: string;
-    // The dialer holds an established PPP session right now.
+export type PppoeClient = {
+    accountId: string;
+    tenantName: string;
+    label: string | null;
+    status: 'active' | 'suspended' | 'closed';
+    username: string;
+    password: string | null;
     online: boolean;
+    lastUsedAt: string | null;
+    availableOnPortal: boolean;
+    activeActivation: {
+        activationId: string;
+        packageTitle: string;
+        activatedAt: string;
+        expireAt: string;
+    } | null;
 };
 
 // Everything needed to configure one dialer: credentials + service config.
-export type PppoeClientConfig = PppoeActivation &
+export type PppoeClientConfig =
     PppoeServiceConfig & {
-        packageTitle: string;
-        expireAt: string;
+        accountId: string;
+        username: string;
+        password: string | null;
+        tenantName: string;
+        packageTitle: string | null;
+        expireAt: string | null;
     };
 
 export type PppoeOrderResult = {

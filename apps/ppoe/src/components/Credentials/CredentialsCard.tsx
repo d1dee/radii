@@ -22,7 +22,7 @@ export function CredentialsCard({
     packageTitle,
 }: {
     username: string;
-    password: string;
+    password: string | null;
     config?: PppoeServiceConfig | null;
     packageTitle?: string;
 }) {
@@ -46,9 +46,9 @@ export function CredentialsCard({
             <TextInput
                 label='PPPoE Password'
                 type={revealed ? 'text' : 'password'}
-                value={password}
+                value={password ?? 'Not provisioned'}
                 readOnly
-                rightSection={
+                rightSection={password ? (
                     <Group gap={4} wrap='nowrap'>
                         <Tooltip
                             label={revealed ? 'Hide password' : 'Show password'}
@@ -63,7 +63,7 @@ export function CredentialsCard({
                         </Tooltip>
                         <CopyControl value={password} />
                     </Group>
-                }
+                ) : null}
             />
 
             {config ? (

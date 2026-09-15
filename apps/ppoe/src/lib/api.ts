@@ -41,6 +41,11 @@ export function currentNasDeviceId(): string | null {
     return localStorage.getItem(NAS_DEVICE_KEY);
 }
 
+function withNas(path: string, nasDeviceId = currentNasDeviceId()) {
+    const separator = path.includes('?') ? '&' : '?';
+    return `${path}${separator}nas=${encodeURIComponent(nasDeviceId ?? '')}`;
+}
+
 export function getPackages(nasDeviceId?: string | null) {
     const nas = nasDeviceId ?? currentNasDeviceId();
     const query = nas ? `?nas=${encodeURIComponent(nas)}` : '';
@@ -64,30 +69,36 @@ export function getServiceConfig() {
 
 // The caller's active PPPoE dialer accounts (credentials + live state).
 export function getClients() {
-    return request<Array<PppoeClient>>('/clients');
+    return request<Array<PppoeClient>>(withNas('/clients'));
 }
 
 // Full dialer configuration for one client (credentials + service defaults).
-export function getClientConfig(activationId: string) {
+export function getClientConfig(accountId: string) {
     return request<PppoeClientConfig>(
-        `/clients/${encodeURIComponent(activationId)}/config`,
+        `/clients/${encodeURIComponent(accountId)}/config`,
     );
 }
 
 // Rotates a dialer's password (live session is cut; the package stays valid).
-export function rotateClientPassword(activationId: string) {
+export function rotateClientPassword(accountId: string) {
     return request<PppoeActivation>(
-        `/clients/${encodeURIComponent(activationId)}/rotate-password`,
+        `/clients/${encodeURIComponent(accountId)}/rotate-password`,
         {},
         { method: 'POST' },
     );
 }
 
-export function getStatus() {
-    return request<Array<Quota>>('/status');
+export function getStatus(accountId: string) {
+    return request<Array<Quota>>(
+        `/status?account=${encodeURIComponent(accountId)}`,
+    );
 }
 
-export function createOrder(body: { packageId: string; phoneNumber: string }) {
+export function createOrder(body: {
+    packageId: string;
+    phoneNumber: string;
+    serviceAccountId: string | null;
+}) {
     // Send the NAS this portal is scoped to so the purchase is attributed to
     // the owning admin's network (tenant scoping).
     return request<OrderResult>(
@@ -100,11 +111,13 @@ export function createOrder(body: { packageId: string; phoneNumber: string }) {
 }
 
 export function getPaymentStatus(paymentId: string) {
-    return request<OrderResult>(`/payment/${encodeURIComponent(paymentId)}`);
+    return request<OrderResult>(
+        withNas(`/payment/${encodeURIComponent(paymentId)}`),
+    );
 }
 
 export function getLatestPendingPayment() {
-    return request<OrderResult | null>('/payment/pending/latest');
+    return request<OrderResult | null>(withNas('/payment/pending/latest'));
 }
 
 export function verifyPaymentReceipt(transactionCode: string) {
@@ -114,7 +127,7 @@ export function verifyPaymentReceipt(transactionCode: string) {
         message: string;
         activation?: PppoeActivation | null;
     }>(
-        `/payment/${encodeURIComponent(transactionCode)}/verify`,
+        withNas(`/payment/${encodeURIComponent(transactionCode)}/verify`),
         { transactionCode },
         { method: 'POST' },
     );
@@ -123,7 +136,11 @@ export function verifyPaymentReceipt(transactionCode: string) {
 // Disconnects a dialer's live PPP session (RADIUS Disconnect-Message to the
 // NAS). The package itself stays active; the dialer can reconnect using the
 // same credentials. Pass sessionId (radacct id) to target one session.
-export function deauthDevice(activationId: string, sessionId?: string) {
+export function deauthDevice(
+    activationId: string,
+    accountId: string,
+    sessionId?: string,
+) {
     const query = sessionId ? `?session=${encodeURIComponent(sessionId)}` : '';
     return request<{
         activationId: string;
@@ -131,7 +148,7 @@ export function deauthDevice(activationId: string, sessionId?: string) {
         sessionsDisconnected?: number;
     }>(
         `/deauth/${encodeURIComponent(activationId)}${query}`,
-        { activationId },
+        { accountId },
         { method: 'POST' },
     );
 }

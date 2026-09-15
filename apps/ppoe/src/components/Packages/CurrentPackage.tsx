@@ -10,7 +10,7 @@ import {
 } from '@mantine/core';
 import { timeRemaining } from './functions.ts';
 
-import { usePppoeQuota } from '@lib/store.ts';
+import { usePppoeAccounts, usePppoeQuota } from '@lib/store.ts';
 import { useDisclosure } from '@mantine/hooks';
 import { IconSelector } from '@tabler/icons-react';
 import humanFormat from 'human-format';
@@ -19,7 +19,8 @@ import { ConnectedDevicesModal } from './ConnectedDevicesModal.tsx';
 import { dataScale } from './PackagePricing.tsx';
 
 export function CurrentPackage() {
-    const { quota } = usePppoeQuota();
+    const { selectedAccountId } = usePppoeAccounts();
+    const { quota } = usePppoeQuota(selectedAccountId);
     const [isOpen, { open, close }] = useDisclosure();
 
     // Prefer an online activation; fall back to the most recent one.
@@ -107,7 +108,11 @@ export function CurrentPackage() {
                     </Stack>
                 </Stack>
             </Paper>
-            <ConnectedDevicesModal onClose={close} isOpen={isOpen} />
+            <ConnectedDevicesModal
+                accountId={selectedAccountId}
+                onClose={close}
+                isOpen={isOpen}
+            />
         </>
     );
 }

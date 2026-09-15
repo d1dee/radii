@@ -21,12 +21,13 @@ import { timeRemaining } from './functions.ts';
 import { dataScale } from './PackagePricing.tsx';
 
 interface Props {
+    accountId: string | null;
     isOpen: boolean;
     onClose: () => void;
 }
-export function ConnectedDevicesModal({ isOpen, onClose }: Props) {
+export function ConnectedDevicesModal({ accountId, isOpen, onClose }: Props) {
     const [pendingDeauth, setPendingDeauth] = useState<Array<string>>([]);
-    const { quota } = usePppoeQuota(false);
+    const { quota } = usePppoeQuota(accountId, false);
 
     // Disconnects one live PPP session (targeted by its radacct id); the
     // package stays active so the dialer can reconnect with the same
@@ -35,9 +36,14 @@ export function ConnectedDevicesModal({ isOpen, onClose }: Props) {
         activationId: string,
         radacctId: string,
     ) => {
+        if (!accountId) return;
         setPendingDeauth((prev) => [...prev, radacctId]);
         try {
-            const result = await deauthDevice(activationId, radacctId);
+            const result = await deauthDevice(
+                activationId,
+                accountId,
+                radacctId,
+            );
             if (!result.success) {
                 notifications.show({
                     color: 'red',

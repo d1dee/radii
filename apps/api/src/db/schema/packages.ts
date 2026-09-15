@@ -9,6 +9,7 @@ import {
     pgTable,
     text,
     timestamp,
+    unique,
     uuid,
     type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
@@ -18,6 +19,7 @@ import { user } from './auth-schema';
 import { adminUser } from './admin-auth-schema';
 import { nasDevice } from './integrations';
 import { transaction } from './payments';
+import { pppoeServiceAccounts } from './pppoe-accounts';
 import { radacct } from './radius';
 
 export const packages = pgTable(
@@ -76,6 +78,13 @@ export const packagePayments = pgTable(
             (): AnyPgColumn => nasDevice.id,
             { onDelete: 'set null' },
         ),
+        tenantAdminId: text('tenant_admin_id').references(() => adminUser.id, {
+            onDelete: 'restrict',
+        }),
+        pppoeServiceAccountId: uuid('pppoe_service_account_id').references(
+            () => pppoeServiceAccounts.id,
+            { onDelete: 'restrict' },
+        ),
         status: text('status', { enum: ['pending', 'paid', 'failed'] })
             .notNull()
             .default('pending'),
@@ -96,6 +105,10 @@ export const packagePayments = pgTable(
         index('package_payments_user_id_idx').on(table.userId),
         index('package_payments_package_id_idx').on(table.packageId),
         index('package_payments_nas_device_id_idx').on(table.nasDeviceId),
+        index('package_payments_tenant_admin_id_idx').on(table.tenantAdminId),
+        index('package_payments_pppoe_account_id_idx').on(
+            table.pppoeServiceAccountId,
+        ),
     ],
 );
 
@@ -117,6 +130,14 @@ export const packagePaymentsRelations = relations(
         transaction: one(transaction, {
             fields: [packagePayments.transaction],
             references: [transaction.id],
+        }),
+        tenantAdmin: one(adminUser, {
+            fields: [packagePayments.tenantAdminId],
+            references: [adminUser.id],
+        }),
+        pppoeServiceAccount: one(pppoeServiceAccounts, {
+            fields: [packagePayments.pppoeServiceAccountId],
+            references: [pppoeServiceAccounts.id],
         }),
     }),
 );
@@ -146,6 +167,10 @@ export const activatedPackages = pgTable(
         packageId: uuid('package_id')
             .notNull()
             .references(() => packages.id, { onDelete: 'restrict' }),
+        pppoeServiceAccountId: uuid('pppoe_service_account_id').references(
+            () => pppoeServiceAccounts.id,
+            { onDelete: 'restrict' },
+        ),
         expireAt: timestamp('expires_at', {
             withTimezone: true,
             mode: 'date',
@@ -160,6 +185,10 @@ export const activatedPackages = pgTable(
         index('activated_packages_payment_id_idx').on(table.packagePaymentId),
         index('activated_packages_radacct_id_idx').on(table.radacctId),
         index('activated_packages_user_id_idx').on(table.userId),
+        index('activated_packages_pppoe_account_id_idx').on(
+            table.pppoeServiceAccountId,
+        ),
+        unique('activated_packages_payment_id_key').on(table.packagePaymentId),
     ],
 );
 
@@ -221,6 +250,10 @@ export const activatedPackagesRelations = relations(
         user: one(user, {
             fields: [activatedPackages.userId],
             references: [user.id],
+        }),
+        pppoeServiceAccount: one(pppoeServiceAccounts, {
+            fields: [activatedPackages.pppoeServiceAccountId],
+            references: [pppoeServiceAccounts.id],
         }),
     }),
 );

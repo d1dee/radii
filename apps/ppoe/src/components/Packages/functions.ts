@@ -28,9 +28,10 @@ export function timeRemaining(totalSeconds: number) {
 
 export async function checkQuotaStatus(
     setValue: Dispatch<SetStateAction<Partial<Quota> & { width: string }>>,
+    accountId: string,
 ) {
     try {
-        const result = await getStatus();
+        const result = await getStatus(accountId);
         if (!result.success || !result.data) return;
 
         // The most recent activation when none is marked for this device.

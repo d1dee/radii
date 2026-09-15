@@ -13,6 +13,7 @@ import {
 } from 'react';
 import { PaymentFlow } from './components/Buy/PaymentFlow.tsx';
 import { PppoeClients } from './components/Credentials/PppoeClients.tsx';
+import { AccountSwitcher } from './components/Credentials/AccountSwitcher.tsx';
 import { Footer } from './components/Footer.tsx';
 import { CurrentPackage } from './components/Packages/CurrentPackage.tsx';
 import { HavingIssues } from './components/Packages/HavingIssues.tsx';
@@ -21,7 +22,11 @@ import { RegisterModal } from './components/RegisterForm/Modal.tsx';
 import { UserAccount } from './components/UserAccounts/UserAccount.tsx';
 import { currentNasDeviceId, type Client } from './lib/api.ts';
 import { useSession } from './lib/auth.ts';
-import { loadPppoePortal, usePppoePortal } from './lib/store.ts';
+import {
+    loadPppoePortal,
+    usePppoeAccounts,
+    usePppoePortal,
+} from './lib/store.ts';
 
 // Operators may link the portal to one NAS with ?nas=<nasDeviceId>;
 // lib/api.ts persists the id so package listings stay scoped. Clean the URL.
@@ -70,6 +75,9 @@ export default function App() {
     const { data, isPending } = useSession();
     const { client: clientData, packages, contacts: adminContacts } =
         usePppoePortal();
+    const { clients } = usePppoeAccounts();
+    const purchaseAccountId =
+        clients.find((client) => client.availableOnPortal)?.accountId ?? null;
     const nasDeviceId = currentNasDeviceId();
 
     useEffect(() => {
@@ -158,6 +166,7 @@ export default function App() {
                                         setHavingIssues,
                                     ]}
                                 />
+                                {data?.session ? <AccountSwitcher /> : null}
                                 {havingIssues ? (
                                     <HavingIssues
                                         adminContacts={adminContacts}
@@ -179,6 +188,7 @@ export default function App() {
                                 opened={buyOpened}
                                 onClose={closeBuy}
                                 seed={buySeed}
+                                serviceAccountId={purchaseAccountId}
                             />
                             <RegisterModal
                                 opened={authOpened}

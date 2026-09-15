@@ -31,10 +31,12 @@ export function PaymentFlow({
     opened,
     onClose,
     seed,
+    serviceAccountId,
 }: {
     opened: boolean;
     onClose: () => void;
     seed: { packageId: string; price: string } | null;
+    serviceAccountId: string | null;
 }) {
     const [status, setStatus] = useState<FlowStatus>('buy');
     const [orderId, setOrderId] = useState('');
@@ -61,6 +63,7 @@ export function PaymentFlow({
                     <BuyForm
                         packageId={seed.packageId}
                         price={seed.price}
+                        serviceAccountId={serviceAccountId}
                         onOrder={(result) => {
                             setOrderId(result.orderId);
                             if (result.status === 'errored') {

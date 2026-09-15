@@ -334,6 +334,39 @@ export function SessionDetailsDrawer({
                             )}
                         </LinkedCard>
 
+                        <LinkedCard label='PPPoE service account'>
+                            {detail.serviceAccount ? (
+                                <>
+                                    <Group gap='xs'>
+                                        <Text fw={600}>
+                                            {detail.serviceAccount.label ||
+                                                detail.serviceAccount.username}
+                                        </Text>
+                                        <Badge size='xs' variant='light'>
+                                            {detail.serviceAccount.status}
+                                        </Badge>
+                                    </Group>
+                                    <Text size='sm' c='dimmed'>
+                                        {detail.serviceAccount.username}
+                                    </Text>
+                                    <Text size='sm' c='dimmed'>
+                                        Last used:{' '}
+                                        {detail.serviceAccount.lastUsedAt
+                                            ? formatDateTime(
+                                                  detail.serviceAccount.lastUsedAt,
+                                              )
+                                            : 'Never'}
+                                    </Text>
+                                    <Code>{detail.serviceAccount.id}</Code>
+                                </>
+                            ) : (
+                                <Text size='sm' c='dimmed'>
+                                    This session is not linked to a PPPoE
+                                    service account.
+                                </Text>
+                            )}
+                        </LinkedCard>
+
                         <LinkedCard label='Package'>
                             {detail.package ? (
                                 <>
