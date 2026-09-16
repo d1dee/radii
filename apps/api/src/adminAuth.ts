@@ -80,12 +80,7 @@ export const adminAuth = betterAuth({
         process.env.ADMIN_BETTER_AUTH_SECRET ||
         process.env.BETTER_AUTH_SECRET ||
         'change-me-in-production',
-    baseURL: {
-        allowedHosts: process.env.BETTER_AUTH_ALLOWED_HOSTS?.split(',') ?? [
-            'http://localhost:3000',
-        ],
-        protocol: 'http',
-    },
+    baseURL: env.apiUrl,
     trustedOrigins: env.adminFrontendUrls,
     advanced: {
         cookiePrefix: 'radii-admin',

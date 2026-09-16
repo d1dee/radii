@@ -7,6 +7,7 @@ import {
 } from 'libphonenumber-js';
 import { db } from './db';
 import * as schema from './db/schema/auth-schema';
+import { env } from './env';
 
 export const auth = betterAuth({
     database: drizzleAdapter(db, {
@@ -37,12 +38,8 @@ export const auth = betterAuth({
         }),
     ],
     secret: process.env.BETTER_AUTH_SECRET || 'change-me-in-production',
-    baseURL: {
-        allowedHosts: process.env.BETTER_AUTH_ALLOWED_HOSTS?.split(',') ?? [
-            'http://localhost:3000',
-        ],
-        protocol: 'http',
-    },
+    baseURL: env.apiUrl,
+    trustedOrigins: env.frontendUrls,
 
     advanced: {
         cookiePrefix: 'radii-client',
