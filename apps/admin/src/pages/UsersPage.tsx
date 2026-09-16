@@ -106,16 +106,25 @@ export default function UsersPage() {
             const res = await getPppoeAccount(detailsAccountId);
             if (cancelled) return;
             setAccountDetailsLoading(false);
-            if (res.success && res.data) {
-                setAccountDetails(res.data);
-            } else {
+            if (!res.success) {
                 notifications.show({
                     color: 'red',
                     title: 'Could not load account',
                     message: res.message || 'PPPoE account not found',
                 });
                 setDetailsAccountId(null);
+                return;
             }
+            if (!res.data) {
+                notifications.show({
+                    color: 'red',
+                    title: 'Could not load account',
+                    message: 'PPPoE account not found',
+                });
+                setDetailsAccountId(null);
+                return;
+            }
+            setAccountDetails(res.data);
         })();
         return () => {
             cancelled = true;
@@ -130,11 +139,19 @@ export default function UsersPage() {
             label: accountDetails.label ?? undefined,
         });
         setRegenerating(false);
-        if (!result.success || !result.data) {
+        if (!result.success) {
             notifications.show({
                 color: 'red',
                 title: 'Could not regenerate credentials',
                 message: result.message || 'Please try again',
+            });
+            return;
+        }
+        if (!result.data) {
+            notifications.show({
+                color: 'red',
+                title: 'Could not regenerate credentials',
+                message: 'Please try again',
             });
             return;
         }
