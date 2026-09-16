@@ -293,36 +293,20 @@ $radiiLog (    "device: " . $devModel .    " (id " . $devSerial .    ") on Route
 # 3. External RADIUS
 # ---------------------------------------------------------------------
 
-# Remove duplicate radii-managed entries, preserving exactly one.
+# Recreate the managed entry so no stale RADIUS properties survive a rerun.
 :local radiusIds [/radius/find where comment="radii managed"];
-:local radiusCount [:len $radiusIds];
-
-:if ($radiusCount = 0) do={
-    /radius/add \
-        address={{RADIUS_SERVER}} \
-        secret="{{RADIUS_SECRET}}" \
-        service=hotspot,ppp \
-        timeout=3s \
-        src-address={{WG_CLIENT_IP}} \
-        comment="radii managed";
-} else={
-    :local radiusFirst [:pick $radiusIds 0];
-
-    /radius/set $radiusFirst \
-        address={{RADIUS_SERVER}} \
-        secret="{{RADIUS_SECRET}}" \
-        service=hotspot,ppp \
-        timeout=3s \
-        disabled=no \
-        src-address={{WG_CLIENT_IP}} \
-        comment="radii managed";
-
-    :if ($radiusCount > 1) do={
-        :for i from=1 to=($radiusCount - 1) do={
-            /radius/remove [:pick $radiusIds $i];
-        };
-    };
+:if ([:len $radiusIds] > 0) do={
+    /radius/remove $radiusIds;
 };
+
+/radius/add \
+    address={{RADIUS_SERVER}} \
+    secret="{{RADIUS_SECRET}}" \
+    service=hotspot,ppp \
+    timeout=3s \
+    disabled=no \
+    src-address={{WG_CLIENT_IP}} \
+    comment="radii managed";
 
 $radiiLog ("RADIUS client configured for {{RADIUS_SERVER}}");
 
@@ -340,13 +324,21 @@ $radiiLog ("RADIUS incoming (CoA / Disconnect-Messages) enabled on port 1700");
 
 :local wgName "wg-radii";
 :local wgIds [/interface/wireguard/find where name=$wgName];
+:local oldWgPeerIds [/interface/wireguard/peers/find where comment="radii server peer"];
+:local oldWgAddresses [/ip/address/find where comment="radii mgmt"];
 
 # IMPORTANT:
-# Recreate the interface here to have RouterOS generates its keypair
-# when the interface is created. Keeping the interface preserves its key.
+# Recreate the interface so RouterOS generates its keypair when the interface
+# is created. Removing managed dependencies first makes reruns deterministic.
+:if ([:len $oldWgPeerIds] > 0) do={
+    /interface/wireguard/peers/remove $oldWgPeerIds;
+};
+:if ([:len $oldWgAddresses] > 0) do={
+    /ip/address/remove $oldWgAddresses;
+};
 :if ([:len $wgIds] > 0) do={
-    /interface/wireguard/remove [:pick $wgIds 0]
-}
+    /interface/wireguard/remove $wgIds;
+};
 /interface/wireguard/add \
     name=$wgName \
     listen-port={{WG_LISTEN_PORT}} \
@@ -362,13 +354,6 @@ $radiiLog ("WireGuard public key: " . $wgPubKey);
 # --- WireGuard IP -----------------------------------------------------
 
 :local wgAddress "{{WG_CLIENT_IP}}/{{WG_PREFIX_LEN}}";
-:local oldWgAddresses [/ip/address/find where comment="radii mgmt"];
-
-# Remove old managed address(es) so a changed configuration is applied.
-:if ([:len $oldWgAddresses] > 0) do={
-    /ip/address/remove $oldWgAddresses;
-};
-
 :local existingWgAddress [/ip/address/find where address=$wgAddress];
 
 :if ([:len $existingWgAddress] = 0) do={
@@ -383,14 +368,6 @@ $radiiLog ("WireGuard public key: " . $wgPubKey);
 };
 
 # --- WireGuard peer ---------------------------------------------------
-
-# Peer configuration is managed by comment.\
-# Recreating only the peer is safe; the interface/keypair is preserved.
-:local wgPeerIds [/interface/wireguard/peers/find where comment="radii server peer"];
-
-:if ([:len $wgPeerIds] > 0) do={
-    /interface/wireguard/peers/remove $wgPeerIds;
-};
 
 /interface/wireguard/peers/add \
     interface=$wgName \
@@ -455,38 +432,42 @@ $radiiLog "WireGuard firewall access rules configured";
 
 :do {
     /ip/service/set [find where name="ssh"] \
-        disabled=no 
+        disabled=no \
+        address={{WG_ALLOWED_ADDRESS}};
 } on-error={
     $radiiLog "WARNING - SSH service not found/configured";
 };
 
 :do {
     /ip/service/set [find where name="winbox"] \
-        disabled=no 
+        disabled=no \
+        address={{WG_ALLOWED_ADDRESS}};
 } on-error={
     $radiiLog "WARNING - Winbox service not found/configured";
 };
 
 :do {
     /ip/service/set [find where name="api"] \
-        disabled=no 
+        disabled=no \
+        address={{WG_ALLOWED_ADDRESS}};
 } on-error={
     $radiiLog "WARNING - API service not found/configured";
 };
 
 :do {
-    /ip/service/set [find where name="api-ssl"] 
+    /ip/service/set [find where name="api-ssl"] disabled=yes;
 } on-error={};
 
 :do {
     /ip/service/set [find where name="www"] \
-        disabled=no 
+        disabled=no \
+        address={{WG_ALLOWED_ADDRESS}};
 } on-error={
     $radiiLog "WARNING - WebFig HTTP service not found/configured";
 };
 
 :do {
-    /ip/service/set [find where name="www-ssl"] 
+    /ip/service/set [find where name="www-ssl"] disabled=yes;
 } on-error={};
 
 $radiiLog "IP management services restricted to {{WG_ALLOWED_ADDRESS}}";
@@ -506,6 +487,7 @@ $radiiLog "IP management services restricted to {{WG_ALLOWED_ADDRESS}}";
     /tool/fetch \
         url="{{NAS_REPORT_URL}}" \
         http-method=post \
+        output=none \
         http-data=("nasId={{NAS_ID}}" ."&token={{REGISTRATION_TOKEN}}" ."&publicKey=" . $encKey ."&model=" . $encModel ."&serialNumber=" . $encSerial ."&firmwareVersion=" . $encVersion ."&boardName=" . $encBoard . "&architecture=" . $encArch);
 
     $radiiLog "Device facts and WireGuard public key reported";
@@ -545,6 +527,12 @@ $radiiLog "IP management services restricted to {{WG_ALLOWED_ADDRESS}}";
         /ip/pool/set [:pick $hsPoolIds 0] \
             ranges={{HOTSPOT_POOL}} \
             comment="radii managed";
+    };
+
+    :if ([:len $hsPoolIds] > 1) do={
+        :for i from=1 to=([:len $hsPoolIds] - 1) do={
+            /ip/pool/remove [:pick $hsPoolIds $i];
+        };
     };
 
     # --- HotSpot gateway address -------------------------------------
@@ -592,6 +580,12 @@ $radiiLog "IP management services restricted to {{WG_ALLOWED_ADDRESS}}";
             split-user-domain=no;
     };
 
+    :if ([:len $hsProfileIds] > 1) do={
+        :for i from=1 to=([:len $hsProfileIds] - 1) do={
+            /ip/hotspot/profile/remove [:pick $hsProfileIds $i];
+        };
+    };
+
     # --- HotSpot user profile ----------------------------------------
 
     :local hsUserProfileIds [/ip/hotspot/user/profile/find where name="radii-default"];
@@ -607,6 +601,12 @@ $radiiLog "IP management services restricted to {{WG_ALLOWED_ADDRESS}}";
             address-pool="radii-hs-pool" \
             shared-users={{SHARED_USERS}} \
             status-autorefresh=1m;
+    };
+
+    :if ([:len $hsUserProfileIds] > 1) do={
+        :for i from=1 to=([:len $hsUserProfileIds] - 1) do={
+            /ip/hotspot/user/profile/remove [:pick $hsUserProfileIds $i];
+        };
     };
 
     # Do NOT modify the built-in "default" HotSpot profile.\
@@ -640,13 +640,15 @@ $radiiLog "IP management services restricted to {{WG_ALLOWED_ADDRESS}}";
                 name="radii-hotspot" \
                 interface=$hsIf \
                 address-pool="radii-hs-pool" \
-                profile="radii-hs";
+                profile="radii-hs" \
+                disabled=no;
         } else={
             /ip/hotspot/set [:pick $interfaceHsIds 0] \
                 name="radii-hotspot" \
                 interface=$hsIf \
                 address-pool="radii-hs-pool" \
-                profile="radii-hs";
+                profile="radii-hs" \
+                disabled=no;
         };
 
     } else={
@@ -677,6 +679,7 @@ $radiiLog "IP management services restricted to {{WG_ALLOWED_ADDRESS}}";
             interface=$hsIf \
             address-pool="radii-hs-pool" \
             lease-time=1h \
+            disabled=no \
             comment="radii managed";
     } else={
         /ip/dhcp-server/set [:pick $dhcpIds 0] \
@@ -685,6 +688,12 @@ $radiiLog "IP management services restricted to {{WG_ALLOWED_ADDRESS}}";
             lease-time=1h \
             comment="radii managed" \
             disabled=no;
+    };
+
+    :if ([:len $dhcpIds] > 1) do={
+        :for i from=1 to=([:len $dhcpIds] - 1) do={
+            /ip/dhcp-server/remove [:pick $dhcpIds $i];
+        };
     };
 
     # --- DHCP network -------------------------------------------------
@@ -716,12 +725,14 @@ $radiiLog "IP management services restricted to {{WG_ALLOWED_ADDRESS}}";
             chain=srcnat \
             src-address={{HOTSPOT_NETWORK}} \
             action=masquerade \
+            disabled=no \
             comment="radii: hotspot masquerade";
     } else={
         /ip/firewall/nat/set [:pick $natIds 0] \
             chain=srcnat \
             src-address={{HOTSPOT_NETWORK}} \
             action=masquerade \
+            disabled=no \
             comment="radii: hotspot masquerade";
     };
 
@@ -803,6 +814,12 @@ $radiiLog "IP management services restricted to {{WG_ALLOWED_ADDRESS}}";
             comment="radii managed";
     };
 
+    :if ([:len $pppPoolIds] > 1) do={
+        :for i from=1 to=([:len $pppPoolIds] - 1) do={
+            /ip/pool/remove [:pick $pppPoolIds $i];
+        };
+    };
+
     # --- PPPoE gateway address -----------------------------------------
 
     :local oldPppAddresses [/ip/address/find where comment="radii pppoe gateway"];
@@ -837,7 +854,8 @@ $radiiLog "IP management services restricted to {{WG_ALLOWED_ADDRESS}}";
             dns-server={{PPP_GATEWAY}} \
             use-compression=no \
             use-encryption=no \
-            change-tcp-mss=yes;
+            change-tcp-mss=yes \
+            comment="radii managed";
     } else={
         /ppp/profile/set [:pick $pppProfileIds 0] \
             local-address={{PPP_GATEWAY}} \
@@ -845,7 +863,14 @@ $radiiLog "IP management services restricted to {{WG_ALLOWED_ADDRESS}}";
             dns-server={{PPP_GATEWAY}} \
             use-compression=no \
             use-encryption=no \
-            change-tcp-mss=yes;
+            change-tcp-mss=yes \
+            comment="radii managed";
+    };
+
+    :if ([:len $pppProfileIds] > 1) do={
+        :for i from=1 to=([:len $pppProfileIds] - 1) do={
+            /ppp/profile/remove [:pick $pppProfileIds $i];
+        };
     };
 
     # --- Expired PPP profile ------------------------------------------
@@ -882,6 +907,12 @@ $radiiLog "IP management services restricted to {{WG_ALLOWED_ADDRESS}}";
             comment="radii managed";
     };
 
+    :if ([:len $expiredPppProfileIds] > 1) do={
+        :for i from=1 to=([:len $expiredPppProfileIds] - 1) do={
+            /ppp/profile/remove [:pick $expiredPppProfileIds $i];
+        };
+    };
+
     # --- PPPoE server ----------------------------------------------------
 
     # max-mtu/max-mru follow the RouterOS manual guidance (underlying MTU
@@ -913,13 +944,21 @@ $radiiLog "IP management services restricted to {{WG_ALLOWED_ADDRESS}}";
             chain=srcnat \
             src-address={{PPP_NETWORK}} \
             action=masquerade \
+            disabled=no \
             comment="radii: pppoe masquerade";
     } else={
         /ip/firewall/nat/set [:pick $pppNatIds 0] \
             chain=srcnat \
             src-address={{PPP_NETWORK}} \
             action=masquerade \
+            disabled=no \
             comment="radii: pppoe masquerade";
+    };
+
+    :if ([:len $pppNatIds] > 1) do={
+        :for i from=1 to=([:len $pppNatIds] - 1) do={
+            /ip/firewall/nat/remove [:pick $pppNatIds $i];
+        };
     };
 
     $radiiLog (\
@@ -1167,6 +1206,25 @@ $radiiLog ("Expired PPPoE payment access configured for " . $pppPortalHost);
 };
 
 :do {
+    # Remove exact managed targets first so every download replaces the prior
+    # page instead of depending on RouterOS fetch collision behavior.
+    :local hsPagePaths {
+        "radii-hs/login.html";
+        "radii-hs/alogin.html";
+        "radii-hs/status.html";
+        "radii-hs/logout.html";
+        "radii-hs/error.html";
+        "radii-hs/radvert.html";
+        "radii-hs/redirect.html";
+    };
+
+    :foreach hsPagePath in=$hsPagePaths do={
+        :local oldHsPage [/file/find where name=$hsPagePath];
+        :if ([:len $oldHsPage] > 0) do={
+            /file/remove $oldHsPage;
+        };
+    };
+
     /tool/fetch \
         url=($hsBaseUrl . "/login.html?token=" . $encHsToken) \
         dst-path=radii-hs/login.html;
