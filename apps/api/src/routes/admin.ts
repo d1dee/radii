@@ -3,6 +3,7 @@ import {
     createNasDeviceSchema,
     createPackageSchema,
     generateSetupScriptSchema,
+    zPhoneNumber,
 } from '@radii/shared';
 import { Hono } from 'hono';
 import { z } from 'zod';
@@ -26,6 +27,7 @@ import {
     listPayments,
     removeUserFlag,
     setUserBan,
+    upsertUserAdminTag,
 } from '../lib/adminUsers';
 import { jsonError } from '../lib/error';
 import {
@@ -45,6 +47,10 @@ import {
     updatePackage,
 } from '../lib/packages';
 import { radiusClient } from '../lib/radius';
+import {
+    getPppoeAccountAdminDetail,
+    provisionPppoeAccountByPhone,
+} from '../lib/pppoeAccounts';
 import {
     buildBootstrapScript,
     generateSetupScript,
@@ -400,6 +406,27 @@ app.get('/users/:id', requireAdmin, async (c) => {
     return c.json({ success: true, data: { ...detail, pppoeAccounts } });
 });
 
+// Per-admin CRM tag (friendly name + location) for one customer. Optional
+// fields; pass empty/null to clear. Scoped to the requesting admin, so it
+// never affects the customer's identity or other tenants' views.
+const userTagSchema = z.object({
+    name: z.string().trim().max(80).nullish(),
+    location: z.string().trim().max(120).nullish(),
+});
+
+app.put('/users/:id/tag', requireAdmin, async (c) => {
+    const id = c.req.param('id');
+    if (!id) return jsonError(c, 404, 'User not found');
+    const parsed = userTagSchema.safeParse(await c.req.json().catch(() => ({})));
+    if (!parsed.success) return jsonError(c, 400, 'Invalid tag payload');
+    const tag = await upsertUserAdminTag(c.get('adminSession').userId, id, {
+        name: parsed.data.name || null,
+        location: parsed.data.location || null,
+    });
+    if (!tag) return jsonError(c, 404, 'User not found');
+    return c.json({ success: true, data: tag });
+});
+
 const flagSchema = z.object({
     reason: z.string().min(1).max(100),
     note: z.string().max(2000).optional(),
@@ -506,6 +533,57 @@ app.get('/users/:id/activations', requireAdmin, async (c) => {
 });
 
 // --- PPPoE password management ------------------------------------------------
+
+const provisionPppoeSchema = z.object({
+    phoneNumber: zPhoneNumber,
+    label: z.string().trim().max(80).optional(),
+});
+
+app.post('/pppoe-accounts/provision', requireAdmin, async (c) => {
+    const parsed = provisionPppoeSchema.safeParse(
+        await c.req.json().catch(() => ({})),
+    );
+    if (!parsed.success) {
+        return jsonError(c, 400, 'Enter a valid phone number');
+    }
+    try {
+        const provisioned = await provisionPppoeAccountByPhone(
+            c.get('adminSession').userId,
+            parsed.data.phoneNumber,
+            parsed.data.label,
+        );
+        return c.json(
+            {
+                success: true,
+                data: {
+                    accountId: provisioned.account.id,
+                    phoneNumber: provisioned.account.normalizedPhone,
+                    label: provisioned.account.label,
+                    username: provisioned.account.username,
+                    password: provisioned.password,
+                    claimCode: provisioned.claimCode,
+                    linked: provisioned.account.customerUserId !== null,
+                },
+            },
+            201,
+        );
+    } catch (err) {
+        console.error('[radius] admin PPPoE provisioning failed:', err);
+        return jsonError(c, 409, 'Could not provision PPPoE credentials');
+    }
+});
+
+// Provisioned-account detail view, scoped to the provisioning admin's tenant.
+app.get('/pppoe-accounts/:id', requireAdmin, async (c) => {
+    const id = c.req.param('id');
+    if (!id) return jsonError(c, 404, 'PPPoE account not found');
+    const data = await getPppoeAccountAdminDetail(
+        id,
+        c.get('adminSession').userId,
+    );
+    if (!data) return jsonError(c, 404, 'PPPoE account not found');
+    return c.json({ success: true, data });
+});
 
 // Sets (or rotates, when no password is supplied) the customer's stable PPPoE
 // dialer password and disconnects live sessions so it applies on next dial.

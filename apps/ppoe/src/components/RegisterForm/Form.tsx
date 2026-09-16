@@ -1,4 +1,4 @@
-import { Button, Input, PinInput, Stack, Text } from '@mantine/core';
+import { Button, Input, PinInput, Stack, Text, TextInput } from '@mantine/core';
 import { schemaResolver, useForm } from '@mantine/form';
 import { hasFieldErrors, loginSchema, signUpSchema } from '@radii/shared';
 import { PhoneNumberInput } from '@radii/ui';
@@ -11,6 +11,7 @@ type FormValues = {
     phoneNumber: string;
     pin: string;
     verifyPin: string;
+    claimCode: string;
 };
 
 export function RegisterForm({
@@ -30,7 +31,12 @@ export function RegisterForm({
     const { refetch } = useSession();
     const form = useForm<FormValues>({
         mode: 'controlled',
-        initialValues: { phoneNumber: '', pin: '', verifyPin: '' },
+        initialValues: {
+            phoneNumber: '',
+            pin: '',
+            verifyPin: '',
+            claimCode: '',
+        },
         validate: schemaResolver(
             mode === 'register' ? signUpSchema : loginSchema,
             { sync: true },
@@ -107,25 +113,42 @@ export function RegisterForm({
                 </Input.Wrapper>
 
                 {mode === 'register' ? (
-                    <Input.Wrapper
-                        label='Verify PIN:'
-                        error={form.errors.verifyPin}
-                    >
-                        <PinInput
-                            value={form.values.verifyPin}
-                            onChange={(value) =>
-                                form.setFieldValue('verifyPin', value)
+                    <>
+                        <Input.Wrapper
+                            label='Verify PIN:'
+                            error={form.errors.verifyPin}
+                        >
+                            <PinInput
+                                value={form.values.verifyPin}
+                                onChange={(value) =>
+                                    form.setFieldValue('verifyPin', value)
+                                }
+                                error={!!form.errors.verifyPin}
+                                length={4}
+                                type='number'
+                                inputMode='numeric'
+                                placeholder='•'
+                                getInputProps={() => ({
+                                    autoComplete: 'new-password',
+                                })}
+                            />
+                        </Input.Wrapper>
+                        <TextInput
+                            label='Admin claim code'
+                            description='Optional. Enter the code supplied with pre-provisioned PPPoE credentials.'
+                            placeholder='8-character code'
+                            maxLength={8}
+                            value={form.values.claimCode}
+                            onChange={(event) =>
+                                form.setFieldValue(
+                                    'claimCode',
+                                    event.currentTarget.value.toUpperCase(),
+                                )
                             }
-                            error={!!form.errors.verifyPin}
-                            length={4}
-                            type='number'
-                            inputMode='numeric'
-                            placeholder='•'
-                            getInputProps={() => ({
-                                autoComplete: 'new-password',
-                            })}
+                            error={form.errors.claimCode}
+                            autoComplete='one-time-code'
                         />
-                    </Input.Wrapper>
+                    </>
                 ) : null}
 
                 {formError ? (

@@ -6,3 +6,4 @@ export * from './integrations';
 export * from './payments';
 export * from './pppoe-accounts';
 export * from './radius';
+export * from './user-tags';

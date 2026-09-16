@@ -26,6 +26,13 @@ export const env = {
     // RouterOS template rendered for each NAS device.
 
     hotspotPortalUrl: required('HOTSPOT_PORTAL_URL'),
+    // Public PPPoE self-service portal used by the expired-subscriber walled
+    // garden. A stable address avoids depending on DNS when redirecting HTTP;
+    // when omitted, the generated RouterOS script resolves the portal host.
+    pppoePortalUrl: process.env.PPPOE_PORTAL_URL || '',
+    pppoePortalIp: process.env.PPPOE_PORTAL_IP || '',
+    pppoeExpiredRateLimit:
+        process.env.PPPOE_EXPIRED_RATE_LIMIT || '512k/512k',
     ntpServers: process.env.NTP_SERVERS || '0.pool.ntp.org,1.pool.ntp.org',
     wgManagementSubnet: process.env.WG_MANAGEMENT_SUBNET || '10.99.0.0/16',
     // The radii server's own WireGuard interface address inside

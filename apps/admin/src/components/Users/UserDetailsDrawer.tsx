@@ -49,6 +49,7 @@ import {
     getUserPayments,
     removeUserFlag,
     setPppoePassword,
+    setUserTag,
     unbanUser,
     updateActivation,
     type AdminActivationRow,
@@ -140,6 +141,9 @@ export function UserDetailsDrawer({
     >(null);
     const [pppoeNewPassword, setPppoeNewPassword] = useState('');
     const [showPassword, setShowPassword] = useState(false);
+    const [tagModal, setTagModal] = useState(false);
+    const [tagName, setTagName] = useState('');
+    const [tagLocation, setTagLocation] = useState('');
 
     const loadDetail = useCallback(async (id: string) => {
         setError(null);
@@ -178,6 +182,7 @@ export function UserDetailsDrawer({
         setTab('valuation');
         setShowPassword(false);
         setSelectedPppoeAccountId(null);
+        setTagModal(false);
         void loadDetail(userId);
     }, [userId, loadDetail]);
 
@@ -188,6 +193,27 @@ export function UserDetailsDrawer({
     }, [tab, userId, detail, loadActivations, loadPayments]);
 
     // --- Actions ---------------------------------------------------------------
+
+    const openTagModal = () => {
+        setTagName(detail?.tag?.name ?? '');
+        setTagLocation(detail?.tag?.location ?? '');
+        setTagModal(true);
+    };
+
+    const submitTag = async () => {
+        if (!userId) return;
+        setBusy(true);
+        const res = await setUserTag(userId, {
+            name: tagName.trim() || null,
+            location: tagLocation.trim() || null,
+        });
+        setBusy(false);
+        notifyResult(res, 'Customer tag saved');
+        if (res.success) {
+            setTagModal(false);
+            void loadDetail(userId);
+        }
+    };
 
     const submitFlag = async () => {
         if (!userId || !flagReason.trim()) return;
@@ -322,7 +348,10 @@ export function UserDetailsDrawer({
             size='xl'
             title={
                 <Title order={4}>
-                    {detail?.name ?? detail?.phoneNumber ?? 'User details'}
+                    {detail?.tag?.name ||
+                        detail?.name ||
+                        detail?.phoneNumber ||
+                        'User details'}
                 </Title>
             }
         >
@@ -339,9 +368,14 @@ export function UserDetailsDrawer({
                             {detail.name.slice(0, 1).toUpperCase()}
                         </Avatar>
                         <Stack gap={0}>
-                            <Text fw={600}>{detail.name}</Text>
+                            <Text fw={600}>
+                                {detail.tag?.name || detail.name}
+                            </Text>
                             <Text size='xs' c='dimmed'>
-                                {detail.phoneNumber} · {detail.email}
+                                {detail.phoneNumber}
+                                {detail.tag?.location
+                                    ? ` · ${detail.tag.location}`
+                                    : ''}
                             </Text>
                         </Stack>
                         <Group gap='xs' ml='auto'>
@@ -371,6 +405,16 @@ export function UserDetailsDrawer({
                     ) : null}
 
                     <Group>
+                        <Button
+                            size='xs'
+                            variant='light'
+                            leftSection={<MdEdit size={14} />}
+                            onClick={openTagModal}
+                        >
+                            {detail.tag?.name || detail.tag?.location
+                                ? 'Edit name / location'
+                                : 'Add name / location'}
+                        </Button>
                         <Button
                             size='xs'
                             variant='light'
@@ -1124,6 +1168,38 @@ export function UserDetailsDrawer({
                             Deactivate
                         </Button>
                     </Group>
+                </Stack>
+            </Modal>
+
+            <Modal
+                opened={tagModal}
+                onClose={() => setTagModal(false)}
+                title='Customer name / location'
+                centered
+            >
+                <Stack>
+                    <Text size='sm' c='dimmed'>
+                        Private labels only visible to you. The customer's
+                        phone-number identity is unchanged; both fields are
+                        optional and can be updated later.
+                    </Text>
+                    <TextInput
+                        label='Name'
+                        placeholder='e.g. Jane Mwangi'
+                        value={tagName}
+                        onChange={(e) => setTagName(e.currentTarget.value)}
+                        maxLength={80}
+                    />
+                    <TextInput
+                        label='Location'
+                        placeholder='e.g. Riverside Apartments, House 4B'
+                        value={tagLocation}
+                        onChange={(e) => setTagLocation(e.currentTarget.value)}
+                        maxLength={120}
+                    />
+                    <Button onClick={() => void submitTag()} loading={busy}>
+                        Save tag
+                    </Button>
                 </Stack>
             </Modal>
 

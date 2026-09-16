@@ -40,6 +40,7 @@ import {
     transaction,
     transactionLog,
     user,
+    userAdminTag,
     userFlag,
 } from '../db/schema';
 import { calculateActivationTime } from './radius/activationLimits';
@@ -84,6 +85,17 @@ export function customerVisibleToAdmin(adminId: string): SQL {
                     ),
                 ),
         ),
+        exists(
+            db
+                .select({ one: sql`1` })
+                .from(pppoeServiceAccounts)
+                .where(
+                    and(
+                        eq(pppoeServiceAccounts.customerUserId, user.id),
+                        eq(pppoeServiceAccounts.tenantAdminId, adminId),
+                    ),
+                ),
+        ),
     ) as SQL;
 }
 
@@ -101,7 +113,7 @@ export async function isAdminUserVisible(
 }
 
 async function getUserAdminIds(userId: string): Promise<Set<string>> {
-    const [paymentOwners, loginOwners] = await Promise.all([
+    const [paymentOwners, loginOwners, pppoeOwners] = await Promise.all([
         db
             .selectDistinct({ ownerId: nasDevice.ownerId })
             .from(packagePayments)
@@ -115,9 +127,15 @@ async function getUserAdminIds(userId: string): Promise<Set<string>> {
                 eq(hotspotLoginRequest.nasDeviceId, nasDevice.id),
             )
             .where(eq(hotspotLoginRequest.userId, userId)),
+        db
+            .selectDistinct({ ownerId: pppoeServiceAccounts.tenantAdminId })
+            .from(pppoeServiceAccounts)
+            .where(eq(pppoeServiceAccounts.customerUserId, userId)),
     ]);
     return new Set(
-        [...paymentOwners, ...loginOwners].map((row) => row.ownerId),
+        [...paymentOwners, ...loginOwners, ...pppoeOwners].map(
+            (row) => row.ownerId,
+        ),
     );
 }
 
@@ -135,6 +153,33 @@ export async function canAdminManageGlobalUser(
 // scoped aggregates, payment log and reports).
 function scopedToAdminNas(adminId: string): SQL {
     return eq(nasDevice.ownerId, adminId);
+}
+
+function activationTypeExists(
+    adminId: string,
+    type: AdminUserTypeFilter,
+): SQL {
+    return exists(
+        db
+            .select()
+            .from(activatedPackages)
+            .innerJoin(packages, eq(activatedPackages.packageId, packages.id))
+            .innerJoin(
+                packagePayments,
+                eq(activatedPackages.packagePaymentId, packagePayments.id),
+            )
+            .innerJoin(
+                nasDevice,
+                eq(packagePayments.nasDeviceId, nasDevice.id),
+            )
+            .where(
+                and(
+                    eq(activatedPackages.userId, user.id),
+                    eq(packages.type, type),
+                    eq(nasDevice.ownerId, adminId),
+                ),
+            ),
+    );
 }
 
 // Accounting tenancy follows the NAS that emitted the row. An address is
@@ -157,6 +202,60 @@ function scopedAccountingToAdminNas(adminId: string): SQL {
           and (${radacct.nasipaddress} = other.ip_address
                or ${radacct.nasipaddress} = other_setup.wg_client_ip)
     )`;
+}
+
+// --- Per-admin CRM tags ------------------------------------------------------
+
+export type UserAdminTag = { name: string | null; location: string | null };
+
+async function getUserAdminTags(
+    userIds: string[],
+    adminId: string,
+): Promise<Map<string, UserAdminTag>> {
+    if (userIds.length === 0) return new Map();
+    const rows = await db
+        .select({
+            userId: userAdminTag.userId,
+            name: userAdminTag.name,
+            location: userAdminTag.location,
+        })
+        .from(userAdminTag)
+        .where(
+            and(
+                inArray(userAdminTag.userId, userIds),
+                eq(userAdminTag.adminId, adminId),
+            ),
+        );
+    return new Map(
+        rows.map((r) => [
+            r.userId,
+            { name: r.name, location: r.location },
+        ]),
+    );
+}
+
+// Upsert the requesting admin's tag for one customer; only visible customers
+// can be tagged (same tenant boundary as the rest of the admin API).
+export async function upsertUserAdminTag(
+    adminId: string,
+    userId: string,
+    fields: UserAdminTag,
+): Promise<UserAdminTag | null> {
+    if (!(await isAdminUserVisible(adminId, userId))) return null;
+    const [row] = await db
+        .insert(userAdminTag)
+        .values({
+            adminId,
+            userId,
+            name: fields.name,
+            location: fields.location,
+        })
+        .onConflictDoUpdate({
+            target: [userAdminTag.adminId, userAdminTag.userId],
+            set: { name: fields.name, location: fields.location },
+        })
+        .returning({ name: userAdminTag.name, location: userAdminTag.location });
+    return row ? { name: row.name, location: row.location } : null;
 }
 
 // --- User listing -----------------------------------------------------------
@@ -332,6 +431,22 @@ export async function listAdminUsers(opts: ListAdminUsersOpts) {
                 ilike(user.name, q),
                 ilike(user.username, q),
                 ilike(user.email, q),
+                // The admin's own CRM tags are searchable too.
+                exists(
+                    db
+                        .select()
+                        .from(userAdminTag)
+                        .where(
+                            and(
+                                eq(userAdminTag.userId, user.id),
+                                eq(userAdminTag.adminId, opts.adminId),
+                                or(
+                                    ilike(userAdminTag.name, q),
+                                    ilike(userAdminTag.location, q),
+                                )!,
+                            ),
+                        ),
+                ),
             )!,
         );
     }
@@ -352,33 +467,28 @@ export async function listAdminUsers(opts: ListAdminUsersOpts) {
     }
     if (opts.type) {
         conditions.push(
-            exists(
-                db
-                    .select()
-                    .from(activatedPackages)
-                    .innerJoin(
-                        packages,
-                        eq(activatedPackages.packageId, packages.id),
-                    )
-                    .innerJoin(
-                        packagePayments,
-                        eq(
-                            activatedPackages.packagePaymentId,
-                            packagePayments.id,
-                        ),
-                    )
-                    .innerJoin(
-                        nasDevice,
-                        eq(packagePayments.nasDeviceId, nasDevice.id),
-                    )
-                    .where(
-                        and(
-                            eq(activatedPackages.userId, user.id),
-                            eq(packages.type, opts.type!),
-                            eq(nasDevice.ownerId, opts.adminId),
-                        ),
-                    ),
-            ),
+            opts.type === 'pppoe'
+                ? or(
+                      exists(
+                          db
+                              .select()
+                              .from(pppoeServiceAccounts)
+                              .where(
+                                  and(
+                                      eq(
+                                          pppoeServiceAccounts.customerUserId,
+                                          user.id,
+                                      ),
+                                      eq(
+                                          pppoeServiceAccounts.tenantAdminId,
+                                          opts.adminId,
+                                      ),
+                                  ),
+                              ),
+                      ),
+                      activationTypeExists(opts.adminId, opts.type),
+                  )!
+                : activationTypeExists(opts.adminId, opts.type),
         );
     }
     const where = and(...conditions);
@@ -396,46 +506,123 @@ export async function listAdminUsers(opts: ListAdminUsersOpts) {
         .limit(perPage)
         .offset((page - 1) * perPage);
 
+    // Provisioned-by-phone PPPoE accounts that no customer has claimed yet
+    // have no `user` row; pin them to the top of the first page so admins can
+    // see what they pre-provisioned. They are tenant-scoped by their
+    // provisioning admin and never carry flags, payments or activations, so
+    // the flagged and hotspot-only filters exclude them.
+    const includePending = !opts.flagged && opts.type !== 'hotspot';
+    let pendingClaims: typeof pppoeServiceAccounts.$inferSelect[] = [];
+    if (includePending && page === 1) {
+        const pendingConditions: SQL[] = [
+            isNull(pppoeServiceAccounts.customerUserId),
+            eq(pppoeServiceAccounts.tenantAdminId, opts.adminId),
+        ];
+        if (opts.q) {
+            const q = `%${opts.q.trim()}%`;
+            pendingConditions.push(
+                or(
+                    ilike(pppoeServiceAccounts.normalizedPhone, q),
+                    ilike(pppoeServiceAccounts.username, q),
+                    ilike(pppoeServiceAccounts.label, q),
+                )!,
+            );
+        }
+        pendingClaims = await db
+            .select()
+            .from(pppoeServiceAccounts)
+            .where(and(...pendingConditions))
+            .orderBy(desc(pppoeServiceAccounts.createdAt))
+            .limit(perPage);
+    }
+
     const agg = await userAggregates(
         users.map((u) => u.id),
         opts.adminId,
     );
+    const tags = await getUserAdminTags(
+        users.map((u) => u.id),
+        opts.adminId,
+    );
+
+    const emptyPayments = {
+        total: 0,
+        paid: 0,
+        pending: 0,
+        failed: 0,
+        revenue: 0,
+    };
+    const emptyActivations = {
+        total: 0,
+        active: 0,
+        hotspot: 0,
+        pppoe: 0,
+    };
 
     return {
         total: Number(stats.total),
         page,
         perPage,
-        users: users.map((u) => {
-            const payments = agg.payments.get(u.id);
-            const activations = agg.activations.get(u.id);
-            return {
-                id: u.id,
-                name: u.name,
-                email: u.email,
-                phoneNumber: u.username ?? '',
-                image: u.image,
-                role: u.role,
-                banned: u.banned ?? false,
-                banReason: u.banReason,
-                createdAt: u.createdAt,
-                flags: agg.flags.get(u.id) ?? 0,
-                online: agg.online.has(u.id),
-                payments: {
-                    total: payments?.total ?? 0,
-                    paid: payments?.paid ?? 0,
-                    pending: payments?.pending ?? 0,
-                    failed: payments?.failed ?? 0,
-                    revenue: payments?.revenue ?? 0,
+        users: [
+            ...pendingClaims.map((account) => ({
+                id: account.id,
+                pendingClaim: true as const,
+                name: account.label ?? account.normalizedPhone,
+                email: null as string | null,
+                phoneNumber: account.normalizedPhone,
+                image: null as string | null,
+                role: null as string | null,
+                banned: false,
+                banReason: null as string | null,
+                createdAt: account.createdAt,
+                flags: 0,
+                online: false,
+                payments: emptyPayments,
+                activations: emptyActivations,
+                lastPaymentAt: null as Date | null,
+                tag: null as UserAdminTag | null,
+                pppoe: {
+                    username: account.username,
+                    label: account.label,
+                    status: account.status,
                 },
-                activations: {
-                    total: activations?.total ?? 0,
-                    active: activations?.active ?? 0,
-                    hotspot: activations?.hotspot ?? 0,
-                    pppoe: activations?.pppoe ?? 0,
-                },
-                lastPaymentAt: agg.lastPayment.get(u.id) ?? null,
-            };
-        }),
+            })),
+            ...users.map((u) => {
+                const payments = agg.payments.get(u.id);
+                const activations = agg.activations.get(u.id);
+                return {
+                    id: u.id,
+                    pendingClaim: false as const,
+                    name: u.name,
+                    email: u.email as string | null,
+                    phoneNumber: u.username ?? '',
+                    image: u.image,
+                    role: u.role,
+                    banned: u.banned ?? false,
+                    banReason: u.banReason,
+                    createdAt: u.createdAt,
+                    flags: agg.flags.get(u.id) ?? 0,
+                    online: agg.online.has(u.id),
+                    payments: {
+                        total: payments?.total ?? 0,
+                        paid: payments?.paid ?? 0,
+                        pending: payments?.pending ?? 0,
+                        failed: payments?.failed ?? 0,
+                        revenue: payments?.revenue ?? 0,
+                    },
+                    activations: {
+                        total: activations?.total ?? 0,
+                        active: activations?.active ?? 0,
+                        hotspot: activations?.hotspot ?? 0,
+                        pppoe: activations?.pppoe ?? 0,
+                    },
+                    lastPaymentAt: (agg.lastPayment.get(u.id) ??
+                        null) as Date | null,
+                    tag: tags.get(u.id) ?? null,
+                    pppoe: null,
+                };
+            }),
+        ],
     };
 }
 
@@ -457,6 +644,7 @@ export async function getAdminUserDetail(userId: string, adminId: string) {
     const agg = await userAggregates([userId], adminId);
     const payments = agg.payments.get(userId);
     const activations = agg.activations.get(userId);
+    const tags = await getUserAdminTags([userId], adminId);
 
     // Flag creators are admins from the isolated admin auth instance
     // (admin_user), not customers from the `user` table. Only this admin's
@@ -546,6 +734,7 @@ export async function getAdminUserDetail(userId: string, adminId: string) {
             lastSeen: usage?.lastSeen ?? null,
         },
         online: agg.online.has(userId),
+        tag: tags.get(userId) ?? null,
     };
 }
 

@@ -242,7 +242,7 @@ const TEMPLATE = `# ============================================================
 #    7. Report device facts to radii
 #    8. HotSpot + DHCP + NAT
 #    9. PPPoE server
-#   10. Walled garden
+#   10. Portal walled gardens
 #   11. Branded HotSpot HTML pages
 # =====================================================================
 
@@ -848,6 +848,40 @@ $radiiLog "IP management services restricted to {{WG_ALLOWED_ADDRESS}}";
             change-tcp-mss=yes;
     };
 
+    # --- Expired PPP profile ------------------------------------------
+
+    # RADIUS selects this profile with Mikrotik-Group=radii-ppp-expired.
+    # The assigned address is added dynamically while the PPP session is up,
+    # giving NAT and firewall rules a reliable subscriber selector.
+    :local expiredPppProfileIds [/ppp/profile/find where name="radii-ppp-expired"];
+
+    :if ([:len $expiredPppProfileIds] = 0) do={
+        /ppp/profile/add \
+            name="radii-ppp-expired" \
+            local-address={{PPP_GATEWAY}} \
+            remote-address="radii-ppp-pool" \
+            dns-server={{PPP_GATEWAY}} \
+            address-list="radii-pppoe-expired" \
+            rate-limit="{{PPP_EXPIRED_RATE_LIMIT}}" \
+            use-ipv6=no \
+            use-compression=no \
+            use-encryption=no \
+            change-tcp-mss=yes \
+            comment="radii managed";
+    } else={
+        /ppp/profile/set [:pick $expiredPppProfileIds 0] \
+            local-address={{PPP_GATEWAY}} \
+            remote-address="radii-ppp-pool" \
+            dns-server={{PPP_GATEWAY}} \
+            address-list="radii-pppoe-expired" \
+            rate-limit="{{PPP_EXPIRED_RATE_LIMIT}}" \
+            use-ipv6=no \
+            use-compression=no \
+            use-encryption=no \
+            change-tcp-mss=yes \
+            comment="radii managed";
+    };
+
     # --- PPPoE server ----------------------------------------------------
 
     # max-mtu/max-mru follow the RouterOS manual guidance (underlying MTU
@@ -898,7 +932,7 @@ $radiiLog "IP management services restricted to {{WG_ALLOWED_ADDRESS}}";
 };
 
 # ---------------------------------------------------------------------
-# 10. Walled garden
+# 10. Portal walled gardens
 # ---------------------------------------------------------------------
 
 :local walledPortalHost "{{PORTAL_DOMAIN}}";
@@ -946,6 +980,177 @@ $radiiLog "IP management services restricted to {{WG_ALLOWED_ADDRESS}}";
         };
     };
 };
+
+# --- Expired PPPoE payment access ------------------------------------
+
+:local pppPortalHost "{{PPP_PORTAL_DOMAIN}}";
+:local pppPortalIsIp "{{PPP_PORTAL_DOMAIN_IS_IP}}";
+:local pppPortalAddress "{{PPP_PORTAL_IP}}";
+
+# Prefer the configured stable portal IP. For simpler deployments, resolve
+# the hostname while applying the script and log a warning if DNS is absent.
+:if ([:len $pppPortalAddress] = 0) do={
+    :if ([:len $pppPortalIsIp] > 0) do={
+        :set pppPortalAddress $pppPortalHost;
+    } else={
+        :do {
+            :set pppPortalAddress [:resolve $pppPortalHost];
+        } on-error={
+            $radiiLog ("WARNING - could not resolve PPPoE portal " . $pppPortalHost);
+        };
+    };
+};
+
+# Address-list hostnames are maintained by RouterOS DNS, so HTTPS access keeps
+# following DNS changes even when the HTTP redirect uses a pinned/resolved IP.
+:local oldPppPaymentAddresses [/ip/firewall/address-list/find where comment~"^radii: pppoe payment"];
+:if ([:len $oldPppPaymentAddresses] > 0) do={
+    /ip/firewall/address-list/remove $oldPppPaymentAddresses;
+};
+
+/ip/firewall/address-list/add \
+    list="radii-pppoe-payment" \
+    address=$pppPortalHost \
+    comment="radii: pppoe payment portal";
+
+:if ([:len $pppPortalAddress] > 0) do={
+    :if ($pppPortalAddress != $pppPortalHost) do={
+        /ip/firewall/address-list/add \
+            list="radii-pppoe-payment" \
+            address=$pppPortalAddress \
+            comment="radii: pppoe payment redirect address";
+    };
+};
+
+:if ($walledApiHost != $pppPortalHost) do={
+    /ip/firewall/address-list/add \
+        list="radii-pppoe-payment" \
+        address=$walledApiHost \
+        comment="radii: pppoe payment api";
+};
+
+# Let Windows complete its initial Network Connectivity Status Indicator
+# probes without redirecting them to the payment portal. RouterOS maintains
+# these hostname-backed entries as their DNS answers change.
+/ip/firewall/address-list/add \
+    list="radii-pppoe-payment" \
+    address="www.msftconnecttest.com" \
+    comment="radii: pppoe payment ncsi connect test";
+
+# Recreate only radii-managed expired-subscriber NAT rules.
+:local oldPppExpiredNat [/ip/firewall/nat/find where comment~"^radii: pppoe expired"];
+:if ([:len $oldPppExpiredNat] > 0) do={
+    /ip/firewall/nat/remove $oldPppExpiredNat;
+};
+
+:local expiredHttpNatId "";
+:if ([:len $pppPortalAddress] > 0) do={
+    :set expiredHttpNatId [/ip/firewall/nat/add \
+        chain=dstnat \
+        src-address-list="radii-pppoe-expired" \
+        dst-address-list=!radii-pppoe-payment \
+        protocol=tcp \
+        dst-port=80 \
+        action=dst-nat \
+        to-addresses=$pppPortalAddress \
+        to-ports={{PPP_PORTAL_REDIRECT_PORT}} \
+        comment="radii: pppoe expired http redirect"];
+};
+
+:local expiredDnsTcpNatId [/ip/firewall/nat/add \
+    chain=dstnat \
+    src-address-list="radii-pppoe-expired" \
+    protocol=tcp \
+    dst-port=53 \
+    action=redirect \
+    to-ports=53 \
+    comment="radii: pppoe expired dns tcp"];
+
+:local expiredDnsUdpNatId [/ip/firewall/nat/add \
+    chain=dstnat \
+    src-address-list="radii-pppoe-expired" \
+    protocol=udp \
+    dst-port=53 \
+    action=redirect \
+    to-ports=53 \
+    comment="radii: pppoe expired dns udp"];
+
+:do {
+    :if ([:len $expiredHttpNatId] > 0) do={
+        /ip/firewall/nat/move $expiredHttpNatId 0;
+    };
+    /ip/firewall/nat/move $expiredDnsTcpNatId 0;
+    /ip/firewall/nat/move $expiredDnsUdpNatId 0;
+} on-error={
+    $radiiLog "WARNING - could not move expired PPPoE NAT rules";
+};
+
+# The router answers the intercepted DNS requests. These input rules and the
+# payment allow/drop pair are moved ahead of pre-existing firewall policy.
+/ip/dns/set allow-remote-requests=yes;
+
+:local expiredDnsTcpFilterId [/ip/firewall/filter/add \
+    chain=input \
+    src-address-list="radii-pppoe-expired" \
+    protocol=tcp \
+    dst-port=53 \
+    action=accept \
+    comment="radii: pppoe expired dns tcp"];
+
+:local expiredDnsUdpFilterId [/ip/firewall/filter/add \
+    chain=input \
+    src-address-list="radii-pppoe-expired" \
+    protocol=udp \
+    dst-port=53 \
+    action=accept \
+    comment="radii: pppoe expired dns udp"];
+
+:local expiredPaymentFilterId [/ip/firewall/filter/add \
+    chain=forward \
+    src-address-list="radii-pppoe-expired" \
+    dst-address-list="radii-pppoe-payment" \
+    protocol=tcp \
+    dst-port={{PPP_PORTAL_ALLOWED_TCP_PORTS}} \
+    action=accept \
+    comment="radii: pppoe expired payment"];
+
+:local expiredPaymentIcmpFilterId [/ip/firewall/filter/add \
+    chain=forward \
+    src-address-list="radii-pppoe-expired" \
+    dst-address-list="radii-pppoe-payment" \
+    protocol=icmp \
+    action=accept \
+    comment="radii: pppoe expired payment icmp"];
+
+:local expiredDropFilterId [/ip/firewall/filter/add \
+    chain=forward \
+    src-address-list="radii-pppoe-expired" \
+    action=drop \
+    comment="radii: pppoe expired drop"];
+
+# RouterOS cannot always move a second rule to absolute position 0 when
+# dynamic HotSpot rules occupy the head of the table. Move the drop as early
+# as RouterOS permits, then place both payment rules directly before it.
+:do {
+    /ip/firewall/filter/move $expiredDropFilterId 0;
+    /ip/firewall/filter/move \
+        $expiredPaymentIcmpFilterId \
+        destination=$expiredDropFilterId;
+    /ip/firewall/filter/move \
+        $expiredPaymentFilterId \
+        destination=$expiredPaymentIcmpFilterId;
+} on-error={
+    $radiiLog "WARNING - could not order expired PPPoE forward rules";
+};
+
+:do {
+    /ip/firewall/filter/move $expiredDnsTcpFilterId 0;
+    /ip/firewall/filter/move $expiredDnsUdpFilterId 0;
+} on-error={
+    $radiiLog "WARNING - could not move expired PPPoE DNS rules";
+};
+
+$radiiLog ("Expired PPPoE payment access configured for " . $pppPortalHost);
 
 # ---------------------------------------------------------------------
 # 11. Branded HotSpot HTML pages

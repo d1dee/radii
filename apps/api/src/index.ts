@@ -6,9 +6,15 @@ import { adminAuth } from './adminAuth';
 import { auth } from './auth';
 import { closeDb } from './db';
 import { env } from './env';
+import { radiusClient } from './lib/radius';
 import { reconcileWireGuardPeers } from './lib/wgReconcile';
 import routes from './routes';
 import type { AppVariables } from './types';
+
+// FreeRADIUS SQL runs before REST. Remove legacy PPPoE Expiration/static reply
+// rows before accepting traffic so REST exclusively selects normal versus
+// payment-only profiles while SQL continues to verify the stable password.
+await radiusClient.preparePppoeRestAuthorization();
 
 const app = new Hono<{ Variables: AppVariables }>();
 

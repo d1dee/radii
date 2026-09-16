@@ -75,6 +75,7 @@ The API reads configuration from environment variables. Key groups:
 | `MPESA_*` | M-Pesa Daraja credentials (consumer key/secret, shortcode, passkey, environment) |
 | `RESEND_API_KEY`, `RESEND_FROM` | Admin OTP email (Resend HTTP API) |
 | `PPPOE_SERVICE_NAME`, `PPPOE_MTU`, `PPPOE_MRU`, `PPPOE_DNS` | PPPoE portal dialer configuration |
+| `PPPOE_PORTAL_URL`, `PPPOE_PORTAL_IP`, `PPPOE_EXPIRED_RATE_LIMIT` | Expired PPPoE payment redirect and restricted-profile configuration |
 
 See `apps/api/src/env.ts` for the full list with defaults.
 

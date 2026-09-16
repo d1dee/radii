@@ -262,8 +262,11 @@ export function getNasDeviceAnalytics(id: string) {
 
 export type AdminUserRow = {
     id: string;
+    // True for PPPoE accounts provisioned by phone that no customer has
+    // claimed yet; they have no user record, only the pending credentials.
+    pendingClaim: boolean;
     name: string;
-    email: string;
+    email: string | null;
     phoneNumber: string;
     image: string | null;
     role: string | null;
@@ -286,7 +289,29 @@ export type AdminUserRow = {
         pppoe: number;
     };
     lastPaymentAt: string | null;
+    // Per-admin CRM tag (friendly name + location); null when untagged.
+    tag: AdminUserTag | null;
+    // Present for pending-claim rows only.
+    pppoe?: {
+        username: string;
+        label: string | null;
+        status: 'active' | 'suspended' | 'closed';
+    } | null;
 };
+
+export type AdminUserTag = {
+    name: string | null;
+    location: string | null;
+};
+
+export function setUserTag(
+    id: string,
+    body: { name?: string | null; location?: string | null },
+) {
+    return request<AdminUserTag>(`/admin/users/${id}/tag`, body, {
+        method: 'PUT',
+    });
+}
 
 export type AdminUserList = {
     total: number;
@@ -346,6 +371,7 @@ export type AdminUserDetail = {
         lastSeen: string | null;
     };
     online: boolean;
+    tag: AdminUserTag | null;
     pppoeAccounts: AdminPppoeAccount[];
 };
 
@@ -548,6 +574,45 @@ export function setPppoePassword(accountId: string, password?: string) {
         { password },
         { method: 'POST' },
     );
+}
+
+export type ProvisionedPppoeAccount = {
+    accountId: string;
+    phoneNumber: string;
+    label: string | null;
+    username: string;
+    password: string;
+    claimCode: string | null;
+    linked: boolean;
+};
+
+export function provisionPppoeAccount(body: {
+    phoneNumber: string;
+    label?: string;
+}) {
+    return request<ProvisionedPppoeAccount>(
+        '/admin/pppoe-accounts/provision',
+        body,
+        { method: 'POST' },
+    );
+}
+
+export type PppoeAccountDetail = {
+    id: string;
+    phoneNumber: string;
+    label: string | null;
+    username: string;
+    password: string | null;
+    status: 'active' | 'suspended' | 'closed';
+    awaitingClaim: boolean;
+    claimCodePending: boolean;
+    customer: { id: string; name: string } | null;
+    lastUsedAt: string | null;
+    createdAt: string;
+};
+
+export function getPppoeAccount(id: string) {
+    return request<PppoeAccountDetail>(`/admin/pppoe-accounts/${id}`);
 }
 
 // --- Payment log ---------------------------------------------------------------

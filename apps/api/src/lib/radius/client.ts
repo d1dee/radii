@@ -83,6 +83,7 @@ import {
 } from './activationLimits';
 
 const NO_EXPIRY_VALIDITY_MONTHS = 6;
+const PPPOE_EXPIRED_PROFILE = 'radii-ppp-expired';
 
 function effectiveExpireAt(
     activation: typeof activatedPackages.$inferSelect,
@@ -595,13 +596,9 @@ export class RadiusClient {
     }
 
     // PPPoE provisioning with STABLE per-customer credentials: the RADIUS
-    // account (username + password) is generated once on the customer's first
-    // PPPoE purchase and reused for every later package. A payment therefore
-    // (re-)authorizes the same login: the radcheck Expiration date is moved
-    // to the package's expiry and the Access-Accept attributes are refreshed
-    // with Session-Timeout set to the time remaining UNTIL that expiry date,
-    // so a PPP session lives exactly as long as the paid package. Idempotent
-    // per payment (re-polls re-apply the same provisioning).
+    // password is generated once on the customer's first PPPoE purchase and
+    // reused for every later package. REST refreshes Access-Accept attributes
+    // with Session-Timeout set to the time remaining until package expiry.
     private async ensurePppoeProvisioned(
         payment: typeof packagePayments.$inferSelect,
         pkg: typeof packages.$inferSelect,
@@ -609,6 +606,23 @@ export class RadiusClient {
         const existing = await this.getActivationByPayment(payment.id);
         const account = await getPppoeAccountForPayment(payment);
         if (!account || account.status !== 'active') return null;
+        const hadActiveActivation =
+            (await this.newestActivePppoeActivationId(account.id)) !== null;
+        const [priorActivation] = hadActiveActivation
+            ? []
+            : await db
+                  .select({ id: activatedPackages.id })
+                  .from(activatedPackages)
+                  .where(
+                      and(
+                          eq(
+                              activatedPackages.pppoeServiceAccountId,
+                              account.id,
+                          ),
+                          isNull(activatedPackages.deactivatedAt),
+                      ),
+                  )
+                  .limit(1);
         let activation = existing;
         if (!activation) {
             try {
@@ -639,6 +653,9 @@ export class RadiusClient {
         const password = await this.ensurePppoePassword(username);
 
         await this.applyPppoeAuthorization(activation, pkg);
+        if (!hadActiveActivation && priorActivation) {
+            await this.disconnectLivePppoeSessions(username);
+        }
         return {
             activationId: activation.id,
             username,
@@ -647,12 +664,10 @@ export class RadiusClient {
     }
 
     // (Re-)authorizes the customer's stable PPPoE dialer account from one
-    // activation: radcheck Expiration = the package's expiry date, radreply
-    // rebuilt with Session-Timeout = time remaining until that expiry (plus
-    // the package's Port-Limit / rate / quota attributes and the activation's
-    // Class cookie). Also pushes the refreshed Session-Timeout cap to any PPP
-    // session already up (renewal while connected; Session-Timeout is one of
-    // the attributes RouterOS accepts via CoA).
+    // activation. SQL retains only the password; REST supplies all normal or
+    // expired-profile reply attributes after credential verification. This
+    // avoids FreeRADIUS's expiration module rejecting calendar-expired users
+    // before they can enter the payment walled garden.
     private async applyPppoeAuthorization(
         activation: typeof activatedPackages.$inferSelect,
         pkg: typeof packages.$inferSelect,
@@ -665,11 +680,17 @@ export class RadiusClient {
         if (selectedId !== activation.id) return;
 
         const expireAt = effectiveExpireAt(activation, pkg);
-        await this.upsertCheckAttribute(
-            username,
-            'Expiration',
-            dayjs(expireAt).format('DD MMM YYYY HH:mm:ss'),
-        );
+        await Promise.all([
+            db
+                .delete(radcheck)
+                .where(
+                    and(
+                        eq(radcheck.username, username),
+                        eq(radcheck.attribute, 'Expiration'),
+                    ),
+                ),
+            db.delete(radreply).where(eq(radreply.username, username)),
+        ]);
 
         const usage =
             pkg.noExpiry || activation.timeAllowanceSeconds !== null
@@ -684,18 +705,6 @@ export class RadiusClient {
                   ),
               )
             : Math.max(1, Math.round((expireAt.getTime() - Date.now()) / 1000));
-        await db.delete(radreply).where(eq(radreply.username, username));
-        await db
-            .insert(radreply)
-            .values(
-                this.buildReplyAttributes(
-                    username,
-                    activation.id,
-                    pkg,
-                    sessionSeconds,
-                ),
-            );
-
         const liveSessions = await this.getSessions({
             username,
             activationId: activation.id,
@@ -899,10 +908,7 @@ export class RadiusClient {
                 )
                 .where(
                     and(
-                        eq(
-                            activatedPackages.pppoeServiceAccountId,
-                            account.id,
-                        ),
+                        eq(activatedPackages.pppoeServiceAccountId, account.id),
                         eq(packages.type, 'pppoe'),
                     ),
                 )
@@ -940,9 +946,7 @@ export class RadiusClient {
             (a, b) =>
                 Number(
                     Boolean(
-                        b.activations.find(
-                            (v) => !v.expired && !v.deactivated,
-                        ),
+                        b.activations.find((v) => !v.expired && !v.deactivated),
                     ),
                 ) -
                     Number(
@@ -953,8 +957,7 @@ export class RadiusClient {
                         ),
                     ) ||
                 Number(b.online) - Number(a.online) ||
-                (b.lastUsedAt?.getTime() ?? 0) -
-                    (a.lastUsedAt?.getTime() ?? 0),
+                (b.lastUsedAt?.getTime() ?? 0) - (a.lastUsedAt?.getTime() ?? 0),
         );
     }
 
@@ -969,7 +972,10 @@ export class RadiusClient {
     ): Promise<ProvisionedCredentials | null> {
         const account = await getPppoeAccountOwnedByCustomer(accountId, userId);
         if (!account || account.status !== 'active') return null;
-        const clients = await this.getPppoeClients(userId, account.tenantAdminId);
+        const clients = await this.getPppoeClients(
+            userId,
+            account.tenantAdminId,
+        );
         const client = clients.find((value) => value.accountId === accountId);
         const activation = client?.activations.find((value) => !value.expired);
         if (!activation) return null;
@@ -1016,6 +1022,34 @@ export class RadiusClient {
             username,
             password,
         };
+    }
+
+    // Restricted PPPoE sessions carry no activation Class cookie, so renewal
+    // must locate them by the stable username rather than the new activation.
+    private async disconnectLivePppoeSessions(username: string): Promise<void> {
+        const liveRows = await db
+            .select()
+            .from(radacct)
+            .where(
+                and(
+                    eq(radacct.username, username),
+                    isNull(radacct.acctstoptime),
+                    isNotNull(radacct.acctstarttime),
+                ),
+            );
+        for (const row of liveRows) {
+            const session = this.sessionInfoFromRow(row);
+            try {
+                if (await this.terminateSessionAtNas(username, session)) {
+                    await this.closeSessionRecord(session);
+                }
+            } catch (err) {
+                console.error(
+                    `[radius] PPPoE renewal disconnect failed on ${session.nasIpAddress}:`,
+                    err,
+                );
+            }
+        }
     }
 
     // =========================================================================
@@ -1087,6 +1121,7 @@ export class RadiusClient {
         | { verdict: 'deactivated' }
         | { verdict: 'expired' }
         | { verdict: 'exhausted' }
+        | { verdict: 'restricted'; attributes: RadiusRestReply }
         | { verdict: 'ok'; attributes: RadiusRestReply }
     > {
         const row = await this.resolveActivationByUsername(username);
@@ -1122,9 +1157,34 @@ export class RadiusClient {
         };
     }
 
+    // Stable PPPoE users use SQL only for password verification. All reply
+    // attributes come from REST so calendar-expired credentials can still be
+    // accepted into the restricted profile instead of being rejected by the
+    // stock expiration module. Idempotent and intentionally scoped through
+    // pppoe_service_account so hotspot and operator-managed users are untouched.
+    async preparePppoeRestAuthorization(): Promise<void> {
+        const pppoeUsernames = db
+            .select({ username: pppoeServiceAccounts.username })
+            .from(pppoeServiceAccounts);
+        await db.transaction(async (tx) => {
+            await tx
+                .delete(radcheck)
+                .where(
+                    and(
+                        eq(radcheck.attribute, 'Expiration'),
+                        inArray(radcheck.username, pppoeUsernames),
+                    ),
+                );
+            await tx
+                .delete(radreply)
+                .where(inArray(radreply.username, pppoeUsernames));
+        });
+    }
+
     // rlm_rest authorize for a stable PPPoE account (PPP-…). Unknown
-    // usernames fall through to the remaining authorize modules; an account
-    // whose newest PPPoE activation has expired is locked out.
+    // usernames fall through to the remaining authorize modules. A valid
+    // stable account with only calendar-expired activations is accepted into
+    // the restricted RouterOS profile so the customer can reach payment.
     private async restAuthorizePppoe(
         username: string,
         nasIpAddress?: string,
@@ -1133,10 +1193,15 @@ export class RadiusClient {
         | { verdict: 'deactivated' }
         | { verdict: 'expired' }
         | { verdict: 'exhausted' }
+        | { verdict: 'restricted'; attributes: RadiusRestReply }
         | { verdict: 'ok'; attributes: RadiusRestReply }
     > {
         const account = await resolvePppoeServiceAccountByUsername(username);
-        if (!account) return { verdict: 'unknown' };
+        if (!account) {
+            return /^PPP-[0-9A-F]{16}$/i.test(username.trim())
+                ? { verdict: 'deactivated' }
+                : { verdict: 'unknown' };
+        }
         if (account.status !== 'active' || !nasIpAddress) {
             return { verdict: 'deactivated' };
         }
@@ -1151,17 +1216,13 @@ export class RadiusClient {
             .innerJoin(packages, eq(activatedPackages.packageId, packages.id))
             .where(
                 and(
-                    eq(
-                        activatedPackages.pppoeServiceAccountId,
-                        account.id,
-                    ),
+                    eq(activatedPackages.pppoeServiceAccountId, account.id),
                     eq(packages.type, 'pppoe'),
                     activeActivationCondition(),
                 ),
             )
             .orderBy(desc(activatedPackages.activatedAt))
             .limit(20);
-        if (rows.length === 0) return { verdict: 'deactivated' };
         for (const row of rows) {
             const expireAt = effectiveExpireAt(row.activation, row.pkg);
             if (expireAt.getTime() < Date.now()) continue;
@@ -1194,7 +1255,30 @@ export class RadiusClient {
                 ),
             };
         }
-        return { verdict: 'exhausted' };
+        if (rows.length > 0) return { verdict: 'exhausted' };
+        const [expiredActivation] = await db
+            .select({ id: activatedPackages.id })
+            .from(activatedPackages)
+            .where(
+                and(
+                    eq(activatedPackages.pppoeServiceAccountId, account.id),
+                    isNull(activatedPackages.deactivatedAt),
+                ),
+            )
+            .limit(1);
+        //if (!expiredActivation) return { verdict: 'deactivated' };
+        if (!(await this.getProvisionedPassword(username))) {
+            return { verdict: 'deactivated' };
+        }
+        return {
+            verdict: 'restricted',
+            attributes: {
+                'reply:Mikrotik-Group': {
+                    op: ':=',
+                    value: [PPPOE_EXPIRED_PROFILE],
+                },
+            },
+        };
     }
 
     // Makes a package unavailable without changing its expiry or allowance.
@@ -1594,7 +1678,8 @@ export class RadiusClient {
         });
 
         if (pkg.type === 'pppoe') {
-            const username = await this.pppoeUsernameForActivation(activationId);
+            const username =
+                await this.pppoeUsernameForActivation(activationId);
             await this.ensurePppoePassword(username);
             await this.applyPppoeAuthorization(activation, pkg);
             return {
@@ -1965,11 +2050,7 @@ export class RadiusClient {
         for (const session of liveSessions) {
             try {
                 if (
-                    await this.terminateSessionAtNas(
-                        username,
-                        session,
-                        adminId,
-                    )
+                    await this.terminateSessionAtNas(username, session, adminId)
                 ) {
                     sessionsDisconnected++;
                     await this.closeSessionRecord(session);

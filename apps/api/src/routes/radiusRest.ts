@@ -39,57 +39,63 @@ app.on(
     ['GET', 'POST'],
     '/user/:userName/nas/:nasIpAddress/mac/:calledStationId',
     async (c) => {
-    const action = (
-        c.req.query('action') ??
-        c.req.query('section') ??
-        ''
-    ).toLowerCase();
-    const userName = c.req.param('userName');
-    const nasIpAddress = c.req.param('nasIpAddress');
-    const calledStationId = c.req.param('calledStationId');
+        const action = (
+            c.req.query('action') ??
+            c.req.query('section') ??
+            ''
+        ).toLowerCase();
+        const userName = c.req.param('userName');
+        const nasIpAddress = c.req.param('nasIpAddress');
+        const calledStationId = c.req.param('calledStationId');
 
-    switch (action) {
-        case 'authorize': {
-            // 200 + attribute JSON -> rlm_rest "updated": the pairs are added
-            // to the request. Rejections map to 403/404 status codes, which
-            // rlm_rest translates to its userlock/notfound module codes.
-            const verdict = await radiusClient.restAuthorize(
-                userName,
-                nasIpAddress,
-            );
-            switch (verdict.verdict) {
-                case 'unknown':
-                    return jsonError(c, 404, 'User not found');
-                case 'expired':
-                    return jsonError(c, 403, 'Package validity expired');
-                case 'deactivated':
-                    return jsonError(c, 403, 'Package deactivated');
-                case 'exhausted':
-                    return jsonError(c, 403, 'Time bank exhausted');
-                default:
-                    return c.json(verdict.attributes);
+        switch (action) {
+            case 'authorize': {
+                // 200 + attribute JSON -> rlm_rest "updated": the pairs are added
+                // to the request. Rejections map to 403/404 status codes, which
+                // rlm_rest translates to its userlock/notfound module codes.
+                const verdict = await radiusClient.restAuthorize(
+                    userName,
+                    nasIpAddress,
+                );
+                switch (verdict.verdict) {
+                    case 'unknown':
+                        return jsonError(c, 404, 'User not found');
+                    case 'expired':
+                        return jsonError(c, 403, 'Package validity expired');
+                    case 'deactivated':
+                        return jsonError(c, 403, 'Package deactivated');
+                    case 'exhausted':
+                        return jsonError(c, 403, 'Time bank exhausted');
+                    case 'restricted':
+                        return c.json(verdict.attributes);
+                    default:
+                        return c.json(verdict.attributes);
+                }
             }
+            case 'authenticate':
+                // freeradius-sql (pap over radcheck) owns authentication; this
+                // endpoint never verifies credentials.
+                return jsonError(
+                    c,
+                    404,
+                    'Authentication is handled by the FreeRADIUS SQL module',
+                );
+            case 'post-auth':
+                // Login succeeded at the RADIUS server. radpostauth itself is
+                // written by the SQL module; this is the API-side audit trail.
+                console.log(
+                    `[radius-rest] post-auth: ${userName} authenticated via NAS ${calledStationId}`,
+                );
+                return c.body(null, 204);
+            default:
+                return action
+                    ? jsonError(
+                          c,
+                          404,
+                          `Unsupported rlm_rest action: ${action}`,
+                      )
+                    : jsonError(c, 400, 'Missing action query parameter');
         }
-        case 'authenticate':
-            // freeradius-sql (pap over radcheck) owns authentication; this
-            // endpoint never verifies credentials.
-            return jsonError(
-                c,
-                404,
-                'Authentication is handled by the FreeRADIUS SQL module',
-            );
-        case 'post-auth':
-            // Login succeeded at the RADIUS server. radpostauth itself is
-            // written by the SQL module; this is the API-side audit trail.
-            console.log(
-                `[radius-rest] post-auth: ${userName} authenticated via NAS ${calledStationId}`,
-            );
-            return c.body(null, 204);
-        default:
-            return action
-                ? jsonError(c, 404, `Unsupported rlm_rest action: ${action}`)
-                : jsonError(c, 400, 'Missing action query parameter');
-    }
     },
 );
 

@@ -200,6 +200,7 @@ export function register(body: {
     phoneNumber: string;
     pin: string;
     verifyPin: string;
+    claimCode?: string;
 }) {
     return request('/register', body, { method: 'POST' });
 }

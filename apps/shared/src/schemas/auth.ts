@@ -37,6 +37,13 @@ export const signUpSchema = z
         phoneNumber: zPhoneNumber,
         pin: zPin,
         verifyPin: zPin,
+        claimCode: z
+            .string()
+            .trim()
+            .toUpperCase()
+            .regex(/^[A-Z0-9]{8}$/, 'Claim code must be 8 characters')
+            .optional()
+            .or(z.literal('').transform(() => undefined)),
     })
     .refine((v) => v.pin === v.verifyPin, {
         message: 'PIN and verification PIN do not match',

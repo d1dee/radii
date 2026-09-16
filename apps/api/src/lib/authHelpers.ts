@@ -10,6 +10,10 @@ import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { auth } from '../auth';
 import type { AppContext } from '../types';
 import { jsonError, jsonFieldErrors } from './error';
+import {
+    claimPppoeAccount,
+    pendingPppoeClaimExists,
+} from './pppoeAccounts';
 
 function normalizePhone(phone: string) {
     return phone.replace(/\D/g, '');
@@ -95,10 +99,22 @@ export async function registerPhonePin(c: AppContext) {
         );
     }
 
-    const { phoneNumber, pin } = parsed.data;
+    const { phoneNumber, pin, claimCode } = parsed.data;
+
+    if (
+        claimCode &&
+        !(await pendingPppoeClaimExists(phoneNumber, claimCode))
+    ) {
+        return jsonFieldErrors(
+            c,
+            400,
+            { claimCode: 'Claim code does not match this phone number' },
+            'Invalid PPPoE claim code',
+        );
+    }
 
     try {
-        const { headers } = await auth.api.signUpEmail({
+        const { headers, response } = await auth.api.signUpEmail({
             body: {
                 // Synthetic unique email derived from the phone; shared across
                 // portals so a phone registers once for all of them.
@@ -110,6 +126,22 @@ export async function registerPhonePin(c: AppContext) {
             headers: c.req.raw.headers,
             returnHeaders: true,
         });
+
+        if (claimCode) {
+            const claimed = await claimPppoeAccount(
+                response.user.id,
+                phoneNumber,
+                claimCode,
+            );
+            if (!claimed) {
+                return jsonFieldErrors(
+                    c,
+                    409,
+                    { claimCode: 'Claim code was already used or replaced' },
+                    'Could not claim PPPoE account',
+                );
+            }
+        }
 
         return forwardCookies(c, headers, { success: true, data: null });
     } catch (err) {

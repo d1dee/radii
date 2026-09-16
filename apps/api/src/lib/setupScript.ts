@@ -169,6 +169,45 @@ export async function generateSetupScript(
     const apiDomain = new URL(env.apiUrl).hostname;
     const hotspotPortalUrl = env.hotspotPortalUrl.replace(/\/+$/, '');
     const portalDomain = new URL(hotspotPortalUrl).hostname;
+    const pppoePortalUrl = env.pppoePortalUrl.replace(/\/+$/, '');
+    if (!pppoePortalUrl) {
+        throw new SetupScriptConfigError(
+            'PPPoE portal is not configured. Set PPPOE_PORTAL_URL before generating setup scripts.',
+        );
+    }
+    const pppoePortal = new URL(pppoePortalUrl);
+    if (!['http:', 'https:'].includes(pppoePortal.protocol)) {
+        throw new SetupScriptConfigError(
+            'PPPOE_PORTAL_URL must use http:// or https://.',
+        );
+    }
+    const pppoePortalDomain = pppoePortal.hostname;
+    const pppoePortalIp = env.pppoePortalIp.trim();
+    if (pppoePortalIp) parseIpv4(pppoePortalIp);
+    if (!/^\d+[kM]?\/\d+[kM]?$/.test(env.pppoeExpiredRateLimit)) {
+        throw new SetupScriptConfigError(
+            'PPPOE_EXPIRED_RATE_LIMIT must use RouterOS rx/tx format, e.g. 512k/512k.',
+        );
+    }
+    const pppoeRedirectPort =
+        pppoePortal.protocol === 'http:'
+            ? parseInt(pppoePortal.port || '80', 10)
+            : 80;
+    const pppoePortalPort = parseInt(
+        pppoePortal.port || (pppoePortal.protocol === 'https:' ? '443' : '80'),
+        10,
+    );
+    const allowedPppoePorts = new Set([
+        80,
+        443,
+        pppoeRedirectPort,
+        pppoePortalPort,
+        parseInt(
+            new URL(env.apiUrl).port ||
+                (env.apiUrl.startsWith('https:') ? '443' : '80'),
+            10,
+        ),
+    ]);
 
     const radiusServer = env.radius.radiusServer;
     if (!env.wgServerPublicKey || !env.wgEndpoint) {
@@ -248,6 +287,18 @@ export async function generateSetupScript(
         PPP_MTU: String(env.pppoe.mtu),
         PPP_MRU: String(env.pppoe.mru),
         PPP_INTERIM_UPDATE: `${env.radius.bankInterimSeconds}s`,
+        PPP_EXPIRED_RATE_LIMIT: env.pppoeExpiredRateLimit,
+        PPP_PORTAL_DOMAIN: pppoePortalDomain,
+        PPP_PORTAL_DOMAIN_IS_IP: /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(
+            pppoePortalDomain,
+        )
+            ? '1'
+            : '',
+        PPP_PORTAL_IP: pppoePortalIp,
+        PPP_PORTAL_REDIRECT_PORT: String(pppoeRedirectPort),
+        PPP_PORTAL_ALLOWED_TCP_PORTS: Array.from(allowedPppoePorts)
+            .sort((a, b) => a - b)
+            .join(','),
         NTP_SERVERS: env.ntpServers,
         BRAND_NAME: brandName,
         PORTAL_URL: hotspotPortalUrl,

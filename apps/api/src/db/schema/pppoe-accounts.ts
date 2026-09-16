@@ -1,5 +1,6 @@
-import { relations } from 'drizzle-orm';
+import { relations, sql } from 'drizzle-orm';
 import {
+    check,
     index,
     pgTable,
     text,
@@ -15,12 +16,13 @@ export const pppoeServiceAccounts = pgTable(
     {
         id: uuid('id').defaultRandom().primaryKey(),
         customerUserId: text('customer_user_id')
-            .notNull()
-            .references(() => user.id, { onDelete: 'cascade' }),
+            .references(() => user.id, { onDelete: 'set null' }),
         tenantAdminId: text('tenant_admin_id')
             .notNull()
             .references(() => adminUser.id, { onDelete: 'restrict' }),
+        normalizedPhone: text('normalized_phone').notNull(),
         username: text('username').notNull(),
+        claimCodeHash: text('claim_code_hash'),
         label: text('label'),
         status: text('status', { enum: ['active', 'suspended', 'closed'] })
             .default('active')
@@ -42,7 +44,18 @@ export const pppoeServiceAccounts = pgTable(
             table.customerUserId,
             table.tenantAdminId,
         ),
+        unique('pppoe_service_account_tenant_phone_key').on(
+            table.tenantAdminId,
+            table.normalizedPhone,
+        ),
+        unique('pppoe_service_account_claim_code_hash_key').on(
+            table.claimCodeHash,
+        ),
         unique('pppoe_service_account_username_key').on(table.username),
+        check(
+            'pppoe_service_account_phone_e164_check',
+            sql`${table.normalizedPhone} ~ '^[+][1-9][0-9]{7,14}$'`,
+        ),
         index('pppoe_service_account_tenant_idx').on(table.tenantAdminId),
         index('pppoe_service_account_customer_idx').on(table.customerUserId),
     ],

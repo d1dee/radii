@@ -1,9 +1,13 @@
 import {
+    ActionIcon,
     Badge,
+    Button,
     Center,
     Checkbox,
+    CopyButton,
     Group,
     Loader,
+    Modal,
     Pagination,
     SegmentedControl,
     Stack,
@@ -13,17 +17,52 @@ import {
     Title,
 } from '@mantine/core';
 import { useDebouncedValue } from '@mantine/hooks';
+import { notifications } from '@mantine/notifications';
+import { PhoneNumberInput } from '@radii/ui';
 import { useCallback, useEffect, useState } from 'react';
-import { MdSearch } from 'react-icons/md';
+import { MdAdd, MdCheck, MdContentCopy, MdSearch } from 'react-icons/md';
 
 import { UserDetailsDrawer } from '@/components/Users/UserDetailsDrawer';
-import { getAdminUsers, type AdminUserList, type PackageType } from '@/lib/api';
+import {
+    getAdminUsers,
+    getPppoeAccount,
+    provisionPppoeAccount,
+    type AdminUserList,
+    type PackageType,
+    type PppoeAccountDetail,
+    type ProvisionedPppoeAccount,
+} from '@/lib/api';
 import { useAutoRefresh } from '@/lib/autoRefresh';
 import { dayjs } from '@/lib/dayjs';
 import { formatDate, formatMoney } from '@/lib/format';
 import { useAdminSettings } from '@/lib/settings';
 
 type TypeFilter = 'all' | PackageType;
+
+function CredentialField({ label, value }: { label: string; value: string }) {
+    return (
+        <TextInput
+            label={label}
+            value={value}
+            readOnly
+            styles={{ input: { fontFamily: 'monospace' } }}
+            rightSection={
+                <CopyButton value={value} timeout={1500}>
+                    {({ copied, copy }) => (
+                        <ActionIcon
+                            variant='subtle'
+                            color={copied ? 'green' : 'gray'}
+                            onClick={copy}
+                            aria-label={`Copy ${label.toLowerCase()}`}
+                        >
+                            {copied ? <MdCheck /> : <MdContentCopy />}
+                        </ActionIcon>
+                    )}
+                </CopyButton>
+            }
+        />
+    );
+}
 
 export default function UsersPage() {
     const { settings, loaded } = useAdminSettings();
@@ -38,6 +77,75 @@ export default function UsersPage() {
     const [flaggedOnly, setFlaggedOnly] = useState(false);
     const [page, setPage] = useState(1);
     const [detailsId, setDetailsId] = useState<string | null>(null);
+    const [provisionOpened, setProvisionOpened] = useState(false);
+    const [provisionPhone, setProvisionPhone] = useState('');
+    const [provisionLabel, setProvisionLabel] = useState('');
+    const [provisioning, setProvisioning] = useState(false);
+    const [provisionError, setProvisionError] = useState<string | null>(null);
+    const [provisioned, setProvisioned] =
+        useState<ProvisionedPppoeAccount | null>(null);
+    const [detailsAccountId, setDetailsAccountId] = useState<string | null>(
+        null,
+    );
+    const [accountDetails, setAccountDetails] =
+        useState<PppoeAccountDetail | null>(null);
+    const [accountDetailsLoading, setAccountDetailsLoading] = useState(false);
+    const [regenerated, setRegenerated] =
+        useState<ProvisionedPppoeAccount | null>(null);
+    const [regenerating, setRegenerating] = useState(false);
+
+    useEffect(() => {
+        if (!detailsAccountId) {
+            setAccountDetails(null);
+            setRegenerated(null);
+            return;
+        }
+        let cancelled = false;
+        setAccountDetailsLoading(true);
+        void (async () => {
+            const res = await getPppoeAccount(detailsAccountId);
+            if (cancelled) return;
+            setAccountDetailsLoading(false);
+            if (res.success && res.data) {
+                setAccountDetails(res.data);
+            } else {
+                notifications.show({
+                    color: 'red',
+                    title: 'Could not load account',
+                    message: res.message || 'PPPoE account not found',
+                });
+                setDetailsAccountId(null);
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [detailsAccountId]);
+
+    async function regenerateClaim() {
+        if (!accountDetails) return;
+        setRegenerating(true);
+        const result = await provisionPppoeAccount({
+            phoneNumber: accountDetails.phoneNumber,
+            label: accountDetails.label ?? undefined,
+        });
+        setRegenerating(false);
+        if (!result.success || !result.data) {
+            notifications.show({
+                color: 'red',
+                title: 'Could not regenerate credentials',
+                message: result.message || 'Please try again',
+            });
+            return;
+        }
+        setRegenerated(result.data);
+        notifications.show({
+            color: 'green',
+            title: 'Credentials regenerated',
+            message: 'Share the new claim code with the customer.',
+        });
+        void load(page, true);
+    }
 
     const load = useCallback(
         async (pageToLoad: number, silent = false) => {
@@ -80,6 +188,44 @@ export default function UsersPage() {
 
     const totalPages = data ? Math.max(1, Math.ceil(data.total / perPage)) : 1;
 
+    function openProvision() {
+        setProvisionPhone('');
+        setProvisionLabel('');
+        setProvisionError(null);
+        setProvisioned(null);
+        setProvisionOpened(true);
+    }
+
+    async function submitProvision(event: React.FormEvent<HTMLFormElement>) {
+        event.preventDefault();
+        setProvisionError(null);
+        setProvisioning(true);
+        const result = await provisionPppoeAccount({
+            phoneNumber: provisionPhone,
+            label: provisionLabel.trim() || undefined,
+        });
+        setProvisioning(false);
+        if (!result.success) {
+            setProvisionError(
+                result.message || 'Could not provision PPPoE credentials',
+            );
+            return;
+        }
+        if (!result.data) {
+            setProvisionError('Could not provision PPPoE credentials');
+            return;
+        }
+        setProvisioned(result.data);
+        notifications.show({
+            color: 'green',
+            title: 'PPPoE credentials provisioned',
+            message: result.data.linked
+                ? 'Linked to the existing customer account.'
+                : 'Share the credentials and claim code with the customer.',
+        });
+        void load(page, true);
+    }
+
     return (
         <Stack gap='md'>
             <Group justify='space-between'>
@@ -90,9 +236,14 @@ export default function UsersPage() {
                         and activation history.
                     </Text>
                 </Stack>
-                <Text c='dimmed' size='sm'>
-                    {data ? `${data.total} customer(s)` : ''}
-                </Text>
+                <Group>
+                    <Text c='dimmed' size='sm'>
+                        {data ? `${data.total} customer(s)` : ''}
+                    </Text>
+                    <Button leftSection={<MdAdd />} onClick={openProvision}>
+                        Provision PPPoE
+                    </Button>
+                </Group>
             </Group>
 
             <Group wrap='wrap'>
@@ -148,17 +299,40 @@ export default function UsersPage() {
                                 {data.users.map((u) => (
                                     <Table.Tr
                                         key={u.id}
-                                        onClick={() => setDetailsId(u.id)}
+                                        onClick={
+                                            u.pendingClaim
+                                                ? () => setDetailsAccountId(u.id)
+                                                : () => setDetailsId(u.id)
+                                        }
                                         style={{ cursor: 'pointer' }}
                                     >
                                         <Table.Td>
-                                            <Text fw={500}>{u.name}</Text>
+                                            <Text fw={500}>
+                                                {u.tag?.name || u.name}
+                                            </Text>
                                             <Text size='xs' c='dimmed'>
                                                 {u.phoneNumber}
+                                                {u.tag?.location
+                                                    ? ` · ${u.tag.location}`
+                                                    : ''}
                                             </Text>
+                                            {u.pendingClaim && u.pppoe ? (
+                                                <Text size='xs' c='dimmed' ff='monospace'>
+                                                    {u.pppoe.username}
+                                                </Text>
+                                            ) : null}
                                         </Table.Td>
                                         <Table.Td>
                                             <Group gap={4}>
+                                                {u.pendingClaim ? (
+                                                    <Badge
+                                                        color='violet'
+                                                        variant='light'
+                                                        size='sm'
+                                                    >
+                                                        Pending claim
+                                                    </Badge>
+                                                ) : null}
                                                 {u.online ? (
                                                     <Badge
                                                         color='green'
@@ -245,6 +419,186 @@ export default function UsersPage() {
                 userId={detailsId}
                 onClose={() => setDetailsId(null)}
             />
+
+            <Modal
+                opened={provisionOpened}
+                onClose={() => setProvisionOpened(false)}
+                title='Provision PPPoE credentials'
+                centered
+            >
+                {provisioned ? (
+                    <Stack gap='md'>
+                        <Text size='sm' c='dimmed'>
+                            {provisioned.linked
+                                ? `The account is linked to ${provisioned.phoneNumber}.`
+                                : `Give these details to ${provisioned.phoneNumber}. The claim code links the credentials during registration.`}
+                        </Text>
+                        <CredentialField
+                            label='PPPoE username'
+                            value={provisioned.username}
+                        />
+                        <CredentialField
+                            label='PPPoE password'
+                            value={provisioned.password}
+                        />
+                        {provisioned.claimCode ? (
+                            <CredentialField
+                                label='One-time claim code'
+                                value={provisioned.claimCode}
+                            />
+                        ) : null}
+                        <Group justify='flex-end' mt='sm'>
+                            <Button
+                                variant='default'
+                                onClick={openProvision}
+                            >
+                                Provision another
+                            </Button>
+                            <Button
+                                onClick={() => setProvisionOpened(false)}
+                            >
+                                Done
+                            </Button>
+                        </Group>
+                    </Stack>
+                ) : (
+                    <form onSubmit={submitProvision}>
+                        <Stack gap='md'>
+                            <Text size='sm' c='dimmed'>
+                                Credentials are created immediately. If the
+                                phone is not registered yet, a one-time claim
+                                code is generated for the customer.
+                            </Text>
+                            <PhoneNumberInput
+                                label='Customer phone number'
+                                value={provisionPhone}
+                                onChange={(value) =>
+                                    setProvisionPhone(value ?? '')
+                                }
+                                required
+                            />
+                            <TextInput
+                                label='Account label'
+                                description='Optional line or location name'
+                                placeholder='Home router'
+                                value={provisionLabel}
+                                onChange={(event) =>
+                                    setProvisionLabel(event.currentTarget.value)
+                                }
+                                maxLength={80}
+                            />
+                            {provisionError ? (
+                                <Text size='sm' c='red'>
+                                    {provisionError}
+                                </Text>
+                            ) : null}
+                            <Group justify='flex-end' mt='sm'>
+                                <Button
+                                    variant='default'
+                                    onClick={() => setProvisionOpened(false)}
+                                >
+                                    Cancel
+                                </Button>
+                                <Button
+                                    type='submit'
+                                    loading={provisioning}
+                                    disabled={!provisionPhone}
+                                >
+                                    Provision credentials
+                                </Button>
+                            </Group>
+                        </Stack>
+                    </form>
+                )}
+            </Modal>
+
+            <Modal
+                opened={detailsAccountId !== null}
+                onClose={() => setDetailsAccountId(null)}
+                title='Provisioned PPPoE account'
+                centered
+            >
+                {accountDetailsLoading ? (
+                    <Center py='xl'>
+                        <Loader />
+                    </Center>
+                ) : accountDetails ? (
+                    <Stack gap='md'>
+                        <Group gap='xs'>
+                            <Badge
+                                color={
+                                    accountDetails.status === 'active'
+                                        ? 'green'
+                                        : accountDetails.status === 'suspended'
+                                          ? 'orange'
+                                          : 'red'
+                                }
+                                variant='light'
+                                size='sm'
+                            >
+                                {accountDetails.status}
+                            </Badge>
+                            {accountDetails.awaitingClaim ? (
+                                <Badge color='violet' variant='light' size='sm'>
+                                    Awaiting claim
+                                </Badge>
+                            ) : null}
+                        </Group>
+                        {accountDetails.customer ? (
+                            <Text size='sm' c='dimmed'>
+                                Linked to customer {accountDetails.customer.name}{' '}
+                                ({accountDetails.phoneNumber}).
+                            </Text>
+                        ) : (
+                            <Text size='sm' c='dimmed'>
+                                Not claimed yet. The customer registers with{' '}
+                                {accountDetails.phoneNumber} and the one-time
+                                claim code to link these credentials.
+                            </Text>
+                        )}
+                        <CredentialField
+                            label='PPPoE username'
+                            value={accountDetails.username}
+                        />
+                        {accountDetails.password ? (
+                            <CredentialField
+                                label='PPPoE password'
+                                value={accountDetails.password}
+                            />
+                        ) : null}
+                        {regenerated?.claimCode ? (
+                            <CredentialField
+                                label='One-time claim code'
+                                value={regenerated.claimCode}
+                            />
+                        ) : null}
+                        <Text size='xs' c='dimmed'>
+                            Provisioned {formatDate(accountDetails.createdAt)}
+                            {accountDetails.lastUsedAt
+                                ? ` · last used ${dayjs(accountDetails.lastUsedAt).fromNow()}`
+                                : ' · never used'}
+                        </Text>
+                        <Group justify='flex-end' mt='sm'>
+                            {accountDetails.awaitingClaim ? (
+                                <Button
+                                    variant='light'
+                                    onClick={regenerateClaim}
+                                    loading={regenerating}
+                                >
+                                    Regenerate credentials
+                                </Button>
+                            ) : null}
+                            <Button onClick={() => setDetailsAccountId(null)}>
+                                Close
+                            </Button>
+                        </Group>
+                    </Stack>
+                ) : (
+                    <Center py='xl'>
+                        <Loader />
+                    </Center>
+                )}
+            </Modal>
         </Stack>
     );
 }
