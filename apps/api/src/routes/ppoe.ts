@@ -24,9 +24,11 @@ import {
 } from '../db/schema';
 import { env } from '../env';
 import {
+    forgotPinPhoneOtp,
     loginPhonePin,
     logoutPhonePin,
     registerPhonePin,
+    resetPinPhoneOtp,
 } from '../lib/authHelpers';
 import {
     getAdminIdForNasDevice,
@@ -77,6 +79,12 @@ app.post('/register', registerPhonePin);
 app.post('/login', loginPhonePin);
 
 app.post('/logout', logoutPhonePin);
+
+// Forget-PIN: request a 6-digit SMS code by phone, then redeem it for a new
+// 4-digit PIN (authHelpers; OTP delivery see lib/sms.ts).
+app.post('/forgot-pin', forgotPinPhoneOtp);
+
+app.post('/reset-pin', resetPinPhoneOtp);
 
 // --- Current user -----------------------------------------------------------
 

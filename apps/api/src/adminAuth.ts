@@ -38,6 +38,8 @@ export const adminAuth = betterAuth({
         enabled: true,
         minPasswordLength: 8,
         requireEmailVerification: true,
+        // An email-OTP password reset signs out every other admin session.
+        revokeSessionsOnPasswordReset: true,
     },
     emailVerification: {
         autoSignInAfterVerification: true,

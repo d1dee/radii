@@ -1,6 +1,6 @@
 import { drizzleAdapter } from '@better-auth/drizzle-adapter';
 import { betterAuth } from 'better-auth';
-import { admin, username } from 'better-auth/plugins';
+import { admin, emailOTP, username } from 'better-auth/plugins';
 import {
     isValidPhoneNumber,
     parsePhoneNumberFromString,
@@ -8,6 +8,7 @@ import {
 import { db } from './db';
 import * as schema from './db/schema/auth-schema';
 import { env } from './env';
+import { sendPortalOtpSms } from './lib/sms';
 
 export const auth = betterAuth({
     database: drizzleAdapter(db, {
@@ -19,6 +20,9 @@ export const auth = betterAuth({
         // PIN is a 4-digit code, so we relax the minimum password length.
         minPasswordLength: 4,
         maxPasswordLength: 4,
+        // A forgotten-PIN reset signs out every existing session so a
+        // compromised device cannot keep the old session alive.
+        revokeSessionsOnPasswordReset: true,
     },
     plugins: [
         username({
@@ -35,6 +39,21 @@ export const auth = betterAuth({
         admin({
             defaultRole: 'user',
             adminRoles: ['admin'],
+        }),
+        // OTP channel for the phone+PIN forget-PIN flow. The "email" is the
+        // synthetic per-phone address (`<digits>@hotspot.local`) created at
+        // registration; delivery converts it back to an SMS (lib/sms.ts).
+        // OTPs are stored in plain text so admins can surface a pending code
+        // on the customer detail view until the SMS provider is integrated.
+        emailOTP({
+            otpLength: 6,
+            expiresIn: 300,
+            allowedAttempts: 5,
+            // Never create accounts through OTP sign-in portals.
+            disableSignUp: true,
+            sendVerificationOTP: async ({ email, otp, type }) => {
+                void sendPortalOtpSms({ email, otp, type });
+            },
         }),
     ],
     secret: process.env.BETTER_AUTH_SECRET || 'change-me-in-production',

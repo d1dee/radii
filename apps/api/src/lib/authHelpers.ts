@@ -4,7 +4,12 @@
 // synthetic per-phone email kept unique so one phone maps to exactly one
 // account no matter which portal it registered on.
 
-import { loginSchema, signUpSchema } from '@radii/shared';
+import {
+    forgotPinSchema,
+    loginSchema,
+    resetPinSchema,
+    signUpSchema,
+} from '@radii/shared';
 import { APIError } from 'better-auth/api';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { auth } from '../auth';
@@ -17,6 +22,13 @@ import {
 
 function normalizePhone(phone: string) {
     return phone.replace(/\D/g, '');
+}
+
+// Synthetic unique email derived from the phone; shared across portals so a
+// phone registers once for all of them. Never receives real mail — it only
+// anchors the account and the OTP flows (see lib/sms.ts).
+export function portalEmailForPhone(phone: string) {
+    return `${normalizePhone(phone)}@hotspot.local`;
 }
 
 export function fieldErrorsFromIssues(
@@ -116,9 +128,7 @@ export async function registerPhonePin(c: AppContext) {
     try {
         const { headers, response } = await auth.api.signUpEmail({
             body: {
-                // Synthetic unique email derived from the phone; shared across
-                // portals so a phone registers once for all of them.
-                email: `${normalizePhone(phoneNumber)}@hotspot.local`,
+                email: portalEmailForPhone(phoneNumber),
                 name: phoneNumber,
                 password: pin,
                 username: phoneNumber,
@@ -188,5 +198,103 @@ export async function logoutPhonePin(c: AppContext) {
         return forwardCookies(c, headers, { success: true, data: null });
     } catch {
         return jsonError(c, 400, 'Could not sign out');
+    }
+}
+
+// --- Forget-PIN (SMS OTP) -----------------------------------------------------
+
+function otpFieldError(message: string) {
+    return { otp: message };
+}
+
+// POST /forgot-pin equivalent: requests a 6-digit reset code for the phone
+// number. The code is delivered over the portal's OTP channel (SMS once the
+// provider is integrated; server console + admin user drawer for now).
+// Unknown numbers answer success too, so the endpoint is not enumerable.
+export async function forgotPinPhoneOtp(c: AppContext) {
+    const parsed = forgotPinSchema.safeParse(
+        await c.req.json().catch(() => ({})),
+    );
+    if (!parsed.success) {
+        return jsonFieldErrors(
+            c,
+            400,
+            fieldErrorsFromIssues(parsed.error.issues),
+        );
+    }
+
+    try {
+        await auth.api.requestPasswordResetEmailOTP({
+            body: { email: portalEmailForPhone(parsed.data.phoneNumber) },
+            headers: c.req.raw.headers,
+        });
+        return c.json({ success: true, data: null });
+    } catch (err) {
+        return respondAuthError(c, err);
+    }
+}
+
+// POST /reset-pin equivalent: redeems the SMS code for a new 4-digit PIN
+// (better-auth emailOTP reset-password, which also revokes stale sessions
+// when configured). The user signs in again with the new PIN afterwards.
+export async function resetPinPhoneOtp(c: AppContext) {
+    const parsed = resetPinSchema.safeParse(
+        await c.req.json().catch(() => ({})),
+    );
+    if (!parsed.success) {
+        return jsonFieldErrors(
+            c,
+            400,
+            fieldErrorsFromIssues(parsed.error.issues),
+        );
+    }
+
+    try {
+        await auth.api.resetPasswordEmailOTP({
+            body: {
+                email: portalEmailForPhone(parsed.data.phoneNumber),
+                otp: parsed.data.otp,
+                password: parsed.data.pin,
+            },
+            headers: c.req.raw.headers,
+        });
+        return c.json({ success: true, data: null });
+    } catch (err) {
+        if (err instanceof APIError) {
+            const code = String((err as { code?: string }).code || '');
+            if (code === 'OTP_EXPIRED') {
+                return jsonFieldErrors(
+                    c,
+                    400,
+                    otpFieldError('Code expired, request a new one'),
+                    'Code expired, request a new one',
+                );
+            }
+            if (code === 'TOO_MANY_ATTEMPTS') {
+                return jsonFieldErrors(
+                    c,
+                    429,
+                    otpFieldError('Too many attempts, request a new code'),
+                    'Too many attempts, request a new code',
+                );
+            }
+            if (code === 'INVALID_OTP') {
+                return jsonFieldErrors(
+                    c,
+                    400,
+                    otpFieldError('Invalid code'),
+                    'Invalid code',
+                );
+            }
+            if (code === 'USER_NOT_FOUND') {
+                return jsonFieldErrors(
+                    c,
+                    400,
+                    { phoneNumber: 'Phone number not registered' },
+                    'Phone number not registered',
+                );
+            }
+        }
+        return respondAuthError(c, err);
     }
 }

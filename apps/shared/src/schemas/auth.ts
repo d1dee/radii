@@ -50,5 +50,27 @@ export const signUpSchema = z
         path: ['verifyPin'],
     });
 
+// --- PIN reset (SMS OTP) -----------------------------------------------------
+// A locked-out portal user requests a 6-digit code by phone, then redeems it
+// with a fresh 4-digit PIN.
+
+export const forgotPinSchema = z.object({
+    phoneNumber: zPhoneNumber,
+});
+
+export const resetPinSchema = z
+    .object({
+        phoneNumber: zPhoneNumber,
+        otp: z.string().regex(/^\d{6}$/, 'Enter the 6-digit code'),
+        pin: zPin,
+        verifyPin: zPin,
+    })
+    .refine((v) => v.pin === v.verifyPin, {
+        message: 'PIN and verification PIN do not match',
+        path: ['verifyPin'],
+    });
+
 export type LoginSchema = z.infer<typeof loginSchema>;
 export type SignUpSchema = z.infer<typeof signUpSchema>;
+export type ForgotPinSchema = z.infer<typeof forgotPinSchema>;
+export type ResetPinSchema = z.infer<typeof resetPinSchema>;

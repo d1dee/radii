@@ -376,6 +376,10 @@ export type AdminUserDetail = {
     online: boolean;
     tag: AdminUserTag | null;
     pppoeAccounts: AdminPppoeAccount[];
+    // Debug aid until SMS delivery is integrated: the customer's pending
+    // forget-PIN OTP (plain-text) and when it expires.
+    pinResetOtp: string | null;
+    pinResetOtpExpiresAt: string | null;
 };
 
 export type ListAdminUsersQuery = {

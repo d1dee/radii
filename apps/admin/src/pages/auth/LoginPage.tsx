@@ -98,6 +98,14 @@ export default function LoginPage() {
                                 required
                                 {...form.getInputProps('password')}
                             />
+                            <Anchor
+                                component={Link}
+                                to='/forgot-password'
+                                size='sm'
+                                ta='right'
+                            >
+                                Forgot password?
+                            </Anchor>
                             <Button type='submit' fullWidth loading={loading}>
                                 Sign in
                             </Button>

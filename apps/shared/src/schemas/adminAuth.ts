@@ -63,6 +63,21 @@ export const adminVerifyOtpSchema = z.object({
     otp: z.string().regex(/^\d{6}$/, 'Enter the 6-digit code'),
 });
 
+// Email-OTP password reset: the admin requests a 6-digit code by email, then
+// redeems it with a new password that satisfies the admin password policy.
+export const adminResetPasswordSchema = z
+    .object({
+        email: zAdminEmail,
+        otp: z.string().regex(/^\d{6}$/, 'Enter the 6-digit code'),
+        password: zAdminPassword,
+        confirmPassword: z.string(),
+    })
+    .refine((v) => v.password === v.confirmPassword, {
+        message: 'Passwords do not match',
+        path: ['confirmPassword'],
+    });
+
 export type AdminRegisterSchema = z.infer<typeof adminRegisterSchema>;
 export type AdminLoginSchema = z.infer<typeof adminLoginSchema>;
 export type AdminVerifyOtpSchema = z.infer<typeof adminVerifyOtpSchema>;
+export type AdminResetPasswordSchema = z.infer<typeof adminResetPasswordSchema>;

@@ -15,6 +15,7 @@ import {
     desc,
     eq,
     exists,
+    gt,
     gte,
     ilike,
     inArray,
@@ -42,6 +43,7 @@ import {
     user,
     userAdminTag,
     userFlag,
+    verification,
 } from '../db/schema';
 import { calculateActivationTime } from './radius/activationLimits';
 
@@ -717,6 +719,28 @@ export async function getAdminUserDetail(userId: string, adminId: string) {
             ),
         );
 
+    // Debug aid until the SMS provider is integrated: the pending forget-PIN
+    // code is stored in plain text by the emailOTP plugin, so support can
+    // read it here and give it to the customer over a trusted channel.
+    // Remove once real SMS delivery (and hashed OTP storage) lands.
+    const [pendingPinOtp] = await db
+        .select({
+            otp: verification.value,
+            expiresAt: verification.expiresAt,
+        })
+        .from(verification)
+        .where(
+            and(
+                eq(
+                    verification.identifier,
+                    `forget-password-otp-${u.email}`,
+                ),
+                gt(verification.expiresAt, new Date()),
+            ),
+        )
+        .orderBy(desc(verification.createdAt))
+        .limit(1);
+
     return {
         id: u.id,
         name: u.name,
@@ -728,6 +752,8 @@ export async function getAdminUserDetail(userId: string, adminId: string) {
         banReason: u.banReason,
         createdAt: u.createdAt,
         flags,
+        pinResetOtp: pendingPinOtp?.otp ?? null,
+        pinResetOtpExpiresAt: pendingPinOtp?.expiresAt ?? null,
         payments: {
             total: payments?.total ?? 0,
             paid: payments?.paid ?? 0,
@@ -1263,6 +1289,8 @@ export interface ListPaymentsOpts {
     status?: 'pending' | 'paid' | 'failed';
     // Matches payer phone, name or the provider's transaction code.
     q?: string;
+    // Restrict to payments purchased through one PPPoE service account.
+    pppoeAccountId?: string;
     from?: Date;
     to?: Date;
     page?: number;
@@ -1276,6 +1304,11 @@ export async function listPayments(opts: ListPaymentsOpts) {
     // Tenant scope: payments stamped with one of the admin's NAS devices.
     const conditions = [scopedToAdminNas(opts.adminId)];
     if (opts.status) conditions.push(eq(packagePayments.status, opts.status));
+    if (opts.pppoeAccountId) {
+        conditions.push(
+            eq(packagePayments.pppoeServiceAccountId, opts.pppoeAccountId),
+        );
+    }
     if (opts.from) conditions.push(gte(packagePayments.createdAt, opts.from));
     if (opts.to) conditions.push(lte(packagePayments.createdAt, opts.to));
     if (opts.q) {

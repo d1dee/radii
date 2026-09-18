@@ -16,7 +16,10 @@ import { LOGIN_REQUEST_KEY } from './lib/api.ts';
 import { CurrentPackage } from './components/Packages/CurrentPackage.tsx';
 import { HavingIssues } from './components/Packages/HavingIssues.tsx';
 import { PackagePricing } from './components/Packages/PackagePricing.tsx';
-import { RegisterModal } from './components/RegisterForm/Modal.tsx';
+import {
+    RegisterModal,
+    type AuthMode,
+} from './components/RegisterForm/Modal.tsx';
 import { UserAccount } from './components/UserAccounts/UserAccount.tsx';
 import type { Client } from './lib/api.ts';
 import { useSession } from './lib/auth.ts';
@@ -108,7 +111,7 @@ export default function App() {
 
     const [authOpened, { open: openAuth, close: closeAuth }] =
         useDisclosure(false);
-    const [authMode, setAuthMode] = useState<'register' | 'login'>('register');
+    const [authMode, setAuthMode] = useState<AuthMode>('register');
     const [authPackageId, setAuthPackageId] = useState('');
     const [authPrice, setAuthPrice] = useState('');
 

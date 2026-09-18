@@ -22,6 +22,9 @@ const ReportsPage = lazy(() => import('@/pages/ReportsPage'));
 const SessionsPage = lazy(() => import('@/pages/SessionsPage'));
 const SettingsPage = lazy(() => import('@/pages/SettingsPage'));
 const UsersPage = lazy(() => import('@/pages/UsersPage'));
+const ForgotPasswordPage = lazy(
+    () => import('@/pages/auth/ForgotPasswordPage'),
+);
 const LoginPage = lazy(() => import('@/pages/auth/LoginPage'));
 const RegisterPage = lazy(() => import('@/pages/auth/RegisterPage'));
 const VerifyEmailPage = lazy(() => import('@/pages/auth/VerifyEmailPage'));
@@ -47,6 +50,10 @@ export default function App() {
                         <Route
                             path='/verify-email'
                             element={<VerifyEmailPage />}
+                        />
+                        <Route
+                            path='/forgot-password'
+                            element={<ForgotPasswordPage />}
                         />
 
                         {/* Everything else requires a verified admin session. */}
