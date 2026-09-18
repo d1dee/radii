@@ -885,6 +885,14 @@ export function UserDetailsDrawer({
                                                                 size='xs'
                                                                 c='dimmed'
                                                             >
+                                                                Network:{' '}
+                                                                {account.nasName ??
+                                                                    'Unassigned'}
+                                                            </Text>
+                                                            <Text
+                                                                size='xs'
+                                                                c='dimmed'
+                                                            >
                                                                 Last used:{' '}
                                                                 {account.lastUsedAt
                                                                     ? formatDateTime(

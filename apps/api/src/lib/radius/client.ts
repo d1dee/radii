@@ -67,14 +67,16 @@ import {
     radcheck,
     radreply,
     transaction,
+    userFlag,
 } from '../../db/schema';
 import {
+    bondPppoeAccountToNas,
     getPppoeAccountForActivation,
     getPppoeAccountForPayment,
     getPppoeAccountOwnedByCustomer,
     listPppoeServiceAccounts,
+    resolveNasDeviceByIp,
     resolvePppoeServiceAccountByUsername,
-    resolveUniqueNasTenant,
 } from '../pppoeAccounts';
 import {
     activationIsAvailable,
@@ -898,7 +900,7 @@ export class RadiusClient {
     async getPppoeClients(userId: string, tenantAdminId?: string | null) {
         const accounts = await listPppoeServiceAccounts(userId, tenantAdminId);
         const result = [];
-        for (const { account, tenantName } of accounts) {
+        for (const { account, tenantName, nas } of accounts) {
             const rows = await db
                 .select({ activation: activatedPackages, pkg: packages })
                 .from(activatedPackages)
@@ -933,6 +935,8 @@ export class RadiusClient {
                 accountId: account.id,
                 tenantId: account.tenantAdminId,
                 tenantName,
+                nasDeviceId: account.nasDeviceId,
+                nasName: nas?.name ?? null,
                 label: account.label,
                 status: account.status,
                 username: account.username,
@@ -1026,7 +1030,9 @@ export class RadiusClient {
 
     // Restricted PPPoE sessions carry no activation Class cookie, so renewal
     // must locate them by the stable username rather than the new activation.
-    private async disconnectLivePppoeSessions(username: string): Promise<void> {
+    private async disconnectLivePppoeSessions(
+        username: string,
+    ): Promise<number> {
         const liveRows = await db
             .select()
             .from(radacct)
@@ -1037,19 +1043,100 @@ export class RadiusClient {
                     isNotNull(radacct.acctstarttime),
                 ),
             );
+        let disconnected = 0;
         for (const row of liveRows) {
             const session = this.sessionInfoFromRow(row);
             try {
                 if (await this.terminateSessionAtNas(username, session)) {
                     await this.closeSessionRecord(session);
+                    disconnected += 1;
                 }
             } catch (err) {
                 console.error(
-                    `[radius] PPPoE renewal disconnect failed on ${session.nasIpAddress}:`,
+                    `[radius] PPPoE disconnect failed on ${session.nasIpAddress}:`,
                     err,
                 );
             }
         }
+        return disconnected;
+    }
+
+    // Admin migration: re-point an account at another NAS device owned by the
+    // same admin tenant and cut its live sessions so the customer re-dials
+    // through the new router.
+    async setPppoeAccountNas(
+        accountId: string,
+        nasDeviceId: string,
+        adminId: string,
+    ): Promise<{ username: string; sessionsDisconnected: number }> {
+        const [account] = await db
+            .select()
+            .from(pppoeServiceAccounts)
+            .where(
+                and(
+                    eq(pppoeServiceAccounts.id, accountId),
+                    eq(pppoeServiceAccounts.tenantAdminId, adminId),
+                ),
+            )
+            .limit(1);
+        if (!account) throw new RadiusError('Unknown PPPoE account');
+        const [device] = await db
+            .select({ id: nasDevice.id })
+            .from(nasDevice)
+            .where(
+                and(
+                    eq(nasDevice.id, nasDeviceId),
+                    eq(nasDevice.ownerId, adminId),
+                ),
+            )
+            .limit(1);
+        if (!device) throw new RadiusError('Unknown NAS device');
+        if (account.nasDeviceId === nasDeviceId) {
+            return { username: account.username, sessionsDisconnected: 0 };
+        }
+        await db
+            .update(pppoeServiceAccounts)
+            .set({ nasDeviceId })
+            .where(eq(pppoeServiceAccounts.id, accountId));
+        const sessionsDisconnected = await this.disconnectLivePppoeSessions(
+            account.username,
+        );
+        return { username: account.username, sessionsDisconnected };
+    }
+
+    // A wrong-NAS dial is operator-visible state: flag the customer for the
+    // owning admin tenant (shown in the admin moderation views) and log the
+    // attempt. Unclaimed accounts have no user row to flag, so those are only
+    // logged. Deduplicated to one flag per customer per 24h — dialers retry
+    // constantly.
+    private async notifyPppoeNasMismatch(
+        account: typeof pppoeServiceAccounts.$inferSelect,
+        device: { id: string; ownerId: string; name: string },
+    ): Promise<void> {
+        console.warn(
+            `[radius] pppoe ${account.username} is assigned to another NAS; rejected dial via ${device.name} (${device.id})`,
+        );
+        if (!account.customerUserId) return;
+        const reason = 'pppoe-nas-mismatch';
+        const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+        const [recent] = await db
+            .select({ id: userFlag.id })
+            .from(userFlag)
+            .where(
+                and(
+                    eq(userFlag.userId, account.customerUserId),
+                    eq(userFlag.reason, reason),
+                    gte(userFlag.createdAt, cutoff),
+                ),
+            )
+            .limit(1);
+        if (recent) return;
+        await db.insert(userFlag).values({
+            userId: account.customerUserId,
+            reason,
+            note: `PPPoE account ${account.username} tried to dial in via ${device.name} but is assigned to a different network. Use the migrate action to move the line.`,
+            createdBy: account.tenantAdminId,
+        });
     }
 
     // =========================================================================
@@ -1205,8 +1292,19 @@ export class RadiusClient {
         if (account.status !== 'active' || !nasIpAddress) {
             return { verdict: 'deactivated' };
         }
-        const tenantAdminId = await resolveUniqueNasTenant(nasIpAddress);
-        if (tenantAdminId !== account.tenantAdminId) {
+        const device = await resolveNasDeviceByIp(nasIpAddress);
+        if (!device || device.ownerId !== account.tenantAdminId) {
+            return { verdict: 'deactivated' };
+        }
+        if (account.nasDeviceId === null) {
+            // First appearance of these credentials: bond the account to the
+            // NAS the session arrived at. This is how admin-provisioned
+            // unclaimed lines finalize sign-up — the customer dials, the
+            // restricted profile redirects them to the portal, and the
+            // account already knows which network it belongs to.
+            await bondPppoeAccountToNas(account.id, device.id);
+        } else if (account.nasDeviceId !== device.id) {
+            await this.notifyPppoeNasMismatch(account, device);
             return { verdict: 'deactivated' };
         }
 
@@ -1970,12 +2068,14 @@ export class RadiusClient {
     async getPppoeCredentialsForUser(userId: string, adminId: string) {
         const rows = await listPppoeServiceAccounts(userId, adminId);
         return Promise.all(
-            rows.map(async ({ account }) => ({
+            rows.map(async ({ account, nas }) => ({
                 id: account.id,
                 label: account.label,
                 status: account.status,
                 username: account.username,
                 password: await this.getProvisionedPassword(account.username),
+                nasDeviceId: account.nasDeviceId,
+                nasName: nas?.name ?? null,
                 lastUsedAt: account.lastUsedAt,
             })),
         );

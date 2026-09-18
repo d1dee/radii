@@ -536,6 +536,10 @@ app.get('/users/:id/activations', requireAdmin, async (c) => {
 
 const provisionPppoeSchema = z.object({
     phoneNumber: zPhoneNumber,
+    // The PPPoE instance (NAS device) the account belongs to. Required: the
+    // first dial bonds the user to this network and the portal shows this
+    // network's packages.
+    nasDeviceId: z.uuid(),
     label: z.string().trim().max(80).optional(),
 });
 
@@ -544,11 +548,17 @@ app.post('/pppoe-accounts/provision', requireAdmin, async (c) => {
         await c.req.json().catch(() => ({})),
     );
     if (!parsed.success) {
-        return jsonError(c, 400, 'Enter a valid phone number');
+        return jsonError(c, 400, 'Enter a valid phone number and NAS device');
+    }
+    const adminId = c.get('adminSession').userId;
+    const device = await getNasDeviceById(parsed.data.nasDeviceId, adminId);
+    if (!device) {
+        return jsonError(c, 400, 'Select one of your NAS devices');
     }
     try {
         const provisioned = await provisionPppoeAccountByPhone(
-            c.get('adminSession').userId,
+            adminId,
+            parsed.data.nasDeviceId,
             parsed.data.phoneNumber,
             parsed.data.label,
         );
@@ -562,6 +572,8 @@ app.post('/pppoe-accounts/provision', requireAdmin, async (c) => {
                     username: provisioned.account.username,
                     password: provisioned.password,
                     claimCode: provisioned.claimCode,
+                    nasDeviceId: provisioned.account.nasDeviceId,
+                    nasName: device.name,
                     linked: provisioned.account.customerUserId !== null,
                 },
             },
@@ -570,6 +582,39 @@ app.post('/pppoe-accounts/provision', requireAdmin, async (c) => {
     } catch (err) {
         console.error('[radius] admin PPPoE provisioning failed:', err);
         return jsonError(c, 409, 'Could not provision PPPoE credentials');
+    }
+});
+
+// Migrates an account to another NAS device of this admin and cuts its live
+// sessions so the customer re-dials through the new router.
+const migratePppoeNasSchema = z.object({ nasDeviceId: z.uuid() });
+
+app.put('/pppoe-accounts/:id/nas', requireAdmin, async (c) => {
+    const id = c.req.param('id');
+    if (!id) return jsonError(c, 404, 'PPPoE account not found');
+    const parsed = migratePppoeNasSchema.safeParse(
+        await c.req.json().catch(() => ({})),
+    );
+    if (!parsed.success) {
+        return jsonError(c, 400, 'Select a NAS device');
+    }
+    try {
+        const data = await radiusClient.setPppoeAccountNas(
+            id,
+            parsed.data.nasDeviceId,
+            c.get('adminSession').userId,
+        );
+        return c.json({
+            success: true,
+            message:
+                data.sessionsDisconnected > 0
+                    ? `Moved to the new network; ${data.sessionsDisconnected} live session(s) disconnected`
+                    : 'Moved to the new network',
+            data,
+        });
+    } catch (err) {
+        console.error('[radius] admin pppoe NAS migration failed:', err);
+        return jsonError(c, 502, 'Could not migrate the PPPoE account');
     }
 });
 

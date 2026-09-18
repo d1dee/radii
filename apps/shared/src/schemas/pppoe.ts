@@ -23,10 +23,14 @@ export type PppoeServiceConfig = {
 };
 
 // One PPPoE dialer account of the current user: an active activation with the
-// credentials to configure on the customer's router/phone dialer.
+// credentials to configure on their router/phone dialer. Each account is
+// bound to one NAS device (network instance), so the portal can use the
+// account selection as a network selection.
 export type PppoeClient = {
     accountId: string;
     tenantName: string;
+    nasDeviceId: string | null;
+    nasName: string | null;
     label: string | null;
     status: 'active' | 'suspended' | 'closed';
     username: string;

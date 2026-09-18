@@ -157,11 +157,12 @@ app.get('/config', (c) => {
 // --- PPPoE clients (dialer accounts) -----------------------------------------
 
 // The caller's active PPPoE dialer accounts with the RADIUS credentials to
-// configure on their router/phone dialer, plus live online state.
+// configure on their router/phone dialer, plus live online state. Each
+// account carries its bound NAS so the portal can act as a NAS selector;
+// availableOnPortal is an exact NAS match, not a tenant match.
 app.get('/clients', requireAuth, async (c) => {
     const currentUser = c.get('user');
-    const tenantAdminId = await getAdminIdForNasDevice(c.req.query('nas'));
-    if (!tenantAdminId) return jsonError(c, 404, 'Unknown NAS device');
+    const nasDeviceId = c.req.query('nas');
     const clients = await radiusClient.getPppoeClients(
         currentUser!.id,
     );
@@ -174,13 +175,16 @@ app.get('/clients', requireAuth, async (c) => {
             return {
             accountId: client.accountId,
             tenantName: client.tenantName,
+            nasDeviceId: client.nasDeviceId,
+            nasName: client.nasName,
             label: client.label,
             status: client.status,
             username: client.username,
             password: client.password,
             online: client.online,
             lastUsedAt: client.lastUsedAt?.toISOString() ?? null,
-            availableOnPortal: client.tenantId === tenantAdminId,
+            availableOnPortal: Boolean(nasDeviceId) &&
+                client.nasDeviceId === nasDeviceId,
             activeActivation: activeActivation
                 ? {
                       activationId: activeActivation.activationId,
@@ -364,11 +368,18 @@ app.post('/order', requireAuth, async (c) => {
               parsed.data.serviceAccountId,
               currentUser!.id,
           )
-        : await ensurePppoeServiceAccount(currentUser!.id, tenantAdminId);
+        : await ensurePppoeServiceAccount(
+              currentUser!.id,
+              tenantAdminId,
+              nasDeviceId,
+          );
     if (
         !account ||
         account.tenantAdminId !== tenantAdminId ||
-        account.status !== 'active'
+        account.status !== 'active' ||
+        // The purchase must land on the account's bound NAS; a mismatch means
+        // the portal selected an account from another network.
+        (account.nasDeviceId !== null && account.nasDeviceId !== nasDeviceId)
     ) {
         return jsonError(c, 404, 'Unknown PPPoE account');
     }

@@ -41,6 +41,17 @@ export function currentNasDeviceId(): string | null {
     return localStorage.getItem(NAS_DEVICE_KEY);
 }
 
+// Persists (or clears, with null) the network the portal is scoped to. Driven
+// by the account switcher — every PPPoE account is bound to one NAS device,
+// so selecting an account selects its network.
+export function setNasDeviceId(nasDeviceId: string | null) {
+    if (nasDeviceId) {
+        localStorage.setItem(NAS_DEVICE_KEY, nasDeviceId);
+    } else {
+        localStorage.removeItem(NAS_DEVICE_KEY);
+    }
+}
+
 function withNas(path: string, nasDeviceId = currentNasDeviceId()) {
     const separator = path.includes('?') ? '&' : '?';
     return `${path}${separator}nas=${encodeURIComponent(nasDeviceId ?? '')}`;

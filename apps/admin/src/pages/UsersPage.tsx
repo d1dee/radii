@@ -10,6 +10,7 @@ import {
     Modal,
     Pagination,
     SegmentedControl,
+    Select,
     Stack,
     Table,
     Text,
@@ -25,9 +26,12 @@ import { MdAdd, MdCheck, MdContentCopy, MdSearch } from 'react-icons/md';
 import { UserDetailsDrawer } from '@/components/Users/UserDetailsDrawer';
 import {
     getAdminUsers,
+    getNasDevices,
     getPppoeAccount,
+    migratePppoeAccountNas,
     provisionPppoeAccount,
     type AdminUserList,
+    type NasDeviceRow,
     type PackageType,
     type PppoeAccountDetail,
     type ProvisionedPppoeAccount,
@@ -77,13 +81,17 @@ export default function UsersPage() {
     const [flaggedOnly, setFlaggedOnly] = useState(false);
     const [page, setPage] = useState(1);
     const [detailsId, setDetailsId] = useState<string | null>(null);
+    const [nasDevices, setNasDevices] = useState<NasDeviceRow[]>([]);
     const [provisionOpened, setProvisionOpened] = useState(false);
     const [provisionPhone, setProvisionPhone] = useState('');
+    const [provisionNas, setProvisionNas] = useState<string | null>(null);
     const [provisionLabel, setProvisionLabel] = useState('');
     const [provisioning, setProvisioning] = useState(false);
     const [provisionError, setProvisionError] = useState<string | null>(null);
     const [provisioned, setProvisioned] =
         useState<ProvisionedPppoeAccount | null>(null);
+    const [migrateNas, setMigrateNas] = useState<string | null>(null);
+    const [migrating, setMigrating] = useState(false);
     const [detailsAccountId, setDetailsAccountId] = useState<string | null>(
         null,
     );
@@ -95,9 +103,22 @@ export default function UsersPage() {
     const [regenerating, setRegenerating] = useState(false);
 
     useEffect(() => {
+        void (async () => {
+            const res = await getNasDevices();
+            if (res.success && res.data) setNasDevices(res.data);
+        })();
+    }, []);
+
+    const nasOptions = nasDevices.map((device) => ({
+        value: device.id,
+        label: device.location ? `${device.name} · ${device.location}` : device.name,
+    }));
+
+    useEffect(() => {
         if (!detailsAccountId) {
             setAccountDetails(null);
             setRegenerated(null);
+            setMigrateNas(null);
             return;
         }
         let cancelled = false;
@@ -125,6 +146,7 @@ export default function UsersPage() {
                 return;
             }
             setAccountDetails(res.data);
+            setMigrateNas(res.data.nasDeviceId);
         })();
         return () => {
             cancelled = true;
@@ -133,9 +155,19 @@ export default function UsersPage() {
 
     async function regenerateClaim() {
         if (!accountDetails) return;
+        if (!accountDetails.nasDeviceId) {
+            notifications.show({
+                color: 'red',
+                title: 'No network assigned',
+                message:
+                    'This account has no NAS device yet; migrate it to one first.',
+            });
+            return;
+        }
         setRegenerating(true);
         const result = await provisionPppoeAccount({
             phoneNumber: accountDetails.phoneNumber,
+            nasDeviceId: accountDetails.nasDeviceId,
             label: accountDetails.label ?? undefined,
         });
         setRegenerating(false);
@@ -161,6 +193,35 @@ export default function UsersPage() {
             title: 'Credentials regenerated',
             message: 'Share the new claim code with the customer.',
         });
+        void load(page, true);
+    }
+
+    async function submitMigrate() {
+        if (!accountDetails || !migrateNas) return;
+        if (migrateNas === accountDetails.nasDeviceId) return;
+        setMigrating(true);
+        const result = await migratePppoeAccountNas(
+            accountDetails.id,
+            migrateNas,
+        );
+        setMigrating(false);
+        if (!result.success) {
+            notifications.show({
+                color: 'red',
+                title: 'Could not migrate account',
+                message: result.message || 'Please try again',
+            });
+            return;
+        }
+        notifications.show({
+            color: 'green',
+            title: 'Account migrated',
+            message: 'The account now belongs to the selected network.',
+        });
+        const refreshed = await getPppoeAccount(accountDetails.id);
+        if (refreshed.success && refreshed.data) {
+            setAccountDetails(refreshed.data);
+        }
         void load(page, true);
     }
 
@@ -207,6 +268,9 @@ export default function UsersPage() {
 
     function openProvision() {
         setProvisionPhone('');
+        setProvisionNas(
+            nasDevices.length === 1 ? nasDevices[0]!.id : provisionNas,
+        );
         setProvisionLabel('');
         setProvisionError(null);
         setProvisioned(null);
@@ -215,10 +279,15 @@ export default function UsersPage() {
 
     async function submitProvision(event: React.FormEvent<HTMLFormElement>) {
         event.preventDefault();
+        if (!provisionNas) {
+            setProvisionError('Select the NAS device for this account');
+            return;
+        }
         setProvisionError(null);
         setProvisioning(true);
         const result = await provisionPppoeAccount({
             phoneNumber: provisionPhone,
+            nasDeviceId: provisionNas,
             label: provisionLabel.trim() || undefined,
         });
         setProvisioning(false);
@@ -338,6 +407,12 @@ export default function UsersPage() {
                                                     {u.pppoe.username}
                                                 </Text>
                                             ) : null}
+                                            {u.pendingClaim &&
+                                            u.pppoe?.nasName ? (
+                                                <Text size='xs' c='dimmed'>
+                                                    {u.pppoe.nasName}
+                                                </Text>
+                                            ) : null}
                                         </Table.Td>
                                         <Table.Td>
                                             <Group gap={4}>
@@ -450,6 +525,12 @@ export default function UsersPage() {
                                 ? `The account is linked to ${provisioned.phoneNumber}.`
                                 : `Give these details to ${provisioned.phoneNumber}. The claim code links the credentials during registration.`}
                         </Text>
+                        <Text size='sm'>
+                            <Text span c='dimmed'>
+                                Network:{' '}
+                            </Text>
+                            {provisioned.nasName ?? '—'}
+                        </Text>
                         <CredentialField
                             label='PPPoE username'
                             value={provisioned.username}
@@ -494,6 +575,18 @@ export default function UsersPage() {
                                 }
                                 required
                             />
+                            <Select
+                                label='NAS device (PPPoE instance)'
+                                description="The user's first login binds them to this network; the portal shows this network's packages."
+                                placeholder='Select a NAS device'
+                                data={nasOptions}
+                                value={provisionNas}
+                                onChange={setProvisionNas}
+                                searchable
+                                clearable={false}
+                                nothingFoundMessage='No NAS devices — create one first'
+                                required
+                            />
                             <TextInput
                                 label='Account label'
                                 description='Optional line or location name'
@@ -519,7 +612,7 @@ export default function UsersPage() {
                                 <Button
                                     type='submit'
                                     loading={provisioning}
-                                    disabled={!provisionPhone}
+                                    disabled={!provisionPhone || !provisionNas}
                                 >
                                     Provision credentials
                                 </Button>
@@ -570,13 +663,40 @@ export default function UsersPage() {
                             <Text size='sm' c='dimmed'>
                                 Not claimed yet. The customer registers with{' '}
                                 {accountDetails.phoneNumber} and the one-time
-                                claim code to link these credentials.
+                                claim code to link these credentials. Their first
+                                PPPoE session bonds the account to the network it
+                                dials through.
                             </Text>
                         )}
                         <CredentialField
                             label='PPPoE username'
                             value={accountDetails.username}
                         />
+                        <Select
+                            label='NAS device (PPPoE instance)'
+                            description='Moving the account cuts its live sessions; the customer re-dials through the new network.'
+                            placeholder='Select a NAS device'
+                            data={nasOptions}
+                            value={migrateNas}
+                            onChange={setMigrateNas}
+                            searchable
+                            nothingFoundMessage='No NAS devices — create one first'
+                        />
+                        <Group justify='flex-end'>
+                            <Button
+                                size='xs'
+                                variant='light'
+                                color='orange'
+                                loading={migrating}
+                                disabled={
+                                    !migrateNas ||
+                                    migrateNas === accountDetails.nasDeviceId
+                                }
+                                onClick={submitMigrate}
+                            >
+                                Migrate to selected network
+                            </Button>
+                        </Group>
                         {accountDetails.password ? (
                             <CredentialField
                                 label='PPPoE password'

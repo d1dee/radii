@@ -512,7 +512,9 @@ export async function listAdminUsers(opts: ListAdminUsersOpts) {
     // provisioning admin and never carry flags, payments or activations, so
     // the flagged and hotspot-only filters exclude them.
     const includePending = !opts.flagged && opts.type !== 'hotspot';
-    let pendingClaims: typeof pppoeServiceAccounts.$inferSelect[] = [];
+    let pendingClaims: Array<
+        typeof pppoeServiceAccounts.$inferSelect & { nasName: string | null }
+    > = [];
     if (includePending && page === 1) {
         const pendingConditions: SQL[] = [
             isNull(pppoeServiceAccounts.customerUserId),
@@ -529,11 +531,24 @@ export async function listAdminUsers(opts: ListAdminUsersOpts) {
             );
         }
         pendingClaims = await db
-            .select()
+            .select({
+                account: pppoeServiceAccounts,
+                nasName: nasDevice.name,
+            })
             .from(pppoeServiceAccounts)
+            .leftJoin(
+                nasDevice,
+                eq(pppoeServiceAccounts.nasDeviceId, nasDevice.id),
+            )
             .where(and(...pendingConditions))
             .orderBy(desc(pppoeServiceAccounts.createdAt))
-            .limit(perPage);
+            .limit(perPage)
+            .then((rows) =>
+                rows.map(({ account, nasName }) => ({
+                    ...account,
+                    nasName: nasName ?? null,
+                })),
+            );
     }
 
     const agg = await userAggregates(
@@ -585,6 +600,7 @@ export async function listAdminUsers(opts: ListAdminUsersOpts) {
                     username: account.username,
                     label: account.label,
                     status: account.status,
+                    nasName: account.nasName,
                 },
             })),
             ...users.map((u) => {

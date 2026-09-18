@@ -12,18 +12,19 @@ import {
     useState,
 } from 'react';
 import { PaymentFlow } from './components/Buy/PaymentFlow.tsx';
-import { PppoeClients } from './components/Credentials/PppoeClients.tsx';
-import { AccountSwitcher } from './components/Credentials/AccountSwitcher.tsx';
+import { PppoeAccountCard } from './components/Credentials/PppoeAccountCard.tsx';
 import { Footer } from './components/Footer.tsx';
 import { CurrentPackage } from './components/Packages/CurrentPackage.tsx';
 import { HavingIssues } from './components/Packages/HavingIssues.tsx';
 import { PackagePricing } from './components/Packages/PackagePricing.tsx';
 import { RegisterModal } from './components/RegisterForm/Modal.tsx';
 import { UserAccount } from './components/UserAccounts/UserAccount.tsx';
-import { currentNasDeviceId, type Client } from './lib/api.ts';
+import { type Client } from './lib/api.ts';
 import { useSession } from './lib/auth.ts';
 import {
     loadPppoePortal,
+    refreshPppoeAccounts,
+    useNasScope,
     usePppoeAccounts,
     usePppoePortal,
 } from './lib/store.ts';
@@ -73,18 +74,37 @@ function pkgPrice(
 export default function App() {
     const [havingIssues, setHavingIssues] = useState(false);
     const { data, isPending } = useSession();
-    const { client: clientData, packages, contacts: adminContacts } =
-        usePppoePortal();
-    const { clients } = usePppoeAccounts();
+    const {
+        client: clientData,
+        packages,
+        contacts: adminContacts,
+    } = usePppoePortal();
+    const { clients, selectedAccountId } = usePppoeAccounts();
+    // Purchases land on the account the portal is currently showing (the
+    // account switcher selection also sets the NAS scope). If that account is
+    // not on the scoped network, pass null so the backend provisions one on
+    // the scoped NAS instead of misattributing the payment.
     const purchaseAccountId =
-        clients.find((client) => client.availableOnPortal)?.accountId ?? null;
-    const nasDeviceId = currentNasDeviceId();
+        clients.find(
+            (client) =>
+                client.accountId === selectedAccountId &&
+                client.availableOnPortal,
+        )?.accountId ?? null;
+    const { nasDeviceId } = useNasScope();
 
     useEffect(() => {
         if (!isPending) {
             void loadPppoePortal(data?.user.id ?? null, nasDeviceId);
         }
     }, [data?.user.id, isPending, nasDeviceId]);
+
+    // Accounts must load even without a network scope: they drive the
+    // auto-scoping of external visits (the account switcher adopts the
+    // network of the default account) and refresh availability on every
+    // scope change.
+    useEffect(() => {
+        if (!isPending && data?.session) void refreshPppoeAccounts();
+    }, [data?.session, isPending, nasDeviceId]);
 
     // Resume an interrupted purchase on first load (e.g. after a login
     // redirect). localStorage is synchronous, so the initial modal state can
@@ -166,16 +186,28 @@ export default function App() {
                                         setHavingIssues,
                                     ]}
                                 />
-                                {data?.session ? <AccountSwitcher /> : null}
-                                {havingIssues ? (
-                                    <HavingIssues
-                                        adminContacts={adminContacts}
-                                    />
-                                ) : (
-                                    <CurrentPackage />
-                                )}
-                                {data?.session ? <PppoeClients /> : null}
-                                <PackagePricing packages={packages} />
+                                {nasDeviceId ? (
+                                    // Packages, status, and sessions only make
+                                    // sense once the portal is scoped to the
+                                    // network of one of the customer's own
+                                    // accounts (account switcher / ?nas= link).
+                                    <>
+                                        {havingIssues ? (
+                                            <HavingIssues
+                                                adminContacts={adminContacts}
+                                            />
+                                        ) : (
+                                            <>
+                                                {data?.session ? (
+                                                    <PppoeAccountCard />
+                                                ) : null}
+                                                <CurrentPackage />
+                                            </>
+                                        )}
+
+                                        <PackagePricing packages={packages} />
+                                    </>
+                                ) : null}
                             </Stack>
                             <Footer />
                             {/*

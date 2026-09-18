@@ -296,6 +296,7 @@ export type AdminUserRow = {
         username: string;
         label: string | null;
         status: 'active' | 'suspended' | 'closed';
+        nasName: string | null;
     } | null;
 };
 
@@ -335,6 +336,8 @@ export type AdminPppoeAccount = {
     status: 'active' | 'suspended' | 'closed';
     username: string;
     password: string | null;
+    nasDeviceId: string | null;
+    nasName: string | null;
     lastUsedAt: string | null;
 };
 
@@ -583,11 +586,14 @@ export type ProvisionedPppoeAccount = {
     username: string;
     password: string;
     claimCode: string | null;
+    nasDeviceId: string | null;
+    nasName: string | null;
     linked: boolean;
 };
 
 export function provisionPppoeAccount(body: {
     phoneNumber: string;
+    nasDeviceId: string;
     label?: string;
 }) {
     return request<ProvisionedPppoeAccount>(
@@ -607,12 +613,24 @@ export type PppoeAccountDetail = {
     awaitingClaim: boolean;
     claimCodePending: boolean;
     customer: { id: string; name: string } | null;
+    nasDeviceId: string | null;
+    nasName: string | null;
     lastUsedAt: string | null;
     createdAt: string;
 };
 
 export function getPppoeAccount(id: string) {
     return request<PppoeAccountDetail>(`/admin/pppoe-accounts/${id}`);
+}
+
+// Moves an account to another NAS device of this admin; live sessions are cut
+// so the customer re-dials through the new router.
+export function migratePppoeAccountNas(accountId: string, nasDeviceId: string) {
+    return request<{ username: string; sessionsDisconnected: number }>(
+        `/admin/pppoe-accounts/${accountId}/nas`,
+        { nasDeviceId },
+        { method: 'PUT' },
+    );
 }
 
 // --- Payment log ---------------------------------------------------------------

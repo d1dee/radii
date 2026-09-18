@@ -34,10 +34,22 @@ function hashClaimCode(code: string): string {
 
 export async function provisionPppoeAccountByPhone(
     tenantAdminId: string,
+    nasDeviceId: string,
     phoneNumber: string,
     label?: string,
 ) {
     const normalizedPhone = zPhoneNumber.parse(phoneNumber);
+    const [device] = await db
+        .select({ id: nasDevice.id })
+        .from(nasDevice)
+        .where(
+            and(
+                eq(nasDevice.id, nasDeviceId),
+                eq(nasDevice.ownerId, tenantAdminId),
+            ),
+        )
+        .limit(1);
+    if (!device) throw new Error('Unknown NAS device');
     const [customer] = await db
         .select({ id: user.id })
         .from(user)
@@ -56,28 +68,38 @@ export async function provisionPppoeAccountByPhone(
                 id,
                 customerUserId: customer?.id ?? null,
                 tenantAdminId,
+                nasDeviceId,
                 normalizedPhone,
                 username: generatedUsername(id),
                 label: label?.trim() || null,
                 claimCodeHash,
             })
-            .onConflictDoNothing({
-                target: [
-                    pppoeServiceAccounts.tenantAdminId,
-                    pppoeServiceAccounts.normalizedPhone,
-                ],
-            });
+            // No conflict target: re-provisioning a claimed phone can violate
+            // both the (NAS, phone) and (customer, NAS) keys at once.
+            .onConflictDoNothing();
 
-        const [existing] = await tx
+        let [existing] = await tx
             .select()
             .from(pppoeServiceAccounts)
             .where(
                 and(
-                    eq(pppoeServiceAccounts.tenantAdminId, tenantAdminId),
+                    eq(pppoeServiceAccounts.nasDeviceId, nasDeviceId),
                     eq(pppoeServiceAccounts.normalizedPhone, normalizedPhone),
                 ),
             )
             .limit(1);
+        if (!existing && customer) {
+            [existing] = await tx
+                .select()
+                .from(pppoeServiceAccounts)
+                .where(
+                    and(
+                        eq(pppoeServiceAccounts.nasDeviceId, nasDeviceId),
+                        eq(pppoeServiceAccounts.customerUserId, customer.id),
+                    ),
+                )
+                .limit(1);
+        }
         if (!existing) throw new Error('Could not provision PPPoE account');
         if (
             existing.customerUserId &&
@@ -96,6 +118,7 @@ export async function provisionPppoeAccountByPhone(
                 customerUserId: linkedUserId,
                 claimCodeHash: nextClaimCodeHash,
                 label: label?.trim() || existing.label,
+                nasDeviceId: existing.nasDeviceId ?? nasDeviceId,
             })
             .where(eq(pppoeServiceAccounts.id, existing.id))
             .returning();
@@ -154,9 +177,13 @@ export async function getPppoeAccountAdminDetail(
     accountId: string,
     tenantAdminId: string,
 ) {
-    const [account] = await db
-        .select()
+    const [row] = await db
+        .select({
+            account: pppoeServiceAccounts,
+            nas: { id: nasDevice.id, name: nasDevice.name },
+        })
         .from(pppoeServiceAccounts)
+        .leftJoin(nasDevice, eq(pppoeServiceAccounts.nasDeviceId, nasDevice.id))
         .where(
             and(
                 eq(pppoeServiceAccounts.id, accountId),
@@ -164,7 +191,8 @@ export async function getPppoeAccountAdminDetail(
             ),
         )
         .limit(1);
-    if (!account) return null;
+    if (!row) return null;
+    const { account, nas } = row;
 
     const [customer] = account.customerUserId
         ? await db
@@ -194,6 +222,8 @@ export async function getPppoeAccountAdminDetail(
         awaitingClaim: account.customerUserId === null,
         claimCodePending: account.claimCodeHash !== null,
         customer: customer ?? null,
+        nasDeviceId: nas?.id ?? null,
+        nasName: nas?.name ?? null,
         lastUsedAt: account.lastUsedAt,
         createdAt: account.createdAt,
     };
@@ -238,9 +268,14 @@ export async function claimPppoeAccount(
     return account ?? null;
 }
 
+// One dialer account per customer per NAS device: self-service purchases on
+// the NAS-scoped portal key the account on (customer, NAS), so the same phone
+// gets a distinct line on every network it subscribes to. A legacy account
+// with no NAS yet is adopted (bonded to this NAS) instead of duplicating it.
 export async function ensurePppoeServiceAccount(
     customerUserId: string,
     tenantAdminId: string,
+    nasDeviceId: string,
 ) {
     const [customer] = await db
         .select({ username: user.username })
@@ -248,24 +283,6 @@ export async function ensurePppoeServiceAccount(
         .where(eq(user.id, customerUserId))
         .limit(1);
     const normalizedPhone = zPhoneNumber.parse(customer?.username);
-    const id = randomUUID();
-    const [created] = await db
-        .insert(pppoeServiceAccounts)
-        .values({
-            id,
-            customerUserId,
-            tenantAdminId,
-            normalizedPhone,
-            username: generatedUsername(id),
-        })
-        .onConflictDoNothing({
-            target: [
-                pppoeServiceAccounts.customerUserId,
-                pppoeServiceAccounts.tenantAdminId,
-            ],
-        })
-        .returning();
-    if (created) return created;
 
     const [existing] = await db
         .select()
@@ -273,12 +290,93 @@ export async function ensurePppoeServiceAccount(
         .where(
             and(
                 eq(pppoeServiceAccounts.customerUserId, customerUserId),
-                eq(pppoeServiceAccounts.tenantAdminId, tenantAdminId),
+                eq(pppoeServiceAccounts.nasDeviceId, nasDeviceId),
             ),
         )
         .limit(1);
-    if (!existing) throw new Error('Could not create PPPoE service account');
-    return existing;
+    if (existing) return existing;
+
+    const [legacy] = await db
+        .select()
+        .from(pppoeServiceAccounts)
+        .where(
+            and(
+                eq(pppoeServiceAccounts.customerUserId, customerUserId),
+                eq(pppoeServiceAccounts.tenantAdminId, tenantAdminId),
+                isNull(pppoeServiceAccounts.nasDeviceId),
+            ),
+        )
+        .limit(1);
+    if (legacy) {
+        const [adopted] = await db
+            .update(pppoeServiceAccounts)
+            .set({ nasDeviceId })
+            .where(
+                and(
+                    eq(pppoeServiceAccounts.id, legacy.id),
+                    isNull(pppoeServiceAccounts.nasDeviceId),
+                ),
+            )
+            .returning();
+        if (adopted) return adopted;
+    }
+
+    // An admin-provisioned unclaimed account may already hold this
+    // (NAS, phone) pair: the customer proved phone ownership by signing in,
+    // so the first purchase on that network adopts (claims) it instead of
+    // colliding with it.
+    const [unclaimed] = await db
+        .select()
+        .from(pppoeServiceAccounts)
+        .where(
+            and(
+                eq(pppoeServiceAccounts.nasDeviceId, nasDeviceId),
+                eq(pppoeServiceAccounts.normalizedPhone, normalizedPhone),
+                isNull(pppoeServiceAccounts.customerUserId),
+            ),
+        )
+        .limit(1);
+    if (unclaimed) {
+        const [adopted] = await db
+            .update(pppoeServiceAccounts)
+            .set({ customerUserId, claimCodeHash: null })
+            .where(
+                and(
+                    eq(pppoeServiceAccounts.id, unclaimed.id),
+                    isNull(pppoeServiceAccounts.customerUserId),
+                ),
+            )
+            .returning();
+        if (adopted) return adopted;
+    }
+
+    const id = randomUUID();
+    const [created] = await db
+        .insert(pppoeServiceAccounts)
+        .values({
+            id,
+            customerUserId,
+            tenantAdminId,
+            nasDeviceId,
+            normalizedPhone,
+            username: generatedUsername(id),
+        })
+        .onConflictDoNothing()
+        .returning();
+    if (created) return created;
+
+    const [raced] = await db
+        .select()
+        .from(pppoeServiceAccounts)
+        .where(
+            and(
+                eq(pppoeServiceAccounts.customerUserId, customerUserId),
+                eq(pppoeServiceAccounts.nasDeviceId, nasDeviceId),
+            ),
+        )
+        .limit(1);
+    if (!raced) throw new Error('Could not create PPPoE service account');
+    return raced;
 }
 
 export async function getPppoeAccountForPayment(
@@ -291,16 +389,35 @@ export async function getPppoeAccountForPayment(
             .where(eq(pppoeServiceAccounts.id, payment.pppoeServiceAccountId))
             .limit(1);
         if (
-            account?.customerUserId === payment.userId &&
-            account.tenantAdminId === payment.tenantAdminId
+            !account ||
+            account.customerUserId !== payment.userId ||
+            account.tenantAdminId !== payment.tenantAdminId
         )
-            return account;
-        return null;
+            return null;
+        // The payment's NAS is authoritative: bond an account that has none
+        // yet, and refuse an account already bound to a different NAS so a
+        // payment can never activate the line on the wrong router.
+        if (account.nasDeviceId === null) {
+            const [bonded] = await db
+                .update(pppoeServiceAccounts)
+                .set({ nasDeviceId: payment.nasDeviceId })
+                .where(
+                    and(
+                        eq(pppoeServiceAccounts.id, account.id),
+                        isNull(pppoeServiceAccounts.nasDeviceId),
+                    ),
+                )
+                .returning();
+            return bonded ?? account;
+        }
+        if (account.nasDeviceId !== payment.nasDeviceId) return null;
+        return account;
     }
     if (!payment.tenantAdminId) return null;
     const account = await ensurePppoeServiceAccount(
         payment.userId,
         payment.tenantAdminId,
+        payment.nasDeviceId,
     );
     await db
         .update(packagePayments)
@@ -350,9 +467,11 @@ export async function listPppoeServiceAccounts(
         .select({
             account: pppoeServiceAccounts,
             tenantName: adminUser.name,
+            nas: { id: nasDevice.id, name: nasDevice.name },
         })
         .from(pppoeServiceAccounts)
         .innerJoin(adminUser, eq(pppoeServiceAccounts.tenantAdminId, adminUser.id))
+        .leftJoin(nasDevice, eq(pppoeServiceAccounts.nasDeviceId, nasDevice.id))
         .where(
             and(
                 eq(pppoeServiceAccounts.customerUserId, customerUserId),
@@ -373,10 +492,17 @@ export async function resolvePppoeServiceAccountByUsername(username: string) {
     return account ?? null;
 }
 
-export async function resolveUniqueNasTenant(nasIpAddress: string) {
+// Resolves a RADIUS NAS-IP-Address (direct address or WireGuard tunnel
+// address) to the single NAS device that owns it. NULL when the address is
+// unknown or claimed by more than one device.
+export async function resolveNasDeviceByIp(nasIpAddress: string) {
     const normalized = nasIpAddress.replace(/\/\d+$/, '');
     const rows = await db
-        .select({ ownerId: nasDevice.ownerId })
+        .select({
+            id: nasDevice.id,
+            ownerId: nasDevice.ownerId,
+            name: nasDevice.name,
+        })
         .from(nasDevice)
         .leftJoin(nasSetupScript, eq(nasSetupScript.nasDeviceId, nasDevice.id))
         .where(
@@ -385,6 +511,27 @@ export async function resolveUniqueNasTenant(nasIpAddress: string) {
                 eq(nasSetupScript.wgClientIp, normalized),
             ),
         );
-    const owners = new Set(rows.map((row) => row.ownerId));
-    return owners.size === 1 ? [...owners][0]! : null;
+    const unique = new Set(rows.map((row) => row.id));
+    return unique.size === 1 ? rows[0]! : null;
 }
+
+// Bonds an account to the NAS it just appeared at (RADIUS authorize). Only
+// fills a NULL nas_device_id; an already-bound account is never moved here —
+// rebinding is an explicit admin migration.
+export async function bondPppoeAccountToNas(
+    accountId: string,
+    nasDeviceId: string,
+) {
+    const [bonded] = await db
+        .update(pppoeServiceAccounts)
+        .set({ nasDeviceId, lastUsedAt: new Date() })
+        .where(
+            and(
+                eq(pppoeServiceAccounts.id, accountId),
+                isNull(pppoeServiceAccounts.nasDeviceId),
+            ),
+        )
+        .returning();
+    return bonded ?? null;
+}
+

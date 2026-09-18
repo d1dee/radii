@@ -10,6 +10,7 @@ import {
 } from 'drizzle-orm/pg-core';
 import { adminUser } from './admin-auth-schema';
 import { user } from './auth-schema';
+import { nasDevice } from './integrations';
 
 export const pppoeServiceAccounts = pgTable(
     'pppoe_service_account',
@@ -20,6 +21,14 @@ export const pppoeServiceAccounts = pgTable(
         tenantAdminId: text('tenant_admin_id')
             .notNull()
             .references(() => adminUser.id, { onDelete: 'restrict' }),
+        // The PPPoE instance (NAS/router) this account dials through. Assigned
+        // by the admin at provisioning time, or bonded automatically the first
+        // time the credentials produce an unclaimed session at RADIUS
+        // authorize. Nullable only to keep legacy rows loadable; enforcement
+        // treats NULL as "bond on first dial".
+        nasDeviceId: uuid('nas_device_id').references(() => nasDevice.id, {
+            onDelete: 'restrict',
+        }),
         normalizedPhone: text('normalized_phone').notNull(),
         username: text('username').notNull(),
         claimCodeHash: text('claim_code_hash'),
@@ -40,12 +49,12 @@ export const pppoeServiceAccounts = pgTable(
             .notNull(),
     },
     (table) => [
-        unique('pppoe_service_account_customer_tenant_key').on(
+        unique('pppoe_service_account_customer_nas_key').on(
             table.customerUserId,
-            table.tenantAdminId,
+            table.nasDeviceId,
         ),
-        unique('pppoe_service_account_tenant_phone_key').on(
-            table.tenantAdminId,
+        unique('pppoe_service_account_nas_phone_key').on(
+            table.nasDeviceId,
             table.normalizedPhone,
         ),
         unique('pppoe_service_account_claim_code_hash_key').on(
@@ -58,6 +67,7 @@ export const pppoeServiceAccounts = pgTable(
         ),
         index('pppoe_service_account_tenant_idx').on(table.tenantAdminId),
         index('pppoe_service_account_customer_idx').on(table.customerUserId),
+        index('pppoe_service_account_nas_idx').on(table.nasDeviceId),
     ],
 );
 
@@ -71,6 +81,10 @@ export const pppoeServiceAccountsRelations = relations(
         tenantAdmin: one(adminUser, {
             fields: [pppoeServiceAccounts.tenantAdminId],
             references: [adminUser.id],
+        }),
+        nas: one(nasDevice, {
+            fields: [pppoeServiceAccounts.nasDeviceId],
+            references: [nasDevice.id],
         }),
     }),
 );

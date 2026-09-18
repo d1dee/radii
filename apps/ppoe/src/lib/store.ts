@@ -8,12 +8,14 @@ import type {
 import { defaultAdminSettings } from '@radii/shared';
 import { useEffect, useSyncExternalStore } from 'react';
 import {
+    currentNasDeviceId,
     getClientData,
     getClients,
     getContacts,
     getPackages,
     getServiceConfig,
     getStatus,
+    setNasDeviceId,
     type Client,
 } from './api.ts';
 
@@ -32,10 +34,15 @@ type AccountSnapshot = {
 
 type QuotaSnapshot = { quota: Quota[]; loading: boolean };
 
+type ScopeSnapshot = { nasDeviceId: string | null };
+
 let portalSnapshot: PortalSnapshot = {
     client: undefined,
     packages: undefined,
     contacts: defaultAdminSettings.contacts,
+};
+let scopeSnapshot: ScopeSnapshot = {
+    nasDeviceId: currentNasDeviceId(),
 };
 let accountSnapshot: AccountSnapshot = {
     clients: [],
@@ -48,6 +55,7 @@ let quotaSnapshot: QuotaSnapshot = { quota: [], loading: true };
 const portalListeners = new Set<() => void>();
 const accountListeners = new Set<() => void>();
 const quotaListeners = new Set<() => void>();
+const scopeListeners = new Set<() => void>();
 let publicScope: string | null | undefined;
 let publicFlight: Promise<void> | null = null;
 let clientUserId: string | null | undefined;
@@ -82,6 +90,46 @@ const publishQuota = createPublisher(
     (value) => (quotaSnapshot = value),
     quotaListeners,
 );
+const publishScope = createPublisher(
+    () => scopeSnapshot,
+    (value) => (scopeSnapshot = value),
+    scopeListeners,
+);
+
+// Selects the network the whole portal is scoped to (packages, contacts,
+// payments). Persisted so the scope survives reloads after the ?nas= URL
+// parameter was cleaned up.
+export function setNasScope(nasDeviceId: string | null) {
+    if (scopeSnapshot.nasDeviceId === nasDeviceId) return;
+    setNasDeviceId(nasDeviceId);
+    publishScope({ nasDeviceId });
+    // A network change invalidates the NAS-scoped account availability and
+    // the quota of any account that does not belong to the new network.
+    if (accountSnapshot.clients.length > 0) {
+        const stillValid =
+            nasDeviceId !== null &&
+            accountSnapshot.clients.some(
+                (client) =>
+                    client.accountId === accountSnapshot.selectedAccountId &&
+                    client.nasDeviceId === nasDeviceId,
+            );
+        if (!stillValid) {
+            publishAccount({
+                selectedAccountId:
+                    accountSnapshot.clients.find(
+                        (client) => client.nasDeviceId === nasDeviceId,
+                    )?.accountId ?? accountSnapshot.selectedAccountId,
+            });
+        }
+    }
+}
+
+export function useNasScope() {
+    return useSyncExternalStore(
+        (listener) => subscribe(scopeListeners, listener),
+        () => scopeSnapshot,
+    );
+}
 
 function subscribe(listeners: Set<() => void>, listener: () => void) {
     listeners.add(listener);
@@ -161,11 +209,30 @@ export function refreshPppoeAccounts() {
                           (b.lastUsedAt ?? '').localeCompare(a.lastUsedAt ?? ''),
                   )
                 : accountSnapshot.clients;
+            // Prefer the account bound to the network this portal is scoped
+            // to; the account switcher doubles as the network selector.
+            const scope = scopeSnapshot.nasDeviceId;
             const selectedAccountId = nextClients.some(
                 (client) => client.accountId === accountSnapshot.selectedAccountId,
             )
                 ? accountSnapshot.selectedAccountId
-                : (nextClients[0]?.accountId ?? null);
+                : (nextClients.find((client) => client.nasDeviceId === scope)
+                      ?.accountId ??
+                  nextClients.find((client) => client.availableOnPortal)
+                      ?.accountId ??
+                  nextClients[0]?.accountId ??
+                  null);
+            // The portal has no network scope (external visit): adopt the
+            // network of the account the customer will manage by default —
+            // e.g. right after claiming admin-provisioned credentials.
+            if (scope === null && selectedAccountId) {
+                const selectedClient = nextClients.find(
+                    (client) => client.accountId === selectedAccountId,
+                );
+                if (selectedClient?.nasDeviceId) {
+                    setNasScope(selectedClient.nasDeviceId);
+                }
+            }
             if (selectedAccountId !== accountSnapshot.selectedAccountId) {
                 publishQuota({ quota: [], loading: Boolean(selectedAccountId) });
             }
@@ -217,15 +284,20 @@ export function refreshPppoeQuota(
     return quotaFlight;
 }
 
+// Selecting an account also selects its network: every PPPoE account is
+// bound to one NAS device, and packages/payments follow that scope.
 export function selectPppoeAccount(accountId: string) {
-    if (
-        accountId === accountSnapshot.selectedAccountId ||
-        !accountSnapshot.clients.some((client) => client.accountId === accountId)
-    ) {
-        return;
+    const client = accountSnapshot.clients.find(
+        (value) => value.accountId === accountId,
+    );
+    if (!client) return;
+    if (accountId !== accountSnapshot.selectedAccountId) {
+        publishAccount({ selectedAccountId: accountId });
+        publishQuota({ quota: [], loading: true });
     }
-    publishAccount({ selectedAccountId: accountId });
-    publishQuota({ quota: [], loading: true });
+    if (client.nasDeviceId && client.nasDeviceId !== scopeSnapshot.nasDeviceId) {
+        setNasScope(client.nasDeviceId);
+    }
 }
 
 export function usePppoePortal() {

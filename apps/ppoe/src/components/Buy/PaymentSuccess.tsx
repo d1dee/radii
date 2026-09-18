@@ -4,7 +4,7 @@ import type { OrderResult } from '../../lib/api.ts';
 import { refreshPppoeAccounts, usePppoeAccounts } from '../../lib/store.ts';
 
 import { IoMdDoneAll } from 'react-icons/io';
-import { CredentialsCard } from '../Credentials/CredentialsCard.tsx';
+import { CredentialsCard } from '../Credentials/PppoeAccountCard.tsx';
 
 export function PaymentSuccess({
     paymentData,

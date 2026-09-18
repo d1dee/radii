@@ -47,10 +47,24 @@ export function CurrentPackage() {
         ? `${thisDevice?.packageTitle} @ Ksh ${thisDevice?.price}`
         : '_';
 
+    if (!thisDevice) {
+        return (
+            <Paper shadow='xl' radius='lg' p='lg' withBorder key=''>
+                <Stack gap='sm'>
+                    <Text size='lg' fw={600}>
+                        Active Package Details
+                    </Text>
+
+                    <ConnectedDevice quota={quota} onOpen={open} />
+                </Stack>
+            </Paper>
+        );
+    }
+
     return (
         <>
             <Paper shadow='xl' radius='lg' p='lg' withBorder key=''>
-                <Stack gap='md'>
+                <Stack gap='sm'>
                     <Text size='lg' fw={600}>
                         Active Package Details
                     </Text>
