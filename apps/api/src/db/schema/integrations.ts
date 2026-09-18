@@ -1,5 +1,6 @@
 import { relations } from 'drizzle-orm';
 import {
+    boolean,
     index,
     inet,
     jsonb,
@@ -135,6 +136,10 @@ export const nasSetupScript = pgTable(
         // rows generated before the columns existed.
         pppoeInterface: text('pppoe_interface'),
         pppoeNetwork: text('pppoe_network'),
+        // Whether the generated script restricted RouterOS management
+        // services to the WireGuard management subnet. Nullable only for
+        // rows generated before the column existed.
+        ipLockdown: boolean('ip_lockdown'),
         // WireGuard public key reported by the device when the script runs.
         // Null until the report arrives; reset to null on regeneration
         // (the device generates a fresh keypair when re-running the script).

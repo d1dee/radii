@@ -249,71 +249,74 @@ export async function generateSetupScript(
     const wgServerPublicKey = env.wgServerPublicKey.trim();
     const reportUrl = `${env.apiUrl}/api/nas/${device.id}/report`;
 
-    const { script, pages } = renderMikrotikSetupScript({
-        NAS_ID: device.id,
-        NAS_NAME: device.name,
-        NAS_IDENTITY:
-            device.name.replace(/[^a-zA-Z0-9 ._-]/g, '').slice(0, 14) ||
-            (device.model ?? 'radii').slice(0, 14),
-        NAS_MODEL: device.model ?? 'auto-detected',
-        NAS_SERIAL: device.serialNumber ?? 'auto-detected',
-        NAS_LOCATION: device.location || '-',
-        GENERATED_AT: new Date().toISOString(),
-        RADIUS_SERVER: radiusServer,
-        RADIUS_SECRET: radiusSecret,
-        WG_LISTEN_PORT: String(env.wgListenPort),
-        WG_CLIENT_IP: wgClientIp,
-        WG_PREFIX_LEN: String(wgSubnet.prefixLen),
-        WG_ENDPOINT_HOST: wg.host,
-        WG_ENDPOINT_PORT: String(wg.port),
-        WG_SERVER_PUBLIC_KEY: wgServerPublicKey,
-        WG_PSK: wgPsk,
-        WG_ALLOWED_ADDRESS: `${wgInterfaceIp}/32`,
-        NAS_REPORT_URL: reportUrl,
-        REGISTRATION_TOKEN: registrationToken,
-        HOTSPOT_INTERFACE: input.hotspotInterface,
-        HOTSPOT_NETWORK: `${hs.network}/${hs.prefixLen}`,
-        HOTSPOT_GATEWAY: hs.gateway,
-        HOTSPOT_ADDRESS: hs.address,
-        HOTSPOT_POOL: hs.pool,
-        HOTSPOT_DNS_NAME: hotspotDnsName,
-        SHARED_USERS: '1',
-        PPP_INTERFACE: input.pppoeInterface,
-        PPP_NETWORK: `${pppoe.network}/${pppoe.prefixLen}`,
-        PPP_GATEWAY: pppoe.gateway,
-        PPP_ADDRESS: pppoe.address,
-        PPP_POOL: pppoe.pool,
-        PPP_SERVICE_NAME: 'radii-pppoe',
-        PPP_MTU: String(env.pppoe.mtu),
-        PPP_MRU: String(env.pppoe.mru),
-        PPP_INTERIM_UPDATE: `${env.radius.bankInterimSeconds}s`,
-        PPP_EXPIRED_RATE_LIMIT: env.pppoeExpiredRateLimit,
-        PPP_PORTAL_DOMAIN: pppoePortalDomain,
-        PPP_PORTAL_DOMAIN_IS_IP: /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(
-            pppoePortalDomain,
-        )
-            ? '1'
-            : '',
-        PPP_PORTAL_IP: pppoePortalIp,
-        PPP_PORTAL_REDIRECT_PORT: String(pppoeRedirectPort),
-        PPP_PORTAL_ALLOWED_TCP_PORTS: Array.from(allowedPppoePorts)
-            .sort((a, b) => a - b)
-            .join(','),
-        NTP_SERVERS: env.ntpServers,
-        BRAND_NAME: brandName,
-        PORTAL_URL: hotspotPortalUrl,
-        PORTAL_DOMAIN: portalDomain,
-        PORTAL_DOMAIN_IS_IP: /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(
-            portalDomain,
-        )
-            ? '1'
-            : '',
-        API_DOMAIN: apiDomain,
-        API_DOMAIN_IS_IP: /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(apiDomain)
-            ? '1'
-            : '',
-        API_BASE_URL: env.apiUrl,
-    });
+    const { script, pages } = renderMikrotikSetupScript(
+            {
+            NAS_ID: device.id,
+            NAS_NAME: device.name,
+            NAS_IDENTITY:
+                device.name.replace(/[^a-zA-Z0-9 ._-]/g, '').slice(0, 14) ||
+                (device.model ?? 'radii').slice(0, 14),
+            NAS_MODEL: device.model ?? 'auto-detected',
+            NAS_SERIAL: device.serialNumber ?? 'auto-detected',
+            NAS_LOCATION: device.location || '-',
+            GENERATED_AT: new Date().toISOString(),
+            RADIUS_SERVER: radiusServer,
+            RADIUS_SECRET: radiusSecret,
+            WG_LISTEN_PORT: String(env.wgListenPort),
+            WG_CLIENT_IP: wgClientIp,
+            WG_PREFIX_LEN: String(wgSubnet.prefixLen),
+            WG_ENDPOINT_HOST: wg.host,
+            WG_ENDPOINT_PORT: String(wg.port),
+            WG_SERVER_PUBLIC_KEY: wgServerPublicKey,
+            WG_PSK: wgPsk,
+            WG_ALLOWED_ADDRESS: `${wgInterfaceIp}/32`,
+            NAS_REPORT_URL: reportUrl,
+            REGISTRATION_TOKEN: registrationToken,
+            HOTSPOT_INTERFACE: input.hotspotInterface,
+            HOTSPOT_NETWORK: `${hs.network}/${hs.prefixLen}`,
+            HOTSPOT_GATEWAY: hs.gateway,
+            HOTSPOT_ADDRESS: hs.address,
+            HOTSPOT_POOL: hs.pool,
+            HOTSPOT_DNS_NAME: hotspotDnsName,
+            SHARED_USERS: '1',
+            PPP_INTERFACE: input.pppoeInterface,
+            PPP_NETWORK: `${pppoe.network}/${pppoe.prefixLen}`,
+            PPP_GATEWAY: pppoe.gateway,
+            PPP_ADDRESS: pppoe.address,
+            PPP_POOL: pppoe.pool,
+            PPP_SERVICE_NAME: 'radii-pppoe',
+            PPP_MTU: String(env.pppoe.mtu),
+            PPP_MRU: String(env.pppoe.mru),
+            PPP_INTERIM_UPDATE: `${env.radius.bankInterimSeconds}s`,
+            PPP_EXPIRED_RATE_LIMIT: env.pppoeExpiredRateLimit,
+            PPP_PORTAL_DOMAIN: pppoePortalDomain,
+            PPP_PORTAL_DOMAIN_IS_IP: /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(
+                pppoePortalDomain,
+            )
+                ? '1'
+                : '',
+            PPP_PORTAL_IP: pppoePortalIp,
+            PPP_PORTAL_REDIRECT_PORT: String(pppoeRedirectPort),
+            PPP_PORTAL_ALLOWED_TCP_PORTS: Array.from(allowedPppoePorts)
+                .sort((a, b) => a - b)
+                .join(','),
+            NTP_SERVERS: env.ntpServers,
+            BRAND_NAME: brandName,
+            PORTAL_URL: hotspotPortalUrl,
+            PORTAL_DOMAIN: portalDomain,
+            PORTAL_DOMAIN_IS_IP: /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(
+                portalDomain,
+            )
+                ? '1'
+                : '',
+            API_DOMAIN: apiDomain,
+            API_DOMAIN_IS_IP: /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(apiDomain)
+                ? '1'
+                : '',
+                API_BASE_URL: env.apiUrl,
+            },
+            { ipLockdown: input.ipLockdown },
+    );
 
     const [existing] = await db
         .select()
@@ -374,6 +377,7 @@ export async function generateSetupScript(
                     brandName: input.brandName ?? null,
                     pppoeInterface: input.pppoeInterface,
                     pppoeNetwork: input.pppoeNetwork,
+                    ipLockdown: input.ipLockdown,
                     wgPublicKey: null,
                     wgClientIp,
                     wgPsk,
@@ -399,6 +403,7 @@ export async function generateSetupScript(
                 brandName: input.brandName ?? null,
                 pppoeInterface: input.pppoeInterface,
                 pppoeNetwork: input.pppoeNetwork,
+                ipLockdown: input.ipLockdown,
                 wgPublicKey: null,
                 wgClientIp,
                 wgPsk,

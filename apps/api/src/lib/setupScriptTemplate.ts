@@ -221,6 +221,69 @@ $(endif)
     return { login, alogin, status, logout, error, radvert, redirect };
 }
 
+// Section 6, injected via {{IP_LOCKDOWN_SECTION}} only when IP service
+// lockdown is enabled in the generation options.
+const IP_LOCKDOWN_SECTION = `# ---------------------------------------------------------------------
+# 6. IP service lockdown
+# ---------------------------------------------------------------------
+
+# Disable legacy/unused services.
+:do { /ip/service/set [find where name="telnet"] disabled=yes; } on-error={};
+:do { /ip/service/set [find where name="ftp"] disabled=yes; } on-error={};
+
+# Management services are restricted to the WireGuard management subnet.\
+# The enabled/disabled state is explicitly set for the services required
+# by the radii configuration.\
+
+:do {
+    /ip/service/set [find where name="ssh"] \
+        disabled=no \
+        address={{WG_ALLOWED_ADDRESS}};
+} on-error={
+    $radiiLog "WARNING - SSH service not found/configured";
+};
+
+:do {
+    /ip/service/set [find where name="winbox"] \
+        disabled=no \
+        address={{WG_ALLOWED_ADDRESS}};
+} on-error={
+    $radiiLog "WARNING - Winbox service not found/configured";
+};
+
+:do {
+    /ip/service/set [find where name="api"] \
+        disabled=no \
+        address={{WG_ALLOWED_ADDRESS}};
+} on-error={
+    $radiiLog "WARNING - API service not found/configured";
+};
+
+:do {
+    /ip/service/set [find where name="api-ssl"] disabled=yes;
+} on-error={};
+
+:do {
+    /ip/service/set [find where name="www"] \
+        disabled=no \
+        address={{WG_ALLOWED_ADDRESS}};
+} on-error={
+    $radiiLog "WARNING - WebFig HTTP service not found/configured";
+};
+
+:do {
+    /ip/service/set [find where name="www-ssl"] disabled=yes;
+} on-error={};
+
+$radiiLog "IP management services restricted to {{WG_ALLOWED_ADDRESS}}";`;
+
+const IP_LOCKDOWN_DISABLED_SECTION = `# ---------------------------------------------------------------------
+# 6. IP service lockdown (skipped: disabled in generation options)
+# ---------------------------------------------------------------------
+
+$radiiLog "IP service lockdown skipped (disabled)";
+`;
+
 const TEMPLATE = `# =====================================================================
 #  radii NAS auto-configuration
 # =====================================================================
@@ -418,59 +481,7 @@ $radiiLog ("WireGuard public key: " . $wgPubKey);
 
 $radiiLog "WireGuard firewall access rules configured";
 
-# ---------------------------------------------------------------------
-# 6. IP service lockdown
-# ---------------------------------------------------------------------
-
-# Disable legacy/unused services.
-:do { /ip/service/set [find where name="telnet"] disabled=yes; } on-error={};
-:do { /ip/service/set [find where name="ftp"] disabled=yes; } on-error={};
-
-# Management services are restricted to the WireGuard management subnet.\
-# The enabled/disabled state is explicitly set for the services required
-# by the radii configuration.\
-
-:do {
-    /ip/service/set [find where name="ssh"] \
-        disabled=no \
-        address={{WG_ALLOWED_ADDRESS}};
-} on-error={
-    $radiiLog "WARNING - SSH service not found/configured";
-};
-
-:do {
-    /ip/service/set [find where name="winbox"] \
-        disabled=no \
-        address={{WG_ALLOWED_ADDRESS}};
-} on-error={
-    $radiiLog "WARNING - Winbox service not found/configured";
-};
-
-:do {
-    /ip/service/set [find where name="api"] \
-        disabled=no \
-        address={{WG_ALLOWED_ADDRESS}};
-} on-error={
-    $radiiLog "WARNING - API service not found/configured";
-};
-
-:do {
-    /ip/service/set [find where name="api-ssl"] disabled=yes;
-} on-error={};
-
-:do {
-    /ip/service/set [find where name="www"] \
-        disabled=no \
-        address={{WG_ALLOWED_ADDRESS}};
-} on-error={
-    $radiiLog "WARNING - WebFig HTTP service not found/configured";
-};
-
-:do {
-    /ip/service/set [find where name="www-ssl"] disabled=yes;
-} on-error={};
-
-$radiiLog "IP management services restricted to {{WG_ALLOWED_ADDRESS}}";
+{{IP_LOCKDOWN_SECTION}}
 
 # ---------------------------------------------------------------------
 # 7. Report device facts + WireGuard public key
@@ -1276,7 +1287,10 @@ $radiiLog (\
 :put ("radii: WireGuard public key (peer on the radii server): " . $wgPubKey);
 `;
 
-export function renderMikrotikSetupScript(vars: Record<string, string>): {
+export function renderMikrotikSetupScript(
+    vars: Record<string, string>,
+    options?: { ipLockdown?: boolean },
+): {
     script: string;
     pages: Record<string, string>;
 } {
@@ -1285,7 +1299,11 @@ export function renderMikrotikSetupScript(vars: Record<string, string>): {
         vars.API_BASE_URL,
         vars.NAS_ID,
     );
-    let out = TEMPLATE;
+    let out = TEMPLATE.split('{{IP_LOCKDOWN_SECTION}}').join(
+        options?.ipLockdown === false
+            ? IP_LOCKDOWN_DISABLED_SECTION
+            : IP_LOCKDOWN_SECTION,
+    );
     for (const [key, value] of Object.entries(vars)) {
         out = out.split(`{{${key}}}`).join(value);
     }

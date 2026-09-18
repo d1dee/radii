@@ -887,6 +887,9 @@ export type NasSetupScriptRow = {
     // generated before the options were persisted.
     pppoeInterface: string | null;
     pppoeNetwork: string | null;
+    // Whether management services were locked down to the WireGuard subnet;
+    // null for rows generated before the option was persisted.
+    ipLockdown: boolean | null;
     wgKeyReportedAt: string | null;
     status: NasSetupScriptStatus;
     generatedAt: string;

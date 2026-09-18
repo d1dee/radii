@@ -12,6 +12,7 @@ import {
     Select,
     SimpleGrid,
     Stack,
+    Switch,
     Table,
     Text,
     TextInput,
@@ -99,6 +100,7 @@ export default function NasDevicesPage() {
             brandName: '',
             pppoeInterface: 'ether3',
             pppoeNetwork: '10.101.0.0/16',
+            ipLockdown: true,
         },
         validate: schemaResolver(generateSetupScriptSchema),
     });
@@ -167,6 +169,7 @@ export default function NasDevicesPage() {
             brandName: row?.brandName ?? device.name,
             pppoeInterface: row?.pppoeInterface ?? 'ether3',
             pppoeNetwork: row?.pppoeNetwork ?? '10.101.0.0/16',
+            ipLockdown: row?.ipLockdown ?? true,
         });
     };
 
@@ -498,6 +501,13 @@ export default function NasDevicesPage() {
                                 description='IPv4 CIDR for the PPPoE client address pool'
                                 placeholder='10.101.0.0/16'
                                 {...form.getInputProps('pppoeNetwork')}
+                            />
+                            <Switch
+                                label='IP service lockdown'
+                                description='Restrict SSH, Winbox, API and WebFig to the WireGuard management subnet and disable telnet, FTP, api-ssl and www-ssl'
+                                {...form.getInputProps('ipLockdown', {
+                                    type: 'checkbox',
+                                })}
                             />
                             <Button type='submit' loading={scriptBusy}>
                                 Generate setup script

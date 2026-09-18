@@ -92,6 +92,9 @@ export const generateSetupScriptSchema = z.object({
             'Must be an IPv4 network in CIDR form, e.g. 10.101.0.0/16',
         )
         .default('10.101.0.0/16'),
+    // Restrict RouterOS management services (ssh/winbox/api/www) to the
+    // WireGuard management subnet and disable telnet/ftp/api-ssl/www-ssl.
+    ipLockdown: z.boolean().default(true),
 });
 
 export type GenerateSetupScriptInput = z.infer<
