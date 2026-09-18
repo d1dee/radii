@@ -50,6 +50,7 @@ import { radiusClient } from '../lib/radius';
 import {
     getPppoeAccountAdminDetail,
     provisionPppoeAccountByPhone,
+    setPppoeAccountLabel,
 } from '../lib/pppoeAccounts';
 import {
     buildBootstrapScript,
@@ -618,6 +619,91 @@ app.put('/pppoe-accounts/:id/nas', requireAdmin, async (c) => {
     }
 });
 
+// Status toggle: suspended/closed accounts are rejected at RADIUS authorize
+// and skipped by portal provisioning, and suspending/closing cuts live
+// sessions immediately. Reactivating (status=active) leaves sessions alone.
+const pppoeStatusSchema = z.object({
+    status: z.enum(['active', 'suspended', 'closed']),
+});
+
+app.put('/pppoe-accounts/:id/status', requireAdmin, async (c) => {
+    const id = c.req.param('id');
+    if (!id) return jsonError(c, 404, 'PPPoE account not found');
+    const parsed = pppoeStatusSchema.safeParse(
+        await c.req.json().catch(() => ({})),
+    );
+    if (!parsed.success) return jsonError(c, 400, 'Invalid status');
+    try {
+        const data = await radiusClient.setPppoeAccountStatus(
+            id,
+            parsed.data.status,
+            c.get('adminSession').userId,
+        );
+        const label =
+            data.status === 'active'
+                ? 'Account reactivated'
+                : data.status === 'suspended'
+                  ? 'Account suspended'
+                  : 'Account closed';
+        return c.json({
+            success: true,
+            message:
+                data.sessionsDisconnected > 0
+                    ? `${label}; ${data.sessionsDisconnected} live session(s) disconnected`
+                    : label,
+            data,
+        });
+    } catch (err) {
+        console.error('[radius] admin pppoe status change failed:', err);
+        return jsonError(c, 502, 'Could not update the PPPoE account');
+    }
+});
+
+// Force-cuts an account's live PPP sessions without changing its status or
+// credentials; the customer can re-dial straight away.
+app.post('/pppoe-accounts/:id/disconnect', requireAdmin, async (c) => {
+    const id = c.req.param('id');
+    if (!id) return jsonError(c, 404, 'PPPoE account not found');
+    try {
+        const data = await radiusClient.disconnectPppoeAccount(
+            id,
+            c.get('adminSession').userId,
+        );
+        return c.json({
+            success: true,
+            message:
+                data.sessionsDisconnected > 0
+                    ? `${data.sessionsDisconnected} live session(s) disconnected`
+                    : 'No live sessions to disconnect',
+            data,
+        });
+    } catch (err) {
+        console.error('[radius] admin pppoe disconnect failed:', err);
+        return jsonError(c, 502, 'Could not disconnect the PPPoE sessions');
+    }
+});
+
+// Renames the admin's private label on the account (empty/null clears it).
+const pppoeLabelSchema = z.object({
+    label: z.string().trim().max(80).nullish(),
+});
+
+app.put('/pppoe-accounts/:id/label', requireAdmin, async (c) => {
+    const id = c.req.param('id');
+    if (!id) return jsonError(c, 404, 'PPPoE account not found');
+    const parsed = pppoeLabelSchema.safeParse(
+        await c.req.json().catch(() => ({})),
+    );
+    if (!parsed.success) return jsonError(c, 400, 'Invalid label payload');
+    const data = await setPppoeAccountLabel(
+        id,
+        c.get('adminSession').userId,
+        parsed.data.label || null,
+    );
+    if (!data) return jsonError(c, 404, 'PPPoE account not found');
+    return c.json({ success: true, data });
+});
+
 // Provisioned-account detail view, scoped to the provisioning admin's tenant.
 app.get('/pppoe-accounts/:id', requireAdmin, async (c) => {
     const id = c.req.param('id');
@@ -685,11 +771,19 @@ app.get('/payments', requireAdmin, async (c) => {
     ) {
         return jsonError(c, 400, 'Invalid date range');
     }
+    const pppoeAccountIdParam = c.req.query('pppoeAccountId');
+    if (
+        pppoeAccountIdParam &&
+        !z.uuid().safeParse(pppoeAccountIdParam).success
+    ) {
+        return jsonError(c, 400, 'Invalid PPPoE account filter');
+    }
     const page = Number(c.req.query('page') ?? 1);
     const perPage = Number(c.req.query('perPage') ?? 50);
     const data = await listPayments({
         adminId: c.get('adminSession').userId,
         status: statusParam as 'pending' | 'paid' | 'failed' | undefined,
+        pppoeAccountId: pppoeAccountIdParam || undefined,
         q: c.req.query('q')?.trim() || undefined,
         from,
         to,

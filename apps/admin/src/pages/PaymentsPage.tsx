@@ -1,4 +1,5 @@
 import {
+    ActionIcon,
     Badge,
     Card,
     Center,
@@ -16,7 +17,8 @@ import {
 import { DateInput } from '@mantine/dates';
 import { useDebouncedValue } from '@mantine/hooks';
 import { useCallback, useEffect, useState } from 'react';
-import { MdSearch } from 'react-icons/md';
+import { useSearchParams } from 'react-router-dom';
+import { MdClose, MdSearch } from 'react-icons/md';
 
 import { PaymentDetailsDrawer } from '@/components/Payments/PaymentDetailsDrawer';
 import {
@@ -52,6 +54,15 @@ function SummaryCard({ label, value }: { label: string; value: string }) {
 }
 
 export default function PaymentsPage() {
+    // Deep links (e.g. "View payments" from a PPPoE account card) filter the
+    // log to one account via /payments?pppoeAccountId=<id>.
+    const [searchParams, setSearchParams] = useSearchParams();
+    const pppoeAccountId = searchParams.get('pppoeAccountId') ?? undefined;
+    const clearPppoeFilter = () => {
+        const next = new URLSearchParams(searchParams);
+        next.delete('pppoeAccountId');
+        setSearchParams(next, { replace: true });
+    };
     const { settings, loaded } = useAdminSettings();
     const perPage = settings.dashboard.perPage;
     const [data, setData] = useState<AdminPaymentList | null>(null);
@@ -75,6 +86,7 @@ export default function PaymentsPage() {
             const res = await getAdminPayments({
                 status: (status as PackagePaymentStatus) || undefined,
                 q: debouncedSearch.trim() || undefined,
+                pppoeAccountId,
                 from: from ? from.toISOString() : undefined,
                 to: to ? dayjs(to).endOf('day').toISOString() : undefined,
                 page: pageToLoad,
@@ -92,12 +104,12 @@ export default function PaymentsPage() {
             setError(null);
             setData(res.data);
         },
-        [status, debouncedSearch, from, to, perPage],
+        [status, debouncedSearch, pppoeAccountId, from, to, perPage],
     );
 
     useEffect(() => {
         setPage(1);
-    }, [status, debouncedSearch, from, to, perPage]);
+    }, [status, debouncedSearch, pppoeAccountId, from, to, perPage]);
 
     useEffect(() => {
         if (!loaded) return;
@@ -159,6 +171,25 @@ export default function PaymentsPage() {
                         ]}
                         w={140}
                     />
+                    {pppoeAccountId && (
+                        <Badge
+                            variant='light'
+                            color='blue'
+                            size='lg'
+                            rightSection={
+                                <ActionIcon
+                                    size='xs'
+                                    variant='transparent'
+                                    aria-label='Clear PPPoE account filter'
+                                    onClick={clearPppoeFilter}
+                                >
+                                    <MdClose size={14} />
+                                </ActionIcon>
+                            }
+                        >
+                            PPPoE account
+                        </Badge>
+                    )}
                     <DateInput
                         placeholder='Date From'
                         value={from}

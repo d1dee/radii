@@ -14,6 +14,7 @@ import {
     Loader,
     Modal,
     NumberInput,
+    Select,
     Stack,
     Table,
     Tabs,
@@ -25,18 +26,23 @@ import {
 } from '@mantine/core';
 import type { ReactNode } from 'react';
 import { useCallback, useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
     MdBlock,
     MdCheckCircle,
+    MdClose,
     MdContentCopy,
     MdDelete,
     MdEdit,
     MdFlag,
     MdLockReset,
+    MdOpenInNew,
     MdPowerSettingsNew,
     MdRefresh,
+    MdSwapHoriz,
     MdVisibility,
     MdVisibilityOff,
+    MdWifiTetheringOff,
 } from 'react-icons/md';
 
 import {
@@ -44,16 +50,24 @@ import {
     addUserFlag,
     banUser,
     deactivateActivation,
+    disconnectPppoeAccountSessions,
     getAdminUser,
+    getNasDevices,
     getUserActivations,
     getUserPayments,
+    migratePppoeAccountNas,
     removeUserFlag,
+    setPppoeAccountLabel,
+    setPppoeAccountStatus,
     setPppoePassword,
     setUserTag,
     unbanUser,
     updateActivation,
     type AdminActivationRow,
+    type AdminPppoeAccount,
     type AdminUserDetail,
+    type NasDeviceRow,
+    type PppoeAccountStatus,
     type UserPaymentRow,
 } from '@/lib/api';
 import { dayjs } from '@/lib/dayjs';
@@ -144,6 +158,22 @@ export function UserDetailsDrawer({
     const [tagModal, setTagModal] = useState(false);
     const [tagName, setTagName] = useState('');
     const [tagLocation, setTagLocation] = useState('');
+    const [pppoeNasModal, setPppoeNasModal] =
+        useState<AdminPppoeAccount | null>(null);
+    const [nasDevices, setNasDevices] = useState<NasDeviceRow[] | null>(null);
+    const [pppoeTargetNasId, setPppoeTargetNasId] = useState<string | null>(
+        null,
+    );
+    const [pppoeStatusModal, setPppoeStatusModal] = useState<{
+        account: AdminPppoeAccount;
+        status: PppoeAccountStatus;
+    } | null>(null);
+    const [pppoeDisconnectModal, setPppoeDisconnectModal] =
+        useState<AdminPppoeAccount | null>(null);
+    const [pppoeLabelModal, setPppoeLabelModal] =
+        useState<AdminPppoeAccount | null>(null);
+    const [pppoeLabelValue, setPppoeLabelValue] = useState('');
+    const navigate = useNavigate();
 
     const loadDetail = useCallback(async (id: string) => {
         setError(null);
@@ -183,6 +213,10 @@ export function UserDetailsDrawer({
         setShowPassword(false);
         setSelectedPppoeAccountId(null);
         setTagModal(false);
+        setPppoeNasModal(null);
+        setPppoeStatusModal(null);
+        setPppoeDisconnectModal(null);
+        setPppoeLabelModal(null);
         void loadDetail(userId);
     }, [userId, loadDetail]);
 
@@ -335,6 +369,109 @@ export function UserDetailsDrawer({
         }
     };
 
+    const openNasModal = (account: AdminPppoeAccount) => {
+        setPppoeTargetNasId(account.nasDeviceId);
+        setPppoeNasModal(account);
+        if (!nasDevices) {
+            void (async () => {
+                const res = await getNasDevices();
+                if (res.success && res.data) setNasDevices(res.data);
+            })();
+        }
+    };
+
+    const submitNasMigration = async () => {
+        if (!userId || !pppoeNasModal || !pppoeTargetNasId) return;
+        setBusy(true);
+        const res = await migratePppoeAccountNas(
+            pppoeNasModal.id,
+            pppoeTargetNasId,
+        );
+        setBusy(false);
+        notifyResult(
+            res,
+            res.success && res.data && res.data.sessionsDisconnected > 0
+                ? `Moved to the new network; ${res.data.sessionsDisconnected} live session(s) disconnected`
+                : 'Moved to the new network',
+        );
+        if (res.success) {
+            setPppoeNasModal(null);
+            void loadDetail(userId);
+        }
+    };
+
+    const submitPppoeStatus = async () => {
+        if (!userId || !pppoeStatusModal) return;
+        setBusy(true);
+        const res = await setPppoeAccountStatus(
+            pppoeStatusModal.account.id,
+            pppoeStatusModal.status,
+        );
+        setBusy(false);
+        const label =
+            pppoeStatusModal.status === 'active'
+                ? 'Account reactivated'
+                : pppoeStatusModal.status === 'suspended'
+                  ? 'Account suspended'
+                  : 'Account closed';
+        notifyResult(
+            res,
+            res.success && res.data && res.data.sessionsDisconnected > 0
+                ? `${label}; ${res.data.sessionsDisconnected} live session(s) disconnected`
+                : label,
+        );
+        if (res.success) {
+            setPppoeStatusModal(null);
+            void loadDetail(userId);
+        }
+    };
+
+    const submitPppoeDisconnect = async () => {
+        if (!userId || !pppoeDisconnectModal) return;
+        setBusy(true);
+        const res = await disconnectPppoeAccountSessions(
+            pppoeDisconnectModal.id,
+        );
+        setBusy(false);
+        notifyResult(
+            res,
+            res.success && res.data && res.data.sessionsDisconnected > 0
+                ? `${res.data.sessionsDisconnected} live session(s) disconnected`
+                : 'No live sessions to disconnect',
+        );
+        if (res.success) {
+            setPppoeDisconnectModal(null);
+            void loadDetail(userId);
+        }
+    };
+
+    const submitPppoeLabel = async () => {
+        if (!userId || !pppoeLabelModal) return;
+        setBusy(true);
+        const res = await setPppoeAccountLabel(
+            pppoeLabelModal.id,
+            pppoeLabelValue.trim() || null,
+        );
+        setBusy(false);
+        notifyResult(res, 'Label saved');
+        if (res.success) {
+            setPppoeLabelModal(null);
+            void loadDetail(userId);
+        }
+    };
+
+    // Deep-links into the payments / sessions logs pre-filtered to one
+    // account; closes the drawer so the destination page is visible.
+    const viewPppoePayments = (account: AdminPppoeAccount) => {
+        onClose();
+        navigate(`/payments?pppoeAccountId=${account.id}`);
+    };
+
+    const viewPppoeSessions = (account: AdminPppoeAccount) => {
+        onClose();
+        navigate(`/sessions?q=${encodeURIComponent(account.username)}`);
+    };
+
     const avgPerPurchase =
         detail && detail.payments.paid > 0
             ? detail.payments.revenue / detail.payments.paid
@@ -402,6 +539,53 @@ export function UserDetailsDrawer({
                         <Text size='sm' c='red'>
                             Ban reason: {detail.banReason}
                         </Text>
+                    ) : null}
+
+                    {detail.pinResetOtp ? (
+                        <Card withBorder padding='sm' radius='md'>
+                            <Group justify='space-between' wrap='wrap'>
+                                <Group gap='xs'>
+                                    <MdLockReset size={16} color='orange' />
+                                    <Text size='sm' fw={600}>
+                                        Pending PIN reset code
+                                    </Text>
+                                    <Badge
+                                        color='orange'
+                                        variant='light'
+                                        size='sm'
+                                    >
+                                        debug
+                                    </Badge>
+                                </Group>
+                                <Group gap={4}>
+                                    <Text size='lg' fw={700} ff='monospace'>
+                                        {detail.pinResetOtp}
+                                    </Text>
+                                    <CopyButton value={detail.pinResetOtp}>
+                                        {({ copy }) => (
+                                            <ActionIcon
+                                                variant='subtle'
+                                                aria-label='Copy PIN reset code'
+                                                onClick={copy}
+                                            >
+                                                <MdContentCopy size={14} />
+                                            </ActionIcon>
+                                        )}
+                                    </CopyButton>
+                                </Group>
+                            </Group>
+                            <Text size='xs' c='dimmed' mt={4}>
+                                SMS delivery is not integrated yet — give this
+                                code to the customer so they can complete the
+                                forget-PIN flow. Expires{' '}
+                                {detail.pinResetOtpExpiresAt
+                                    ? dayjs(
+                                          detail.pinResetOtpExpiresAt,
+                                      ).fromNow()
+                                    : 'soon'}
+                                .
+                            </Text>
+                        </Card>
                     ) : null}
 
                     <Group>
@@ -1001,36 +1185,195 @@ export function UserDetailsDrawer({
                                                             </Group>
                                                         }
                                                     />
-                                                    <Group align='center'>
-                                                        <Button
-                                                            size='xs'
-                                                            variant='light'
-                                                            leftSection={
-                                                                <MdLockReset
-                                                                    size={14}
-                                                                />
-                                                            }
-                                                            onClick={() => {
-                                                                setPppoeNewPassword(
-                                                                    '',
-                                                                );
-                                                                setSelectedPppoeAccountId(
-                                                                    account.id,
-                                                                );
-                                                            }}
+                                                    <Stack gap={6}>
+                                                        <Group
+                                                            gap='xs'
+                                                            wrap='wrap'
                                                         >
-                                                            Change / rotate password
-                                                        </Button>
+                                                            <Button
+                                                                size='xs'
+                                                                variant='light'
+                                                                leftSection={
+                                                                    <MdLockReset
+                                                                        size={14}
+                                                                    />
+                                                                }
+                                                                onClick={() => {
+                                                                    setPppoeNewPassword(
+                                                                        '',
+                                                                    );
+                                                                    setSelectedPppoeAccountId(
+                                                                        account.id,
+                                                                    );
+                                                                }}
+                                                            >
+                                                                Change / rotate
+                                                                password
+                                                            </Button>
+                                                            <Button
+                                                                size='xs'
+                                                                variant='light'
+                                                                leftSection={
+                                                                    <MdSwapHoriz
+                                                                        size={14}
+                                                                    />
+                                                                }
+                                                                onClick={() =>
+                                                                    openNasModal(
+                                                                        account,
+                                                                    )
+                                                                }
+                                                            >
+                                                                Reassign network
+                                                            </Button>
+                                                            <Button
+                                                                size='xs'
+                                                                variant='light'
+                                                                leftSection={
+                                                                    <MdEdit
+                                                                        size={14}
+                                                                    />
+                                                                }
+                                                                onClick={() => {
+                                                                    setPppoeLabelValue(
+                                                                        account.label ??
+                                                                            '',
+                                                                    );
+                                                                    setPppoeLabelModal(
+                                                                        account,
+                                                                    );
+                                                                }}
+                                                            >
+                                                                Edit label
+                                                            </Button>
+                                                            <Button
+                                                                size='xs'
+                                                                variant='light'
+                                                                leftSection={
+                                                                    <MdWifiTetheringOff
+                                                                        size={14}
+                                                                    />
+                                                                }
+                                                                onClick={() =>
+                                                                    setPppoeDisconnectModal(
+                                                                        account,
+                                                                    )
+                                                                }
+                                                            >
+                                                                Disconnect sessions
+                                                            </Button>
+                                                            {account.status ===
+                                                            'active' ? (
+                                                                <>
+                                                                    <Button
+                                                                        size='xs'
+                                                                        variant='light'
+                                                                        color='orange'
+                                                                        leftSection={
+                                                                            <MdBlock
+                                                                                size={14}
+                                                                            />
+                                                                        }
+                                                                        onClick={() =>
+                                                                            setPppoeStatusModal(
+                                                                                {
+                                                                                    account,
+                                                                                    status: 'suspended',
+                                                                                },
+                                                                            )
+                                                                        }
+                                                                    >
+                                                                        Suspend
+                                                                    </Button>
+                                                                    <Button
+                                                                        size='xs'
+                                                                        variant='light'
+                                                                        color='red'
+                                                                        leftSection={
+                                                                            <MdClose
+                                                                                size={14}
+                                                                            />
+                                                                        }
+                                                                        onClick={() =>
+                                                                            setPppoeStatusModal(
+                                                                                {
+                                                                                    account,
+                                                                                    status: 'closed',
+                                                                                },
+                                                                            )
+                                                                        }
+                                                                    >
+                                                                        Close
+                                                                    </Button>
+                                                                </>
+                                                            ) : (
+                                                                <Button
+                                                                    size='xs'
+                                                                    variant='light'
+                                                                    color='green'
+                                                                    leftSection={
+                                                                        <MdCheckCircle
+                                                                            size={14}
+                                                                        />
+                                                                    }
+                                                                    onClick={() =>
+                                                                        setPppoeStatusModal(
+                                                                            {
+                                                                                account,
+                                                                                status: 'active',
+                                                                            },
+                                                                        )
+                                                                    }
+                                                                >
+                                                                    Reactivate
+                                                                </Button>
+                                                            )}
+                                                            <Button
+                                                                size='xs'
+                                                                variant='subtle'
+                                                                rightSection={
+                                                                    <MdOpenInNew
+                                                                        size={14}
+                                                                    />
+                                                                }
+                                                                onClick={() =>
+                                                                    viewPppoePayments(
+                                                                        account,
+                                                                    )
+                                                                }
+                                                            >
+                                                                View payments
+                                                            </Button>
+                                                            <Button
+                                                                size='xs'
+                                                                variant='subtle'
+                                                                rightSection={
+                                                                    <MdOpenInNew
+                                                                        size={14}
+                                                                    />
+                                                                }
+                                                                onClick={() =>
+                                                                    viewPppoeSessions(
+                                                                        account,
+                                                                    )
+                                                                }
+                                                            >
+                                                                View sessions
+                                                            </Button>
+                                                        </Group>
                                                         <Text
                                                             size='xs'
                                                             c='dimmed'
                                                         >
-                                                            Changing the password
-                                                            disconnects live PPP
-                                                            sessions for this
-                                                            account.
+                                                            Rotating the
+                                                            password, reassigning
+                                                            the network,
+                                                            suspending or closing
+                                                            the account all
+                                                            disconnect its live
+                                                            PPP sessions.
                                                         </Text>
-                                                    </Group>
+                                                    </Stack>
                                                 </Stack>
                                             </Card>
                                         );
@@ -1233,6 +1576,158 @@ export function UserDetailsDrawer({
                         loading={busy}
                     >
                         Save password
+                    </Button>
+                </Stack>
+            </Modal>
+
+            <Modal
+                opened={pppoeNasModal !== null}
+                onClose={() => setPppoeNasModal(null)}
+                title='Reassign PPPoE network'
+                centered
+            >
+                <Stack>
+                    <Text size='sm' c='dimmed'>
+                        The account keeps its username, password and package
+                        history, but dials through the new router. Live PPP
+                        sessions are cut so the customer reconnects on the new
+                        network.
+                    </Text>
+                    <Select
+                        label='NAS device'
+                        placeholder={
+                            nasDevices === null ? 'Loading devices…' : 'Pick a network'
+                        }
+                        data={(nasDevices ?? []).map((device) => ({
+                            value: device.id,
+                            label: device.location
+                                ? `${device.name} — ${device.location}`
+                                : device.name,
+                        }))}
+                        value={pppoeTargetNasId}
+                        onChange={setPppoeTargetNasId}
+                        searchable
+                    />
+                    <Group justify='flex-end'>
+                        <Button
+                            variant='default'
+                            onClick={() => setPppoeNasModal(null)}
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            loading={busy}
+                            disabled={
+                                !pppoeTargetNasId ||
+                                pppoeTargetNasId === pppoeNasModal?.nasDeviceId
+                            }
+                            onClick={() => void submitNasMigration()}
+                        >
+                            Move account
+                        </Button>
+                    </Group>
+                </Stack>
+            </Modal>
+
+            <Modal
+                opened={pppoeStatusModal !== null}
+                onClose={() => setPppoeStatusModal(null)}
+                title={
+                    pppoeStatusModal?.status === 'active'
+                        ? 'Reactivate PPPoE account'
+                        : pppoeStatusModal?.status === 'suspended'
+                          ? 'Suspend PPPoE account'
+                          : 'Close PPPoE account'
+                }
+                centered
+            >
+                <Stack>
+                    <Text size='sm'>
+                        {pppoeStatusModal?.status === 'active'
+                            ? 'The account can dial in and buy packages again. Nothing is reconnected automatically — the customer re-dials with the same credentials.'
+                            : pppoeStatusModal?.status === 'suspended'
+                              ? 'The account is rejected at RADIUS and hidden from portal purchases until you reactivate it. Live PPP sessions are disconnected now. Use this for temporary blocks (e.g. payment disputes).'
+                              : 'The account is rejected at RADIUS and hidden from portal purchases. Closing is meant to be permanent — prefer suspend for temporary blocks. Live PPP sessions are disconnected now.'}
+                    </Text>
+                    <Group justify='flex-end'>
+                        <Button
+                            variant='default'
+                            onClick={() => setPppoeStatusModal(null)}
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            loading={busy}
+                            color={
+                                pppoeStatusModal?.status === 'active'
+                                    ? 'green'
+                                    : pppoeStatusModal?.status === 'suspended'
+                                      ? 'orange'
+                                      : 'red'
+                            }
+                            onClick={() => void submitPppoeStatus()}
+                        >
+                            {pppoeStatusModal?.status === 'active'
+                                ? 'Reactivate'
+                                : pppoeStatusModal?.status === 'suspended'
+                                  ? 'Suspend'
+                                  : 'Close'}
+                        </Button>
+                    </Group>
+                </Stack>
+            </Modal>
+
+            <Modal
+                opened={pppoeDisconnectModal !== null}
+                onClose={() => setPppoeDisconnectModal(null)}
+                title='Disconnect PPPoE sessions'
+                centered
+            >
+                <Stack>
+                    <Text size='sm'>
+                        Sends a RADIUS Disconnect-Request for every live session
+                        of {pppoeDisconnectModal?.username}. The account and its
+                        packages are untouched; the customer can re-dial
+                        immediately.
+                    </Text>
+                    <Group justify='flex-end'>
+                        <Button
+                            variant='default'
+                            onClick={() => setPppoeDisconnectModal(null)}
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            color='red'
+                            loading={busy}
+                            onClick={() => void submitPppoeDisconnect()}
+                        >
+                            Disconnect
+                        </Button>
+                    </Group>
+                </Stack>
+            </Modal>
+
+            <Modal
+                opened={pppoeLabelModal !== null}
+                onClose={() => setPppoeLabelModal(null)}
+                title='Edit PPPoE account label'
+                centered
+            >
+                <Stack>
+                    <Text size='sm' c='dimmed'>
+                        Private name for this line, only visible to you. Leave
+                        empty to clear it.
+                    </Text>
+                    <TextInput
+                        label='Label'
+                        placeholder='e.g. Home line, Shop router'
+                        value={pppoeLabelValue}
+                        onChange={(e) => setPppoeLabelValue(e.currentTarget.value)}
+                        maxLength={80}
+                    />
+                    <Button onClick={() => void submitPppoeLabel()} loading={busy}>
+                        Save label
                     </Button>
                 </Stack>
             </Modal>

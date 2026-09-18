@@ -1104,6 +1104,68 @@ export class RadiusClient {
         return { username: account.username, sessionsDisconnected };
     }
 
+    // Admin status toggle for a provisioned account. Suspended/closed accounts
+    // are rejected at RADIUS authorize and skipped by portal provisioning;
+    // suspending or closing cuts live sessions so the change is immediate.
+    async setPppoeAccountStatus(
+        accountId: string,
+        status: 'active' | 'suspended' | 'closed',
+        adminId: string,
+    ): Promise<{
+        username: string;
+        status: 'active' | 'suspended' | 'closed';
+        sessionsDisconnected: number;
+    }> {
+        const [account] = await db
+            .select()
+            .from(pppoeServiceAccounts)
+            .where(
+                and(
+                    eq(pppoeServiceAccounts.id, accountId),
+                    eq(pppoeServiceAccounts.tenantAdminId, adminId),
+                ),
+            )
+            .limit(1);
+        if (!account) throw new RadiusError('Unknown PPPoE account');
+        // Status first so a re-dial racing the disconnect is already rejected.
+        await db
+            .update(pppoeServiceAccounts)
+            .set({ status })
+            .where(eq(pppoeServiceAccounts.id, accountId));
+        const sessionsDisconnected =
+            status === 'active'
+                ? 0
+                : await this.disconnectLivePppoeSessions(account.username);
+        return {
+            username: account.username,
+            status,
+            sessionsDisconnected,
+        };
+    }
+
+    // Force-cuts the account's live PPP sessions without touching status,
+    // credentials or provisioning (the customer can re-dial immediately).
+    async disconnectPppoeAccount(
+        accountId: string,
+        adminId: string,
+    ): Promise<{ username: string; sessionsDisconnected: number }> {
+        const [account] = await db
+            .select()
+            .from(pppoeServiceAccounts)
+            .where(
+                and(
+                    eq(pppoeServiceAccounts.id, accountId),
+                    eq(pppoeServiceAccounts.tenantAdminId, adminId),
+                ),
+            )
+            .limit(1);
+        if (!account) throw new RadiusError('Unknown PPPoE account');
+        const sessionsDisconnected = await this.disconnectLivePppoeSessions(
+            account.username,
+        );
+        return { username: account.username, sessionsDisconnected };
+    }
+
     // A wrong-NAS dial is operator-visible state: flag the customer for the
     // owning admin tenant (shown in the admin moderation views) and log the
     // attempt. Unclaimed accounts have no user row to flag, so those are only

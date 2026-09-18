@@ -17,6 +17,7 @@ import {
 } from '@mantine/core';
 import { useDebouncedValue } from '@mantine/hooks';
 import { useCallback, useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { MdDelete, MdEdit, MdRefresh, MdSearch } from 'react-icons/md';
 
 import { SessionDetailsDrawer } from '@/components/Sessions/SessionDetailsDrawer';
@@ -37,13 +38,16 @@ import {
 import { notifyResult } from '@/lib/notify';
 
 export default function SessionsPage() {
+    // Deep links (e.g. "View sessions" from a PPPoE account card) seed the
+    // search box via /sessions?q=<username>.
+    const [searchParams] = useSearchParams();
     const [sessions, setSessions] = useState<SessionInfo[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [lastLoaded, setLastLoaded] = useState<Date | null>(null);
     const [detailsId, setDetailsId] = useState<string | null>(null);
 
-    const [search, setSearch] = useState('');
+    const [search, setSearch] = useState(searchParams.get('q') ?? '');
     const [debouncedSearch] = useDebouncedValue(search, 300);
     const [liveOnly, setLiveOnly] = useState(false);
 

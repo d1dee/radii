@@ -229,6 +229,26 @@ export async function getPppoeAccountAdminDetail(
     };
 }
 
+// Renames an admin's private label on a provisioned account. Tenant-scoped;
+// returns null when the account does not belong to this admin.
+export async function setPppoeAccountLabel(
+    accountId: string,
+    tenantAdminId: string,
+    label: string | null,
+) {
+    const [account] = await db
+        .update(pppoeServiceAccounts)
+        .set({ label: label?.trim() || null })
+        .where(
+            and(
+                eq(pppoeServiceAccounts.id, accountId),
+                eq(pppoeServiceAccounts.tenantAdminId, tenantAdminId),
+            ),
+        )
+        .returning({ id: pppoeServiceAccounts.id, label: pppoeServiceAccounts.label });
+    return account ?? null;
+}
+
 export async function pendingPppoeClaimExists(
     phoneNumber: string,
     claimCode: string,

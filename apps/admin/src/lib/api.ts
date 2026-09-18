@@ -637,11 +637,49 @@ export function migratePppoeAccountNas(accountId: string, nasDeviceId: string) {
     );
 }
 
+export type PppoeAccountStatus = 'active' | 'suspended' | 'closed';
+
+// Status toggle: suspended/closed accounts are rejected at RADIUS authorize
+// and their live sessions are cut immediately; active restores normal dialing.
+export function setPppoeAccountStatus(
+    accountId: string,
+    status: PppoeAccountStatus,
+) {
+    return request<{
+        username: string;
+        status: PppoeAccountStatus;
+        sessionsDisconnected: number;
+    }>(
+        `/admin/pppoe-accounts/${accountId}/status`,
+        { status },
+        { method: 'PUT' },
+    );
+}
+
+// Force-cuts live PPP sessions without changing status or credentials.
+export function disconnectPppoeAccountSessions(accountId: string) {
+    return request<{ username: string; sessionsDisconnected: number }>(
+        `/admin/pppoe-accounts/${accountId}/disconnect`,
+        undefined,
+        { method: 'POST' },
+    );
+}
+
+// Renames the admin's private label on the account (null clears it).
+export function setPppoeAccountLabel(accountId: string, label: string | null) {
+    return request<{ id: string; label: string | null }>(
+        `/admin/pppoe-accounts/${accountId}/label`,
+        { label },
+        { method: 'PUT' },
+    );
+}
+
 // --- Payment log ---------------------------------------------------------------
 
 export type ListPaymentsQuery = {
     status?: PackagePaymentStatus;
     q?: string;
+    pppoeAccountId?: string;
     from?: string;
     to?: string;
     page?: number;
@@ -652,6 +690,9 @@ export function getAdminPayments(query: ListPaymentsQuery = {}) {
     const params = new URLSearchParams();
     if (query.status) params.set('status', query.status);
     if (query.q) params.set('q', query.q);
+    if (query.pppoeAccountId) {
+        params.set('pppoeAccountId', query.pppoeAccountId);
+    }
     if (query.from) params.set('from', query.from);
     if (query.to) params.set('to', query.to);
     if (query.page) params.set('page', String(query.page));
