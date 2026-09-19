@@ -46,7 +46,7 @@ import {
     getPackages,
     updatePackage,
 } from '../lib/packages';
-import { radiusClient } from '../lib/radius';
+import { RadiusError, radiusClient } from '../lib/radius';
 import {
     getPppoeAccountAdminDetail,
     provisionPppoeAccountByPhone,
@@ -614,6 +614,9 @@ app.put('/pppoe-accounts/:id/nas', requireAdmin, async (c) => {
             data,
         });
     } catch (err) {
+        if (err instanceof RadiusError) {
+            return jsonError(c, 409, err.message);
+        }
         console.error('[radius] admin pppoe NAS migration failed:', err);
         return jsonError(c, 502, 'Could not migrate the PPPoE account');
     }
@@ -654,6 +657,9 @@ app.put('/pppoe-accounts/:id/status', requireAdmin, async (c) => {
             data,
         });
     } catch (err) {
+        if (err instanceof RadiusError) {
+            return jsonError(c, 409, err.message);
+        }
         console.error('[radius] admin pppoe status change failed:', err);
         return jsonError(c, 502, 'Could not update the PPPoE account');
     }

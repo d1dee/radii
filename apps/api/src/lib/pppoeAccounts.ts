@@ -1,5 +1,5 @@
 import { zPhoneNumber } from '@radii/shared';
-import { and, desc, eq, isNull, or } from 'drizzle-orm';
+import { and, desc, eq, isNull, ne, or } from 'drizzle-orm';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { db } from '../db';
 import {
@@ -85,6 +85,7 @@ export async function provisionPppoeAccountByPhone(
                 and(
                     eq(pppoeServiceAccounts.nasDeviceId, nasDeviceId),
                     eq(pppoeServiceAccounts.normalizedPhone, normalizedPhone),
+                    ne(pppoeServiceAccounts.status, 'closed'),
                 ),
             )
             .limit(1);
@@ -96,6 +97,7 @@ export async function provisionPppoeAccountByPhone(
                     and(
                         eq(pppoeServiceAccounts.nasDeviceId, nasDeviceId),
                         eq(pppoeServiceAccounts.customerUserId, customer.id),
+                        ne(pppoeServiceAccounts.status, 'closed'),
                     ),
                 )
                 .limit(1);
@@ -262,6 +264,7 @@ export async function pendingPppoeClaimExists(
                 eq(pppoeServiceAccounts.normalizedPhone, normalizedPhone),
                 eq(pppoeServiceAccounts.claimCodeHash, hashClaimCode(claimCode)),
                 isNull(pppoeServiceAccounts.customerUserId),
+                ne(pppoeServiceAccounts.status, 'closed'),
             ),
         )
         .limit(1);
@@ -282,6 +285,7 @@ export async function claimPppoeAccount(
                 eq(pppoeServiceAccounts.normalizedPhone, normalizedPhone),
                 eq(pppoeServiceAccounts.claimCodeHash, hashClaimCode(claimCode)),
                 isNull(pppoeServiceAccounts.customerUserId),
+                ne(pppoeServiceAccounts.status, 'closed'),
             ),
         )
         .returning();
@@ -311,6 +315,7 @@ export async function ensurePppoeServiceAccount(
             and(
                 eq(pppoeServiceAccounts.customerUserId, customerUserId),
                 eq(pppoeServiceAccounts.nasDeviceId, nasDeviceId),
+                ne(pppoeServiceAccounts.status, 'closed'),
             ),
         )
         .limit(1);
@@ -324,6 +329,7 @@ export async function ensurePppoeServiceAccount(
                 eq(pppoeServiceAccounts.customerUserId, customerUserId),
                 eq(pppoeServiceAccounts.tenantAdminId, tenantAdminId),
                 isNull(pppoeServiceAccounts.nasDeviceId),
+                ne(pppoeServiceAccounts.status, 'closed'),
             ),
         )
         .limit(1);
@@ -353,6 +359,7 @@ export async function ensurePppoeServiceAccount(
                 eq(pppoeServiceAccounts.nasDeviceId, nasDeviceId),
                 eq(pppoeServiceAccounts.normalizedPhone, normalizedPhone),
                 isNull(pppoeServiceAccounts.customerUserId),
+                ne(pppoeServiceAccounts.status, 'closed'),
             ),
         )
         .limit(1);
@@ -392,6 +399,7 @@ export async function ensurePppoeServiceAccount(
             and(
                 eq(pppoeServiceAccounts.customerUserId, customerUserId),
                 eq(pppoeServiceAccounts.nasDeviceId, nasDeviceId),
+                ne(pppoeServiceAccounts.status, 'closed'),
             ),
         )
         .limit(1);

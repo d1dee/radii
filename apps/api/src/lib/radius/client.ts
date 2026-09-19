@@ -1094,6 +1094,13 @@ export class RadiusClient {
         if (account.nasDeviceId === nasDeviceId) {
             return { username: account.username, sessionsDisconnected: 0 };
         }
+        // Closed accounts are excluded from the (customer, NAS) / (NAS, phone)
+        // unique indexes, so only open rows on the target NAS can block it.
+        await this.assertPppoeNasSlotFree(
+            account,
+            nasDeviceId,
+            'the destination network',
+        );
         await db
             .update(pppoeServiceAccounts)
             .set({ nasDeviceId })
@@ -1102,6 +1109,60 @@ export class RadiusClient {
             account.username,
         );
         return { username: account.username, sessionsDisconnected };
+    }
+
+    // Guards the partial unique indexes (customer_user_id, nas_device_id) and
+    // (nas_device_id, normalized_phone): both only cover non-closed rows, so a
+    // migration or reactivation fails when another open account already holds
+    // the customer's or the phone's slot on that NAS.
+    private async assertPppoeNasSlotFree(
+        account: typeof pppoeServiceAccounts.$inferSelect,
+        nasDeviceId: string,
+        networkLabel: string,
+    ): Promise<void> {
+        const onTargetNas = and(
+            eq(pppoeServiceAccounts.nasDeviceId, nasDeviceId),
+            ne(pppoeServiceAccounts.id, account.id),
+            ne(pppoeServiceAccounts.status, 'closed'),
+        );
+        if (account.customerUserId) {
+            const [customerConflict] = await db
+                .select({ username: pppoeServiceAccounts.username })
+                .from(pppoeServiceAccounts)
+                .where(
+                    and(
+                        onTargetNas,
+                        eq(
+                            pppoeServiceAccounts.customerUserId,
+                            account.customerUserId,
+                        ),
+                    ),
+                )
+                .limit(1);
+            if (customerConflict) {
+                throw new RadiusError(
+                    `The customer already has another open PPPoE account (${customerConflict.username}) on ${networkLabel}; close or migrate that account first`,
+                );
+            }
+        }
+        const [phoneConflict] = await db
+            .select({ username: pppoeServiceAccounts.username })
+            .from(pppoeServiceAccounts)
+            .where(
+                and(
+                    onTargetNas,
+                    eq(
+                        pppoeServiceAccounts.normalizedPhone,
+                        account.normalizedPhone,
+                    ),
+                ),
+            )
+            .limit(1);
+        if (phoneConflict) {
+            throw new RadiusError(
+                `An open account with the same phone number (${phoneConflict.username}) already exists on ${networkLabel}; close or migrate that account first`,
+            );
+        }
     }
 
     // Admin status toggle for a provisioned account. Suspended/closed accounts
@@ -1127,6 +1188,18 @@ export class RadiusClient {
             )
             .limit(1);
         if (!account) throw new RadiusError('Unknown PPPoE account');
+        // Closed accounts are excluded from the (customer, NAS) / (NAS, phone)
+        // unique indexes, so another account may have taken the slot while
+        // this one was closed; reactivation would violate the index.
+        if (account.status === 'closed' && status !== 'closed') {
+            if (account.nasDeviceId) {
+                await this.assertPppoeNasSlotFree(
+                    account,
+                    account.nasDeviceId,
+                    'this network',
+                );
+            }
+        }
         // Status first so a re-dial racing the disconnect is already rejected.
         await db
             .update(pppoeServiceAccounts)

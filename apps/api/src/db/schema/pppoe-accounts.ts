@@ -6,6 +6,7 @@ import {
     text,
     timestamp,
     unique,
+    uniqueIndex,
     uuid,
 } from 'drizzle-orm/pg-core';
 import { adminUser } from './admin-auth-schema';
@@ -49,14 +50,15 @@ export const pppoeServiceAccounts = pgTable(
             .notNull(),
     },
     (table) => [
-        unique('pppoe_service_account_customer_nas_key').on(
-            table.customerUserId,
-            table.nasDeviceId,
-        ),
-        unique('pppoe_service_account_nas_phone_key').on(
-            table.nasDeviceId,
-            table.normalizedPhone,
-        ),
+        // Closed accounts are kept for history and can be reactivated, but
+        // they must not occupy their (customer, NAS) / (NAS, phone) slots:
+        // uniqueness is only enforced among active/suspended rows.
+        uniqueIndex('pppoe_service_account_customer_nas_key')
+            .on(table.customerUserId, table.nasDeviceId)
+            .where(sql`${table.status} <> 'closed'`),
+        uniqueIndex('pppoe_service_account_nas_phone_key')
+            .on(table.nasDeviceId, table.normalizedPhone)
+            .where(sql`${table.status} <> 'closed'`),
         unique('pppoe_service_account_claim_code_hash_key').on(
             table.claimCodeHash,
         ),
