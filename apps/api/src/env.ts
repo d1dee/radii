@@ -31,8 +31,7 @@ export const env = {
     // when omitted, the generated RouterOS script resolves the portal host.
     pppoePortalUrl: process.env.PPPOE_PORTAL_URL || '',
     pppoePortalIp: process.env.PPPOE_PORTAL_IP || '',
-    pppoeExpiredRateLimit:
-        process.env.PPPOE_EXPIRED_RATE_LIMIT || '512k/512k',
+    pppoeExpiredRateLimit: process.env.PPPOE_EXPIRED_RATE_LIMIT || '512k/512k',
     ntpServers: process.env.NTP_SERVERS || '0.pool.ntp.org,1.pool.ntp.org',
     wgManagementSubnet: process.env.WG_MANAGEMENT_SUBNET || '10.99.0.0/16',
     // The radii server's own WireGuard interface address inside
@@ -89,6 +88,15 @@ export const env = {
         ),
         bankInterimSeconds: parseInt(
             process.env.RADIUS_BANK_INTERIM_SECONDS || '60',
+            10,
+        ),
+    },
+    // Package defaults. Hotspot cumulative time-bank (noExpiry) packages stay
+    // usable for this many months after activation unless the owning admin set
+    // their own packages.noExpiryValidityMonths in the console settings.
+    packages: {
+        noExpiryValidityMonths: parseInt(
+            process.env.NO_EXPIRY_VALIDITY_MONTHS || '3',
             10,
         ),
     },

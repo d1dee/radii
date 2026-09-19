@@ -27,7 +27,13 @@ import {
     type AdminSettings,
 } from '@shared/index';
 import { useState } from 'react';
-import { MdContacts, MdDashboard, MdPalette, MdPayment } from 'react-icons/md';
+import {
+    MdContacts,
+    MdDashboard,
+    MdInventory2,
+    MdPalette,
+    MdPayment,
+} from 'react-icons/md';
 
 import { previewDateTime } from '@/lib/format';
 import { useAdminSettings } from '@/lib/settings';
@@ -128,6 +134,12 @@ export default function SettingsPage() {
                         >
                             Contacts
                         </Tabs.Tab>
+                        <Tabs.Tab
+                            value='packages'
+                            leftSection={<MdInventory2 size={16} />}
+                        >
+                            Packages
+                        </Tabs.Tab>
                     </Tabs.List>
 
                     <Tabs.Panel value='appearance' pt='lg'>
@@ -141,6 +153,9 @@ export default function SettingsPage() {
                     </Tabs.Panel>
                     <Tabs.Panel value='contacts' pt='lg'>
                         <ContactsSection />
+                    </Tabs.Panel>
+                    <Tabs.Panel value='packages' pt='lg'>
+                        <PackagesSection />
                     </Tabs.Panel>
                 </Tabs>
             </Stack>
@@ -441,6 +456,84 @@ function ContactsSection() {
                     <Group justify='flex-end'>
                         <Button type='submit' loading={saving}>
                             Save Contacts
+                        </Button>
+                    </Group>
+                </Stack>
+            </form>
+        </>
+    );
+}
+
+// --- Packages -----------------------------------------------------------------
+
+interface PackagesForm {
+    noExpiryValidityMonths: number | '';
+}
+
+function PackagesSection() {
+    const { settings, saveSettings } = useAdminSettings();
+    const [saving, setSaving] = useState(false);
+
+    const form = useForm<PackagesForm>({
+        initialValues: {
+            noExpiryValidityMonths:
+                settings.packages.noExpiryValidityMonths ?? '',
+        },
+        validate: {
+            noExpiryValidityMonths: (v) =>
+                v === '' || (Number.isInteger(v) && v >= 1 && v <= 120)
+                    ? null
+                    : 'Must be a whole number between 1 and 120 months',
+        },
+    });
+
+    const handleSubmit = async (values: PackagesForm) => {
+        setSaving(true);
+        const res = await saveSettings({
+            ...settings,
+            packages: {
+                noExpiryValidityMonths:
+                    values.noExpiryValidityMonths === ''
+                        ? null
+                        : values.noExpiryValidityMonths,
+            },
+        });
+        setSaving(false);
+        notifySaved(
+            'Package settings saved',
+            res.success,
+            res.success ? undefined : res.message,
+        );
+    };
+
+    return (
+        <>
+            <SectionHeader
+                title='Packages'
+                description='Defaults applied to the hotspot and PPPoE packages you sell.'
+            />
+            <form onSubmit={form.onSubmit(handleSubmit)}>
+                <Stack gap='md' maw='40em'>
+                    <NumberInput
+                        label='No Expiry validity window (months)'
+                        description='How long a hotspot "No Expiry" (time-bank) package stays usable after activation. The customer must consume the session-length time bank within this window. Leave empty to use the server default.'
+                        placeholder='Server default'
+                        min={1}
+                        max={120}
+                        step={1}
+                        {...form.getInputProps('noExpiryValidityMonths')}
+                    />
+                    <Alert icon={<TbInfoTriangle />}>
+                        <Text size='sm'>
+                            This only affects hotspot time-bank packages. PPPoE
+                            packages are always calendar-based: their session
+                            length is the validity window.
+                        </Text>
+                    </Alert>
+                    <Divider />
+                    <Group justify='flex-end'>
+                        <Button type='submit' loading={saving}>
+                            Save Package Settings
                         </Button>
                     </Group>
                 </Stack>

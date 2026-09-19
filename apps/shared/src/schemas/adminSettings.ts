@@ -143,11 +143,20 @@ export type AdminContactsSettings = z.output<
     typeof adminContactsSettingsSchema
 >;
 
+// Package behaviour defaults for the owning admin's tenant. A null/absent
+// noExpiryValidityMonths means "use the server default" (env
+// NO_EXPIRY_VALIDITY_MONTHS); it bounds how long a hotspot cumulative
+// time-bank (noExpiry) package stays usable after activation.
+export const adminPackagesSettingsSchema = z.object({
+    noExpiryValidityMonths: z.number().int().min(1).max(120).nullish(),
+});
+
 export const adminSettingsSchema = z.object({
     appearance: adminAppearanceSettingsSchema.prefault({}),
     dashboard: adminDashboardSettingsSchema.prefault({}),
     mpesa: adminMpesaSettingsSchema.prefault({}),
     contacts: adminContactsSettingsSchema.prefault({}),
+    packages: adminPackagesSettingsSchema.prefault({}),
 });
 
 export type AdminSettings = z.output<typeof adminSettingsSchema>;

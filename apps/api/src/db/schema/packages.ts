@@ -32,11 +32,6 @@ export const packages = pgTable(
             .notNull(),
         category: text('category').notNull(),
         sessionLength: integer('session_length').notNull(),
-        // Legacy/configurable validity retained for package records. Runtime
-        // expiry packages use their persisted activation expiry; no-expiry
-        // packages use a fixed six-month validity and a cumulative time bank.
-
-        validityDays: integer('validity_days').default(30).notNull(),
         createdBy: text().references(() => adminUser.id),
         price: numeric('price', { precision: 10, scale: 2 }).notNull(),
         maxDevices: integer('max_devices').notNull(),

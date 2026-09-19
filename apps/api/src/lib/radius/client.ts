@@ -54,6 +54,8 @@ import {
 import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
 import * as dgram from 'node:dgram';
 import { db } from '../../db';
+import { env } from '../../env';
+import { getAdminSettings } from '../adminSettings';
 import {
     activatedPackages,
     activationEvents,
@@ -84,7 +86,6 @@ import {
     calculateActivationTime,
 } from './activationLimits';
 
-const NO_EXPIRY_VALIDITY_MONTHS = 6;
 const PPPOE_EXPIRED_PROFILE = 'radii-ppp-expired';
 
 function effectiveExpireAt(
@@ -610,21 +611,6 @@ export class RadiusClient {
         if (!account || account.status !== 'active') return null;
         const hadActiveActivation =
             (await this.newestActivePppoeActivationId(account.id)) !== null;
-        const [priorActivation] = hadActiveActivation
-            ? []
-            : await db
-                  .select({ id: activatedPackages.id })
-                  .from(activatedPackages)
-                  .where(
-                      and(
-                          eq(
-                              activatedPackages.pppoeServiceAccountId,
-                              account.id,
-                          ),
-                          isNull(activatedPackages.deactivatedAt),
-                      ),
-                  )
-                  .limit(1);
         let activation = existing;
         if (!activation) {
             try {
@@ -655,9 +641,14 @@ export class RadiusClient {
         const password = await this.ensurePppoePassword(username);
 
         await this.applyPppoeAuthorization(activation, pkg);
-        if (!hadActiveActivation && priorActivation) {
-            await this.disconnectLivePppoeSessions(username);
-        }
+        // Sessions that dialed while captured (restricted profile) carry no
+        // Class cookie, so applyPppoeAuthorization's CoA cannot reach them and
+        // only a Disconnect-Request makes them re-dial into the new package's
+        // profile. With no active activation at purchase time every live
+        // session predates it (first capture or expired renewal) and is cut;
+        // otherwise only stale restricted sessions are, which self-heals a
+        // disconnect missed by an earlier attempt (idempotent per portal poll).
+        await this.disconnectLivePppoeSessions(username, hadActiveActivation);
         return {
             activationId: activation.id,
             username,
@@ -1030,8 +1021,12 @@ export class RadiusClient {
 
     // Restricted PPPoE sessions carry no activation Class cookie, so renewal
     // must locate them by the stable username rather than the new activation.
+    // restrictedOnly limits the sweep to live sessions that dialed under the
+    // restricted profile (class NULL), leaving normally authorized sessions of
+    // an already-active account untouched.
     private async disconnectLivePppoeSessions(
         username: string,
+        restrictedOnly?: boolean,
     ): Promise<number> {
         const liveRows = await db
             .select()
@@ -1041,6 +1036,7 @@ export class RadiusClient {
                     eq(radacct.username, username),
                     isNull(radacct.acctstoptime),
                     isNotNull(radacct.acctstarttime),
+                    restrictedOnly ? isNull(radacct.class) : undefined,
                 ),
             );
         let disconnected = 0;
@@ -2543,8 +2539,8 @@ export class RadiusClient {
     // =========================================================================
 
     // Balance of an activation's time bank: the package's sessionLength is the
-    // TOTAL minutes consumable across sessions within the six-month validity.
-    // Usage = closed sessions' Acct-Session-Time + live sessions' elapsed
+    // TOTAL minutes consumable across sessions within the configurable validity
+    // window. Usage = closed sessions' Acct-Session-Time + live sessions' elapsed
     // time (accounting interim updates keep the closed-figure side fresh).
     async getBankUsage(
         activationId: string,
@@ -2735,12 +2731,31 @@ export class RadiusClient {
         ];
     }
 
+    // Validity window (months) for a cumulative time-bank (noExpiry)
+    // activation: the owning admin's packages.noExpiryValidityMonths console
+    // setting, falling back to the server env default when unset.
+    private async noExpiryValidityMonths(
+        payment: typeof packagePayments.$inferSelect,
+        pkg: typeof packages.$inferSelect,
+    ): Promise<number> {
+        const adminId = payment.tenantAdminId ?? pkg.createdBy;
+        if (adminId) {
+            const settings = await getAdminSettings(adminId);
+            const months = settings.packages.noExpiryValidityMonths;
+            if (months) return months;
+        }
+        return env.packages.noExpiryValidityMonths;
+    }
+
     private async provisionActivation(
         payment: typeof packagePayments.$inferSelect,
         pkg: typeof packages.$inferSelect,
     ) {
         const expireAt = pkg.noExpiry
-            ? dayjs().add(NO_EXPIRY_VALIDITY_MONTHS, 'month')
+            ? dayjs().add(
+                  await this.noExpiryValidityMonths(payment, pkg),
+                  'month',
+              )
             : dayjs().add(pkg.sessionLength, 'minutes');
 
         const activationId = randomUUID();
@@ -2836,9 +2851,9 @@ export class RadiusClient {
         pkg: typeof packages.$inferSelect,
         account: typeof pppoeServiceAccounts.$inferSelect,
     ) {
-        const expireAt = pkg.noExpiry
-            ? dayjs().add(NO_EXPIRY_VALIDITY_MONTHS, 'month')
-            : dayjs().add(pkg.sessionLength, 'minutes');
+        // PPPoE activations are always calendar-based (no noExpiry): the
+        // session length is the validity window from activation.
+        const expireAt = dayjs().add(pkg.sessionLength, 'minutes');
 
         const activationId = randomUUID();
         const username = account.username;

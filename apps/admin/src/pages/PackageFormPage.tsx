@@ -5,6 +5,7 @@ import {
     Container,
     Grid,
     Group,
+    Input,
     Loader,
     MultiSelect,
     NumberInput,
@@ -34,6 +35,30 @@ import {
 
 const ALL_NAS_VALUE = 'all';
 
+// Session length is entered in a human-friendly unit and stored as minutes.
+// A month is normalized to 30 days (43200 minutes).
+const LENGTH_UNITS = [
+    { value: 'minutes', label: 'Minutes', minutes: 1 },
+    { value: 'days', label: 'Days', minutes: 1440 },
+    { value: 'weeks', label: 'Weeks', minutes: 10080 },
+    { value: 'months', label: 'Months', minutes: 43200 },
+] as const;
+
+type LengthUnit = (typeof LENGTH_UNITS)[number]['value'];
+
+function unitToMinutes(unit: LengthUnit): number {
+    return LENGTH_UNITS.find((u) => u.value === unit)!.minutes;
+}
+
+// Largest unit that expresses totalMinutes exactly (edit-mode prefill).
+function bestUnitFor(totalMinutes: number): LengthUnit {
+    for (const unit of ['months', 'weeks', 'days'] as const) {
+        const m = unitToMinutes(unit);
+        if (totalMinutes >= m && totalMinutes % m === 0) return unit;
+    }
+    return 'minutes';
+}
+
 export default function PackageFormPage() {
     const navigate = useNavigate();
     const { id } = useParams<{ id: string }>();
@@ -45,13 +70,17 @@ export default function PackageFormPage() {
     const [fetchError, setFetchError] = useState<string | null>(null);
     const [nasDevices, setNasDevices] = useState<NasDeviceRow[]>([]);
 
+    // Session-length entry split into a human value + unit; the form only ever
+    // holds the total in minutes (sessionLength).
+    const [lengthValue, setLengthValue] = useState<number>(60);
+    const [lengthUnit, setLengthUnit] = useState<LengthUnit>('minutes');
+
     const form = useForm<CreatePackageInput>({
         initialValues: {
             title: '',
             type: defaultType,
             category: '',
             sessionLength: 60,
-            validityDays: 30,
             price: 0,
             maxDevices: 1,
             noExpiry: false,
@@ -65,6 +94,20 @@ export default function PackageFormPage() {
         },
         validate: schemaResolver(createPackageSchema),
     });
+
+    const type = form.useWatchValue('type');
+    const noExpiry = form.useWatchValue('noExpiry');
+    const isPppoe = type === 'pppoe';
+
+    // Keep the minute value in the form in sync with the value+unit inputs.
+    const setSessionLength = (value: number, unit: LengthUnit) => {
+        setLengthValue(value);
+        setLengthUnit(unit);
+        const minutes = Number.isFinite(value)
+            ? Math.round(value * unitToMinutes(unit))
+            : 0;
+        form.setFieldValue('sessionLength', minutes);
+    };
 
     useEffect(() => {
         (async () => {
@@ -95,7 +138,6 @@ export default function PackageFormPage() {
                 type: pkg.type,
                 category: pkg.category,
                 sessionLength: pkg.sessionLength,
-                validityDays: pkg.validityDays ?? 30,
                 price: Number(pkg.price),
                 maxDevices: pkg.maxDevices,
                 noExpiry: pkg.noExpiry,
@@ -107,6 +149,9 @@ export default function PackageFormPage() {
                 uploadQuota: pkg.uploadQuota,
                 nasDeviceIds: pkg.nasDeviceIds ?? [],
             });
+            const unit = bestUnitFor(pkg.sessionLength);
+            setLengthValue(pkg.sessionLength / unitToMinutes(unit));
+            setLengthUnit(unit);
             setFetching(false);
         })();
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -131,9 +176,12 @@ export default function PackageFormPage() {
 
     const handleSubmit = async (values: CreatePackageInput) => {
         setLoading(true);
+        // PPPoE is always calendar-based; never submit the bank model for it.
+        const payload: CreatePackageInput =
+            values.type === 'pppoe' ? { ...values, noExpiry: false } : values;
         const result = isEdit
-            ? await updateAdminPackage(id!, values)
-            : await createPackage(values);
+            ? await updateAdminPackage(id!, payload)
+            : await createPackage(payload);
         setLoading(false);
 
         if (!result.success) {
@@ -210,6 +258,18 @@ export default function PackageFormPage() {
                                     ]}
                                     allowDeselect={false}
                                     {...form.getInputProps('type')}
+                                    onChange={(value) => {
+                                        form.setFieldValue(
+                                            'type',
+                                            (value as PackageType) ?? 'hotspot',
+                                        );
+                                        if (value === 'pppoe') {
+                                            form.setFieldValue(
+                                                'noExpiry',
+                                                false,
+                                            );
+                                        }
+                                    }}
                                 />
                             </Grid.Col>
                             <Grid.Col span={6}>
@@ -224,13 +284,53 @@ export default function PackageFormPage() {
                         </Grid>
                         <Grid>
                             <Grid.Col span={6}>
-                                <NumberInput
-                                    label='Session Length (minutes)'
-                                    placeholder='Enter session length'
-                                    description='Online time granted per activation (or the time bank when No Expiry is on)'
-                                    min={1}
-                                    {...form.getInputProps('sessionLength')}
-                                />
+                                <Input.Wrapper
+                                    label='Session Length'
+                                    description={
+                                        !isPppoe && noExpiry
+                                            ? 'Time bank the client consumes across sessions'
+                                            : 'How long each activation stays valid'
+                                    }
+                                    error={
+                                        form.errors.sessionLength
+                                            ? 'Enter a valid session length'
+                                            : undefined
+                                    }
+                                >
+                                    <Group gap='xs' wrap='nowrap'>
+                                        <NumberInput
+                                            min={1}
+                                            step={1}
+                                            style={{ flex: 1 }}
+                                            value={lengthValue}
+                                            onChange={(v) =>
+                                                setSessionLength(
+                                                    Number(v) || 0,
+                                                    lengthUnit,
+                                                )
+                                            }
+                                        />
+                                        <Select
+                                            aria-label='Session length unit'
+                                            data={LENGTH_UNITS.map(
+                                                ({ value, label }) => ({
+                                                    value,
+                                                    label,
+                                                }),
+                                            )}
+                                            value={lengthUnit}
+                                            allowDeselect={false}
+                                            w={130}
+                                            onChange={(v) =>
+                                                v &&
+                                                setSessionLength(
+                                                    lengthValue,
+                                                    v as LengthUnit,
+                                                )
+                                            }
+                                        />
+                                    </Group>
+                                </Input.Wrapper>
                             </Grid.Col>
                             <Grid.Col span={6}>
                                 <NumberInput
@@ -324,19 +424,15 @@ export default function PackageFormPage() {
                             rows={2}
                             {...form.getInputProps('note')}
                         />
-                        <Switch
-                            label='No Expiry'
-                            description='Cumulative time package: the session length becomes a time bank the client consumes across sessions'
-                            {...form.getInputProps('noExpiry', {
-                                type: 'checkbox',
-                            })}
-                        />
-                        <NumberInput
-                            label='Validity (days)'
-                            description='How many days after activation the package stays usable (the time bank must be consumed within this window)'
-                            min={1}
-                            {...form.getInputProps('validityDays')}
-                        />
+                        {!isPppoe && (
+                            <Switch
+                                label='No Expiry'
+                                description='Cumulative time package: the session length becomes a time bank the client consumes across sessions. The bank must be used within the validity window set under Settings → Packages.'
+                                {...form.getInputProps('noExpiry', {
+                                    type: 'checkbox',
+                                })}
+                            />
+                        )}
                         <Group justify='flex-end'>
                             <Button
                                 variant='default'
