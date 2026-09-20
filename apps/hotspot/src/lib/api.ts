@@ -85,13 +85,17 @@ export function getLatestPendingPayment() {
 }
 
 export function verifyPaymentReceipt(transactionCode: string) {
+    const loginRequestId = currentLoginRequestId();
+    const query = loginRequestId
+        ? `?login_request=${encodeURIComponent(loginRequestId)}`
+        : '';
     return request<{
         paymentId: string;
         status: 'pending' | 'paid' | 'failed';
         message: string;
         activation?: ActivationRedirect | null;
     }>(
-        `/payment/${encodeURIComponent(transactionCode)}/verify`,
+        `/payment/${encodeURIComponent(transactionCode)}/verify${query}`,
         { transactionCode },
         { method: 'POST' },
     );

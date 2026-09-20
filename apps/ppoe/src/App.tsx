@@ -178,10 +178,15 @@ export default function App() {
     return (
         <MantineProvider defaultColorScheme='auto'>
             <Notifications position='top-center' />
-            <Container size='sm' pt='md'>
+            <Container
+                size='sm'
+                py='md'
+                mih='100dvh'
+                style={{ display: 'flex', flexDirection: 'column' }}
+            >
                 <ModalActionsContext.Provider value={modalActions}>
                     <ClientContext.Provider value={clientData}>
-                        <Stack justify='space-between'>
+                        <Stack justify='space-between' style={{ flex: 1 }}>
                             <Stack gap='md'>
                                 <UserAccount
                                     havingIssues={[

@@ -1,35 +1,46 @@
-import { Button, Loader, Stack, Text } from '@mantine/core';
+import { Loader, Stack, Text } from '@mantine/core';
 import { useEffect, useEffectEvent, useRef, useState } from 'react';
 import type { OrderResult } from '../../lib/api.ts';
 import { getPaymentStatus } from '../../lib/api.ts';
 import type { FlowStatus } from './PaymentFlow.tsx';
 
-import { IoMdRefresh } from 'react-icons/io';
-
 export function PendingPayment({
     orderId,
     onStatusChange,
     onError,
-    onRetry,
 }: {
     orderId: string;
     onStatusChange: (status: FlowStatus, data: OrderResult | null) => void;
     onError: (message: string) => void;
-    onRetry: () => void;
 }) {
     const [tick, setTick] = useState(0);
     const tickRef = useRef(0);
+    const failedPollsRef = useRef(0);
+    const paidWithoutActivationRef = useRef(0);
     const handlePoll = useEffectEvent(async () => {
         const result = await getPaymentStatus(orderId);
         if (!result.success) {
-            onError(result.message || 'Could not check payment status.');
-            return false;
+            failedPollsRef.current++;
+            if (failedPollsRef.current >= 3) {
+                onError(result.message || 'Could not check payment status.');
+                return false;
+            }
+            return true;
         }
+        failedPollsRef.current = 0;
 
         const { status } = result.data!;
-        if (status === 'paid') {
+        if (status === 'paid' && result.data!.activation) {
             onStatusChange('success', result.data!);
             return false;
+        }
+        if (status === 'paid') {
+            paidWithoutActivationRef.current++;
+            if (paidWithoutActivationRef.current >= 15) {
+                onStatusChange('success', result.data!);
+                return false;
+            }
+            return true;
         }
         if (status === 'failed') {
             onError('Payment failed. Please try again.');
@@ -81,14 +92,6 @@ export function PendingPayment({
                 </Text>
             </Stack>
 
-            <Button
-                variant='outline'
-                fullWidth
-                onClick={onRetry}
-                leftSection={<IoMdRefresh />}
-            >
-                Retry
-            </Button>
         </Stack>
     );
 }

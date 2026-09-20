@@ -11,6 +11,7 @@ import {
     hotspotLoginRequest,
     nasDevice,
     packagePayments,
+    packages,
     radcheck,
     user,
 } from '../db/schema';
@@ -30,7 +31,6 @@ import {
     getPackageById,
     getOrderPackageForNas,
     getPackagesGroupedByCategory,
-    getPaymentById,
 } from '../lib/packages';
 import { paymentService } from '../lib/payments';
 import { radiusClient, type ActivationRedirect } from '../lib/radius';
@@ -233,7 +233,7 @@ const orderSchema = z.object({
 });
 
 app.post('/order', requireAuth, async (c) => {
-    const body = await c.req.json();
+    const body = await c.req.json().catch(() => ({}));
     const parsed = orderSchema.safeParse(body);
     if (!parsed.success) {
         return jsonError(c, 400, 'Invalid order payload');
@@ -317,12 +317,14 @@ app.post('/order', requireAuth, async (c) => {
 app.get('/payment/pending/latest', requireAuth, async (c) => {
     const currentUser = c.get('user');
     const [payment] = await db
-        .select()
+        .select({ payment: packagePayments })
         .from(packagePayments)
+        .innerJoin(packages, eq(packagePayments.packageId, packages.id))
         .where(
             and(
                 eq(packagePayments.userId, currentUser!.id),
                 eq(packagePayments.status, 'pending'),
+                eq(packages.type, 'hotspot'),
             ),
         )
         .orderBy(desc(packagePayments.createdAt))
@@ -332,16 +334,20 @@ app.get('/payment/pending/latest', requireAuth, async (c) => {
         return c.json({ success: true, data: null });
     }
 
-    const status = await paymentService.refreshPackagePaymentStatus(payment);
+    const status = await paymentService.refreshPackagePaymentStatus(
+        payment.payment,
+    );
     const activation =
-        status === 'paid' ? await activationForPayment(payment.id) : null;
+        status === 'paid'
+            ? await activationForPayment(payment.payment.id)
+            : null;
     return c.json({
         success: true,
         data: {
-            paymentId: payment.id,
+            paymentId: payment.payment.id,
             status,
-            amount: Number(payment.amount),
-            packageId: payment.packageId,
+            amount: Number(payment.payment.amount),
+            packageId: payment.payment.packageId,
             activation,
         },
     });
@@ -353,8 +359,20 @@ app.get('/payment/:id', requireAuth, async (c) => {
         return jsonError(c, 404, 'Payment not found');
     }
     const currentUser = c.get('user');
-    const payment = await getPaymentById(id, currentUser.id);
-    if (!payment || payment.userId !== currentUser!.id) {
+    const [paymentResult] = await db
+        .select({ payment: packagePayments })
+        .from(packagePayments)
+        .innerJoin(packages, eq(packagePayments.packageId, packages.id))
+        .where(
+            and(
+                eq(packagePayments.id, id),
+                eq(packagePayments.userId, currentUser.id),
+                eq(packages.type, 'hotspot'),
+            ),
+        )
+        .limit(1);
+    const payment = paymentResult?.payment;
+    if (!payment) {
         return jsonError(c, 404, 'Payment not found');
     }
     // While pending, reconcile against the provider so clients converge even
@@ -413,16 +431,38 @@ app.post('/payment/:id/verify', requireAuth, async (c) => {
     }
 
     const currentUser = c.get('user');
+    const loginRequestId = c.req.query('login_request');
+    if (!loginRequestId) {
+        return jsonError(c, 400, 'A valid hotspot login request is required');
+    }
+    const [loginRequest] = await db
+        .select({ nasDeviceId: hotspotLoginRequest.nasDeviceId })
+        .from(hotspotLoginRequest)
+        .where(
+            and(
+                eq(hotspotLoginRequest.id, loginRequestId),
+                eq(hotspotLoginRequest.userId, currentUser!.id),
+            ),
+        )
+        .limit(1);
+    const tenantAdminId = await getAdminIdForNasDevice(
+        loginRequest?.nasDeviceId,
+    );
+    if (!tenantAdminId) {
+        return jsonError(c, 400, 'A valid hotspot login request is required');
+    }
     const result = await paymentService.verifyTransactionCode(
         currentUser!.id,
         parsed.data.transactionCode,
+        tenantAdminId,
+        'hotspot',
     );
 
     if (result === null) {
         return jsonError(c, 404, 'Payment not found');
     }
     if (result.error) {
-        return jsonError(c, 502, result.message);
+        return jsonError(c, result.errorStatus ?? 502, result.message);
     }
 
     return c.json({

@@ -641,14 +641,22 @@ export class RadiusClient {
         const password = await this.ensurePppoePassword(username);
 
         await this.applyPppoeAuthorization(activation, pkg);
-        // Sessions that dialed while captured (restricted profile) carry no
-        // Class cookie, so applyPppoeAuthorization's CoA cannot reach them and
-        // only a Disconnect-Request makes them re-dial into the new package's
-        // profile. With no active activation at purchase time every live
-        // session predates it (first capture or expired renewal) and is cut;
-        // otherwise only stale restricted sessions are, which self-heals a
-        // disconnect missed by an earlier attempt (idempotent per portal poll).
-        await this.disconnectLivePppoeSessions(username, hadActiveActivation);
+        // Captured sessions must reconnect to leave the expired profile, but
+        // disconnecting inline tears down the customer's network before the
+        // payment-status response reaches the portal. Give the successful
+        // response time to reach the browser, then trigger the required
+        // idempotent reconnect in the background.
+        setTimeout(() => {
+            void this.disconnectLivePppoeSessions(
+                username,
+                hadActiveActivation,
+            ).catch((err) =>
+                console.error(
+                    `[radius] delayed PPPoE reconnect for ${username} failed:`,
+                    err,
+                ),
+            );
+        }, 1_500);
         return {
             activationId: activation.id,
             username,

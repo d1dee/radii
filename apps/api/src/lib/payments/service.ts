@@ -16,7 +16,12 @@
 
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { db } from '../../db';
-import { packagePayments, transaction, transactionLog } from '../../db/schema';
+import {
+    packagePayments,
+    packages,
+    transaction,
+    transactionLog,
+} from '../../db/schema';
 import { env } from '../../env';
 import { getAdminIdForNasDevice, getAdminIdForUser } from '../adminSettings';
 import { getPaymentByTransactionCode, type PackageRow } from '../packages';
@@ -26,7 +31,11 @@ import {
     parseAdminIdFromProviderName,
     resolveProviderByName,
 } from './adminProviders';
-import { MPESA_PROVIDER_NAME } from './mpesa/provider';
+import { paymentLogError, paymentLogInfo, paymentLogWarn } from './log';
+import {
+    MPESA_CALLBACK_EVENTS,
+    MPESA_PROVIDER_NAME,
+} from './mpesa/provider';
 import {
     PaymentProviderError,
     type PaymentOutcome,
@@ -51,6 +60,7 @@ export interface VerifyByCodeOutcome {
     paymentId: string | null;
     message: string;
     error?: boolean;
+    errorStatus?: 409 | 502;
     // Present once the verified payment has its package activated on RADIUS;
     // the portal uses it for the final redirect to the NAS.
     activation?: ActivationRedirect | null;
@@ -61,6 +71,12 @@ const STATUS_CALLBACK_EVENT = 'status_callback';
 // Providers that deliver callbacks resolve payments on their own, so the
 // fallback poll-by-reference only needs to run every this often.
 const STATUS_POLL_INTERVAL_MS = 15_000;
+const PAYMENT_UNAVAILABLE_MESSAGE =
+    'Payments are temporarily unavailable. Please try again in a moment.';
+const PAYMENT_START_FAILED_MESSAGE =
+    'We could not start the payment. Please check the phone number and try again.';
+const PAYMENT_VERIFICATION_FAILED_MESSAGE =
+    'We could not verify that receipt right now. Please try again in a moment.';
 
 export class PaymentService {
     private providers = new Map<string, PaymentProvider>();
@@ -153,6 +169,24 @@ export class PaymentService {
         pkg: PackageRow,
         loginRequestId?: string | null,
     ): Promise<{ success: boolean; message: string }> {
+        const amount = Number(pkg.price);
+        if (!Number.isSafeInteger(amount) || amount < 1) {
+            paymentLogError('invalid_package_amount', {
+                paymentId: payment.id,
+                packageId: pkg.id,
+                amount: pkg.price,
+            });
+            await db
+                .update(packagePayments)
+                .set({ status: 'failed' })
+                .where(eq(packagePayments.id, payment.id));
+            return {
+                success: false,
+                message:
+                    'This package cannot be purchased right now. Please contact support.',
+            };
+        }
+
         // Tenant attribution: payment -> NAS device -> owning admin. When the
         // owner stored their own M-Pesa credentials the payment runs through
         // their till; otherwise the server-wide provider is used.
@@ -162,60 +196,119 @@ export class PaymentService {
             provider = await this.providerForAdmin(adminId);
         } catch (err) {
             if (err instanceof PaymentProviderError) {
-                return { success: false, message: err.message };
+                paymentLogError(
+                    'provider_configuration_failed',
+                    {
+                        paymentId: payment.id,
+                        userId: payment.userId,
+                        nasDeviceId: payment.nasDeviceId,
+                        provider: err.provider,
+                    },
+                    err,
+                );
+                await db
+                    .update(packagePayments)
+                    .set({ status: 'failed' })
+                    .where(eq(packagePayments.id, payment.id));
+                return { success: false, message: PAYMENT_UNAVAILABLE_MESSAGE };
             }
             throw err;
         }
         if (!provider) {
+            paymentLogWarn('provider_unavailable', {
+                paymentId: payment.id,
+                userId: payment.userId,
+                nasDeviceId: payment.nasDeviceId,
+            });
+            await db
+                .update(packagePayments)
+                .set({ status: 'failed' })
+                .where(eq(packagePayments.id, payment.id));
             return {
                 success: false,
-                message: 'No payment provider is configured on this server.',
+                message: PAYMENT_UNAVAILABLE_MESSAGE,
             };
         }
 
-        const [txRow] = await db
-            .insert(transaction)
-            .values({
-                userId: payment.userId,
-                type: 'income',
-                amount: String(payment.amount),
-                provider: provider.name,
-                status: 'pending',
-                description: `Package purchase: ${pkg.title}`,
-                metadata: {
-                    packagePaymentId: payment.id,
-                    packageId: pkg.id,
-                    ...(loginRequestId ? { loginRequestId } : {}),
-                },
-            })
-            .returning();
-
-        const result = await provider.initiatePayment({
-            amount: Number(pkg.price),
-            currency: 'KES',
-            phoneNumber: payment.phoneNumber,
-            accountReference: payment.id.replace(/-/g, '').slice(0, 12),
-            description: pkg.title,
-            callbackBaseUrl: this.callbackBaseUrl(provider.name),
+        const txRow = await db.transaction(async (trx) => {
+            const [row] = await trx
+                .insert(transaction)
+                .values({
+                    userId: payment.userId,
+                    type: 'income',
+                    amount: String(amount),
+                    provider: provider.name,
+                    status: 'pending',
+                    description: `Package purchase: ${pkg.title}`,
+                    metadata: {
+                        packagePaymentId: payment.id,
+                        packageId: pkg.id,
+                        ...(loginRequestId ? { loginRequestId } : {}),
+                    },
+                })
+                .returning();
+            await trx
+                .update(packagePayments)
+                .set({ transaction: row.id })
+                .where(eq(packagePayments.id, payment.id));
+            return row;
         });
 
-        if (result.outcome !== 'pending' || !result.reference) {
-            await db
-                .update(transaction)
-                .set({ status: 'failed' })
-                .where(eq(transaction.id, txRow.id));
-            await this.appendLog(
-                txRow.id,
-                provider.name,
-                'payment_initiation_failed',
-                { message: result.message },
-                result.requestId,
+        paymentLogInfo('initiation_requested', {
+            paymentId: payment.id,
+            transactionId: txRow.id,
+            userId: payment.userId,
+            provider: provider.name,
+            amount,
+            currency: 'KES',
+        });
+
+        let result;
+        try {
+            result = await provider.initiatePayment({
+                amount,
+                currency: 'KES',
+                phoneNumber: payment.phoneNumber,
+                accountReference: payment.id.replace(/-/g, '').slice(0, 12),
+                description: pkg.title,
+                callbackBaseUrl: this.callbackBaseUrl(provider.name),
+            });
+        } catch (err) {
+            paymentLogError(
+                'initiation_threw',
+                {
+                    paymentId: payment.id,
+                    transactionId: txRow.id,
+                    userId: payment.userId,
+                    provider: provider.name,
+                },
+                err,
             );
+            await this.applyOutcome(txRow, 'failed', {
+                source: 'initiation_exception',
+                message:
+                    err instanceof Error ? err.message : 'Unknown provider error',
+            });
+            return { success: false, message: PAYMENT_START_FAILED_MESSAGE };
+        }
+
+        if (result.outcome !== 'pending' || !result.reference) {
+            paymentLogError('initiation_rejected', {
+                paymentId: payment.id,
+                transactionId: txRow.id,
+                userId: payment.userId,
+                provider: provider.name,
+                providerRequestId: result.requestId,
+                providerMessage: result.message,
+            });
+            await this.applyOutcome(txRow, 'failed', {
+                source: 'initiation',
+                message: result.message,
+                requestId: result.requestId,
+            });
             return {
                 success: false,
-                message:
-                    result.message ||
-                    'The payment provider rejected the payment request.',
+                message: PAYMENT_START_FAILED_MESSAGE,
             };
         }
 
@@ -223,7 +316,6 @@ export class PaymentService {
             .update(transaction)
             .set({ providerReference: result.reference })
             .where(eq(transaction.id, txRow.id));
-        await this.linkPaymentToTransaction(payment, txRow.id);
         await this.appendLog(
             txRow.id,
             provider.name,
@@ -234,6 +326,15 @@ export class PaymentService {
             },
             result.requestId,
         );
+
+        paymentLogInfo('initiation_accepted', {
+            paymentId: payment.id,
+            transactionId: txRow.id,
+            userId: payment.userId,
+            provider: provider.name,
+            providerReference: result.reference,
+            providerRequestId: result.requestId,
+        });
 
         return { success: true, message: result.message };
     }
@@ -267,21 +368,49 @@ export class PaymentService {
             this.lastStatusPoll.set(txRow.id, now);
         }
 
-        const result = await provider.getPaymentStatus(txRow.providerReference);
+        let result;
+        try {
+            result = await provider.getPaymentStatus(txRow.providerReference);
+        } catch (err) {
+            paymentLogError(
+                'status_poll_threw',
+                {
+                    paymentId: payment.id,
+                    transactionId: txRow.id,
+                    provider: txRow.provider,
+                    providerReference: txRow.providerReference,
+                },
+                err,
+            );
+            return payment.status;
+        }
+        paymentLogInfo('status_polled', {
+            paymentId: payment.id,
+            transactionId: txRow.id,
+            provider: txRow.provider,
+            providerReference: txRow.providerReference,
+            outcome: result.outcome,
+            providerTransactionId: result.transactionId,
+            providerMessage: result.message,
+        });
         if (result.outcome === 'completed') {
-            await this.applyOutcome(txRow, 'completed', {
+            const transitioned = await this.applyOutcome(txRow, 'completed', {
                 transactionId: result.transactionId,
                 source: 'status_poll',
                 message: result.message,
             });
-            return 'paid';
+            return transitioned
+                ? 'paid'
+                : await this.getPackagePaymentStatus(payment.id, payment.status);
         }
         if (result.outcome === 'failed') {
-            await this.applyOutcome(txRow, 'failed', {
+            const transitioned = await this.applyOutcome(txRow, 'failed', {
                 source: 'status_poll',
                 message: result.message,
             });
-            return 'failed';
+            return transitioned
+                ? 'failed'
+                : await this.getPackagePaymentStatus(payment.id, payment.status);
         }
         return payment.status;
     }
@@ -302,6 +431,7 @@ export class PaymentService {
         userId: string,
         rawCode: string,
         tenantAdminId?: string,
+        packageType?: 'hotspot' | 'pppoe',
     ): Promise<VerifyByCodeOutcome | null> {
         const code = rawCode.trim().toUpperCase();
 
@@ -315,20 +445,29 @@ export class PaymentService {
             provider = await this.providerForAdmin(adminId);
         } catch (err) {
             if (err instanceof PaymentProviderError) {
+                paymentLogError(
+                    'verification_provider_configuration_failed',
+                    { userId, tenantAdminId, provider: err.provider },
+                    err,
+                );
                 return {
                     status: 'pending',
                     paymentId: null,
-                    message: err.message,
+                    message: PAYMENT_VERIFICATION_FAILED_MESSAGE,
                     error: true,
                 };
             }
             throw err;
         }
         if (!provider) {
+            paymentLogWarn('verification_provider_unavailable', {
+                userId,
+                tenantAdminId,
+            });
             return {
                 status: 'pending',
                 paymentId: null,
-                message: 'No payment provider is configured on this server.',
+                message: PAYMENT_UNAVAILABLE_MESSAGE,
                 error: true,
             };
         }
@@ -374,44 +513,39 @@ export class PaymentService {
         const known = await this.findTransactionByCode(family, code);
         if (known) {
             if (known.userId !== userId) return null;
-            if (known.status === 'completed') {
-                return {
-                    paymentId: known.id,
-                    status: 'paid',
-                    message: `Payment confirmed by the provider (receipt ${code}).`,
-                };
-            }
-            if (known.status === 'failed') {
-                return {
-                    paymentId: known.id,
-                    status: 'failed',
-                    message:
-                        'The provider reported this transaction as not completed. Contact the admin if money left your account.',
-                };
-            }
-            return {
-                paymentId: known.id,
-                status: 'pending',
-                message:
-                    'Waiting for the provider to confirm this transaction...',
-            };
+            paymentLogWarn('unlinked_verification_transaction_found', {
+                transactionId: known.id,
+                userId,
+                provider: known.provider,
+                receipt: code,
+                status: known.status,
+            });
+            return null;
         }
 
         // 3. An in-flight verification whose row we could not match above
         // (e.g. callback still in transit): keep the client polling.
         const [pendingQuery] = await db
-            .select()
+            .select({
+                log: transactionLog,
+                transactionStatus: transaction.status,
+            })
             .from(transactionLog)
+            .innerJoin(
+                transaction,
+                eq(transaction.id, transactionLog.transactionId),
+            )
             .where(
                 and(
                     inArray(transactionLog.provider, family),
                     eq(transactionLog.eventType, STATUS_QUERY_EVENT),
                     sql`${transactionLog.payload}->>'receipt' = ${code}`,
+                    eq(transaction.userId, userId),
                 ),
             )
             .orderBy(desc(transactionLog.createdAt))
             .limit(1);
-        if (pendingQuery?.providerConversationId) {
+        if (pendingQuery?.log.providerConversationId) {
             const [callback] = await db
                 .select({ id: transactionLog.id })
                 .from(transactionLog)
@@ -421,7 +555,7 @@ export class PaymentService {
                         eq(transactionLog.eventType, STATUS_CALLBACK_EVENT),
                         eq(
                             transactionLog.providerConversationId,
-                            pendingQuery.providerConversationId,
+                            pendingQuery.log.providerConversationId,
                         ),
                     ),
                 )
@@ -436,51 +570,130 @@ export class PaymentService {
             }
         }
 
-        // 4. Submit a fresh verification to the provider.
-        const result = await provider.verifyTransaction(code, {
-            callbackBaseUrl: this.callbackBaseUrl(provider.name),
-        });
-
-        if (result.outcome === 'failed') {
+        const pendingConditions = [
+            eq(packagePayments.userId, userId),
+            eq(packagePayments.status, 'pending'),
+            inArray(transaction.provider, family),
+        ];
+        if (tenantAdminId) {
+            pendingConditions.push(
+                eq(packagePayments.tenantAdminId, tenantAdminId),
+            );
+        }
+        if (packageType) {
+            pendingConditions.push(eq(packages.type, packageType));
+        }
+        const targets = await db
+            .select({ payment: packagePayments, tx: transaction })
+            .from(packagePayments)
+            .innerJoin(packages, eq(packages.id, packagePayments.packageId))
+            .innerJoin(
+                transaction,
+                eq(transaction.id, packagePayments.transaction),
+            )
+            .where(and(...pendingConditions))
+            .orderBy(desc(packagePayments.createdAt))
+            .limit(2);
+        if (targets.length > 1) {
+            paymentLogWarn('verification_ambiguous_pending_payment', {
+                userId,
+                tenantAdminId,
+                packageType,
+                pendingPaymentIds: targets.map(({ payment }) => payment.id),
+            });
             return {
                 status: 'pending',
                 paymentId: null,
-                message: result.message,
+                message:
+                    'More than one payment is still pending. Wait for the latest payment to finish or contact support before verifying a receipt.',
+                error: true,
+                errorStatus: 409,
+            };
+        }
+        const target = targets[0];
+        if (!target) {
+            paymentLogWarn('verification_without_pending_payment', {
+                userId,
+                tenantAdminId,
+                packageType,
+                provider: provider.name,
+                receipt: code,
+            });
+            return {
+                status: 'pending',
+                paymentId: null,
+                message:
+                    'No pending payment was found. Start a package purchase before verifying a receipt.',
+                error: true,
+                errorStatus: 409,
+            };
+        }
+
+        // 4. Submit a fresh verification to the provider.
+        let result;
+        try {
+            result = await provider.verifyTransaction(code, {
+                callbackBaseUrl: this.callbackBaseUrl(provider.name),
+            });
+        } catch (err) {
+            paymentLogError(
+                'verification_threw',
+                { userId, tenantAdminId, provider: provider.name, receipt: code },
+                err,
+            );
+            return {
+                status: 'pending',
+                paymentId: null,
+                message: PAYMENT_VERIFICATION_FAILED_MESSAGE,
                 error: true,
             };
         }
 
-        // Target row for the asynchronous status callback. The amount is only
-        // learned once the provider reports it (placeholder 0 until then).
-        const [verTx] = await db
-            .insert(transaction)
-            .values({
+        if (result.outcome === 'failed') {
+            paymentLogError('verification_rejected', {
                 userId,
-                type: 'income',
-                amount: '0',
+                tenantAdminId,
                 provider: provider.name,
-                status: 'pending',
-                description: `Receipt verification: ${code}`,
-                metadata: { receipt: code },
-            })
-            .returning();
-
-        if (result.outcome === 'completed') {
-            await this.applyOutcome(verTx, 'completed', {
-                transactionId: code,
-                source: 'receipt_verification',
-                message: result.message,
+                receipt: code,
+                providerMessage: result.message,
             });
             return {
-                paymentId: verTx.id,
-                status: 'paid',
-                message: 'Payment verified.',
+                status: 'pending',
+                paymentId: null,
+                message: PAYMENT_VERIFICATION_FAILED_MESSAGE,
+                error: true,
+            };
+        }
+
+        if (result.outcome === 'completed') {
+            const transitioned = await this.applyOutcome(
+                target.tx,
+                'completed',
+                {
+                    transactionId: code,
+                    source: 'receipt_verification',
+                    message: result.message,
+                },
+            );
+            const status = transitioned
+                ? 'paid'
+                : await this.getPackagePaymentStatus(
+                      target.payment.id,
+                      target.payment.status,
+                  );
+            return {
+                paymentId: target.payment.id,
+                status,
+                message:
+                    status === 'paid'
+                        ? 'Payment verified.'
+                        : 'The receipt was verified, but the payment state changed. Refresh and try again.',
             };
         }
 
         if (result.conversationId) {
             await this.appendLog(
-                verTx.id,
+                target.tx.id,
                 provider.name,
                 STATUS_QUERY_EVENT,
                 {
@@ -493,7 +706,7 @@ export class PaymentService {
             );
         }
         return {
-            paymentId: verTx.id,
+            paymentId: target.payment.id,
             status: 'pending',
             message:
                 result.message ||
@@ -540,18 +753,30 @@ export class PaymentService {
             result = await provider.handleCallback(event, payload);
         } catch (err) {
             if (err instanceof PaymentProviderError) {
+                paymentLogError(
+                    'callback_rejected',
+                    { provider: providerName, event },
+                    err,
+                );
                 return {
                     status: 400,
-                    body: { success: false, message: err.message },
+                    body: {
+                        success: false,
+                        message: 'Invalid payment callback payload.',
+                    },
                 };
             }
+            paymentLogError(
+                'callback_processing_threw',
+                { provider: providerName, event },
+                err,
+            );
             throw err;
         }
 
         if (result.outcome === 'ignored') {
             return { status: 200, body: { success: true } };
         }
-
         const txRow = await this.findTransactionForCallback(
             providerName,
             result,
@@ -559,14 +784,119 @@ export class PaymentService {
         if (!txRow) {
             // Nothing to reconcile (unknown/stale reference). Acknowledge so
             // the gateway does not retry forever.
-            console.warn(
-                `[payments] callback ${providerName}/${event} matched no transaction; payload logged to console only`,
-            );
+            paymentLogWarn('callback_unmatched', {
+                provider: providerName,
+                event,
+                reference: result.reference,
+                providerRequestId: result.requestId,
+                providerConversationId: result.conversationId,
+                providerTransactionId: result.transactionId,
+                outcome: result.outcome,
+            });
             return { status: 200, body: { success: true } };
         }
 
+        if (event === MPESA_CALLBACK_EVENTS.status) {
+            await this.appendLog(
+                txRow.id,
+                txRow.provider,
+                STATUS_CALLBACK_EVENT,
+                result.payload,
+                result.requestId,
+                result.conversationId,
+            );
+        }
+
+        if (result.outcome === 'pending') {
+            paymentLogInfo('callback_pending', {
+                transactionId: txRow.id,
+                provider: providerName,
+                event,
+                reference: result.reference,
+                providerConversationId: result.conversationId,
+                providerMessage: result.message,
+            });
+            return { status: 200, body: { success: true } };
+        }
+
+        if (event === MPESA_CALLBACK_EVENTS.stk && result.reference) {
+            if (provider.name !== providerName) {
+                paymentLogError('callback_could_not_be_authenticated', {
+                    transactionId: txRow.id,
+                    provider: providerName,
+                    event,
+                    reference: result.reference,
+                    reason: 'original provider credentials are unavailable',
+                });
+                return { status: 200, body: { success: true } };
+            }
+            try {
+                const verified = await provider.getPaymentStatus(
+                    result.reference,
+                );
+                if (verified.outcome !== result.outcome) {
+                    paymentLogWarn('callback_not_confirmed_by_status_query', {
+                        transactionId: txRow.id,
+                        provider: providerName,
+                        event,
+                        reference: result.reference,
+                        callbackOutcome: result.outcome,
+                        queryOutcome: verified.outcome,
+                        providerMessage: verified.message,
+                    });
+                    return { status: 200, body: { success: true } };
+                }
+            } catch (err) {
+                paymentLogError(
+                    'callback_authentication_query_failed',
+                    {
+                        transactionId: txRow.id,
+                        provider: providerName,
+                        event,
+                        reference: result.reference,
+                    },
+                    err,
+                );
+                return { status: 200, body: { success: true } };
+            }
+        }
+
+        paymentLogInfo('callback_matched', {
+            transactionId: txRow.id,
+            provider: providerName,
+            event,
+            reference: result.reference,
+            providerRequestId: result.requestId,
+            providerConversationId: result.conversationId,
+            providerTransactionId: result.transactionId,
+            amount: result.amount,
+            outcome: result.outcome,
+        });
+
         if (result.outcome === 'completed') {
-            const mismatch = await this.amountMismatch(txRow, result.amount);
+            if (
+                event === MPESA_CALLBACK_EVENTS.status &&
+                result.amount === null &&
+                Number(txRow.amount) > 0
+            ) {
+                paymentLogWarn('callback_missing_payment_amount', {
+                    transactionId: txRow.id,
+                    provider: providerName,
+                    event,
+                    reference: result.reference,
+                    providerTransactionId: result.transactionId,
+                });
+                return { status: 200, body: { success: true } };
+            }
+            // An STK status query confirms the exact checkout request that the
+            // server created with the package amount, so it remains a safe
+            // callback-loss fallback even though Safaricom omits amount from
+            // the query response. Manual receipt verification is different:
+            // its status callback must report and match the package amount.
+            const mismatch =
+                event === MPESA_CALLBACK_EVENTS.status
+                    ? await this.amountMismatch(txRow, result.amount)
+                    : null;
             if (mismatch) {
                 await this.applyOutcome(txRow, 'failed', {
                     transactionId: result.transactionId,
@@ -711,10 +1041,11 @@ export class PaymentService {
             requestId?: string | null;
             conversationId?: string | null;
         },
-    ): Promise<void> {
+    ): Promise<boolean> {
         this.lastStatusPoll.delete(txRow.id);
+        let transitioned = false;
         await db.transaction(async (trx) => {
-            await trx
+            const updated = await trx
                 .update(transaction)
                 .set({
                     status: outcome,
@@ -725,27 +1056,60 @@ export class PaymentService {
                         ? { amount: String(details.amount) }
                         : {}),
                 })
-                .where(eq(transaction.id, txRow.id));
+                .where(
+                    and(
+                        eq(transaction.id, txRow.id),
+                        eq(transaction.status, 'pending'),
+                    ),
+                )
+                .returning({ id: transaction.id });
+            transitioned = updated.length > 0;
 
-            await trx
-                .update(packagePayments)
-                .set({ status: outcome === 'completed' ? 'paid' : 'failed' })
-                .where(eq(packagePayments.transaction, txRow.id));
+            if (transitioned) {
+                await trx
+                    .update(packagePayments)
+                    .set({
+                        status: outcome === 'completed' ? 'paid' : 'failed',
+                    })
+                    .where(
+                        and(
+                            eq(packagePayments.transaction, txRow.id),
+                            eq(packagePayments.status, 'pending'),
+                        ),
+                    );
+            }
 
             await trx.insert(transactionLog).values({
                 transactionId: txRow.id,
                 provider: txRow.provider,
-                eventType:
-                    outcome === 'completed'
+                eventType: transitioned
+                    ? outcome === 'completed'
                         ? `payment_completed_${details.source}`
-                        : `payment_failed_${details.source}`,
-                payload: details.payload ?? { message: details.message },
+                        : `payment_failed_${details.source}`
+                    : `payment_outcome_ignored_${details.source}`,
+                payload: transitioned
+                    ? (details.payload ?? { message: details.message })
+                    : {
+                          requestedOutcome: outcome,
+                          message: details.message,
+                      },
                 providerRequestId: details.requestId ?? null,
                 providerConversationId: details.conversationId ?? null,
             });
         });
 
-        if (outcome === 'completed') {
+        paymentLogInfo('outcome_applied', {
+            transactionId: txRow.id,
+            provider: txRow.provider,
+            providerTransactionId: details.transactionId,
+            source: details.source,
+            outcome,
+            transitioned,
+            amount: details.amount ?? null,
+            providerMessage: details.message,
+        });
+
+        if (transitioned && outcome === 'completed') {
             const packagePaymentId = (
                 txRow.metadata as { packagePaymentId?: string } | null
             )?.packagePaymentId;
@@ -760,16 +1124,19 @@ export class PaymentService {
                     );
             }
         }
+        return transitioned;
     }
 
-    private async linkPaymentToTransaction(
-        payment: PackagePaymentRow,
-        transactionId: string,
-    ): Promise<void> {
-        await db
-            .update(packagePayments)
-            .set({ transaction: transactionId })
-            .where(eq(packagePayments.id, payment.id));
+    private async getPackagePaymentStatus(
+        paymentId: string,
+        fallback: PackagePaymentRow['status'],
+    ): Promise<PackagePaymentRow['status']> {
+        const [row] = await db
+            .select({ status: packagePayments.status })
+            .from(packagePayments)
+            .where(eq(packagePayments.id, paymentId))
+            .limit(1);
+        return row?.status ?? fallback;
     }
 
     private async appendLog(

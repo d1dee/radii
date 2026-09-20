@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { schemaResolver, useForm } from '@mantine/form';
 import {
     paymentTransactionCodeSchema,
+    type ActivationRedirect,
     type AdminContactsSettings,
 } from '@radii/shared';
 import { AdminContacts } from '../../components/AdminContacts.tsx';
@@ -19,6 +20,22 @@ export function HavingIssues({ adminContacts }: Props) {
     >(undefined);
     const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const generationRef = useRef(0);
+    const activationFormRef = useRef<HTMLFormElement>(null);
+    const activationSubmittedRef = useRef(false);
+    const [activation, setActivation] = useState<ActivationRedirect | null>(
+        null,
+    );
+
+    useEffect(() => {
+        if (
+            activation &&
+            activationFormRef.current &&
+            !activationSubmittedRef.current
+        ) {
+            activationSubmittedRef.current = true;
+            activationFormRef.current.submit();
+        }
+    }, [activation]);
 
     const form = useForm({
         mode: 'controlled',
@@ -91,6 +108,9 @@ export function HavingIssues({ adminContacts }: Props) {
                 success: status === 'paid' ? true : undefined,
                 message: detail || status,
             });
+            if (status === 'paid' && res.data?.activation) {
+                setActivation(res.data.activation);
+            }
             return false;
         };
 
@@ -149,6 +169,28 @@ export function HavingIssues({ adminContacts }: Props) {
                 </Card>
 
                 <AdminContacts adminContacts={adminContacts} />
+
+                {activation ? (
+                    <form
+                        ref={activationFormRef}
+                        action={activation.linkLoginOnly}
+                        method='post'
+                    >
+                        <input
+                            type='hidden'
+                            name='username'
+                            value={activation.username}
+                        />
+                        <input
+                            type='hidden'
+                            name='password'
+                            value={activation.password}
+                        />
+                        <input type='hidden' name='domain' value='' />
+                        <input type='hidden' name='dst' value={activation.dst} />
+                        <input type='hidden' name='popup' value='true' />
+                    </form>
+                ) : null}
             </Stack>
         </Paper>
     );

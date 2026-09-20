@@ -39,7 +39,8 @@ export interface InitiatePaymentResult {
     // Gateway acknowledgment id for the initiation request, if one exists
     // (e.g. M-Pesa MerchantRequestID).
     requestId: string | null;
-    // Human-readable message; surfaced to the client as-is on failure.
+    // Provider diagnostic message. The service logs/persists failures and
+    // returns a separate stable, client-safe message from the API boundary.
     message: string;
 }
 
@@ -94,7 +95,7 @@ export interface ProviderCallbackResult {
 }
 
 // Thrown by providers for configuration problems and unrecognised inputs.
-// Carries a ready-to-display message.
+// Its diagnostic message is server-only and must not be returned verbatim.
 export class PaymentProviderError extends Error {
     constructor(
         message: string,

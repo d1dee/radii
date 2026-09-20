@@ -33,6 +33,7 @@ import type {
     TransactionStatusResponseInterface,
 } from './deno-mpesa-api/@types/types.d';
 import MpesaApi from './deno-mpesa-api/mod';
+import { paymentLogError } from '../log';
 
 export const MPESA_PROVIDER_NAME = 'mpesa';
 
@@ -483,14 +484,19 @@ export class MpesaPaymentProvider implements PaymentProvider {
         // Legacy acceptance rule: the transaction only counts as paid when it
         // is fully completed on M-Pesa's side.
         const transactionStatus = parameters.TransactionStatus ?? '';
+        const resultDescription =
+            ('ResultDesc' in result && result.ResultDesc) || transactionStatus;
         const completed =
             resultCode === '0' &&
             resultType === '0' &&
             transactionStatus.toLowerCase() === 'completed';
 
         if (!completed) {
+            const timedOut = resultDescription
+                .toLowerCase()
+                .includes('timeout');
             return {
-                outcome: 'failed',
+                outcome: timedOut ? 'pending' : 'failed',
                 reference: null,
                 requestId: null,
                 conversationId: originatorConversationId,
@@ -499,8 +505,7 @@ export class MpesaPaymentProvider implements PaymentProvider {
                 amount: null,
                 payload: raw,
                 message:
-                    ('ResultDesc' in result && result.ResultDesc) ||
-                    transactionStatus ||
+                    resultDescription ||
                     'M-Pesa reported the transaction as not completed.',
             };
         }
@@ -527,12 +532,16 @@ export class MpesaPaymentProvider implements PaymentProvider {
     // --- Error mapping ---------------------------------------------------------
 
     private mapClientError(error: Error, operation: string): string {
+        paymentLogError(
+            'mpesa_client_error',
+            {
+                provider: this.name,
+                operation,
+                environment: this.config.environment,
+            },
+            error,
+        );
         const message = error.message.toLowerCase();
-        if (message.includes('auth')) {
-            console.error(
-                `M-Pesa authentication failed while attempting the ${operation}. Check the consumer key and consumer secret (${this.config.environment}).`,
-            );
-        }
         if (message.includes('could not be parsed')) {
             return `Could not reach M-Pesa while attempting the ${operation}. Try again in a moment.`;
         }

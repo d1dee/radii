@@ -553,13 +553,14 @@ app.post('/payment/:id/verify', requireAuth, async (c) => {
         currentUser!.id,
         parsed.data.transactionCode,
         tenantAdminId,
+        'pppoe',
     );
 
     if (result === null) {
         return jsonError(c, 404, 'Payment not found');
     }
     if (result.error) {
-        return jsonError(c, 502, result.message);
+        return jsonError(c, result.errorStatus ?? 502, result.message);
     }
 
     // The payment service activates hotspot-style on its own; for PPPoE the
