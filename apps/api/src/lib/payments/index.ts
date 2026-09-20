@@ -4,8 +4,11 @@
 // register() it; nothing else in the app changes.
 
 import { env } from '../../env';
+import { apiLogger } from '../../logging';
 import { MpesaPaymentProvider } from './mpesa/provider';
 import { PaymentService } from './service';
+
+const logger = apiLogger.getChild('payments');
 
 function buildPaymentService(): PaymentService {
     const service = new PaymentService();
@@ -37,8 +40,8 @@ function buildPaymentService(): PaymentService {
             }),
         );
     } else {
-        console.warn(
-            '[payments] No M-Pesa credentials configured (MPESA_CONSUMER_KEY, MPESA_CONSUMER_SECRET, MPESA_SHORTCODE, MPESA_PASSKEY); payment initiation is disabled.',
+        logger.warn(
+            'M-Pesa payment initiation is disabled; provider is not configured',
         );
     }
 

@@ -16,6 +16,7 @@ import {
     type HotspotRedirectData,
 } from '@lib/api.ts';
 import { refreshHotspotQuota, useHotspotQuota } from '@lib/store.ts';
+import { mutationLogger } from '@lib/logging.ts';
 import { notifications } from '@mantine/notifications';
 import humanFormat from 'human-format';
 import { timeRemaining } from './functions.ts';
@@ -55,6 +56,16 @@ export function ConnectedDevicesModal({ isOpen, onClose }: Props) {
                 title: 'Success',
                 message: 'Device has been disconnected successfully',
             });
+        } catch (error) {
+            mutationLogger.warning('Unexpected device disconnect failure.', {
+                operation: 'disconnect-device',
+                errorName: error instanceof Error ? error.name : 'UnknownError',
+            });
+            notifications.show({
+                color: 'red',
+                title: 'Disconnect failed',
+                message: 'Could not disconnect this device. Try again.',
+            });
         } finally {
             setPendingDeauth((prev) => prev.filter((id) => id !== deviceId));
         }
@@ -91,7 +102,15 @@ export function ConnectedDevicesModal({ isOpen, onClose }: Props) {
                     : res.message || 'Try again.',
             });
         } catch (err) {
-            console.warn('Connect failed', err);
+            mutationLogger.warning('Unexpected device connect failure.', {
+                operation: 'connect-device',
+                errorName: err instanceof Error ? err.name : 'UnknownError',
+            });
+            notifications.show({
+                color: 'red',
+                title: 'Could not connect',
+                message: 'Could not connect this device. Try again.',
+            });
         }
         setPendingConnect((prev) => prev.filter((pendingId) => pendingId !== id));
     };
@@ -165,7 +184,7 @@ export function ConnectedDevicesModal({ isOpen, onClose }: Props) {
                                 type='button'
                                 size='sm'
                                 c='green'
-                                onClick={() => connectDevice(v.id)}
+                                onClick={() => void connectDevice(v.id)}
                             >
                                 Connect
                             </Anchor>

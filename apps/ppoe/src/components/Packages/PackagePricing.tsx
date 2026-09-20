@@ -3,6 +3,7 @@ import {
     Button,
     Card,
     Group,
+    Loader,
     Paper,
     SimpleGrid,
     Stack,
@@ -34,8 +35,14 @@ function getPackagesByTitle(title: string, packages: Packages) {
 
 export function PackagePricing({
     packages,
+    error,
+    loading,
+    onRetry,
 }: {
     packages: Packages | undefined;
+    error: string | null;
+    loading: boolean;
+    onRetry: () => void;
 }) {
     const [selectedTitle, setSelectedTitle] = useState('');
 
@@ -76,14 +83,38 @@ export function PackagePricing({
                     <Text size='lg' fw={600}>
                         Available Packages
                     </Text>
-                    <Alert
-                        color='orange'
-                        title='Warning'
-                        icon={<AiOutlineExclamationCircle size={24} />}
-                    >
-                        Could not find PPPoE packages. Contact the admin to
-                        make sure packages are available.
-                    </Alert>
+                    {loading && !error ? (
+                        <Group gap='sm'>
+                            <Loader size='sm' />
+                            <Text c='dimmed'>Loading available packages…</Text>
+                        </Group>
+                    ) : (
+                        <Alert
+                            color={error ? 'red' : 'orange'}
+                            title={
+                                error
+                                    ? 'Could not load packages'
+                                    : 'Warning'
+                            }
+                            icon={<AiOutlineExclamationCircle size={24} />}
+                        >
+                            <Stack gap='sm'>
+                                <Text>
+                                    {error ??
+                                        'Could not find PPPoE packages. Contact the admin to make sure packages are available.'}
+                                </Text>
+                                {error ? (
+                                    <Button
+                                        variant='light'
+                                        color='red'
+                                        onClick={onRetry}
+                                    >
+                                        Try again
+                                    </Button>
+                                ) : null}
+                            </Stack>
+                        </Alert>
+                    )}
                 </Stack>
             </Paper>
         );
@@ -94,6 +125,22 @@ export function PackagePricing({
                 <Text size='lg' fw={600}>
                     Available Packages
                 </Text>
+
+                {error ? (
+                    <Alert color='orange' title='Showing saved packages'>
+                        <Group justify='space-between' align='center'>
+                            <Text size='sm'>{error}</Text>
+                            <Button
+                                size='xs'
+                                variant='light'
+                                color='orange'
+                                onClick={onRetry}
+                            >
+                                Retry
+                            </Button>
+                        </Group>
+                    </Alert>
+                ) : null}
 
                 <SimpleGrid
                     cols={{ base: 2, xs: 3, sm: 4, md: 5 }}

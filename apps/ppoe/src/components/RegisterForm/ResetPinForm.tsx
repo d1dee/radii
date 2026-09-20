@@ -4,6 +4,7 @@ import { forgotPinSchema, hasFieldErrors, resetPinSchema } from '@radii/shared';
 import { PhoneNumberInput } from '@radii/ui';
 import { useState } from 'react';
 import { forgotPin, resetPin } from '../../lib/api.ts';
+import { mutationLogger } from '../../lib/logging.ts';
 
 type RequestValues = { phoneNumber: string };
 type ResetValues = {
@@ -38,38 +39,58 @@ export function ResetPinForm({
     async function handleRequest(values: RequestValues) {
         setFormError(null);
         setSubmitting(true);
-        const result = await forgotPin(values);
-        setSubmitting(false);
-
-        if (!result.success) {
-            if (hasFieldErrors(result.data))
-                requestForm.setErrors(result.data.fieldErrors);
-            else
-                setFormError(
-                    result.message || 'Could not send the code, contact support',
-                );
-            return;
+        try {
+            const result = await forgotPin(values);
+            if (!result.success) {
+                if (hasFieldErrors(result.data)) {
+                    requestForm.setErrors(result.data.fieldErrors);
+                } else {
+                    setFormError(
+                        result.message ||
+                            'Could not send the code. Try again or contact support.',
+                    );
+                }
+                return;
+            }
+            resetForm.setFieldValue('phoneNumber', values.phoneNumber);
+            setStep('reset');
+        } catch (error) {
+            mutationLogger.warning('Unexpected reset code request failure.', {
+                operation: 'forgot-pin',
+                errorName: error instanceof Error ? error.name : 'UnknownError',
+            });
+            setFormError('Could not send the reset code. Try again.');
+        } finally {
+            setSubmitting(false);
         }
-        resetForm.setFieldValue('phoneNumber', values.phoneNumber);
-        setStep('reset');
     }
 
     async function handleReset(values: ResetValues) {
         setFormError(null);
         setSubmitting(true);
-        const result = await resetPin(values);
-        setSubmitting(false);
-
-        if (!result.success) {
-            if (hasFieldErrors(result.data))
-                resetForm.setErrors(result.data.fieldErrors);
-            else
-                setFormError(
-                    result.message || 'Could not reset the PIN, contact support',
-                );
-            return;
+        try {
+            const result = await resetPin(values);
+            if (!result.success) {
+                if (hasFieldErrors(result.data)) {
+                    resetForm.setErrors(result.data.fieldErrors);
+                } else {
+                    setFormError(
+                        result.message ||
+                            'Could not reset the PIN. Try again or contact support.',
+                    );
+                }
+                return;
+            }
+            setStep('done');
+        } catch (error) {
+            mutationLogger.warning('Unexpected PIN reset failure.', {
+                operation: 'reset-pin',
+                errorName: error instanceof Error ? error.name : 'UnknownError',
+            });
+            setFormError('Could not reset the PIN. Try again.');
+        } finally {
+            setSubmitting(false);
         }
-        setStep('done');
     }
 
     if (step === 'done') {

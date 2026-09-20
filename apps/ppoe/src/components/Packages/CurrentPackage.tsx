@@ -1,5 +1,7 @@
 import {
+    Alert,
     Box,
+    Button,
     Grid,
     Group,
     Paper,
@@ -10,7 +12,11 @@ import {
 } from '@mantine/core';
 import { timeRemaining } from './functions.ts';
 
-import { usePppoeAccounts, usePppoeQuota } from '@lib/store.ts';
+import {
+    refreshPppoeQuota,
+    usePppoeAccounts,
+    usePppoeQuota,
+} from '@lib/store.ts';
 import { useDisclosure } from '@mantine/hooks';
 import { IconSelector } from '@tabler/icons-react';
 import humanFormat from 'human-format';
@@ -20,7 +26,7 @@ import { dataScale } from './PackagePricing.tsx';
 
 export function CurrentPackage() {
     const { selectedAccountId } = usePppoeAccounts();
-    const { quota } = usePppoeQuota(selectedAccountId);
+    const { quota, error, loading } = usePppoeQuota(selectedAccountId);
     const [isOpen, { open, close }] = useDisclosure();
 
     // Prefer an online activation; fall back to the most recent one.
@@ -55,7 +61,29 @@ export function CurrentPackage() {
                         Active Package Details
                     </Text>
 
-                    <ConnectedDevice quota={quota} onOpen={open} />
+                    {loading && !error ? (
+                        <Text c='dimmed'>Loading active package…</Text>
+                    ) : error ? (
+                        <Alert
+                            color='red'
+                            title='Could not load your active package'
+                        >
+                            <Stack gap='sm'>
+                                <Text size='sm'>{error}</Text>
+                                <Button
+                                    color='red'
+                                    variant='light'
+                                    onClick={() =>
+                                        void refreshPppoeQuota(selectedAccountId)
+                                    }
+                                >
+                                    Try again
+                                </Button>
+                            </Stack>
+                        </Alert>
+                    ) : (
+                        <ConnectedDevice quota={quota} onOpen={open} />
+                    )}
                 </Stack>
             </Paper>
         );
@@ -68,6 +96,27 @@ export function CurrentPackage() {
                     <Text size='lg' fw={600}>
                         Active Package Details
                     </Text>
+
+                    {error ? (
+                        <Alert
+                            color='orange'
+                            title='Showing saved package data'
+                        >
+                            <Group justify='space-between'>
+                                <Text size='sm'>{error}</Text>
+                                <Button
+                                    size='xs'
+                                    variant='light'
+                                    color='orange'
+                                    onClick={() =>
+                                        void refreshPppoeQuota(selectedAccountId)
+                                    }
+                                >
+                                    Retry
+                                </Button>
+                            </Group>
+                        </Alert>
+                    ) : null}
 
                     <Group justify='space-between'>
                         <Text size='sm' fw={500}>

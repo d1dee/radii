@@ -1,15 +1,37 @@
+import {
+    configureSync,
+    getConsoleSink,
+    getLogger,
+} from '@logtape/logtape';
+import { join } from 'path';
+
+configureSync({
+    sinks: { console: getConsoleSink() },
+    loggers: [
+        {
+            category: ['radii', 'pppoe', 'server'],
+            lowestLevel: 'info',
+            sinks: ['console'],
+        },
+        {
+            category: ['logtape', 'meta'],
+            lowestLevel: 'warning',
+            sinks: ['console'],
+        },
+    ],
+});
+
+const logger = getLogger(['radii', 'pppoe', 'server']);
 const PORT = parseInt(Bun.env.SERVER_PORT || '0');
 const SERVER_ADDRESS = Bun.env.SERVER_ADDRESS;
 const SERVER_PUBLIC_URL = Bun.env.SERVER_PUBLIC_URL;
 
 if (!SERVER_ADDRESS || !SERVER_PUBLIC_URL) {
-    console.error('SERVER_ADDRESS and SERVER_PUBLIC_URL are required');
+    logger.fatal('SERVER_ADDRESS and SERVER_PUBLIC_URL are required');
     process.exit('SERVER_CONFIG_ERROR');
 }
 
 const canonicalPortalUrl = new URL(SERVER_PUBLIC_URL);
-
-import { join } from 'path';
 
 const server = Bun.serve({
     port: PORT,
@@ -49,4 +71,4 @@ const server = Bun.serve({
     },
 });
 
-console.log(`PPoE serving at ${server.url}`);
+logger.info('PPoE server started', { url: server.url.toString() });

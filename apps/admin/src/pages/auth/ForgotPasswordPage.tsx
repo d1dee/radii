@@ -18,6 +18,7 @@ import { useState } from 'react';
 import { Link, Navigate, useNavigate } from 'react-router-dom';
 
 import { authClient, useSession } from '@/lib/auth';
+import { reportClientError } from '@/lib/clientError';
 
 // Email-OTP password reset on the dedicated admin BetterAuth instance:
 // request a 6-digit code by email (valid 5 minutes), then redeem it with a
@@ -68,6 +69,15 @@ export default function ForgotPasswordPage() {
                 message: `We sent a 6-digit reset code to ${form.values.email}`,
             });
             setStep('reset');
+        } catch (error) {
+            notifications.show({
+                color: 'red',
+                message: reportClientError(
+                    error,
+                    'request admin password reset',
+                    'The reset code could not be sent. Try again.',
+                ),
+            });
         } finally {
             setRequesting(false);
         }
@@ -98,6 +108,15 @@ export default function ForgotPasswordPage() {
                 message: 'Password updated — sign in with your new password',
             });
             navigate('/login', { replace: true });
+        } catch (error) {
+            notifications.show({
+                color: 'red',
+                message: reportClientError(
+                    error,
+                    'reset admin password',
+                    'The password could not be reset. Try again.',
+                ),
+            });
         } finally {
             setResetting(false);
         }

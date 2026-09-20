@@ -14,6 +14,7 @@ import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 
 import { authClient, useSession } from '@/lib/auth';
+import { reportClientError } from '@/lib/clientError';
 import { notifications } from '@mantine/notifications';
 
 // 2FA-style email verification for admin accounts: the admin registers (or
@@ -63,6 +64,15 @@ export default function VerifyEmailPage() {
                 color: 'blue',
                 message: 'A new 6-digit code is on its way',
             });
+        } catch (error) {
+            notifications.show({
+                color: 'red',
+                message: reportClientError(
+                    error,
+                    'resend admin verification code',
+                    'A new verification code could not be sent. Try again.',
+                ),
+            });
         } finally {
             setResending(false);
         }
@@ -95,6 +105,16 @@ export default function VerifyEmailPage() {
                     navigate('/login', { replace: true });
                 }
             }, 2500);
+        } catch (error) {
+            notifications.show({
+                color: 'red',
+                message: reportClientError(
+                    error,
+                    'verify admin email',
+                    'Email verification could not be completed. Try again.',
+                ),
+            });
+            setOtp('');
         } finally {
             setVerifying(false);
         }

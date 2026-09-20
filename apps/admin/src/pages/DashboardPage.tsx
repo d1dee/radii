@@ -39,6 +39,7 @@ import {
     type NetworkUsage,
 } from '@/lib/api';
 import { useAutoRefresh } from '@/lib/autoRefresh';
+import { warnBackgroundFailure } from '@/lib/clientError';
 import { dayjs } from '@/lib/dayjs';
 import { formatBytes, formatMoney, formatSpeed } from '@/lib/format';
 import { useAdminSettings } from '@/lib/settings';
@@ -118,11 +119,13 @@ export default function DashboardPage() {
             );
             if (!silent) setLoading(false);
             if (!res.success) {
-                setError(res.message || 'Failed to load dashboard data');
+                if (silent) warnBackgroundFailure('refresh dashboard reports', res);
+                else setError(res.message || 'Failed to load dashboard data');
                 return;
             }
             if (!res.data) {
-                setError('Failed to load dashboard data');
+                if (silent) warnBackgroundFailure('refresh dashboard reports', res);
+                else setError('Failed to load dashboard data');
                 return;
             }
             setReports(res.data);
@@ -133,6 +136,7 @@ export default function DashboardPage() {
     const loadUsage = useCallback(async () => {
         const res = await getRadiusSummary(60);
         if (res.success && res.data) setUsage(res.data);
+        else warnBackgroundFailure('load dashboard network usage', res);
     }, []);
 
     // Initial load waits for the admin's saved settings so their default

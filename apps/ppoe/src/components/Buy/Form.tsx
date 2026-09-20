@@ -4,6 +4,7 @@ import { parseServiceProvider, zPhoneNumber } from '@radii/shared';
 import { PhoneNumberInput } from '@radii/ui';
 import { useContext, useState } from 'react';
 import { createOrder } from '../../lib/api.ts';
+import { mutationLogger } from '../../lib/logging.ts';
 
 import { AiOutlineLoading } from 'react-icons/ai';
 import z from 'zod';
@@ -92,14 +93,15 @@ export function BuyForm({
                 status: 'pending',
             });
         } catch (err) {
-            console.warn('Order failed', err);
+            mutationLogger.warning('Unexpected order creation failure.', {
+                operation: 'create-order',
+                errorName: err instanceof Error ? err.name : 'UnknownError',
+            });
             onOrder({
                 orderId: '',
                 status: 'errored',
                 message:
-                    err instanceof Error
-                        ? err.message
-                        : 'Could not submit your order.',
+                    'Could not submit your payment. Check your connection and try again.',
             });
         }
     }

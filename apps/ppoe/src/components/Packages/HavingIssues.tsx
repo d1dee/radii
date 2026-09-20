@@ -7,6 +7,7 @@ import {
     type AdminContactsSettings,
 } from '@radii/shared';
 import { verifyPaymentReceipt } from '../../lib/api.ts';
+import { mutationLogger } from '../../lib/logging.ts';
 import { AdminContacts } from '../AdminContacts.tsx';
 
 interface Props {
@@ -59,27 +60,48 @@ export function HavingIssues({ adminContacts }: Props) {
         // the receipt until the payment leaves the pending state; the service
         // deduplicates in-flight verifications server-side.
         const pollOnce = async (): Promise<boolean> => {
-            const res = await verifyPaymentReceipt(values.transactionCode);
-            if (generationRef.current !== generation) return false;
-            if (!res.success) {
+            try {
+                const res = await verifyPaymentReceipt(values.transactionCode);
+                if (generationRef.current !== generation) return false;
+                if (!res.success) {
+                    setMessage({
+                        message:
+                            res.message || 'Transaction verification failed',
+                    });
+                    return false;
+                }
+                const { status, message: detail } = res.data!;
+                if (status === 'pending') {
+                    setMessage({
+                        success: true,
+                        message: detail || 'Processing...',
+                    });
+                    return true;
+                }
                 setMessage({
-                    message: res.message || 'Transaction verification failed',
+                    success: status === 'paid' ? true : undefined,
+                    message: detail || status,
                 });
                 return false;
+            } catch (error) {
+                mutationLogger.warning(
+                    'Unexpected payment verification failure.',
+                    {
+                        operation: 'verify-payment',
+                        errorName:
+                            error instanceof Error
+                                ? error.name
+                                : 'UnknownError',
+                    },
+                );
+                if (generationRef.current === generation) {
+                    setMessage({
+                        message:
+                            'Could not verify the transaction. Try again.',
+                    });
+                }
+                return false;
             }
-            const { status, message: detail } = res.data!;
-            if (status === 'pending') {
-                setMessage({
-                    success: true,
-                    message: detail || 'Processing...',
-                });
-                return true;
-            }
-            setMessage({
-                success: status === 'paid' ? true : undefined,
-                message: detail || status,
-            });
-            return false;
         };
 
         if (await pollOnce()) {

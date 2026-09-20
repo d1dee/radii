@@ -5,10 +5,13 @@
 // uses 2FA-style one-time codes rendered by a dedicated admin template, so
 // admin and customer email concerns cannot collide.
 //
-// When RESEND_API_KEY is not set (local development), the code is printed to
-// the server console instead of being sent.
+// When RESEND_API_KEY is not set, delivery is skipped and logged without
+// exposing the recipient or one-time code.
 
 import { env } from '../env';
+import { apiLogger } from '../logging';
+
+const logger = apiLogger.getChild('email');
 
 export interface AdminOtpEmailInput {
     email: string;
@@ -76,11 +79,9 @@ export async function sendAdminOtpEmail(
     input: AdminOtpEmailInput,
 ): Promise<void> {
     if (!env.resend.apiKey) {
-        // Dev fallback: surface the code on the server console so the flow
-        // remains fully testable without a Resend account.
-        console.log(
-            `[admin-email] RESEND_API_KEY not set — ${input.type} code for ${input.email}: ${input.otp}`,
-        );
+        logger.warn('Admin OTP email delivery skipped; Resend is not configured', {
+            otpType: input.type,
+        });
         return;
     }
 
@@ -99,12 +100,11 @@ export async function sendAdminOtpEmail(
             }),
         });
         if (!res.ok) {
-            console.error(
-                `[admin-email] Resend request failed (${res.status}):`,
-                await res.text(),
-            );
+            logger.error('Resend rejected admin OTP email', {
+                status: res.status,
+            });
         }
     } catch (err) {
-        console.error('[admin-email] could not reach Resend:', err);
+        logger.error('Could not reach Resend', { error: err });
     }
 }

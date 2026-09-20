@@ -34,10 +34,12 @@ import {
 } from '../lib/packages';
 import { paymentService } from '../lib/payments';
 import { radiusClient, type ActivationRedirect } from '../lib/radius';
+import { apiLogger } from '../logging';
 import { requireAdmin, requireAuth } from '../middleware/auth';
 import type { AppVariables } from '../types';
 
 const app = new Hono<{ Variables: AppVariables }>();
+const logger = apiLogger.getChild('radius').getChild('hotspot');
 
 // --- Packages ---------------------------------------------------------------
 
@@ -151,77 +153,72 @@ app.get('/client', requireAuth, async (c) => {
 // Active (non-expired) package activations enriched with live RADIUS usage:
 // remaining time/bytes, live sessions, average speed — everything the portal
 // needs to render quota state without talking to RADIUS itself.
+// Errors bubble to the global onError handler, which logs them with the
+// matched route and request id; no local try/catch to avoid double logging.
 app.get('/status', requireAuth, async (c) => {
-    try {
-        const currentUser = c.get('user');
+    const currentUser = c.get('user');
 
-        // Identify the calling device: the portal carries the login-request id in localstorage
-        const loginRequestId = c.req.query('login_request');
-        let clientMac = '';
-        if (loginRequestId) {
-            const [loginRequest] = await db
-                .select({ mac: hotspotLoginRequest.mac })
-                .from(hotspotLoginRequest)
-                .where(eq(hotspotLoginRequest.id, loginRequestId))
-                .limit(1);
-            clientMac = normalizeMac(loginRequest?.mac);
-        }
-
-        const activations = await radiusClient.getUserPackageStatuses(
-            currentUser!.id,
-            'hotspot',
-        );
-        const data = activations
-            .filter((v) => v)
-            .map((a) => ({
-                id: a.activationId,
-                sessionLength: a.sessionLength,
-                // For bank (noExpiry) packages remainingSeconds carries the
-                // cumulative balance, so this renders as bank minutes left.
-                remainingSessionLength:
-                    a.remainingSeconds === null
-                        ? 0
-                        : Math.ceil(a.remainingSeconds / 60),
-                remainingSeconds: a.remainingSeconds ?? 0,
-                price: a.price,
-                uploadRate: a.uploadRate,
-                downloadRate: a.downloadRate,
-                maxDevices: a.maxDevices,
-                expiresAt: a.expireAt.toISOString(),
-                lastActive: a.lastActive?.toISOString(),
-                noExpiry: a.noExpiry,
-                thisDevice:
-                    clientMac !== '' &&
-                    a.liveSessions.some(
-                        (s) => normalizeMac(s.callingStationId) === clientMac,
-                    ),
-                online: a.online,
-                clientMac:
-                    a.liveSessions.find((s) => s.callingStationId)
-                        ?.callingStationId ?? null,
-                packageId: a.packageId,
-                packageTitle: a.packageTitle,
-                username: a.username,
-                usedSeconds: a.usedSeconds,
-                sessionLimitSeconds: a.sessionLimitSeconds,
-                bankTotalSeconds: a.noExpiry
-                    ? a.sessionLength * 60
-                    : null,
-                bankUsedSeconds: a.noExpiry ? a.usedSeconds : null,
-                bankRemainingSeconds: a.noExpiry
-                    ? Math.max(0, a.sessionLength * 60 - a.usedSeconds)
-                    : null,
-                octetsUsed: a.octetsUsed,
-                octetsLimit: a.octetsLimit,
-                remainingOctets: a.remainingOctets,
-                avgSpeedBps: a.avgSpeedBps,
-                liveSessions: a.liveSessions,
-            }));
-        return c.json({ success: true, data });
-    } catch (err) {
-        console.error(err);
-        throw err;
+    // Identify the calling device: the portal carries the login-request id in localstorage
+    const loginRequestId = c.req.query('login_request');
+    let clientMac = '';
+    if (loginRequestId) {
+        const [loginRequest] = await db
+            .select({ mac: hotspotLoginRequest.mac })
+            .from(hotspotLoginRequest)
+            .where(eq(hotspotLoginRequest.id, loginRequestId))
+            .limit(1);
+        clientMac = normalizeMac(loginRequest?.mac);
     }
+
+    const activations = await radiusClient.getUserPackageStatuses(
+        currentUser!.id,
+        'hotspot',
+    );
+    const data = activations
+        .filter((v) => v)
+        .map((a) => ({
+            id: a.activationId,
+            sessionLength: a.sessionLength,
+            // For bank (noExpiry) packages remainingSeconds carries the
+            // cumulative balance, so this renders as bank minutes left.
+            remainingSessionLength:
+                a.remainingSeconds === null
+                    ? 0
+                    : Math.ceil(a.remainingSeconds / 60),
+            remainingSeconds: a.remainingSeconds ?? 0,
+            price: a.price,
+            uploadRate: a.uploadRate,
+            downloadRate: a.downloadRate,
+            maxDevices: a.maxDevices,
+            expiresAt: a.expireAt.toISOString(),
+            lastActive: a.lastActive?.toISOString(),
+            noExpiry: a.noExpiry,
+            thisDevice:
+                clientMac !== '' &&
+                a.liveSessions.some(
+                    (s) => normalizeMac(s.callingStationId) === clientMac,
+                ),
+            online: a.online,
+            clientMac:
+                a.liveSessions.find((s) => s.callingStationId)
+                    ?.callingStationId ?? null,
+            packageId: a.packageId,
+            packageTitle: a.packageTitle,
+            username: a.username,
+            usedSeconds: a.usedSeconds,
+            sessionLimitSeconds: a.sessionLimitSeconds,
+            bankTotalSeconds: a.noExpiry ? a.sessionLength * 60 : null,
+            bankUsedSeconds: a.noExpiry ? a.usedSeconds : null,
+            bankRemainingSeconds: a.noExpiry
+                ? Math.max(0, a.sessionLength * 60 - a.usedSeconds)
+                : null,
+            octetsUsed: a.octetsUsed,
+            octetsLimit: a.octetsLimit,
+            remainingOctets: a.remainingOctets,
+            avgSpeedBps: a.avgSpeedBps,
+            liveSessions: a.liveSessions,
+        }));
+    return c.json({ success: true, data });
 });
 
 // --- Orders / payments ------------------------------------------------------
@@ -404,10 +401,10 @@ async function activationForPayment(
     try {
         return await radiusClient.ensureActivated(paymentId);
     } catch (err) {
-        console.error(
-            `[radius] activation for payment ${paymentId} failed:`,
-            err,
-        );
+        logger.error('Hotspot payment activation failed', {
+            paymentId,
+            error: err,
+        });
         return null;
     }
 }
@@ -517,7 +514,7 @@ app.post('/deauth/:deviceQuotaId', requireAuth, async (c) => {
             },
         });
     } catch (err) {
-        console.error('[radius] session disconnect failed:', err);
+        logger.error('Hotspot session disconnect failed', { error: err });
         return jsonError(c, 502, 'Could not contact the RADIUS system');
     }
 });

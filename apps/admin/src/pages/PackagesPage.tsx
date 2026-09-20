@@ -23,6 +23,7 @@ import { useNavigate } from 'react-router-dom';
 import { PackageDetailsDrawer } from '@/components/Packages/PackageDetailsDrawer';
 import { getAdminPackages, type PackageRow, type PackageType } from '@/lib/api';
 import { useAutoRefresh } from '@/lib/autoRefresh';
+import { warnBackgroundFailure } from '@/lib/clientError';
 import { formatMoney } from '@/lib/format';
 
 function SummaryCard({
@@ -71,7 +72,8 @@ export default function PackagesPage() {
         const result = await getAdminPackages(type);
         if (!silent) setLoading(false);
         if (!result.success) {
-            if (!silent) setError(result.message || 'Failed to load packages');
+            if (silent) warnBackgroundFailure('refresh packages', result);
+            else setError(result.message || 'Failed to load packages');
             return;
         }
         setError(null);

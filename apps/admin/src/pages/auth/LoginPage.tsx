@@ -17,6 +17,7 @@ import { useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 
 import { authClient, useSession } from '@/lib/auth';
+import { reportClientError } from '@/lib/clientError';
 
 export default function LoginPage() {
     const navigate = useNavigate();
@@ -67,6 +68,15 @@ export default function LoginPage() {
             }
             const from = (location.state as { from?: string } | null)?.from;
             navigate(from ?? '/', { replace: true });
+        } catch (error) {
+            notifications.show({
+                color: 'red',
+                message: reportClientError(
+                    error,
+                    'admin sign in',
+                    'Sign in could not be completed. Try again.',
+                ),
+            });
         } finally {
             setLoading(false);
         }

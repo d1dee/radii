@@ -27,6 +27,7 @@ import {
     type PackagePaymentStatus,
 } from '@/lib/api';
 import { useAutoRefresh } from '@/lib/autoRefresh';
+import { warnBackgroundFailure } from '@/lib/clientError';
 import { dayjs } from '@/lib/dayjs';
 import { formatDateTime, formatMoney } from '@/lib/format';
 import { useAdminSettings } from '@/lib/settings';
@@ -94,11 +95,13 @@ export default function PaymentsPage() {
             });
             if (!silent) setLoading(false);
             if (!res.success) {
-                if (!silent) setError(res.message || 'Failed to load payments');
+                if (silent) warnBackgroundFailure('refresh payments', res);
+                else setError(res.message || 'Failed to load payments');
                 return;
             }
             if (!res.data) {
-                if (!silent) setError('Failed to load payments');
+                if (silent) warnBackgroundFailure('refresh payments', res);
+                else setError('Failed to load payments');
                 return;
             }
             setError(null);

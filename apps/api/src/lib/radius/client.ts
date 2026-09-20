@@ -55,6 +55,7 @@ import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
 import * as dgram from 'node:dgram';
 import { db } from '../../db';
 import { env } from '../../env';
+import { apiLogger } from '../../logging';
 import { getAdminSettings } from '../adminSettings';
 import {
     activatedPackages,
@@ -86,6 +87,7 @@ import {
     calculateActivationTime,
 } from './activationLimits';
 
+const logger = apiLogger.getChild('radius');
 const PPPOE_EXPIRED_PROFILE = 'radii-ppp-expired';
 
 function effectiveExpireAt(
@@ -651,10 +653,7 @@ export class RadiusClient {
                 username,
                 hadActiveActivation,
             ).catch((err) =>
-                console.error(
-                    `[radius] delayed PPPoE reconnect for ${username} failed:`,
-                    err,
-                ),
+                logger.error('Delayed PPPoE reconnect failed', { error: err }),
             );
         }, 1_500);
         return {
@@ -717,10 +716,10 @@ export class RadiusClient {
                 session,
                 sessionSeconds,
             ).catch((err) =>
-                console.error(
-                    `[radius] pppoe re-authorization CoA failed on ${session.nasIpAddress}:`,
-                    err,
-                ),
+                logger.error('PPPoE re-authorization CoA failed', {
+                    nasIpAddress: session.nasIpAddress,
+                    error: err,
+                }),
             );
         }
     }
@@ -1056,10 +1055,10 @@ export class RadiusClient {
                     disconnected += 1;
                 }
             } catch (err) {
-                console.error(
-                    `[radius] PPPoE disconnect failed on ${session.nasIpAddress}:`,
-                    err,
-                );
+                logger.error('PPPoE disconnect failed', {
+                    nasIpAddress: session.nasIpAddress,
+                    error: err,
+                });
             }
         }
         return disconnected;
@@ -1252,9 +1251,10 @@ export class RadiusClient {
         account: typeof pppoeServiceAccounts.$inferSelect,
         device: { id: string; ownerId: string; name: string },
     ): Promise<void> {
-        console.warn(
-            `[radius] pppoe ${account.username} is assigned to another NAS; rejected dial via ${device.name} (${device.id})`,
-        );
+        logger.warn('Rejected PPPoE dial through mismatched NAS', {
+            nasDeviceId: device.id,
+            tenantAdminId: device.ownerId,
+        });
         if (!account.customerUserId) return;
         const reason = 'pppoe-nas-mismatch';
         const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
@@ -2292,10 +2292,10 @@ export class RadiusClient {
                     await this.closeSessionRecord(session);
                 }
             } catch (err) {
-                console.error(
-                    `[radius] admin pppoe password disconnect failed on ${session.nasIpAddress}:`,
-                    err,
-                );
+                logger.error('PPPoE password-change disconnect failed', {
+                    nasIpAddress: session.nasIpAddress,
+                    error: err,
+                });
             }
         }
         return { username, password: newPassword, sessionsDisconnected };
@@ -2665,10 +2665,10 @@ export class RadiusClient {
                 session,
                 enforcedSeconds,
             ).catch((err) =>
-                console.error(
-                    `[radius] bank CoA failed on ${session.nasIpAddress}:`,
-                    err,
-                ),
+                logger.error('Time-bank CoA failed', {
+                    nasIpAddress: session.nasIpAddress,
+                    error: err,
+                }),
             );
         }
         return { active: true, remainingSeconds: enforcedSeconds };
@@ -2708,10 +2708,10 @@ export class RadiusClient {
                 await this.syncBankAuthorization(row.activation.id, row.pkg);
                 touched++;
             } catch (err) {
-                console.error(
-                    `[radius] bank reconcile failed for activation ${row.activation.id}:`,
-                    err,
-                );
+                logger.error('Time-bank activation reconciliation failed', {
+                    activationId: row.activation.id,
+                    error: err,
+                });
             }
         }
         return touched;

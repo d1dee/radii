@@ -17,6 +17,7 @@ import { useState } from 'react';
 import { Link, Navigate, useNavigate } from 'react-router-dom';
 
 import { authClient, useSession } from '@/lib/auth';
+import { reportClientError } from '@/lib/clientError';
 
 export default function RegisterPage() {
     const navigate = useNavigate();
@@ -68,6 +69,15 @@ export default function RegisterPage() {
             });
             navigate('/verify-email', {
                 state: { email: values.email },
+            });
+        } catch (error) {
+            notifications.show({
+                color: 'red',
+                message: reportClientError(
+                    error,
+                    'admin registration',
+                    'The admin account could not be created. Try again.',
+                ),
             });
         } finally {
             setLoading(false);

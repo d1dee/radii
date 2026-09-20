@@ -33,6 +33,7 @@ import {
 import { MdSettingsEthernet } from 'react-icons/md';
 import { deauthDevice, rotateClientPassword } from '../../lib/api.ts';
 import { useSession } from '../../lib/auth.ts';
+import { mutationLogger } from '../../lib/logging.ts';
 import {
     refreshPppoeAccounts,
     refreshPppoeQuota,
@@ -46,7 +47,13 @@ import {
 // details live under an expandable section.
 export function PppoeAccountCard() {
     const { data: session } = useSession();
-    const { clients, config, loading, selectedAccountId } = usePppoeAccounts();
+    const {
+        clients,
+        config,
+        loading,
+        selectedAccountId,
+        error: accountsError,
+    } = usePppoeAccounts();
     const { nasDeviceId } = useNasScope();
     const [rotating, setRotating] = useState<string | null>(null);
     const [disconnecting, setDisconnecting] = useState<string | null>(null);
@@ -97,6 +104,16 @@ export function PppoeAccountCard() {
                     message: res.message || 'Try again.',
                 });
             }
+        } catch (error) {
+            mutationLogger.warning('Unexpected password rotation failure.', {
+                operation: 'rotate-password',
+                errorName: error instanceof Error ? error.name : 'UnknownError',
+            });
+            notifications.show({
+                color: 'red',
+                title: 'Could not rotate password',
+                message: 'Something went wrong. Try again.',
+            });
         } finally {
             setRotating(null);
         }
@@ -126,6 +143,16 @@ export function PppoeAccountCard() {
                     message: res.message || 'Try again.',
                 });
             }
+        } catch (error) {
+            mutationLogger.warning('Unexpected session disconnect failure.', {
+                operation: 'disconnect-session',
+                errorName: error instanceof Error ? error.name : 'UnknownError',
+            });
+            notifications.show({
+                color: 'red',
+                title: 'Disconnect failed',
+                message: 'Could not disconnect the session. Try again.',
+            });
         } finally {
             setDisconnecting(null);
         }
@@ -163,16 +190,58 @@ export function PppoeAccountCard() {
                         </Text>
                     </Group>
                 ) : clients.length === 0 ? (
-                    <Alert
-                        color='red'
-                        variant='light'
-                        title='No active PPPoE package'
-                    >
-                        Buy a package below, then configure your router or phone
-                        dialer with the credentials shown here.
-                    </Alert>
+                    accountsError ? (
+                        <Alert
+                            color='red'
+                            variant='light'
+                            title='Could not load service accounts'
+                        >
+                            <Stack gap='sm'>
+                                <Text size='sm'>{accountsError}</Text>
+                                <Button
+                                    size='xs'
+                                    variant='light'
+                                    color='red'
+                                    onClick={() =>
+                                        void refreshPppoeAccounts()
+                                    }
+                                >
+                                    Try again
+                                </Button>
+                            </Stack>
+                        </Alert>
+                    ) : (
+                        <Alert
+                            color='red'
+                            variant='light'
+                            title='No active PPPoE package'
+                        >
+                            Buy a package below, then configure your router or
+                            phone dialer with the credentials shown here.
+                        </Alert>
+                    )
                 ) : (
                     <>
+                        {accountsError ? (
+                            <Alert
+                                color='orange'
+                                title='Showing saved accounts'
+                            >
+                                <Group justify='space-between' align='center'>
+                                    <Text size='sm'>{accountsError}</Text>
+                                    <Button
+                                        size='xs'
+                                        variant='light'
+                                        color='orange'
+                                        onClick={() =>
+                                            void refreshPppoeAccounts()
+                                        }
+                                    >
+                                        Retry
+                                    </Button>
+                                </Group>
+                            </Alert>
+                        ) : null}
                         <Select
                             aria-label='Select PPPoE service account'
                             value={selectedAccountId}

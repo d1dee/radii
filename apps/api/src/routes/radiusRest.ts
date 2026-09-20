@@ -19,9 +19,11 @@
 import { Hono } from 'hono';
 import { jsonError } from '../lib/error';
 import { radiusClient } from '../lib/radius';
+import { apiLogger } from '../logging';
 import type { AppVariables } from '../types';
 
 const app = new Hono<{ Variables: AppVariables }>();
+const logger = apiLogger.getChild('radius').getChild('rest');
 
 // --- Health check -----------------------------------------------------------
 // FreeRADIUS probes connect_uri on module initialization; the bare prefix and
@@ -83,9 +85,9 @@ app.on(
             case 'post-auth':
                 // Login succeeded at the RADIUS server. radpostauth itself is
                 // written by the SQL module; this is the API-side audit trail.
-                console.log(
-                    `[radius-rest] post-auth: ${userName} authenticated via NAS ${calledStationId}`,
-                );
+                logger.info('RADIUS post-authentication succeeded', {
+                    nasIpAddress,
+                });
                 return c.body(null, 204);
             default:
                 return action

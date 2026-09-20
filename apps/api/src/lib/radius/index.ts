@@ -4,7 +4,10 @@
 // as lib/payments and db).
 
 import { env } from '../../env';
+import { apiLogger } from '../../logging';
 import { RadiusClient } from './client';
+
+const logger = apiLogger.getChild('radius');
 
 function buildRadiusClient(): RadiusClient {
     return new RadiusClient({
@@ -26,8 +29,8 @@ export const radiusClient: RadiusClient =
     (globalRef.__radiusClient = buildRadiusClient());
 
 if (!env.radius.url) {
-    console.warn(
-        '[radius] RADIUS_SERVER is not configured; provisioning still writes the RADIUS SQL tables and session disconnects still go directly to the NAS, but credential checks (Access-Requests to the server) are disabled.',
+    logger.warn(
+        'RADIUS credential checks are disabled; server URL is not configured',
     );
 }
 
@@ -42,7 +45,9 @@ if (!globalRef.__radiusBankTicker) {
         void radiusClient
             .reconcileBankPackages()
             .catch((err) =>
-                console.error('[radius] bank reconciliation tick failed:', err),
+                logger.error('Time-bank reconciliation tick failed', {
+                    error: err,
+                }),
             );
     }, tickerSeconds * 1000);
     // Never hold the event loop open for the ticker alone (tests/scripts).

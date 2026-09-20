@@ -1,8 +1,3 @@
-import type { Dispatch, SetStateAction } from 'react';
-import type { Quota } from '../../types/index.ts';
-import { dayjs } from '../../lib/dayjs.ts';
-import { getStatus } from '../../lib/api.ts';
-
 export function timeRemaining(totalSeconds: number) {
     let remaining = Math.max(0, Math.floor(totalSeconds));
     const units = [
@@ -24,72 +19,4 @@ export function timeRemaining(totalSeconds: number) {
     }
 
     return parts.join(' ') || '0 seconds';
-}
-
-export async function checkQuotaStatus(
-    setValue: Dispatch<SetStateAction<Partial<Quota> & { width: string }>>,
-    accountId: string,
-) {
-    try {
-        const result = await getStatus(accountId);
-        if (!result.success || !result.data) return;
-
-        // The most recent activation when none is marked for this device.
-        const deviceQuota =
-            result.data.find((v) => v.thisDevice) || result.data[0];
-
-        setValue((prev) => ({
-            ...prev,
-            ...deviceQuota,
-            width:
-                Math.max(
-                    0,
-                    Math.min(
-                        100,
-                        (dayjs
-                            .duration(prev?.remainingSessionLength || 0, 'm')
-                            .asSeconds() *
-                            100) /
-                            dayjs
-                                .duration(prev?.sessionLength || 0, 'm')
-                                .asSeconds(),
-                    ),
-                ) + '%',
-            sessionLength: dayjs
-                .duration(deviceQuota?.sessionLength || 0, 'm')
-                .asSeconds(),
-            remainingSessionLength: dayjs
-                .duration(deviceQuota?.remainingSessionLength || 0, 'm')
-                .asSeconds(),
-        }));
-
-        return result.data;
-    } catch (err) {
-        console.warn('Error checking package status', err);
-    }
-}
-
-export async function checkOnlineStatus() {
-    try {
-        const abort = new AbortController();
-        // timeout out 5 seconds
-        const timeoutId = setTimeout(
-            () => abort.abort('Request timed out.'),
-            5e3,
-        );
-
-        const res = await fetch('https://catfact.ninja/fact', {
-            method: 'GET',
-            cache: 'no-store',
-            signal: abort.signal,
-        });
-
-        console.log('Random cat ping fact: ', (await res.json())?.fact);
-        clearTimeout(timeoutId);
-
-        return res.status === 200;
-    } catch (err) {
-        console.warn('Error checking online status', err);
-        return false;
-    }
 }

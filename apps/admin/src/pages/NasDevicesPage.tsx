@@ -36,6 +36,7 @@ import {
     type NasSetupScriptRow,
 } from '@/lib/api';
 import { useAutoRefresh } from '@/lib/autoRefresh';
+import { warnBackgroundFailure } from '@/lib/clientError';
 import {
     nasDeviceOsLabel,
     nasDeviceStatusColors,
@@ -113,8 +114,8 @@ export default function NasDevicesPage() {
         const result = await getNasDevices();
         if (!silent) setLoading(false);
         if (!result.success) {
-            if (!silent)
-                setError(result.message || 'Failed to load NAS devices');
+            if (silent) warnBackgroundFailure('refresh NAS devices', result);
+            else setError(result.message || 'Failed to load NAS devices');
             return;
         }
         setError(null);

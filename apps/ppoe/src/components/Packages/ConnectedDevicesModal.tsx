@@ -10,6 +10,7 @@ import {
 import { useState } from 'react';
 
 import { deauthDevice } from '@lib/api.ts';
+import { mutationLogger } from '@lib/logging.ts';
 import {
     refreshPppoeAccounts,
     refreshPppoeQuota,
@@ -60,8 +61,16 @@ export function ConnectedDevicesModal({ accountId, isOpen, onClose }: Props) {
                 title: 'Success',
                 message: 'Session has been disconnected successfully',
             });
-        } catch (err) {
-            console.warn('Deauth failed', err);
+        } catch (error) {
+            mutationLogger.warning('Unexpected session disconnect failure.', {
+                operation: 'disconnect-session',
+                errorName: error instanceof Error ? error.name : 'UnknownError',
+            });
+            notifications.show({
+                color: 'red',
+                title: 'Disconnect failed',
+                message: 'Could not disconnect this session. Try again.',
+            });
         } finally {
             setPendingDeauth((prev) => prev.filter((id) => id !== radacctId));
         }

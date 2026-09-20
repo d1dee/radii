@@ -6,6 +6,7 @@ import { useContext, useState } from 'react';
 import { ModalActionsContext } from '../../App.tsx';
 import { login, register } from '../../lib/api.ts';
 import { useSession } from '../../lib/auth.ts';
+import { mutationLogger } from '../../lib/logging.ts';
 
 type FormValues = {
     phoneNumber: string;
@@ -51,32 +52,44 @@ export function RegisterForm({
             localStorage.setItem('packageId', packageId);
         }
 
-        const result =
-            mode === 'register' ? await register(values) : await login(values);
+        try {
+            const result =
+                mode === 'register'
+                    ? await register(values)
+                    : await login(values);
 
-        setSubmitting(false);
+            if (!result.success) {
+                // Failed responses share one envelope; per-field form errors
+                // live in `data.fieldErrors` (any type: VALIDATION_ERROR,
+                // CONFLICT for duplicates, UNAUTHORIZED for bad credentials…).
+                if (hasFieldErrors(result.data)) {
+                    form.setErrors(result.data.fieldErrors);
+                } else {
+                    setFormError(
+                        result.message ||
+                            'Could not authenticate. Try again or contact support.',
+                    );
+                }
+                return;
+            }
 
-        if (!result.success) {
-            // Failed responses share one envelope; per-field form errors
-            // live in `data.fieldErrors` (any type: VALIDATION_ERROR,
-            // CONFLICT for duplicates, UNAUTHORIZED for bad credentials…).
-            if (hasFieldErrors(result.data))
-                form.setErrors(result.data.fieldErrors);
-            else
-                setFormError(
-                    result.message || 'Authentication error, contact support',
-                );
-            return;
-        }
+            // The backend set the session cookie; refresh the client-side
+            // session so `useSession` (and the /me loader) react to it.
+            await refetch();
+            onClose();
 
-        // The backend set the session cookie; refresh the client-side
-        // session so `useSession` (and the /me loader) react to it.
-        await refetch();
-        onClose();
-
-        if (packageId && packageId !== 'null') {
-            startBuy({ packageId, price });
-            localStorage.removeItem('packageId');
+            if (packageId && packageId !== 'null') {
+                startBuy({ packageId, price });
+                localStorage.removeItem('packageId');
+            }
+        } catch (error) {
+            mutationLogger.warning('Unexpected authentication failure.', {
+                operation: mode,
+                errorName: error instanceof Error ? error.name : 'UnknownError',
+            });
+            setFormError('Could not complete authentication. Try again.');
+        } finally {
+            setSubmitting(false);
         }
     }
 

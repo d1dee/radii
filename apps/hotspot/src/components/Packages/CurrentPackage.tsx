@@ -1,5 +1,7 @@
 import {
+    Alert,
     Box,
+    Button,
     Grid,
     Group,
     Paper,
@@ -11,7 +13,7 @@ import {
 import { timeRemaining } from './functions.ts';
 
 import { currentLoginRequestId } from '@lib/api.ts';
-import { useHotspotQuota } from '@lib/store.ts';
+import { refreshHotspotQuota, useHotspotQuota } from '@lib/store.ts';
 import { useDisclosure } from '@mantine/hooks';
 import { IconSelector } from '@tabler/icons-react';
 import humanFormat from 'human-format';
@@ -20,7 +22,8 @@ import { ConnectedDevicesModal } from './ConnectedDevicesModal.tsx';
 import { dataScale } from './PackagePricing.tsx';
 
 export function CurrentPackage() {
-    const { quota } = useHotspotQuota(currentLoginRequestId());
+    const loginRequestId = currentLoginRequestId();
+    const { quota, error, loading } = useHotspotQuota(loginRequestId);
     const [isOpen, { open, close }] = useDisclosure();
 
     // Pick the highest if no token belongs to this devices
@@ -47,6 +50,43 @@ export function CurrentPackage() {
         ? `${thisDevice?.packageTitle} @ Ksh ${thisDevice?.price}`
         : '_';
 
+    if (!thisDevice) {
+        return (
+            <Paper shadow='xl' radius='lg' p='lg' withBorder>
+                <Stack gap='md'>
+                    <Text size='lg' fw={600}>
+                        Active Package Details
+                    </Text>
+                    {loading && !error ? (
+                        <Text c='dimmed'>Loading active package…</Text>
+                    ) : error ? (
+                        <Alert
+                            color='red'
+                            title='Could not load your active package'
+                        >
+                            <Stack gap='sm'>
+                                <Text size='sm'>{error}</Text>
+                                <Button
+                                    color='red'
+                                    variant='light'
+                                    onClick={() =>
+                                        void refreshHotspotQuota(loginRequestId)
+                                    }
+                                >
+                                    Try again
+                                </Button>
+                            </Stack>
+                        </Alert>
+                    ) : (
+                        <Alert color='blue' title='No active package'>
+                            Buy a package below to get connected.
+                        </Alert>
+                    )}
+                </Stack>
+            </Paper>
+        );
+    }
+
     return (
         <>
             <Paper shadow='xl' radius='lg' p='lg' withBorder key=''>
@@ -54,6 +94,27 @@ export function CurrentPackage() {
                     <Text size='lg' fw={600}>
                         Active Package Details
                     </Text>
+
+                    {error ? (
+                        <Alert
+                            color='orange'
+                            title='Showing saved package data'
+                        >
+                            <Group justify='space-between'>
+                                <Text size='sm'>{error}</Text>
+                                <Button
+                                    size='xs'
+                                    variant='light'
+                                    color='orange'
+                                    onClick={() =>
+                                        void refreshHotspotQuota(loginRequestId)
+                                    }
+                                >
+                                    Retry
+                                </Button>
+                            </Group>
+                        </Alert>
+                    ) : null}
 
                     <Group justify='space-between'>
                         <Text size='sm' fw={500}>

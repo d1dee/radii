@@ -1,7 +1,9 @@
 import '@mantine/core/styles.css';
+import '@mantine/notifications/styles.css';
 
-import { Container, MantineProvider, Stack } from '@mantine/core';
+import { Alert, Button, Container, MantineProvider, Stack } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
+import { Notifications } from '@mantine/notifications';
 import type { Package } from '@radii/shared';
 import {
     createContext,
@@ -76,8 +78,15 @@ function pkgPrice(
 export default function App() {
     const [havingIssues, setHavingIssues] = useState(false);
     const { data, isPending } = useSession();
-    const { client: clientData, packages, contacts: adminContacts } =
-        useHotspotPortal();
+    const {
+        client: clientData,
+        clientError,
+        packages,
+        packagesError,
+        packagesLoading,
+        contacts: adminContacts,
+        contactsError,
+    } = useHotspotPortal();
     const loginRequestId = localStorage.getItem(LOGIN_REQUEST_KEY);
 
     useEffect(() => {
@@ -154,6 +163,7 @@ export default function App() {
 
     return (
         <MantineProvider defaultColorScheme='auto'>
+            <Notifications position='top-center' />
             <Container
                 size='sm'
                 py='md'
@@ -164,6 +174,27 @@ export default function App() {
                     <ClientContext.Provider value={clientData}>
                         <Stack justify='space-between' style={{ flex: 1 }}>
                             <Stack gap='md'>
+                                {clientError || contactsError ? (
+                                    <Alert color='orange' title='Some account information is unavailable'>
+                                        <Stack gap='sm'>
+                                            {clientError ?? contactsError}
+                                            <Button
+                                                size='xs'
+                                                variant='light'
+                                                color='orange'
+                                                onClick={() =>
+                                                    void loadHotspotPortal(
+                                                        data?.user.id ?? null,
+                                                        loginRequestId,
+                                                        true,
+                                                    )
+                                                }
+                                            >
+                                                Try again
+                                            </Button>
+                                        </Stack>
+                                    </Alert>
+                                ) : null}
                                 <UserAccount
                                     havingIssues={[
                                         havingIssues,
@@ -177,7 +208,18 @@ export default function App() {
                                 ) : (
                                     <CurrentPackage />
                                 )}
-                                <PackagePricing packages={packages} />
+                                <PackagePricing
+                                    packages={packages}
+                                    error={packagesError}
+                                    loading={packagesLoading}
+                                    onRetry={() =>
+                                        void loadHotspotPortal(
+                                            data?.user.id ?? null,
+                                            loginRequestId,
+                                            true,
+                                        )
+                                    }
+                                />
                             </Stack>
                             <Footer />
                             {/*

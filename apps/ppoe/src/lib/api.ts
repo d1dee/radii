@@ -10,6 +10,7 @@ import type {
     Quota,
 } from '@radii/shared';
 import { ApiErrorType } from '@radii/shared';
+import { apiLogger } from './logging.ts';
 
 export type Client = {
     userId: string;
@@ -169,42 +170,136 @@ export async function request<T>(
     body?: unknown,
     opts?: Omit<RequestInit, 'body'>,
 ): Promise<ApiEnvelope<T>> {
+    const method = opts?.method?.toUpperCase() ?? 'GET';
+    // Sanitized for logs only: strip the query string and collapse dynamic id
+    // segments so account ids, payment ids, and receipt codes never reach logs.
+    const logPath = path
+        .split('?')[0]
+        .replace(/\/(clients|payment|deauth)\/[^/]+/g, '/$1/:id');
+    const context = (status?: number, requestId?: string | null) => ({
+        method,
+        path: logPath,
+        ...(status === undefined ? {} : { status }),
+        ...(requestId ? { requestId } : {}),
+    });
     let res: Response;
     try {
         res = await fetch(`${BASE}${path}`, {
-            method: 'GET',
+            method,
             credentials: 'include',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body),
             ...opts,
         });
-    } catch {
+    } catch (error) {
+        apiLogger.warning('API fetch failed for {method} {path}.', {
+            ...context(),
+            errorName: error instanceof Error ? error.name : 'UnknownError',
+            offline: typeof navigator !== 'undefined' && !navigator.onLine,
+        });
         return {
             success: false,
-            message: 'Could not reach the server. Try again.',
+            message:
+                typeof navigator !== 'undefined' && !navigator.onLine
+                    ? 'You appear to be offline. Check your connection and try again.'
+                    : 'Could not reach the server. Check your connection and try again.',
             type: ApiErrorType.NETWORK_ERROR,
         };
     }
 
-    let json: ApiEnvelope<T>;
+    const requestId =
+        res.headers.get('x-request-id') ??
+        res.headers.get('x-correlation-id') ??
+        res.headers.get('trace-id');
+    let json: unknown;
     try {
-        json = (await res.json()) as ApiEnvelope<T>;
-    } catch {
+        json = await res.json();
+    } catch (error) {
+        apiLogger.warning('API response was not valid JSON for {method} {path}.', {
+            ...context(res.status, requestId),
+            contentType: res.headers.get('content-type'),
+            errorName: error instanceof Error ? error.name : 'UnknownError',
+        });
         return {
             success: false,
-            message: `Could not parse response from path ${path}`,
-            type: ApiErrorType.NETWORK_ERROR,
+            message: statusMessage(res.status),
+            type: errorTypeForStatus(res.status),
         };
     }
 
-    if (!json.success)
+    if (!isApiEnvelope<T>(json)) {
+        apiLogger.warning(
+            'API response had an invalid envelope for {method} {path}.',
+            context(res.status, requestId),
+        );
         return {
             success: false,
-            message: json.message,
-            type: json.type,
-            data: json.data,
+            message: statusMessage(res.status),
+            type: errorTypeForStatus(res.status),
         };
+    }
+
+    if (!res.ok || !json.success) {
+        apiLogger.warning('API request failed for {method} {path}.', {
+            ...context(res.status, requestId),
+            errorType: !json.success
+                ? json.type
+                : errorTypeForStatus(res.status),
+            protocolMismatch: json.success,
+        });
+        if (!json.success) return json;
+        return {
+            success: false,
+            message: statusMessage(res.status),
+            type: errorTypeForStatus(res.status),
+        };
+    }
+
+    apiLogger.debug(
+        'API request completed for {method} {path}.',
+        context(res.status, requestId),
+    );
     return json;
+}
+
+const apiErrorTypes = new Set<string>(Object.values(ApiErrorType));
+
+function isApiEnvelope<T>(value: unknown): value is ApiEnvelope<T> {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+        return false;
+    }
+    const envelope = value as Record<string, unknown>;
+    if (envelope.success === true) return true;
+    return (
+        envelope.success === false &&
+        typeof envelope.message === 'string' &&
+        envelope.message.trim().length > 0 &&
+        typeof envelope.type === 'string' &&
+        apiErrorTypes.has(envelope.type) &&
+        (envelope.data === undefined ||
+            (typeof envelope.data === 'object' &&
+                envelope.data !== null &&
+                !Array.isArray(envelope.data)))
+    );
+}
+
+function errorTypeForStatus(status: number) {
+    if (status === 401) return ApiErrorType.UNAUTHORIZED;
+    if (status === 403) return ApiErrorType.FORBIDDEN;
+    if (status === 404) return ApiErrorType.NOT_FOUND;
+    if (status === 409) return ApiErrorType.CONFLICT;
+    if (status >= 500) return ApiErrorType.INTERNAL_ERROR;
+    return ApiErrorType.NETWORK_ERROR;
+}
+
+function statusMessage(status: number) {
+    if (status === 401) return 'Your session has expired. Sign in and try again.';
+    if (status === 403) return 'You do not have permission to complete this request.';
+    if (status === 404) return 'The requested item could not be found.';
+    if (status === 409) return 'The request conflicts with the current server state. Refresh and try again.';
+    if (status === 429) return 'Too many requests. Wait a moment and try again.';
+    if (status >= 500) return 'The server could not complete the request. Try again shortly.';
+    return 'The server returned an invalid response. Try again.';
 }
 
 export function register(body: {

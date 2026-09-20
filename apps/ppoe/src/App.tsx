@@ -1,4 +1,5 @@
 import '@mantine/core/styles.css';
+import '@mantine/notifications/styles.css';
 
 import { Container, MantineProvider, Stack } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
@@ -80,6 +81,8 @@ export default function App() {
     const {
         client: clientData,
         packages,
+        packagesError,
+        packagesLoading,
         contacts: adminContacts,
     } = usePppoePortal();
     const { clients, selectedAccountId } = usePppoeAccounts();
@@ -213,7 +216,18 @@ export default function App() {
                                             </>
                                         )}
 
-                                        <PackagePricing packages={packages} />
+                                        <PackagePricing
+                                            packages={packages}
+                                            error={packagesError}
+                                            loading={packagesLoading}
+                                            onRetry={() =>
+                                                void loadPppoePortal(
+                                                    data?.user.id ?? null,
+                                                    nasDeviceId,
+                                                    true,
+                                                )
+                                            }
+                                        />
                                     </>
                                 ) : null}
                             </Stack>

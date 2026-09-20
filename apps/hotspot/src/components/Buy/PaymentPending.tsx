@@ -2,6 +2,7 @@ import { Loader, Stack, Text } from '@mantine/core';
 import { useEffect, useEffectEvent, useRef, useState } from 'react';
 import type { OrderResult } from '../../lib/api.ts';
 import { getPaymentStatus } from '../../lib/api.ts';
+import { mutationLogger } from '../../lib/logging.ts';
 import type { FlowStatus } from './PaymentFlow.tsx';
 
 export function PendingPayment({
@@ -61,7 +62,12 @@ export function PendingPayment({
             try {
                 const pending = await handlePoll();
                 if (!cancelled && pending) pollTimer = setTimeout(poll, 2_000);
-            } catch {
+            } catch (error) {
+                mutationLogger.warning('Unexpected payment polling failure.', {
+                    operation: 'poll-payment',
+                    errorName:
+                        error instanceof Error ? error.name : 'UnknownError',
+                });
                 if (!cancelled) onError('Could not reach the server. Try again.');
             }
         };

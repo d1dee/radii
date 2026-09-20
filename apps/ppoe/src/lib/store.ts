@@ -18,11 +18,16 @@ import {
     setNasDeviceId,
     type Client,
 } from './api.ts';
+import { storeLogger } from './logging.ts';
 
 type PortalSnapshot = {
     client: Client | undefined;
+    clientError: string | null;
     packages: Packages | undefined;
+    packagesError: string | null;
+    packagesLoading: boolean;
     contacts: AdminContactsSettings;
+    contactsError: string | null;
 };
 
 type AccountSnapshot = {
@@ -30,16 +35,21 @@ type AccountSnapshot = {
     selectedAccountId: string | null;
     config: PppoeServiceConfig | null;
     loading: boolean;
+    error: string | null;
 };
 
-type QuotaSnapshot = { quota: Quota[]; loading: boolean };
+type QuotaSnapshot = { quota: Quota[]; loading: boolean; error: string | null };
 
 type ScopeSnapshot = { nasDeviceId: string | null };
 
 let portalSnapshot: PortalSnapshot = {
     client: undefined,
+    clientError: null,
     packages: undefined,
+    packagesError: null,
+    packagesLoading: true,
     contacts: defaultAdminSettings.contacts,
+    contactsError: null,
 };
 let scopeSnapshot: ScopeSnapshot = {
     nasDeviceId: currentNasDeviceId(),
@@ -49,8 +59,9 @@ let accountSnapshot: AccountSnapshot = {
     selectedAccountId: null,
     config: null,
     loading: true,
+    error: null,
 };
-let quotaSnapshot: QuotaSnapshot = { quota: [], loading: true };
+let quotaSnapshot: QuotaSnapshot = { quota: [], loading: true, error: null };
 
 const portalListeners = new Set<() => void>();
 const accountListeners = new Set<() => void>();
@@ -138,45 +149,106 @@ function subscribe(listeners: Set<() => void>, listener: () => void) {
     };
 }
 
-export function loadPppoePortal(userId: string | null, nasDeviceId: string | null) {
-    if (publicScope !== nasDeviceId) {
+export function loadPppoePortal(
+    userId: string | null,
+    nasDeviceId: string | null,
+    force = false,
+) {
+    if (publicScope !== nasDeviceId || (force && !publicFlight)) {
+        const scopeChanged = publicScope !== nasDeviceId;
         publicScope = nasDeviceId;
-        publicFlight = Promise.all([
-            getContacts(nasDeviceId),
-            getPackages(nasDeviceId),
-        ])
-            .then(([contacts, packages]) => {
+        publishPortal({
+            ...(scopeChanged
+                ? {
+                      packages: undefined,
+                      contacts: defaultAdminSettings.contacts,
+                  }
+                : {}),
+            packagesLoading: true,
+            packagesError: null,
+            contactsError: null,
+        });
+        const flight = (async () => {
+            try {
+                const [contacts, packages] = await Promise.all([
+                    getContacts(nasDeviceId),
+                    getPackages(nasDeviceId),
+                ]);
                 if (publicScope !== nasDeviceId) return;
                 publishPortal({
                     contacts:
                         contacts.success && contacts.data
                             ? contacts.data
-                            : defaultAdminSettings.contacts,
-                    packages: packages.success ? packages.data : undefined,
+                            : portalSnapshot.contacts,
+                    contactsError: contacts.success ? null : contacts.message,
+                    packages: packages.success
+                        ? packages.data
+                        : portalSnapshot.packages,
+                    packagesError: packages.success ? null : packages.message,
+                    packagesLoading: false,
                 });
-            })
-            .finally(() => {
+            } catch (error) {
+                storeLogger.warning('Unexpected portal load failure.', {
+                    operation: 'load-portal',
+                    errorName:
+                        error instanceof Error ? error.name : 'UnknownError',
+                });
+                if (publicScope === nasDeviceId) {
+                    publishPortal({
+                        packagesError:
+                            'Could not load PPPoE packages. Try again.',
+                        contactsError: 'Could not load support contacts.',
+                    });
+                }
+            }
+        })();
+        publicFlight = flight;
+        const finish = () => {
+            if (publicFlight === flight) {
+                publishPortal({ packagesLoading: false });
                 publicFlight = null;
-            });
+            }
+        };
+        void publicFlight.then(finish, finish);
     }
 
-    if (clientUserId !== userId) {
+    if (clientUserId !== userId || (force && !clientFlight)) {
         clientUserId = userId;
-        publishPortal({ client: undefined });
+        publishPortal({ client: undefined, clientError: null });
         if (!userId) {
             publishAccount({
                 clients: [],
                 selectedAccountId: null,
                 config: null,
                 loading: false,
+                error: null,
             });
-            publishQuota({ quota: [], loading: false });
+            publishQuota({ quota: [], loading: false, error: null });
         }
         clientFlight = userId
             ? getClientData()
                   .then((result) => {
-                      if (clientUserId === userId && result.success) {
-                          publishPortal({ client: result.data });
+                      if (clientUserId === userId) {
+                          publishPortal(
+                              result.success
+                                  ? { client: result.data, clientError: null }
+                                  : { clientError: result.message },
+                          );
+                      }
+                  })
+                  .catch((error: unknown) => {
+                      storeLogger.warning('Unexpected client load failure.', {
+                          operation: 'load-client',
+                          errorName:
+                              error instanceof Error
+                                  ? error.name
+                                  : 'UnknownError',
+                      });
+                      if (clientUserId === userId) {
+                          publishPortal({
+                              clientError:
+                                  'Could not load your account. Try again.',
+                          });
                       }
                   })
                   .finally(() => {
@@ -184,6 +256,7 @@ export function loadPppoePortal(userId: string | null, nasDeviceId: string | nul
                   })
             : null;
     }
+
     return Promise.all([publicFlight, clientFlight]);
 }
 
@@ -191,11 +264,20 @@ export function refreshPppoeAccounts() {
     if (accountFlight) return accountFlight;
     const userId = clientUserId;
     if (!userId) return Promise.resolve();
-    publishAccount({ loading: accountSnapshot.clients.length === 0 });
+    publishAccount({
+        loading: accountSnapshot.clients.length === 0,
+        error: null,
+    });
     const configRequest = accountSnapshot.config ? null : getServiceConfig();
-    accountFlight = Promise.all([getClients(), configRequest])
+    const flight = Promise.all([getClients(), configRequest])
         .then(([clients, config]) => {
             if (clientUserId !== userId) return;
+            if (config && !config.success) {
+                storeLogger.warning('Could not load the PPPoE service config.', {
+                    operation: 'load-service-config',
+                    errorType: config.type,
+                });
+            }
             const nextClients = clients.success
                 ? [...(clients.data ?? [])].sort(
                       (a, b) =>
@@ -234,7 +316,11 @@ export function refreshPppoeAccounts() {
                 }
             }
             if (selectedAccountId !== accountSnapshot.selectedAccountId) {
-                publishQuota({ quota: [], loading: Boolean(selectedAccountId) });
+                publishQuota({
+                    quota: [],
+                    loading: Boolean(selectedAccountId),
+                    error: null,
+                });
             }
             publishAccount({
                 clients: nextClients,
@@ -244,12 +330,28 @@ export function refreshPppoeAccounts() {
                         ? config.data
                         : accountSnapshot.config,
                 loading: false,
+                error: clients.success ? null : clients.message,
             });
         })
+        .catch((error: unknown) => {
+            storeLogger.warning('Unexpected account refresh failure.', {
+                operation: 'load-accounts',
+                errorName:
+                    error instanceof Error ? error.name : 'UnknownError',
+            });
+            if (clientUserId === userId) {
+                publishAccount({
+                    error: 'Could not load your PPPoE accounts. Try again.',
+                });
+            }
+        })
         .finally(() => {
-            publishAccount({ loading: false });
-            accountFlight = null;
+            if (accountFlight === flight) {
+                publishAccount({ loading: false });
+                accountFlight = null;
+            }
         });
+    accountFlight = flight;
     return accountFlight;
 }
 
@@ -257,19 +359,30 @@ export function refreshPppoeQuota(
     accountId = accountSnapshot.selectedAccountId,
 ) {
     if (!accountId) {
-        publishQuota({ quota: [], loading: false });
+        publishQuota({ quota: [], loading: false, error: null });
         return Promise.resolve();
     }
     if (quotaFlight && quotaFlightAccountId === accountId) return quotaFlight;
     quotaFlightAccountId = accountId;
-    publishQuota({ loading: quotaSnapshot.quota.length === 0 });
-    quotaFlight = getStatus(accountId)
+    publishQuota({ loading: quotaSnapshot.quota.length === 0, error: null });
+    const flight = getStatus(accountId)
         .then((result) => {
-            if (
-                result.success &&
-                accountSnapshot.selectedAccountId === accountId
-            ) {
-                publishQuota({ quota: result.data ?? [] });
+            if (accountSnapshot.selectedAccountId !== accountId) return;
+            if (result.success) {
+                publishQuota({ quota: result.data ?? [], error: null });
+            } else {
+                publishQuota({ error: result.message });
+            }
+        })
+        .catch((error: unknown) => {
+            storeLogger.warning('Unexpected quota load failure.', {
+                operation: 'load-quota',
+                errorName: error instanceof Error ? error.name : 'UnknownError',
+            });
+            if (accountSnapshot.selectedAccountId === accountId) {
+                publishQuota({
+                    error: 'Could not load your active package. Try again.',
+                });
             }
         })
         .finally(() => {
@@ -281,6 +394,7 @@ export function refreshPppoeQuota(
                 quotaFlightAccountId = null;
             }
         });
+    quotaFlight = flight;
     return quotaFlight;
 }
 
@@ -293,7 +407,7 @@ export function selectPppoeAccount(accountId: string) {
     if (!client) return;
     if (accountId !== accountSnapshot.selectedAccountId) {
         publishAccount({ selectedAccountId: accountId });
-        publishQuota({ quota: [], loading: true });
+        publishQuota({ quota: [], loading: true, error: null });
     }
     if (client.nasDeviceId && client.nasDeviceId !== scopeSnapshot.nasDeviceId) {
         setNasScope(client.nasDeviceId);

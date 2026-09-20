@@ -1,13 +1,14 @@
 import { ApiErrorType } from '@radii/shared';
-import { Hono } from 'hono';
+import { honoLogger } from '@logtape/hono';
+import { Hono, type MiddlewareHandler } from 'hono';
 import { cors } from 'hono/cors';
-import { logger } from 'hono/logger';
 import { adminAuth } from './adminAuth';
 import { auth } from './auth';
 import { closeDb } from './db';
 import { env } from './env';
 import { radiusClient } from './lib/radius';
 import { reconcileWireGuardPeers } from './lib/wgReconcile';
+import { apiLogger, disposeLogging } from './logging';
 import routes from './routes';
 import type { AppVariables } from './types';
 
@@ -17,12 +18,36 @@ import type { AppVariables } from './types';
 await radiusClient.preparePppoeRestAuthorization();
 
 const app = new Hono<{ Variables: AppVariables }>();
+const logger = apiLogger.getChild('server');
 
 if (!env.frontendUrls.length) {
     throw new Error('FRONTEND_URLS must contain at least one origin');
 }
 
-app.use(logger());
+app.use(
+    honoLogger({
+        category: ['radii', 'api', 'http'],
+        format: (c, responseTime) => ({
+            method: c.req.method,
+            path: c.req.matchedRoutes.at(-1)?.path ?? '<unmatched>',
+            status: c.res.status,
+            responseTime,
+            contentLength: c.res.headers.get('content-length') ?? undefined,
+        }),
+        context: {
+            requestId: {
+                headerNames: ['x-correlation-id', 'x-request-id'],
+                responseHeader: 'x-request-id',
+                normalize: (value) =>
+                    /^[A-Za-z0-9._:-]{1,128}$/.test(value) ? value : null,
+            },
+            include: ['requestId', 'method'],
+            enrich: (c) => ({
+                path: c.req.matchedRoutes.at(-1)?.path ?? '<unmatched>',
+            }),
+        },
+    }) as unknown as MiddlewareHandler<{ Variables: AppVariables }>,
+);
 
 // CORS — applied to all API routes (auth + REST).
 app.use(
@@ -31,7 +56,7 @@ app.use(
         origin: [...env.frontendUrls, ...env.adminFrontendUrls],
         allowHeaders: ['Content-Type', 'Authorization'],
         allowMethods: ['POST', 'GET', 'OPTIONS', 'PUT', 'DELETE'],
-        exposeHeaders: ['Content-Length'],
+        exposeHeaders: ['Content-Length', 'X-Request-Id'],
         maxAge: 600,
         credentials: true,
     }),
@@ -76,7 +101,11 @@ app.notFound((c) =>
     ),
 );
 app.onError((err, c) => {
-    console.error(err);
+    logger.error('Unhandled request error', {
+        error: err,
+        method: c.req.method,
+        path: c.req.matchedRoutes.at(-1)?.path ?? '<unmatched>',
+    });
     return c.json(
         {
             success: false,
@@ -90,7 +119,7 @@ app.onError((err, c) => {
 // Converge the WireGuard interface to the database (source of truth) after
 // restarts: re-asserts known peers and prunes stale ones. Never fatal.
 void reconcileWireGuardPeers().catch((err) =>
-    console.error('[wg] reconciliation error:', err),
+    logger.error('WireGuard reconciliation failed', { error: err }),
 );
 
 // Flush the Bun SQL connection pool on shutdown.
@@ -100,12 +129,13 @@ const shutdownFlags = globalThis as unknown as {
 if (!shutdownFlags.__pgShutdownRegistered) {
     shutdownFlags.__pgShutdownRegistered = true;
     const shutdown = async (signal: string): Promise<void> => {
-        console.log(`Received ${signal}, closing database pool...`);
+        logger.info('Shutting down API server', { signal });
         try {
             await closeDb();
         } catch (err) {
-            console.error('Error closing database pool:', err);
+            logger.error('Database pool shutdown failed', { error: err });
         }
+        await disposeLogging();
         process.exit(0);
     };
     process.on('SIGINT', () => void shutdown('SIGINT'));
@@ -118,6 +148,8 @@ const server = Bun.serve({
     fetch: app.fetch,
 });
 
-console.info(
-    `Bun server started at: ${server.protocol}://${server.hostname}:${server.port}`,
-);
+logger.info('API server started', {
+    protocol: server.protocol,
+    hostname: server.hostname,
+    port: server.port,
+});

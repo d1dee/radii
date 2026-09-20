@@ -10,6 +10,9 @@ import { chmod, unlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { env } from '../env';
+import { apiLogger } from '../logging';
+
+const logger = apiLogger.getChild('wireguard');
 
 export class WgError extends Error {}
 
@@ -67,7 +70,9 @@ export async function interfaceReady(): Promise<boolean> {
         await runWg(['show', env.wgIface, 'public-key']);
         return true;
     } catch (err) {
-        err instanceof Error && console.error(err.message);
+        logger.error('WireGuard interface readiness check failed', {
+            error: err,
+        });
         return false;
     }
 }
@@ -93,7 +98,15 @@ export async function upsertPeer(peer: WgPeerConfig): Promise<void> {
         }
         await runWg(args);
     } finally {
-        if (pskFile) await unlink(pskFile).catch(() => {});
+        // The temp file holds a preshared key: never log its contents, but a
+        // failed delete leaves secret material on disk and must be visible.
+        if (pskFile)
+            await unlink(pskFile).catch((err) => {
+                logger.error('Failed to delete temporary preshared-key file', {
+                    fileRemoved: false,
+                    error: err,
+                });
+            });
     }
 }
 

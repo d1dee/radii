@@ -3,9 +3,12 @@ import { desc, eq } from 'drizzle-orm';
 import { db } from '../db';
 import { nas, nasDevice, nasSetupScript } from '../db/schema';
 import { env } from '../env';
+import { apiLogger } from '../logging';
 import type { NasDeviceRow } from './nas';
 import { renderMikrotikSetupScript } from './setupScriptTemplate';
 import { removePeer, wgManagementEnabled } from './wireguard';
+
+const logger = apiLogger.getChild('wireguard');
 
 export class SetupScriptConfigError extends Error {}
 
@@ -332,9 +335,10 @@ export async function generateSetupScript(
         try {
             await removePeer(existing.wgPublicKey);
         } catch (e) {
-            console.error(
-                `[wg] failed to remove stale peer for ${device.name}: ${e}`,
-            );
+            logger.error('Failed to remove stale peer during setup regeneration', {
+                nasDeviceId: device.id,
+                error: e,
+            });
         }
     }
 

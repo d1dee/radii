@@ -13,6 +13,9 @@
     },
     "dependencies": {
         "@better-auth/drizzle-adapter": "^1.6.26",
+        "@logtape/hono": "^2.3.6",
+        "@logtape/logtape": "^2.3.6",
+        "@logtape/redaction": "^2.3.6",
         "@radii/shared": "workspace:*",
         "@types/bun": "^1.3.14",
         "better-auth": "^1.6.26",

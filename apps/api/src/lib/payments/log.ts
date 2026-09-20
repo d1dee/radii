@@ -1,26 +1,20 @@
-type PaymentLogDetails = Record<string, unknown>;
+import { apiLogger } from '../../logging';
 
-function errorDetails(error: unknown): unknown {
-    if (!(error instanceof Error)) return { type: typeof error };
-    return {
-        name: error.name,
-        message: error.message,
-        stack: error.stack,
-    };
-}
+type PaymentLogDetails = Record<string, unknown>;
+const logger = apiLogger.getChild('payments');
 
 export function paymentLogInfo(
     event: string,
     details: PaymentLogDetails,
 ): void {
-    console.info(`[payments] ${event}`, details);
+    logger.info(event, details);
 }
 
 export function paymentLogWarn(
     event: string,
     details: PaymentLogDetails,
 ): void {
-    console.warn(`[payments] ${event}`, details);
+    logger.warn(event, details);
 }
 
 export function paymentLogError(
@@ -28,8 +22,8 @@ export function paymentLogError(
     details: PaymentLogDetails,
     error?: unknown,
 ): void {
-    console.error(`[payments] ${event}`, {
+    logger.error(event, {
         ...details,
-        ...(error === undefined ? {} : { error: errorDetails(error) }),
+        ...(error === undefined ? {} : { error }),
     });
 }

@@ -6,22 +6,24 @@ import {
     Stack,
     Text,
     UnstyledButton,
-} from '@mantine/core'
-import { MdLogout, MdMenu, MdSettings } from 'react-icons/md'
-import { useNavigate } from 'react-router-dom'
+} from '@mantine/core';
+import { notifications } from '@mantine/notifications';
+import { MdLogout, MdMenu, MdSettings } from 'react-icons/md';
+import { useNavigate } from 'react-router-dom';
 
-import { authClient, useSession } from '@/lib/auth'
+import { authClient, useSession } from '@/lib/auth';
+import { reportClientError } from '@/lib/clientError';
 
 interface HeaderProps {
-    onMenuClick: () => void
+    onMenuClick: () => void;
 }
 
 export function Header({ onMenuClick }: HeaderProps) {
-    const { data: session } = useSession()
-    const navigate = useNavigate()
+    const { data: session } = useSession();
+    const navigate = useNavigate();
 
-    const name = session?.user.name ?? 'Admin'
-    const email = session?.user.email ?? ''
+    const name = session?.user.name ?? 'Admin';
+    const email = session?.user.email ?? '';
     const initials =
         name
             .split(' ')
@@ -29,11 +31,29 @@ export function Header({ onMenuClick }: HeaderProps) {
             .filter(Boolean)
             .slice(0, 2)
             .join('')
-            .toUpperCase() || 'A'
+            .toUpperCase() || 'A';
 
     async function signOut() {
-        await authClient.signOut()
-        navigate('/login', { replace: true })
+        try {
+            const { error } = await authClient.signOut();
+            if (error) {
+                notifications.show({
+                    color: 'red',
+                    message: error.message || 'Could not sign out. Try again.',
+                });
+                return;
+            }
+            navigate('/login', { replace: true });
+        } catch (error) {
+            notifications.show({
+                color: 'red',
+                message: reportClientError(
+                    error,
+                    'admin sign out',
+                    'Could not sign out. Try again.',
+                ),
+            });
+        }
     }
 
     return (
@@ -85,5 +105,5 @@ export function Header({ onMenuClick }: HeaderProps) {
                 </Menu.Dropdown>
             </Menu>
         </Group>
-    )
+    );
 }

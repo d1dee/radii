@@ -23,6 +23,7 @@ import {
     transactionLog,
 } from '../../db/schema';
 import { env } from '../../env';
+import { apiLogger } from '../../logging';
 import { getAdminIdForNasDevice, getAdminIdForUser } from '../adminSettings';
 import { getPaymentByTransactionCode, type PackageRow } from '../packages';
 import { radiusClient, type ActivationRedirect } from '../radius';
@@ -42,6 +43,8 @@ import {
     type PaymentProvider,
     type ProviderCallbackResult,
 } from './types';
+
+const logger = apiLogger.getChild('payments');
 
 export type PackagePaymentRow = typeof packagePayments.$inferSelect;
 type TransactionRow = typeof transaction.$inferSelect;
@@ -487,10 +490,10 @@ export class PaymentService {
                     ? await radiusClient
                           .ensureActivated(payment.id)
                           .catch((err) => {
-                              console.error(
-                                  `[radius] activation for payment ${payment.id} failed:`,
-                                  err,
-                              );
+                              logger.error('RADIUS payment activation failed', {
+                                  paymentId: payment.id,
+                                  error: err,
+                              });
                               return null;
                           })
                     : null;
@@ -1117,10 +1120,10 @@ export class PaymentService {
                 void radiusClient
                     .ensureActivated(packagePaymentId)
                     .catch((err) =>
-                        console.error(
-                            `[radius] activation for payment ${packagePaymentId} failed:`,
-                            err,
-                        ),
+                        logger.error('RADIUS payment activation failed', {
+                            paymentId: packagePaymentId,
+                            error: err,
+                        }),
                     );
             }
         }

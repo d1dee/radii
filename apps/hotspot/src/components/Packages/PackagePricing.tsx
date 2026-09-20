@@ -4,6 +4,7 @@ import {
     Card,
     Group,
     Paper,
+    Loader,
     SimpleGrid,
     Stack,
     Text,
@@ -33,8 +34,14 @@ function getPackagesByTitle(title: string, packages: Packages) {
 
 export function PackagePricing({
     packages,
+    error,
+    loading,
+    onRetry,
 }: {
     packages: Packages | undefined;
+    error: string | null;
+    loading: boolean;
+    onRetry: () => void;
 }) {
     const [selectedTitle, setSelectedTitle] = useState('');
 
@@ -70,14 +77,38 @@ export function PackagePricing({
                     <Text size='lg' fw={600}>
                         Available Packages
                     </Text>
-                    <Alert
-                        color='orange'
-                        title='Warning'
-                        icon={<AiOutlineExclamationCircle size={24} />}
-                    >
-                        Could not find packages linked with your current NAS.
-                        Reconnect your wifi network to resolve.
-                    </Alert>
+                    {loading && !error ? (
+                        <Group gap='sm'>
+                            <Loader size='sm' />
+                            <Text c='dimmed'>Loading available packages…</Text>
+                        </Group>
+                    ) : (
+                        <Alert
+                            color={error ? 'red' : 'blue'}
+                            title={
+                                error
+                                    ? 'Could not load packages'
+                                    : 'No packages available'
+                            }
+                            icon={<AiOutlineExclamationCircle size={24} />}
+                        >
+                            <Stack gap='sm'>
+                                <Text>
+                                    {error ??
+                                        'There are no packages linked with this hotspot.'}
+                                </Text>
+                                {error ? (
+                                    <Button
+                                        variant='light'
+                                        color='red'
+                                        onClick={onRetry}
+                                    >
+                                        Try again
+                                    </Button>
+                                ) : null}
+                            </Stack>
+                        </Alert>
+                    )}
                 </Stack>
             </Paper>
         );
@@ -88,6 +119,22 @@ export function PackagePricing({
                 <Text size='lg' fw={600}>
                     Available Packages
                 </Text>
+
+                {error ? (
+                    <Alert color='orange' title='Showing saved packages'>
+                        <Group justify='space-between' align='center'>
+                            <Text size='sm'>{error}</Text>
+                            <Button
+                                size='xs'
+                                variant='light'
+                                color='orange'
+                                onClick={onRetry}
+                            >
+                                Retry
+                            </Button>
+                        </Group>
+                    </Alert>
+                ) : null}
 
                 <SimpleGrid
                     cols={{ base: 2, xs: 3, sm: 4, md: 5 }}

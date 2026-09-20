@@ -20,6 +20,7 @@ import {
 } from '@shared/index';
 
 import { getAdminSettings, updateAdminSettings } from '@/lib/api';
+import { warnBackgroundFailure } from '@/lib/clientError';
 import { configureAppearance } from '@/lib/format';
 
 interface SettingsContextValue {
@@ -59,6 +60,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
             const res = await getAdminSettings();
             if (cancelled) return;
             if (res.success && res.data) apply(res.data);
+            else warnBackgroundFailure('load admin settings', res);
             setLoaded(true);
         })();
         return () => {

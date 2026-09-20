@@ -6,10 +6,14 @@
 
 import { closeDb } from '../db';
 import { reconcileWireGuardPeers } from '../lib/wgReconcile';
+import { apiLogger, disposeLogging } from '../logging';
+
+const logger = apiLogger.getChild('wireguard');
 
 await reconcileWireGuardPeers().catch((err) => {
-    console.error('[wg] reconciliation error:', err);
+    logger.error('WireGuard reconciliation failed', { error: err });
     process.exitCode = 1;
 });
 
 await closeDb();
+await disposeLogging();

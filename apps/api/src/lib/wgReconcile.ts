@@ -13,6 +13,7 @@ import { inArray, isNotNull } from 'drizzle-orm';
 import { db } from '../db';
 import { nasSetupScript } from '../db/schema';
 import { env } from '../env';
+import { apiLogger } from '../logging';
 import {
     interfaceReady,
     listPeerPublicKeys,
@@ -20,18 +21,18 @@ import {
     upsertPeer,
 } from './wireguard';
 
+const logger = apiLogger.getChild('wireguard');
+
 export async function reconcileWireGuardPeers(): Promise<void> {
     if (!env.wgManagePeers) {
-        console.log(
-            '[wg] peer management disabled (set WG_MANAGE_PEERS=true to enable)',
-        );
+        logger.info('WireGuard peer management is disabled');
         return;
     }
 
     if (!(await interfaceReady())) {
-        console.error(
-            `[wg] interface '${env.wgIface}' is not available — skipping reconciliation`,
-        );
+        logger.error('WireGuard interface is unavailable; skipping reconciliation', {
+            interface: env.wgIface,
+        });
         return;
     }
 
@@ -51,9 +52,10 @@ export async function reconcileWireGuardPeers(): Promise<void> {
             });
             upserted.add(publicKey);
         } catch (e) {
-            console.error(
-                `[wg] reconcile: failed to upsert peer for script ${row.id}: ${e}`,
-            );
+            logger.error('Failed to reconcile WireGuard peer', {
+                setupScriptId: row.id,
+                error: e,
+            });
         }
     }
 
@@ -70,14 +72,14 @@ export async function reconcileWireGuardPeers(): Promise<void> {
                     await removePeer(publicKey);
                     removed += 1;
                 } catch (e) {
-                    console.error(
-                        `[wg] reconcile: failed to remove stale peer ${publicKey}: ${e}`,
-                    );
+                    logger.error('Failed to remove stale WireGuard peer', {
+                        error: e,
+                    });
                 }
             }
         }
     } catch (e) {
-        console.error(`[wg] reconcile: could not list interface peers: ${e}`);
+        logger.error('Failed to list WireGuard peers', { error: e });
     }
 
     // Heal rows whose server-side peer apply failed earlier.
@@ -96,9 +98,10 @@ export async function reconcileWireGuardPeers(): Promise<void> {
             );
     }
 
-    console.log(
-        `[wg] reconcile complete: ${rows.length} expected peers, ` +
-            `${upserted.size} ensured, ${removed} stale removed, ` +
-            `${healed.length} failed rows healed`,
-    );
+    logger.info('WireGuard reconciliation completed', {
+        expectedPeers: rows.length,
+        ensuredPeers: upserted.size,
+        removedPeers: removed,
+        healedRows: healed.length,
+    });
 }

@@ -37,6 +37,7 @@ import {
     type ProvisionedPppoeAccount,
 } from '@/lib/api';
 import { useAutoRefresh } from '@/lib/autoRefresh';
+import { warnBackgroundFailure } from '@/lib/clientError';
 import { dayjs } from '@/lib/dayjs';
 import { formatDate, formatMoney } from '@/lib/format';
 import { useAdminSettings } from '@/lib/settings';
@@ -106,6 +107,7 @@ export default function UsersPage() {
         void (async () => {
             const res = await getNasDevices();
             if (res.success && res.data) setNasDevices(res.data);
+            else warnBackgroundFailure('load user NAS options', res);
         })();
     }, []);
 
@@ -221,6 +223,8 @@ export default function UsersPage() {
         const refreshed = await getPppoeAccount(accountDetails.id);
         if (refreshed.success && refreshed.data) {
             setAccountDetails(refreshed.data);
+        } else {
+            warnBackgroundFailure('refresh migrated PPPoE account', refreshed);
         }
         void load(page, true);
     }
@@ -240,11 +244,13 @@ export default function UsersPage() {
             });
             if (!silent) setLoading(false);
             if (!res.success) {
-                if (!silent) setError(res.message || 'Failed to load users');
+                if (silent) warnBackgroundFailure('refresh users', res);
+                else setError(res.message || 'Failed to load users');
                 return;
             }
             if (!res.data) {
-                if (!silent) setError('Failed to load users');
+                if (silent) warnBackgroundFailure('refresh users', res);
+                else setError('Failed to load users');
                 return;
             }
             setError(null);

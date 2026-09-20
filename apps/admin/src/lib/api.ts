@@ -8,6 +8,9 @@ import {
     type NasDeviceStatus,
 } from '@shared/index';
 
+import { getErrorDiagnostic } from '@/lib/clientError';
+import { adminLogger } from '@/lib/logging';
+
 export type {
     AdminSettings,
     GenerateSetupScriptInput,
@@ -16,12 +19,43 @@ export type {
 } from '@shared/index';
 
 const BASE = import.meta.env.VITE_API_URL + '/api';
+const apiLogger = adminLogger.getChild('api');
+const apiErrorTypes = new Set<string>(Object.values(ApiErrorType));
+
+function isApiEnvelope<T>(value: unknown): value is ApiEnvelope<T> {
+    if (typeof value !== 'object' || value === null || !('success' in value)) {
+        return false;
+    }
+    const envelope = value as Record<string, unknown>;
+    if (envelope.success === true) return true;
+    return (
+        envelope.success === false &&
+        typeof envelope.message === 'string' &&
+        envelope.message.trim().length > 0 &&
+        typeof envelope.type === 'string' &&
+        apiErrorTypes.has(envelope.type)
+    );
+}
+
+function safePath(path: string): string {
+    return path.split(/[?#]/, 1)[0] || '/';
+}
+
+function invalidResponse<T>(): ApiEnvelope<T> {
+    return {
+        success: false,
+        message: 'The server returned an invalid response. Try again.',
+        type: ApiErrorType.NETWORK_ERROR,
+    };
+}
 
 export async function request<T>(
     path: string,
     body?: unknown,
     opts?: RequestInit,
 ): Promise<ApiEnvelope<T>> {
+    const method = (opts?.method ?? 'GET').toUpperCase();
+    const logContext = { method, path: safePath(path) };
     let res: Response;
     try {
         res = await fetch(`${BASE}${path}`, {
@@ -33,33 +67,63 @@ export async function request<T>(
                 : {}),
             ...opts,
         });
-    } catch {
+    } catch (error) {
+        apiLogger.error('API transport failure', {
+            ...logContext,
+            ...getErrorDiagnostic(error),
+        });
         return {
             success: false,
-            message: 'Could not reach the server. Try again.',
+            message:
+                'Could not reach the server. Check your connection and try again.',
             type: ApiErrorType.NETWORK_ERROR,
         };
     }
 
-    let json: ApiEnvelope<T>;
+    const responseContext = {
+        ...logContext,
+        status: res.status,
+        requestId: res.headers.get('x-request-id') ?? undefined,
+    };
+    let value: unknown;
     try {
-        json = (await res.json()) as ApiEnvelope<T>;
-    } catch {
-        return {
-            success: false,
-            message: `Request to ${path} failed (${res.status})`,
-            type: ApiErrorType.NETWORK_ERROR,
-        };
+        value = await res.json();
+    } catch (error) {
+        apiLogger.error('API response was not valid JSON', {
+            ...responseContext,
+            ...getErrorDiagnostic(error),
+        });
+        return invalidResponse<T>();
     }
 
-    if (!json.success)
+    if (!isApiEnvelope<T>(value)) {
+        apiLogger.error('API response had an invalid envelope', responseContext);
+        return invalidResponse<T>();
+    }
+
+    if (!res.ok && value.success) {
+        apiLogger.error(
+            'API returned a successful envelope with a failing HTTP status',
+            responseContext,
+        );
+        return invalidResponse<T>();
+    }
+
+    if (!value.success) {
+        if (res.status >= 500) {
+            apiLogger.error('API request failed on the server', {
+                ...responseContext,
+                errorType: value.type,
+            });
+        }
         return {
             success: false,
-            message: json.message,
-            type: json.type,
-            data: json.data,
+            message: value.message,
+            type: value.type,
+            data: value.data,
         };
-    return json;
+    }
+    return value;
 }
 
 export function register(body: {

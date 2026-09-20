@@ -5,9 +5,11 @@ import { nasSetupScript } from '../db/schema';
 import { jsonError } from '../lib/error';
 import { applyNasReport, getSetupScriptForNasDevice } from '../lib/setupScript';
 import { upsertPeer, WgError, wgManagementEnabled } from '../lib/wireguard';
+import { apiLogger } from '../logging';
 import type { AppVariables } from '../types';
 
 const app = new Hono<{ Variables: AppVariables }>();
+const logger = apiLogger.getChild('wireguard');
 
 // Called by the router itself (via /tool/fetch at the end of the setup
 // script) to register its WireGuard public key and device facts (model,
@@ -59,9 +61,10 @@ app.post('/:id/report', async (c) => {
                 allowedIps: [`${row.wgClientIp}/32`],
             });
         } catch (e) {
-            console.error(
-                `[wg] failed to apply peer for NAS ${nasDeviceId}: ${e}`,
-            );
+            logger.error('Failed to apply NAS peer', {
+                nasDeviceId,
+                error: e,
+            });
             await db
                 .update(nasSetupScript)
                 .set({ status: 'failed' })

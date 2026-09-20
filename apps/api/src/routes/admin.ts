@@ -47,6 +47,7 @@ import {
     updatePackage,
 } from '../lib/packages';
 import { RadiusError, radiusClient } from '../lib/radius';
+import { apiLogger } from '../logging';
 import {
     getPppoeAccountAdminDetail,
     provisionPppoeAccountByPhone,
@@ -62,6 +63,7 @@ import { requireAdmin } from '../middleware/auth';
 import type { AppVariables } from '../types';
 
 const app = new Hono<{ Variables: AppVariables }>();
+const logger = apiLogger.getChild('admin');
 
 // Postgres unique-violation SQLSTATE, which bun:sql surfaces as `errno` on
 // the error cause wrapped by drizzle.
@@ -528,7 +530,7 @@ app.get('/users/:id/activations', requireAdmin, async (c) => {
             data: all,
         });
     } catch (err) {
-        console.error('[radius] admin activation listing failed:', err);
+        logger.error('RADIUS activation listing failed', { error: err });
         return jsonError(c, 502, 'Could not contact the RADIUS system');
     }
 });
@@ -581,7 +583,7 @@ app.post('/pppoe-accounts/provision', requireAdmin, async (c) => {
             201,
         );
     } catch (err) {
-        console.error('[radius] admin PPPoE provisioning failed:', err);
+        logger.error('PPPoE provisioning failed', { error: err });
         return jsonError(c, 409, 'Could not provision PPPoE credentials');
     }
 });
@@ -617,7 +619,7 @@ app.put('/pppoe-accounts/:id/nas', requireAdmin, async (c) => {
         if (err instanceof RadiusError) {
             return jsonError(c, 409, err.message);
         }
-        console.error('[radius] admin pppoe NAS migration failed:', err);
+        logger.error('PPPoE NAS migration failed', { error: err });
         return jsonError(c, 502, 'Could not migrate the PPPoE account');
     }
 });
@@ -660,7 +662,7 @@ app.put('/pppoe-accounts/:id/status', requireAdmin, async (c) => {
         if (err instanceof RadiusError) {
             return jsonError(c, 409, err.message);
         }
-        console.error('[radius] admin pppoe status change failed:', err);
+        logger.error('PPPoE status change failed', { error: err });
         return jsonError(c, 502, 'Could not update the PPPoE account');
     }
 });
@@ -684,7 +686,7 @@ app.post('/pppoe-accounts/:id/disconnect', requireAdmin, async (c) => {
             data,
         });
     } catch (err) {
-        console.error('[radius] admin pppoe disconnect failed:', err);
+        logger.error('PPPoE disconnect failed', { error: err });
         return jsonError(c, 502, 'Could not disconnect the PPPoE sessions');
     }
 });
@@ -753,7 +755,7 @@ app.post('/pppoe-accounts/:id/password', requireAdmin, async (c) => {
             data,
         });
     } catch (err) {
-        console.error('[radius] admin pppoe password set failed:', err);
+        logger.error('PPPoE password update failed', { error: err });
         return jsonError(c, 502, 'Could not contact the RADIUS system');
     }
 });
@@ -857,7 +859,7 @@ app.post('/activations/:id/activate', requireAdmin, async (c) => {
             data: result,
         });
     } catch (err) {
-        console.error('[radius] admin activation failed:', err);
+        logger.error('RADIUS activation failed', { error: err });
         return jsonError(c, 502, 'Could not contact the RADIUS system');
     }
 });
@@ -899,7 +901,7 @@ app.put('/activations/:id', requireAdmin, async (c) => {
         if (!result.ok) return jsonError(c, 404, result.message);
         return c.json({ success: true, message: result.message, data: result });
     } catch (err) {
-        console.error('[radius] admin activation edit failed:', err);
+        logger.error('RADIUS activation update failed', { error: err });
         return jsonError(c, 502, 'Could not contact the RADIUS system');
     }
 });
@@ -985,7 +987,7 @@ app.post('/radius/activations/:id/deactivate', requireAdmin, async (c) => {
             data: result,
         });
     } catch (err) {
-        console.error('[radius] admin deactivation failed:', err);
+        logger.error('RADIUS deactivation failed', { error: err });
         return jsonError(c, 502, 'Could not contact the RADIUS system');
     }
 });
@@ -1014,11 +1016,8 @@ app.post('/radius/check-credentials', requireAdmin, async (c) => {
         );
         return c.json({ success: true, data });
     } catch (err) {
-        return jsonError(
-            c,
-            502,
-            err instanceof Error ? err.message : 'RADIUS check failed',
-        );
+        logger.error('RADIUS credential check failed', { error: err });
+        return jsonError(c, 502, 'Could not contact the RADIUS system');
     }
 });
 
@@ -1044,7 +1043,7 @@ app.post('/radius/sessions/:radacctId/disconnect', requireAdmin, async (c) => {
         if (!result.ok) return jsonError(c, 400, result.message);
         return c.json({ success: true, message: result.message, data: result });
     } catch (err) {
-        console.error('[radius] admin session disconnect failed:', err);
+        logger.error('RADIUS session disconnect failed', { error: err });
         return jsonError(c, 502, 'Could not contact the RADIUS system');
     }
 });
@@ -1092,7 +1091,7 @@ app.put('/radius/sessions/:radacctId', requireAdmin, async (c) => {
         if (!result.ok) return jsonError(c, 400, result.message);
         return c.json({ success: true, message: result.message, data: result });
     } catch (err) {
-        console.error('[radius] admin session edit failed:', err);
+        logger.error('RADIUS session update failed', { error: err });
         return jsonError(c, 502, 'Could not contact the RADIUS system');
     }
 });

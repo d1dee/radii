@@ -1,10 +1,16 @@
 // Centralized environment access. Validates required variables at startup so
 // the server fails fast with a clear message instead of crashing mid-request.
 
+import { apiLogger } from './logging';
+
+const logger = apiLogger.getChild('config');
+
 function required(name: string): string {
     const value = process.env[name];
     if (!value) {
-        console.error(`Missing required environment variable: ${name}`);
+        logger.fatal('Missing required environment variable', {
+            environmentVariable: name,
+        });
         process.exit(1);
     }
     return value;
@@ -135,9 +141,9 @@ export const env = {
             | 'CustomerBuyGoodsOnline',
     },
     // Admin-console transactional email (Resend HTTP API). Optional: without
-    // RESEND_API_KEY the admin verification codes are printed to the server
-    // console instead (dev fallback). Only the admin BetterAuth instance
-    // sends email; portal customers authenticate with phone+PIN only.
+    // RESEND_API_KEY admin OTP delivery is skipped with a warning log (the
+    // code itself is never logged). Only the admin BetterAuth instance sends
+    // email; portal customers authenticate with phone+PIN only.
     resend: {
         apiKey: process.env.RESEND_API_KEY || '',
         from: process.env.RESEND_FROM || 'Radii Admin <onboarding@resend.dev>',

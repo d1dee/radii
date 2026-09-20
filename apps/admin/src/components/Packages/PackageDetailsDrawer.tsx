@@ -23,6 +23,7 @@ import {
     type PackagePaymentStatus,
     type PackageRow,
 } from '@/lib/api';
+import { warnBackgroundFailure } from '@/lib/clientError';
 import { formatDate } from '@/lib/format';
 
 const STATUS_BADGE: Record<
@@ -108,6 +109,11 @@ export function PackageDetailsDrawer({
             if (result.success && result.data) {
                 setNasDeviceNames(
                     Object.fromEntries(result.data.map((d) => [d.id, d.name])),
+                );
+            } else {
+                warnBackgroundFailure(
+                    'load package detail NAS names',
+                    result,
                 );
             }
         })();

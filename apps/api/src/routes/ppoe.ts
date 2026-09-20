@@ -49,10 +49,12 @@ import {
     getPppoeAccountOwnedByCustomer,
 } from '../lib/pppoeAccounts';
 import { radiusClient } from '../lib/radius';
+import { apiLogger } from '../logging';
 import { requireAdmin, requireAuth } from '../middleware/auth';
 import type { AppVariables } from '../types';
 
 const app = new Hono<{ Variables: AppVariables }>();
+const logger = apiLogger.getChild('radius').getChild('pppoe');
 
 // --- Packages ---------------------------------------------------------------
 
@@ -266,10 +268,10 @@ app.post('/clients/:id/rotate-password', requireAuth, async (c) => {
             },
         });
     } catch (err) {
-        console.error(
-            `[radius] pppoe password rotation failed for ${accountId}:`,
-            err,
-        );
+        logger.error('PPPoE password rotation failed', {
+            accountId,
+            error: err,
+        });
         return jsonError(c, 502, 'Could not contact the RADIUS system');
     }
 });
@@ -520,10 +522,10 @@ async function pppoeActivationForPayment(
             password: provisioned.password,
         };
     } catch (err) {
-        console.error(
-            `[radius] pppoe activation for payment ${paymentId} failed:`,
-            err,
-        );
+        logger.error('PPPoE payment activation failed', {
+            paymentId,
+            error: err,
+        });
         return null;
     }
 }
@@ -636,7 +638,7 @@ app.post('/deauth/:activationId', requireAuth, async (c) => {
             },
         });
     } catch (err) {
-        console.error('[radius] pppoe session disconnect failed:', err);
+        logger.error('PPPoE session disconnect failed', { error: err });
         return jsonError(c, 502, 'Could not contact the RADIUS system');
     }
 });

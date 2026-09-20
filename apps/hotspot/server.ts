@@ -1,12 +1,34 @@
+import {
+    configureSync,
+    getConsoleSink,
+    getLogger,
+} from '@logtape/logtape';
+import { join } from 'path';
+
+configureSync({
+    sinks: { console: getConsoleSink() },
+    loggers: [
+        {
+            category: ['radii', 'hotspot', 'server'],
+            lowestLevel: 'info',
+            sinks: ['console'],
+        },
+        {
+            category: ['logtape', 'meta'],
+            lowestLevel: 'warning',
+            sinks: ['console'],
+        },
+    ],
+});
+
+const logger = getLogger(['radii', 'hotspot', 'server']);
 const PORT = parseInt(Bun.env.SERVER_PORT || '0');
 const SERVER_ADDRESS = Bun.env.SERVER_ADDRESS;
 
 if (!SERVER_ADDRESS) {
-    console.error('SERVER_ADDRESS not specified');
+    logger.fatal('SERVER_ADDRESS is not configured');
     process.exit('SERVER_ADDRESS_ERROR');
 }
-
-import { join } from 'path';
 
 const server = Bun.serve({
     port: PORT,
@@ -28,4 +50,4 @@ const server = Bun.serve({
     },
 });
 
-console.log(`Hotspot serving at ${server.url}`);
+logger.info('Hotspot server started', { url: server.url.toString() });

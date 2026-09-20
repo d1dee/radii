@@ -20,6 +20,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { getAdminReports, type AdminReports } from '@/lib/api';
 import { useAutoRefresh } from '@/lib/autoRefresh';
+import { warnBackgroundFailure } from '@/lib/clientError';
 import { dayjs } from '@/lib/dayjs';
 import { formatBytes, formatMoney, formatSeconds } from '@/lib/format';
 import { useAdminSettings } from '@/lib/settings';
@@ -72,11 +73,13 @@ export default function ReportsPage() {
             );
             if (!silent) setLoading(false);
             if (!res.success) {
-                if (!silent) setError(res.message || 'Failed to load reports');
+                if (silent) warnBackgroundFailure('refresh reports', res);
+                else setError(res.message || 'Failed to load reports');
                 return;
             }
             if (!res.data) {
-                if (!silent) setError('Failed to load reports');
+                if (silent) warnBackgroundFailure('refresh reports', res);
+                else setError('Failed to load reports');
                 return;
             }
             setError(null);

@@ -13,12 +13,15 @@ import {
 import { APIError } from 'better-auth/api';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { auth } from '../auth';
+import { apiLogger } from '../logging';
 import type { AppContext } from '../types';
 import { jsonError, jsonFieldErrors } from './error';
 import {
     claimPppoeAccount,
     pendingPppoeClaimExists,
 } from './pppoeAccounts';
+
+const logger = apiLogger.getChild('auth');
 
 function normalizePhone(phone: string) {
     return phone.replace(/\D/g, '');
@@ -96,6 +99,12 @@ export function respondAuthError(c: AppContext, err: unknown) {
             err.message || 'Authentication failed',
         );
     }
+    // Unexpected failure inside better-auth or the OTP/DB layer — keep a
+    // structured record (safe fields only, never phone/PIN) before answering
+    // the client with the generic envelope.
+    logger.error('Portal authentication operation failed unexpectedly', {
+        error: err,
+    });
     return jsonError(c, 500, 'Authentication failed');
 }
 
@@ -196,7 +205,8 @@ export async function logoutPhonePin(c: AppContext) {
             returnHeaders: true,
         });
         return forwardCookies(c, headers, { success: true, data: null });
-    } catch {
+    } catch (err) {
+        logger.warning('Portal sign-out failed', { error: err });
         return jsonError(c, 400, 'Could not sign out');
     }
 }

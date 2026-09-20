@@ -32,6 +32,7 @@ import {
     type NasDeviceRow,
     type PackageType,
 } from '@/lib/api';
+import { warnBackgroundFailure } from '@/lib/clientError';
 
 const ALL_NAS_VALUE = 'all';
 
@@ -114,6 +115,8 @@ export default function PackageFormPage() {
             const result = await getNasDevices();
             if (result.success && result.data) {
                 setNasDevices(result.data);
+            } else {
+                warnBackgroundFailure('load package form NAS options', result);
             }
         })();
     }, []);

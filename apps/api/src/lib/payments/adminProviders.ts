@@ -6,9 +6,12 @@
 // credentials the caller falls back to the server-wide provider registered
 // from env (see ./index.ts).
 
+import { apiLogger } from '../../logging';
 import { getAdminSettings } from '../adminSettings';
 import { MPESA_PROVIDER_NAME, MpesaPaymentProvider } from './mpesa/provider';
 import { PaymentProviderError, type PaymentProvider } from './types';
+
+const logger = apiLogger.getChild('payments');
 
 // Provider-name prefix encoding the owning admin: "mpesa-<adminId>".
 const MPESA_ADMIN_PREFIX = `${MPESA_PROVIDER_NAME}-`;
@@ -108,10 +111,10 @@ export async function resolveProviderByName(
         return await getAdminMpesaProvider(adminId);
     } catch (err) {
         if (err instanceof PaymentProviderError) {
-            console.error(
-                `[payments] cannot rebuild provider "${name}":`,
-                err.message,
-            );
+            logger.error('Could not rebuild payment provider', {
+                provider: name,
+                error: err,
+            });
             return null;
         }
         throw err;

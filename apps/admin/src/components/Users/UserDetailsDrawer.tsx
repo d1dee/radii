@@ -70,6 +70,7 @@ import {
     type PppoeAccountStatus,
     type UserPaymentRow,
 } from '@/lib/api';
+import { warnBackgroundFailure } from '@/lib/clientError';
 import { dayjs } from '@/lib/dayjs';
 import {
     formatBytes,
@@ -194,6 +195,7 @@ export function UserDetailsDrawer({
         const res = await getUserActivations(id);
         setActivationsLoading(false);
         if (res.success && res.data) setActivations(res.data);
+        else warnBackgroundFailure('load user activations', res);
     }, []);
 
     const loadPayments = useCallback(async (id: string) => {
@@ -201,6 +203,7 @@ export function UserDetailsDrawer({
         const res = await getUserPayments(id);
         setPaymentsLoading(false);
         if (res.success && res.data) setPayments(res.data);
+        else warnBackgroundFailure('load user payments', res);
     }, []);
 
     useEffect(() => {
@@ -376,6 +379,7 @@ export function UserDetailsDrawer({
             void (async () => {
                 const res = await getNasDevices();
                 if (res.success && res.data) setNasDevices(res.data);
+                else warnBackgroundFailure('load user detail NAS options', res);
             })();
         }
     };

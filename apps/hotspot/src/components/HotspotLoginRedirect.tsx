@@ -5,6 +5,7 @@ import {
     LOGIN_REQUEST_KEY,
     type HotspotRedirectData,
 } from '../lib/api.ts';
+import { mutationLogger } from '../lib/logging.ts';
 
 export { LOGIN_REQUEST_KEY };
 
@@ -19,20 +20,37 @@ export function HotspotLoginRedirect({ id }: { id: string }) {
 
     useEffect(() => {
         let cancelled = false;
-        (async () => {
-            const res = await completeLoginRequest(id);
-            if (cancelled) return;
-            localStorage.removeItem(LOGIN_REQUEST_KEY);
-            if (res.success && res.data) {
-                setRedirect(res.data);
-            } else {
-                setError(
-                    res.success
-                        ? 'This hotspot sign-in session has expired.'
-                        : res.message,
+        const complete = async () => {
+            try {
+                const res = await completeLoginRequest(id);
+                if (cancelled) return;
+                localStorage.removeItem(LOGIN_REQUEST_KEY);
+                if (res.success && res.data) {
+                    setRedirect(res.data);
+                } else {
+                    setError(
+                        res.success
+                            ? 'This hotspot sign-in session has expired.'
+                            : res.message,
+                    );
+                }
+            } catch (error) {
+                mutationLogger.warning(
+                    'Unexpected hotspot login completion failure.',
+                    {
+                        operation: 'complete-login',
+                        errorName:
+                            error instanceof Error
+                                ? error.name
+                                : 'UnknownError',
+                    },
                 );
+                if (!cancelled) {
+                    setError('Could not complete sign-in. Try reconnecting to the wifi network.');
+                }
             }
-        })();
+        };
+        void complete();
         return () => {
             cancelled = true;
         };

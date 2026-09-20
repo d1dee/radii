@@ -10,6 +10,7 @@
         "serve": "bun run server.ts"
     },
     "dependencies": {
+        "@logtape/logtape": "^2.3.6",
         "@mantine/charts": "^9.6.0",
         "@mantine/core": "^9.6.0",
         "@mantine/dates": "^9.6.0",
