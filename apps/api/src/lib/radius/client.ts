@@ -1401,8 +1401,9 @@ export class RadiusClient {
 
     // rlm_rest authorize for a stable PPPoE account (PPP-…). Unknown
     // usernames fall through to the remaining authorize modules. A valid
-    // stable account with only calendar-expired activations is accepted into
-    // the restricted RouterOS profile so the customer can reach payment.
+    // stable account with no usable activation (expired/lapsed) is never
+    // rejected: it is accepted into the restricted RouterOS profile
+    // (Mikrotik-Group = radii-ppp-expired) so the customer can reach payment.
     private async restAuthorizePppoe(
         username: string,
         nasIpAddress?: string,
@@ -1485,20 +1486,12 @@ export class RadiusClient {
             };
         }
         if (rows.length > 0) return { verdict: 'exhausted' };
-        const [expiredActivation] = await db
-            .select({ id: activatedPackages.id })
-            .from(activatedPackages)
-            .where(
-                and(
-                    eq(activatedPackages.pppoeServiceAccountId, account.id),
-                    isNull(activatedPackages.deactivatedAt),
-                ),
-            )
-            .limit(1);
-        //if (!expiredActivation) return { verdict: 'deactivated' };
-        if (!(await this.getProvisionedPassword(username))) {
-            return { verdict: 'deactivated' };
-        }
+        // Lapsed line: no usable activation left. Never reject here — accept
+        // into the restricted RouterOS profile so the customer reaches the
+        // payment portal, per the expired-subscriber design. The stable
+        // Cleartext-Password is never touched on this path: PPPoE credentials
+        // must survive expiry unchanged so the customer's router can re-dial
+        // as-is after payment.
         return {
             verdict: 'restricted',
             attributes: {
@@ -1654,10 +1647,14 @@ export class RadiusClient {
             if (other) {
                 await this.applyPppoeAuthorization(other.activation, other.pkg);
             } else {
-                await Promise.all([
-                    db.delete(radcheck).where(eq(radcheck.username, username)),
-                    db.delete(radreply).where(eq(radreply.username, username)),
-                ]);
+                // Keep the stable Cleartext-Password in radcheck: an expired
+                // customer must still be able to authenticate so REST
+                // authorize can place the dial into the expired PPP profile
+                // (payment-portal access) instead of rejecting it. Only the
+                // reply-side provisioning is removed.
+                await db
+                    .delete(radreply)
+                    .where(eq(radreply.username, username));
             }
         } else {
             await Promise.all([
