@@ -108,7 +108,7 @@ export function getStatus(accountId: string) {
 
 export function createOrder(body: {
     packageId: string;
-    phoneNumber: string;
+    phoneNumber?: string;
     serviceAccountId: string | null;
 }) {
     // Send the NAS this portal is scoped to so the purchase is attributed to

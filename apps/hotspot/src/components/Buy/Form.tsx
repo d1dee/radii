@@ -4,6 +4,7 @@ import { parseServiceProvider, zPhoneNumber } from '@radii/shared';
 import { PhoneNumberInput } from '@radii/ui';
 import { useContext, useState } from 'react';
 import { createOrder } from '../../lib/api.ts';
+import type { OrderResult } from '../../lib/api.ts';
 import { mutationLogger } from '../../lib/logging.ts';
 
 import { AiOutlineLoading } from 'react-icons/ai';
@@ -34,12 +35,15 @@ export function BuyForm({
     price: string;
     onOrder: (result: {
         orderId: string;
-        status: 'pending' | 'errored';
+        status: 'pending' | 'errored' | 'success';
         message?: string;
+        paymentData?: OrderResult;
     }) => void;
 }) {
     const client = useContext(ClientContext);
+    const isFree = price !== '' && Number(price) === 0;
     const prevPaymentMethods = client?.prevPaymentMethods || [];
+    const [activating, setActivating] = useState(false);
 
     const defaultPhone =
         [...prevPaymentMethods, client?.phoneNumber || ''].find(
@@ -61,21 +65,12 @@ export function BuyForm({
         setInputMethod(method);
     }
 
-    async function handleSubmit(values: FormValues) {
-        const parsed = buyFormSchema.safeParse(values);
-        if (!parsed.success) {
-            form.setFieldError(
-                'phoneNumber',
-                parsed.error.issues[0]?.message ?? '',
-            );
-            return;
-        }
-
+    async function submitOrder(phoneNumber?: string) {
         try {
             const result = await createOrder({
                 loginRequestKey: localStorage.getItem(LOGIN_REQUEST_KEY),
                 packageId,
-                phoneNumber: parsed.data.phoneNumber,
+                ...(phoneNumber ? { phoneNumber } : {}),
             });
 
             if (!result.success) {
@@ -87,9 +82,25 @@ export function BuyForm({
                 return;
             }
 
+            const order = result.data!;
+            if (order.status === 'failed') {
+                onOrder({
+                    orderId: order.paymentId,
+                    status: 'errored',
+                    message: isFree
+                        ? 'Could not activate this package.'
+                        : 'Payment failed. Please try again.',
+                });
+                return;
+            }
+
             onOrder({
-                orderId: result.data!.paymentId,
-                status: 'pending',
+                orderId: order.paymentId,
+                status:
+                    order.status === 'paid' && order.activation
+                        ? 'success'
+                        : 'pending',
+                paymentData: order,
             });
         } catch (err) {
             mutationLogger.warning('Unexpected order creation failure.', {
@@ -103,6 +114,38 @@ export function BuyForm({
                     'Could not submit your order. Check your connection and try again.',
             });
         }
+    }
+
+    async function handleSubmit(values: FormValues) {
+        const parsed = buyFormSchema.safeParse(values);
+        if (!parsed.success) {
+            form.setFieldError(
+                'phoneNumber',
+                parsed.error.issues[0]?.message ?? '',
+            );
+            return;
+        }
+
+        await submitOrder(parsed.data.phoneNumber);
+    }
+
+    async function handleFreeActivation() {
+        setActivating(true);
+        await submitOrder();
+        setActivating(false);
+    }
+
+    if (isFree) {
+        return (
+            <Button
+                onClick={() => void handleFreeActivation()}
+                loading={activating}
+                loaderProps={{ children: <AiOutlineLoading /> }}
+                fullWidth
+            >
+                Activate Free Package
+            </Button>
+        );
     }
 
     return (

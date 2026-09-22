@@ -27,6 +27,25 @@ const TITLES: Record<FlowStatus, { title: string; subtitle: string }> = {
     },
 };
 
+const FREE_TITLES: Record<FlowStatus, { title: string; subtitle: string }> = {
+    buy: {
+        title: 'Activate Free Package',
+        subtitle: 'Activate this package to get connected',
+    },
+    pending: {
+        title: 'Activating Package',
+        subtitle: 'Please wait while we activate your package',
+    },
+    errored: {
+        title: 'Activation Error',
+        subtitle: 'Something went wrong while activating your package',
+    },
+    success: {
+        title: 'Package Activated',
+        subtitle: 'Your free package is ready to use',
+    },
+};
+
 export function PaymentFlow({
     opened,
     onClose,
@@ -40,6 +59,8 @@ export function PaymentFlow({
     const [orderId, setOrderId] = useState('');
     const [paymentData, setPaymentData] = useState<OrderResult | null>(null);
     const [errorMessage, setErrorMessage] = useState('');
+    const isFree = seed?.price !== '' && Number(seed?.price) === 0;
+    const heading = isFree ? FREE_TITLES[status] : TITLES[status];
 
     return (
         <Modal
@@ -47,9 +68,9 @@ export function PaymentFlow({
             onClose={onClose}
             title={
                 <Stack gap={2}>
-                    <Title order={3}>{TITLES[status].title}</Title>
+                    <Title order={3}>{heading.title}</Title>
                     <Text size='sm' c='dimmed'>
-                        {TITLES[status].subtitle}
+                        {heading.subtitle}
                     </Text>
                 </Stack>
             }
@@ -63,6 +84,9 @@ export function PaymentFlow({
                         price={seed.price}
                         onOrder={(result) => {
                             setOrderId(result.orderId);
+                            if (result.paymentData) {
+                                setPaymentData(result.paymentData);
+                            }
                             if (result.status === 'errored') {
                                 setErrorMessage(
                                     result.message || 'Payment failed.',
@@ -76,6 +100,7 @@ export function PaymentFlow({
                 {status === 'pending' ? (
                     <PendingPayment
                         orderId={orderId}
+                        isFree={isFree}
                         onStatusChange={(next, data) => {
                             if (data) setPaymentData(data);
                             setStatus(next);

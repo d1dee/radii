@@ -9,11 +9,13 @@ import { IoMdRefresh } from 'react-icons/io';
 
 export function PendingPayment({
     orderId,
+    isFree,
     onStatusChange,
     onError,
     onRetry,
 }: {
     orderId: string;
+    isFree: boolean;
     onStatusChange: (status: FlowStatus, data: OrderResult | null) => void;
     onError: (message: string) => void;
     onRetry: () => void;
@@ -27,11 +29,12 @@ export function PendingPayment({
             return false;
         }
 
-        const { status } = result.data!;
-        if (status === 'paid') {
+        const { status, activation } = result.data!;
+        if (status === 'paid' && activation) {
             onStatusChange('success', result.data!);
             return false;
         }
+        if (status === 'paid') return true;
         if (status === 'failed') {
             onError('Payment failed. Please try again.');
             return false;
@@ -72,15 +75,16 @@ export function PendingPayment({
     return (
         <Stack align='center' gap='lg' p='md'>
             <Text size='xl' fw={600} c='gray.8'>
-                Processing Payment{'.'.repeat((tick % 3) + 1)}
+                {isFree ? 'Activating Package' : 'Processing Payment'}
+                {'.'.repeat((tick % 3) + 1)}
             </Text>
 
             <Loader size='xl' color='grape' />
 
             <Stack align='center' gap='xs' ta='center'>
                 <Text size='sm' c='red.4'>
-                    Please do not close this window while we process your
-                    payment.
+                    Please do not close this window while we{' '}
+                    {isFree ? 'activate your package' : 'process your payment'}.
                 </Text>
                 <Text size='sm' c='gray.6'>
                     This may take a few seconds.

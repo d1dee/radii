@@ -17,9 +17,11 @@ import {
     usePppoeQuota,
 } from '@lib/store.ts';
 import { notifications } from '@mantine/notifications';
-import humanFormat from 'human-format';
 import { timeRemaining } from './functions.ts';
-import { dataScale } from './PackagePricing.tsx';
+import {
+    formatPackagePrice,
+    formatPackageRate,
+} from './PackagePricing.tsx';
 
 interface Props {
     accountId: string | null;
@@ -77,9 +79,8 @@ export function ConnectedDevicesModal({ accountId, isOpen, onClose }: Props) {
     };
 
     const rows = quota.flatMap((v) => {
-        const title = v.downloadRate
-            ? humanFormat(v.downloadRate, { scale: dataScale })
-            : 'Unlimited';
+        const speed = formatPackageRate(v.downloadRate);
+        const price = formatPackagePrice(v.price);
 
         if (!v.liveSessions || v.liveSessions.length === 0) {
             return [
@@ -97,7 +98,7 @@ export function ConnectedDevicesModal({ accountId, isOpen, onClose }: Props) {
                         <Stack gap={0}>
                             <span>{v.packageTitle}</span>
                             <Text size='xs' c='dimmed' opacity={0.5}>
-                                {title} - Ksh {v.price.toLocaleString()}
+                                {speed} - {price}
                             </Text>
                         </Stack>
                     </Table.Td>
@@ -131,7 +132,7 @@ export function ConnectedDevicesModal({ accountId, isOpen, onClose }: Props) {
                     <Stack gap={0}>
                         <span>{v.packageTitle}</span>
                         <Text size='xs' c='dimmed' opacity={0.5}>
-                            {title} - Ksh {v.price.toLocaleString()}
+                            {speed} - {price}
                         </Text>
                     </Stack>
                 </Table.Td>

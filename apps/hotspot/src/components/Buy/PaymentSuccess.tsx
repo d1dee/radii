@@ -14,6 +14,10 @@ export function PaymentSuccess({
     const formRef = useRef<HTMLFormElement>(null);
     const submitted = useRef(false);
     const activation = paymentData?.activation ?? null;
+    const isFree = paymentData?.amount === 0;
+    const successMessage = isFree
+        ? 'Your free package was activated successfully.'
+        : `Payment of Kes: ${paymentData?.amount} was Successful.`;
 
     // Final activation hop: re-submit the freshly issued hotspot credentials
     // to the NAS servlet login page ($(link-login-only), MikroTik hotspot
@@ -31,7 +35,7 @@ export function PaymentSuccess({
             <Stack align='center' gap='lg' p='md' ta='center'>
                 <Loader size='xl' color='grape' />
                 <Text size='lg' fw={600} c='green'>
-                    Payment of Kes: {paymentData?.amount} was Successful.
+                    {successMessage}
                 </Text>
                 <Text size='sm' c='gray.6'>
                     Connecting you to the internet&hellip;
@@ -90,10 +94,11 @@ export function PaymentSuccess({
             {paymentData ? (
                 <Stack align='center' gap='xs'>
                     <Text size='lg' fw={600} c='green'>
-                        Payment of Kes: {paymentData.amount} was Successful.
+                        {successMessage}
                     </Text>
                     <Text size='sm' c='gray.6'>
-                        Payment ID: {paymentData.paymentId}
+                        {isFree ? 'Activation' : 'Payment'} ID:{' '}
+                        {paymentData.paymentId}
                     </Text>
                     <Text size='sm'>
                         Please wait a few seconds for the system to activate

@@ -15,6 +15,10 @@ export function PaymentSuccess({
 }) {
     const { config } = usePppoeAccounts();
     const activation = paymentData?.activation ?? null;
+    const isFree = paymentData?.amount === 0;
+    const successMessage = isFree
+        ? 'Your free package was activated successfully.'
+        : `Payment of Kes: ${paymentData?.amount} was Successful.`;
 
     useEffect(() => {
         if (!activation) return;
@@ -25,7 +29,7 @@ export function PaymentSuccess({
         return (
             <Stack align='center' gap='lg' p='md'>
                 <Text size='lg' fw={600} c='green' ta='center'>
-                    Payment of Kes: {paymentData?.amount} was Successful.
+                    {successMessage}
                 </Text>
 
                 <CredentialsCard
@@ -66,10 +70,11 @@ export function PaymentSuccess({
             {paymentData ? (
                 <Stack align='center' gap='xs'>
                     <Text size='lg' fw={600} c='green'>
-                        Payment of Kes: {paymentData.amount} was Successful.
+                        {successMessage}
                     </Text>
                     <Text size='sm' c='gray.6'>
-                        Payment ID: {paymentData.paymentId}
+                        {isFree ? 'Activation' : 'Payment'} ID:{' '}
+                        {paymentData.paymentId}
                     </Text>
                     <Text size='sm'>
                         Please wait a few seconds for the system to activate

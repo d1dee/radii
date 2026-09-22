@@ -1,3 +1,21 @@
+import humanFormat from 'human-format';
+
+export const dataScale = new humanFormat.Scale({
+    Kbps: 1,
+    Mbps: 1e3,
+    Gbps: 1e6,
+});
+
+export function formatPackageRate(rate: number | null | undefined) {
+    return rate == null || rate === 0
+        ? 'Unlimited'
+        : humanFormat(rate, { scale: dataScale });
+}
+
+export function formatPackagePrice(price: number) {
+    return price === 0 ? 'Free' : `Ksh ${price.toLocaleString()}`;
+}
+
 export function timeRemaining(totalSeconds: number) {
     let remaining = Math.max(0, Math.floor(totalSeconds));
     const units = [

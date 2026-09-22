@@ -18,9 +18,11 @@ import {
 import { refreshHotspotQuota, useHotspotQuota } from '@lib/store.ts';
 import { mutationLogger } from '@lib/logging.ts';
 import { notifications } from '@mantine/notifications';
-import humanFormat from 'human-format';
-import { timeRemaining } from './functions.ts';
-import { dataScale } from './PackagePricing.tsx';
+import {
+    formatPackagePrice,
+    formatPackageRate,
+    timeRemaining,
+} from './functions.ts';
 
 interface Props {
     isOpen: boolean;
@@ -125,11 +127,7 @@ export function ConnectedDevicesModal({ isOpen, onClose }: Props) {
     const rows = quota
         .toSorted((v) => (v.thisDevice ? -1 : 1))
         .map((v, i) => {
-            const title = v.downloadRate
-                ? humanFormat(v.downloadRate, {
-                      scale: dataScale,
-                  })
-                : 'Unlimited';
+            const downloadRate = formatPackageRate(v.downloadRate);
 
             return (
                 <Table.Tr key={v.id} bg={v.thisDevice ? 'grape.0' : undefined}>
@@ -146,7 +144,7 @@ export function ConnectedDevicesModal({ isOpen, onClose }: Props) {
                         <Stack gap={0}>
                             <span>{v.packageTitle}</span>
                             <Text size='xs' c='dimmed' opacity={0.5}>
-                                {title} - Ksh {v.price.toLocaleString()}
+                                {downloadRate} - {formatPackagePrice(v.price)}
                             </Text>
                         </Stack>
                     </Table.Td>

@@ -11,7 +11,7 @@ export const createPackageSchema = z
         price: z
             .number()
             .int('M-Pesa package prices must be whole shillings')
-            .positive('Price must be positive'),
+            .nonnegative('Price must be non-negative'),
         maxDevices: z
             .number()
             .int('Must be an integer')

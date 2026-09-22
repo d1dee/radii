@@ -344,7 +344,7 @@ app.get('/status', requireAuth, async (c) => {
 
 const orderSchema = z.object({
     packageId: z.uuid(),
-    phoneNumber: z.string().min(10),
+    phoneNumber: z.string().min(10).optional(),
     // The NAS this portal instance is scoped to (captured from ?nas= in the
     // portal URL). Used for tenant attribution of the purchase; when absent
     // the package's NAS links resolve it.
@@ -371,6 +371,15 @@ app.post('/order', requireAuth, async (c) => {
         'pppoe',
     );
     if (!pkg) return jsonError(c, 404, 'Package not found');
+    const isFree = Number(pkg.price) === 0;
+    const phoneNumber =
+        parsed.data.phoneNumber ??
+        (isFree
+            ? currentUser!.username?.trim() || currentUser!.email
+            : null);
+    if (!phoneNumber) {
+        return jsonError(c, 400, 'Invalid order payload');
+    }
     const tenantAdminId = await getAdminIdForNasDevice(nasDeviceId);
     if (!tenantAdminId) return jsonError(c, 404, 'Unknown NAS device');
     const account = parsed.data.serviceAccountId
@@ -396,34 +405,38 @@ app.post('/order', requireAuth, async (c) => {
 
     const row = await createPayment({
         userId: currentUser!.id,
-        packageId: pkg.id,
-        amount: Number(pkg.price),
-        phoneNumber: parsed.data.phoneNumber,
+        pkg,
+        phoneNumber,
         nasDeviceId,
         tenantAdminId,
         pppoeServiceAccountId: account.id,
     });
 
-    // Hand the purchase to the default registered payment provider. On
-    // failure the payment row stays pending so the customer can retry. PPPoE
-    // purchases are not tied to a login request (no captive portal), so no
-    // redirect metadata is carried in the transaction.
-    const initiated = await paymentService.initiatePackagePayment(
-        row,
-        pkg,
-        null,
-    );
-    if (!initiated.success) {
-        return jsonError(c, 502, initiated.message);
+    if (row.status === 'pending') {
+        // Paid purchases retain the existing provider flow. Free purchases
+        // are already settled internally and must never reach a provider.
+        const initiated = await paymentService.initiatePackagePayment(
+            row,
+            pkg,
+            null,
+        );
+        if (!initiated.success) {
+            return jsonError(c, 502, initiated.message);
+        }
     }
+    const activation =
+        row.status === 'paid'
+            ? await pppoeActivationForPayment(row.id)
+            : null;
 
     return c.json({
         success: true,
         data: {
             paymentId: row.id,
-            status: 'pending',
+            status: row.status,
             amount: Number(pkg.price),
             packageId: pkg.id,
+            ...(row.status === 'paid' ? { activation } : {}),
         },
     });
 });

@@ -71,7 +71,7 @@ function pkgPrice(
             .find(
                 (v): v is Package =>
                     typeof v !== 'string' && v?.packageId === packageId,
-            )?.price || '',
+            )?.price ?? '',
     );
 }
 

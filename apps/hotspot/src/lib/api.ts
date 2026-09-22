@@ -70,7 +70,7 @@ export function getStatus(loginRequestId?: string | null) {
 export function createOrder(body: {
     loginRequestKey: string | null;
     packageId: string;
-    phoneNumber: string;
+    phoneNumber?: string;
 }) {
     return request<OrderResult>('/order', body, {
         method: 'POST',

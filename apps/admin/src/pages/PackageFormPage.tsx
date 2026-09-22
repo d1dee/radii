@@ -7,6 +7,7 @@ import {
     Group,
     Input,
     Loader,
+    Modal,
     MultiSelect,
     NumberInput,
     Select,
@@ -70,6 +71,8 @@ export default function PackageFormPage() {
     const [fetching, setFetching] = useState(isEdit);
     const [fetchError, setFetchError] = useState<string | null>(null);
     const [nasDevices, setNasDevices] = useState<NasDeviceRow[]>([]);
+    const [pendingSubmit, setPendingSubmit] =
+        useState<CreatePackageInput | null>(null);
 
     // Session-length entry split into a human value + unit; the form only ever
     // holds the total in minutes (sessionLength).
@@ -177,7 +180,7 @@ export default function PackageFormPage() {
         );
     };
 
-    const handleSubmit = async (values: CreatePackageInput) => {
+    const submitPackage = async (values: CreatePackageInput) => {
         setLoading(true);
         // PPPoE is always calendar-based; never submit the bank model for it.
         const payload: CreatePackageInput =
@@ -204,6 +207,19 @@ export default function PackageFormPage() {
             color: 'green',
         });
         navigate('/packages');
+    };
+
+    const handleSubmit = (values: CreatePackageInput) => {
+        if (
+            values.price === 0 ||
+            values.uploadRate === 0 ||
+            values.downloadRate === 0
+        ) {
+            setPendingSubmit(values);
+            return;
+        }
+
+        void submitPackage(values);
     };
 
     if (fetching) {
@@ -236,7 +252,7 @@ export default function PackageFormPage() {
                         {isEdit ? 'Edit Package' : 'Add Package'}
                     </Title>
                     <Text size='sm' c='dimmed'>
-                        Packages are only sold on the NAS devices you link
+                        Packages are only available on the NAS devices you link
                         below. Rates are in Kbps and quotas in KB; use 0 for
                         unlimited.
                     </Text>
@@ -339,7 +355,7 @@ export default function PackageFormPage() {
                                 <NumberInput
                                     label='Price'
                                     placeholder='Enter price'
-                                    description='Amount charged via M-Pesa'
+                                    description='Minimum paid amount is Ksh 1; use 0 for a free package'
                                     min={0}
                                     {...form.getInputProps('price')}
                                 />
@@ -450,6 +466,56 @@ export default function PackageFormPage() {
                     </Stack>
                 </form>
             </Card>
+            <Modal
+                opened={pendingSubmit !== null}
+                onClose={() => setPendingSubmit(null)}
+                title='Confirm zero package values'
+                centered
+                closeOnClickOutside={!loading}
+                closeOnEscape={!loading}
+                withCloseButton={!loading}
+            >
+                <Stack>
+                    <Text size='sm'>
+                        Review these settings before saving. Zero values have
+                        special behavior:
+                    </Text>
+                    {pendingSubmit?.price === 0 && (
+                        <Text size='sm'>
+                            Price is 0: customers can activate this package for
+                            free without using the payment processor.
+                        </Text>
+                    )}
+                    {pendingSubmit?.uploadRate === 0 && (
+                        <Text size='sm'>
+                            Upload rate is 0: upload speed is unlimited.
+                        </Text>
+                    )}
+                    {pendingSubmit?.downloadRate === 0 && (
+                        <Text size='sm'>
+                            Download rate is 0: download speed is unlimited.
+                        </Text>
+                    )}
+                    <Group justify='flex-end'>
+                        <Button
+                            variant='default'
+                            disabled={loading}
+                            onClick={() => setPendingSubmit(null)}
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            loading={loading}
+                            onClick={() =>
+                                pendingSubmit &&
+                                void submitPackage(pendingSubmit)
+                            }
+                        >
+                            {isEdit ? 'Save Changes' : 'Create Package'}
+                        </Button>
+                    </Group>
+                </Stack>
+            </Modal>
         </Container>
     );
 }

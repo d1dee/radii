@@ -12,18 +12,12 @@ import {
 import { upperFirstCase } from '@radii/shared';
 import { dayjs } from '../../lib/dayjs.ts';
 
-import humanFormat from 'human-format';
 import { useContext, useState } from 'react';
 import { AiOutlineExclamationCircle } from 'react-icons/ai';
 import { ModalActionsContext } from '../../App.tsx';
 import { useSession } from '../../lib/auth.ts';
 import type { Package, Packages } from '../../types/index.ts';
-
-export const dataScale = new humanFormat.Scale({
-    Kbps: 1,
-    Mbps: 1e3,
-    Gbps: 1e6,
-});
+import { formatPackagePrice, formatPackageRate } from './functions.ts';
 
 function getPackagesByTitle(title: string, packages: Packages) {
     const h = packages.find(
@@ -157,11 +151,9 @@ export function PackagePricing({
 
                 <Stack gap='md'>
                     {groupedPackages.map((pkg) => {
-                        const title = pkg.downloadRate
-                            ? humanFormat(pkg.downloadRate, {
-                                  scale: dataScale,
-                              })
-                            : 'Unlimited';
+                        const downloadRate = formatPackageRate(
+                            pkg.downloadRate,
+                        );
                         const expiry = pkg.noExpiry
                             ? 'No Expiry'
                             : dayjs.duration(pkg.sessionLength, 'm').humanize();
@@ -183,7 +175,7 @@ export function PackagePricing({
                                                 {upperFirstCase(pkg.title)}
                                             </Text>
                                             <Text size='32px' fw={700}>
-                                                {title}
+                                                {downloadRate}
                                             </Text>
                                         </Stack>
 
@@ -192,7 +184,7 @@ export function PackagePricing({
                                                 {expiry}
                                             </Text>
                                             <Text size='xl' fw={700}>
-                                                Ksh {pkg.price.toLocaleString()}
+                                                {formatPackagePrice(pkg.price)}
                                             </Text>
                                         </Stack>
                                     </Group>
@@ -201,7 +193,7 @@ export function PackagePricing({
                                         fullWidth
                                         onClick={() => initiateOrderFlow(pkg)}
                                     >
-                                        Buy Now
+                                        {pkg.price === 0 ? 'Activate' : 'Buy Now'}
                                     </Button>
                                 </Stack>
                             </Card>

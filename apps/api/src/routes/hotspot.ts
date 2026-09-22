@@ -2,7 +2,7 @@ import {
     defaultAdminSettings,
     paymentTransactionCodeSchema,
 } from '@radii/shared';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, isNull, or } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { db } from '../db';
@@ -226,7 +226,7 @@ app.get('/status', requireAuth, async (c) => {
 const orderSchema = z.object({
     loginRequestKey: z.uuid().nullable(),
     packageId: z.uuid(),
-    phoneNumber: z.string().min(10),
+    phoneNumber: z.string().min(10).optional(),
 });
 
 app.post('/order', requireAuth, async (c) => {
@@ -255,16 +255,22 @@ app.post('/order', requireAuth, async (c) => {
         )[0]?.id ??
         null;
     if (loginRequestId) {
+        // Fresh captive-portal requests are unclaimed until the customer
+        // authenticates. Claim the UUID atomically here, while allowing the
+        // same customer to reuse it and rejecting requests owned by others.
         const [lr] = await db
-            .select({ nasDeviceId: hotspotLoginRequest.nasDeviceId })
-            .from(hotspotLoginRequest)
+            .update(hotspotLoginRequest)
+            .set({ userId: currentUser!.id })
             .where(
                 and(
                     eq(hotspotLoginRequest.id, loginRequestId),
-                    eq(hotspotLoginRequest.userId, currentUser!.id),
+                    or(
+                        isNull(hotspotLoginRequest.userId),
+                        eq(hotspotLoginRequest.userId, currentUser!.id),
+                    ),
                 ),
             )
-            .limit(1);
+            .returning({ nasDeviceId: hotspotLoginRequest.nasDeviceId });
         nasDeviceId = lr?.nasDeviceId ?? null;
     }
     if (!nasDeviceId) {
@@ -276,33 +282,47 @@ app.post('/order', requireAuth, async (c) => {
         'hotspot',
     );
     if (!pkg) return jsonError(c, 404, 'Package not found');
+    const isFree = Number(pkg.price) === 0;
+    const phoneNumber =
+        parsed.data.phoneNumber ??
+        (isFree
+            ? currentUser!.username?.trim() || currentUser!.email
+            : null);
+    if (!phoneNumber) {
+        return jsonError(c, 400, 'Invalid order payload');
+    }
 
     const row = await createPayment({
         userId: currentUser!.id,
-        packageId: pkg.id,
-        amount: Number(pkg.price),
-        phoneNumber: parsed.data.phoneNumber,
+        pkg,
+        phoneNumber,
+        loginRequestId,
         nasDeviceId,
     });
 
-    // Hand the purchase to the default registered payment provider (gateway
-    // specifics live inside the provider; see lib/payments).
-    const initiated = await paymentService.initiatePackagePayment(
-        row,
-        pkg,
-        parsed.data.loginRequestKey,
-    );
-    if (!initiated.success) {
-        return jsonError(c, 502, initiated.message);
+    if (row.status === 'pending') {
+        // Paid purchases retain the existing provider flow. Free purchases
+        // are already settled internally and must never reach a provider.
+        const initiated = await paymentService.initiatePackagePayment(
+            row,
+            pkg,
+            loginRequestId,
+        );
+        if (!initiated.success) {
+            return jsonError(c, 502, initiated.message);
+        }
     }
+    const activation =
+        row.status === 'paid' ? await activationForPayment(row.id) : null;
 
     return c.json({
         success: true,
         data: {
             paymentId: row.id,
-            status: 'pending',
+            status: row.status,
             amount: Number(pkg.price),
             packageId: pkg.id,
+            ...(row.status === 'paid' ? { activation } : {}),
         },
     });
 });

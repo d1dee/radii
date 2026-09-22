@@ -22,7 +22,10 @@ import { IconSelector } from '@tabler/icons-react';
 import humanFormat from 'human-format';
 import { ConnectedDevice } from './ConnectedDevices.tsx';
 import { ConnectedDevicesModal } from './ConnectedDevicesModal.tsx';
-import { dataScale } from './PackagePricing.tsx';
+import {
+    dataScale,
+    formatPackagePrice,
+} from './PackagePricing.tsx';
 
 export function CurrentPackage() {
     const { selectedAccountId } = usePppoeAccounts();
@@ -50,7 +53,7 @@ export function CurrentPackage() {
           })
         : '_';
     const title = thisDevice?.packageTitle
-        ? `${thisDevice?.packageTitle} @ Ksh ${thisDevice?.price}`
+        ? `${thisDevice.packageTitle} @ ${formatPackagePrice(thisDevice.price)}`
         : '_';
 
     if (!thisDevice) {

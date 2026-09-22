@@ -19,6 +19,7 @@ import {
     packages,
     radacct,
     transaction,
+    transactionLog,
 } from '../db/schema';
 
 type InsertPackage = typeof packages.$inferInsert;
@@ -467,9 +468,9 @@ async function resolvePackageNasDevice(
 
 export async function createPayment(data: {
     userId: string;
-    packageId: string;
-    amount: number;
+    pkg: PackageRow;
     phoneNumber: string;
+    loginRequestId?: string | null;
     // The NAS device the purchase happened through; tenant attribution for
     // admin-scoped views. Falls back to the package's NAS links when omitted.
     nasDeviceId?: string | null;
@@ -477,7 +478,7 @@ export async function createPayment(data: {
     pppoeServiceAccountId?: string | null;
 }) {
     const nasDeviceId =
-        data.nasDeviceId ?? (await resolvePackageNasDevice(data.packageId));
+        data.nasDeviceId ?? (await resolvePackageNasDevice(data.pkg.id));
     let tenantAdminId = data.tenantAdminId ?? null;
     if (!tenantAdminId && nasDeviceId) {
         const [device] = await db
@@ -487,19 +488,79 @@ export async function createPayment(data: {
             .limit(1);
         tenantAdminId = device?.ownerId ?? null;
     }
-    const [row] = await db
-        .insert(packagePayments)
-        .values({
-            userId: data.userId,
-            packageId: data.packageId,
-            amount: String(data.amount),
-            phoneNumber: data.phoneNumber,
-            nasDeviceId,
-            tenantAdminId,
-            pppoeServiceAccountId: data.pppoeServiceAccountId ?? null,
-        })
-        .returning();
-    return row;
+    const amount = Number(data.pkg.price);
+    const values = {
+        userId: data.userId,
+        packageId: data.pkg.id,
+        amount: String(amount),
+        phoneNumber: data.phoneNumber,
+        nasDeviceId,
+        tenantAdminId,
+        pppoeServiceAccountId: data.pppoeServiceAccountId ?? null,
+    };
+
+    if (amount !== 0) {
+        const [row] = await db
+            .insert(packagePayments)
+            .values(values)
+            .returning();
+        return row;
+    }
+
+    // Free purchases are settled entirely inside the database. The completed
+    // internal transaction keeps the same audit/metadata shape that RADIUS
+    // activation consumes, without resolving or invoking a payment provider.
+    return db.transaction(async (tx) => {
+        const [payment] = await tx
+            .insert(packagePayments)
+            .values(values)
+            .returning();
+        const internalReference = `free:${payment.id}`;
+        const [internalTransaction] = await tx
+            .insert(transaction)
+            .values({
+                userId: data.userId,
+                type: 'income',
+                amount: '0',
+                provider: 'internal',
+                status: 'completed',
+                providerTransactionId: internalReference,
+                providerReference: internalReference,
+                description: `Free package purchase: ${data.pkg.title}`,
+                metadata: {
+                    packagePaymentId: payment.id,
+                    packageId: data.pkg.id,
+                    settlement: 'free_package',
+                    ...(data.loginRequestId
+                        ? { loginRequestId: data.loginRequestId }
+                        : {}),
+                },
+            })
+            .returning();
+        const [paidPayment] = await tx
+            .update(packagePayments)
+            .set({ status: 'paid', transaction: internalTransaction.id })
+            .where(
+                and(
+                    eq(packagePayments.id, payment.id),
+                    eq(packagePayments.status, 'pending'),
+                ),
+            )
+            .returning();
+        if (!paidPayment) {
+            throw new Error('Failed to settle free package payment');
+        }
+        await tx.insert(transactionLog).values({
+            transactionId: internalTransaction.id,
+            provider: 'internal',
+            eventType: 'payment_completed_free_package',
+            payload: {
+                message: 'Free package order completed internally.',
+                packagePaymentId: payment.id,
+            },
+        });
+        return paidPayment;
+    });
 }
 
 export async function getPaymentById(paymentId: string, userId: string) {
