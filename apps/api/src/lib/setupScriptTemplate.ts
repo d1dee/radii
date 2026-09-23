@@ -580,6 +580,7 @@ $radiiLog "WireGuard firewall access rules configured";
             login-by=http-chap,http-pap \
             use-radius=yes \
             radius-accounting=yes \
+            radius-interim-update=received \
             split-user-domain=no;
     } else={
         /ip/hotspot/profile/set [:pick $hsProfileIds 0] \
@@ -588,6 +589,7 @@ $radiiLog "WireGuard firewall access rules configured";
             login-by=http-chap,http-pap \
             use-radius=yes \
             radius-accounting=yes \
+            radius-interim-update=received \
             split-user-domain=no;
     };
 
