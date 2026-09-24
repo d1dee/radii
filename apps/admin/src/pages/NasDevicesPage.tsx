@@ -1,5 +1,6 @@
 import {
     ActionIcon,
+    Alert,
     Badge,
     Box,
     Button,
@@ -49,6 +50,8 @@ const setupScriptStatusColors: Record<NasSetupScriptRow['status'], string> = {
     applied: 'green',
     failed: 'red',
 };
+
+const DEVICE_MODE_COMMAND = '/system/device-mode/update mode=advanced';
 
 function SummaryCard({
     label,
@@ -218,13 +221,12 @@ export default function NasDevicesPage() {
         setScriptRow(null);
     };
 
-    const handleCopyScript = async () => {
-        if (!scriptRow) return;
+    const copyToClipboard = async (value: string, successMessage: string) => {
         try {
-            await navigator.clipboard.writeText(scriptRow.script);
+            await navigator.clipboard.writeText(value);
             notifications.show({
                 title: 'Success',
-                message: 'Script copied to clipboard',
+                message: successMessage,
                 color: 'green',
             });
         } catch (_) {
@@ -234,6 +236,11 @@ export default function NasDevicesPage() {
                 color: 'orange',
             });
         }
+    };
+
+    const handleCopyScript = () => {
+        if (!scriptRow) return;
+        void copyToClipboard(scriptRow.script, 'Setup script copied to clipboard');
     };
 
     return (
@@ -425,37 +432,77 @@ export default function NasDevicesPage() {
                                 </Text>
                             </Group>
                             <Group gap='xs'>
-                                <Button
-                                    variant='default'
-                                    size='xs'
-                                    onClick={handleCopyScript}
-                                >
-                                    Copy script
-                                </Button>
                                 <Button size='xs' onClick={handleRegenerate}>
                                     Regenerate
                                 </Button>
                             </Group>
                         </Group>
                         {scriptError && <Text c='red'>{scriptError}</Text>}
-                        <Text size='xs' c='dimmed'>
-                            Paste this command into the MikroTik terminal
-                            (System → Terminal). It downloads and runs the setup
-                            script automatically.
-                        </Text>
-                        <Box pos='relative'>
-                            <Code
-                                block
-                                style={{
-                                    whiteSpace: 'pre-wrap',
-                                    overflowWrap: 'anywhere',
-                                    wordBreak: 'break-word',
-                                    paddingInlineEnd: 44,
-                                }}
-                            >
-                                {scriptRow.script}
-                            </Code>
-                        </Box>
+                        <Card withBorder radius='md' padding='md'>
+                            <Stack gap='sm'>
+                                <Group justify='space-between' align='flex-start'>
+                                    <div>
+                                        <Text fw={600}>1. Enable device mode</Text>
+                                        <Text size='sm' c='dimmed'>
+                                            Paste this command into the router console first.
+                                        </Text>
+                                    </div>
+                                    <Button
+                                        variant='default'
+                                        size='xs'
+                                        onClick={() =>
+                                            void copyToClipboard(
+                                                DEVICE_MODE_COMMAND,
+                                                'Device-mode command copied to clipboard',
+                                            )
+                                        }
+                                    >
+                                        Copy command
+                                    </Button>
+                                </Group>
+                                <Code block>{DEVICE_MODE_COMMAND}</Code>
+                                <Alert color='yellow' title='Physical confirmation required'>
+                                    Within 5 minutes, briefly press the router's reset or mode
+                                    button, or power it off and back on. The router will reboot.
+                                    Reconnect to its console before continuing to Step 2.
+                                </Alert>
+                            </Stack>
+                        </Card>
+
+                        <Card withBorder radius='md' padding='md'>
+                            <Stack gap='sm'>
+                                <Group justify='space-between' align='flex-start'>
+                                    <div>
+                                        <Text fw={600}>2. Run the setup script</Text>
+                                        <Text size='sm' c='dimmed'>
+                                            After the router has rebooted, paste this command into
+                                            the router console. It downloads and runs the setup
+                                            script automatically.
+                                        </Text>
+                                    </div>
+                                    <Button
+                                        variant='default'
+                                        size='xs'
+                                        onClick={handleCopyScript}
+                                    >
+                                        Copy script
+                                    </Button>
+                                </Group>
+                                <Box pos='relative'>
+                                    <Code
+                                        block
+                                        style={{
+                                            whiteSpace: 'pre-wrap',
+                                            overflowWrap: 'anywhere',
+                                            wordBreak: 'break-word',
+                                            paddingInlineEnd: 44,
+                                        }}
+                                    >
+                                        {scriptRow.script}
+                                    </Code>
+                                </Box>
+                            </Stack>
+                        </Card>
                     </Stack>
                 ) : (
                     <form onSubmit={form.onSubmit(handleGenerateScript)}>

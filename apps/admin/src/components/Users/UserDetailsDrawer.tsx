@@ -14,6 +14,7 @@ import {
     Loader,
     Modal,
     NumberInput,
+    Progress,
     Select,
     Stack,
     Table,
@@ -536,6 +537,14 @@ export function UserDetailsDrawer({
                                     {detail.flags.length > 1 ? 's' : ''}
                                 </Badge>
                             )}
+                            {detail.activations.underFup > 0 ? (
+                                <Badge color='orange' variant='filled'>
+                                    Under FUP
+                                    {detail.activations.underFup > 1
+                                        ? ` (${detail.activations.underFup})`
+                                        : ''}
+                                </Badge>
+                            ) : null}
                         </Group>
                     </Group>
 
@@ -672,7 +681,7 @@ export function UserDetailsDrawer({
                                         <StatCard
                                             label='Active activations'
                                             value={detail.activations.active}
-                                            sub={`${detail.activations.hotspot} hotspot · ${detail.activations.pppoe} pppoe`}
+                                            sub={`${detail.activations.hotspot} hotspot · ${detail.activations.pppoe} pppoe${detail.activations.underFup > 0 ? ` · ${detail.activations.underFup} under FUP` : ''}`}
                                         />
                                     </Grid.Col>
                                     <Grid.Col span={4}>
@@ -846,6 +855,24 @@ export function UserDetailsDrawer({
                                                                 ? 'Expired'
                                                                 : 'Active'}
                                                         </Badge>
+                                                        {a.fairUsage
+                                                            ?.throttled ? (
+                                                            <Badge
+                                                                color='orange'
+                                                                variant='filled'
+                                                                size='sm'
+                                                            >
+                                                                Under FUP
+                                                            </Badge>
+                                                        ) : a.fairUsage ? (
+                                                            <Badge
+                                                                color='cyan'
+                                                                variant='light'
+                                                                size='sm'
+                                                            >
+                                                                FUP monitored
+                                                            </Badge>
+                                                        ) : null}
                                                     </Group>
                                                 </Table.Td>
                                                 <Table.Td>
@@ -870,6 +897,88 @@ export function UserDetailsDrawer({
                                                             ? ` / ${formatBytes(a.octetsLimit)}`
                                                             : ''}
                                                     </Text>
+                                                    {a.fairUsage ? (
+                                                        <Stack gap={3} mt={5}>
+                                                            <Progress
+                                                                value={Math.min(
+                                                                    100,
+                                                                    (a.fairUsage
+                                                                        .usedBytes /
+                                                                        a.fairUsage
+                                                                            .limitBytes) *
+                                                                        100,
+                                                                )}
+                                                                color={
+                                                                    a.fairUsage
+                                                                        .throttled
+                                                                        ? 'orange'
+                                                                        : 'cyan'
+                                                                }
+                                                                size='sm'
+                                                            />
+                                                            <Text
+                                                                size='xs'
+                                                                c={
+                                                                    a.fairUsage
+                                                                        .throttled
+                                                                        ? 'orange'
+                                                                        : 'dimmed'
+                                                                }
+                                                                fw={
+                                                                    a.fairUsage
+                                                                        .throttled
+                                                                        ? 600
+                                                                        : 400
+                                                                }
+                                                            >
+                                                                {formatBytes(
+                                                                    a.fairUsage
+                                                                        .usedBytes,
+                                                                )}{' '}
+                                                                /{' '}
+                                                                {formatBytes(
+                                                                    a.fairUsage
+                                                                        .limitBytes,
+                                                                )}{' '}
+                                                                in{' '}
+                                                                {a.fairUsage
+                                                                    .windowUnit ===
+                                                                'session'
+                                                                    ? 'this session'
+                                                                    : `${a.fairUsage.windowValue} ${a.fairUsage.windowUnit}`}
+                                                            </Text>
+                                                            {a.fairUsage
+                                                                .throttled ? (
+                                                                <Text
+                                                                    size='xs'
+                                                                    c='dimmed'
+                                                                >
+                                                                    Throttled to{' '}
+                                                                    {
+                                                                        a.fairUsage
+                                                                            .uploadRate
+                                                                    }{' '}
+                                                                    /{' '}
+                                                                    {
+                                                                        a.fairUsage
+                                                                            .downloadRate
+                                                                    }{' '}
+                                                                    Kbps up/down
+                                                                </Text>
+                                                            ) : (
+                                                                <Text
+                                                                    size='xs'
+                                                                    c='dimmed'
+                                                                >
+                                                                    {formatBytes(
+                                                                        a.fairUsage
+                                                                            .remainingBytes,
+                                                                    )}{' '}
+                                                                    remaining
+                                                                </Text>
+                                                            )}
+                                                        </Stack>
+                                                    ) : null}
                                                 </Table.Td>
                                                 <Table.Td>
                                                     <Text size='xs'>

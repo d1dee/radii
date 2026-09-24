@@ -459,6 +459,19 @@ export default function UsersPage() {
                                                         {u.flags > 1 ? 's' : ''}
                                                     </Badge>
                                                 ) : null}
+                                                {u.activations.underFup > 0 ? (
+                                                    <Badge
+                                                        color='orange'
+                                                        variant='filled'
+                                                        size='sm'
+                                                    >
+                                                        Under FUP
+                                                        {u.activations
+                                                            .underFup > 1
+                                                            ? ` (${u.activations.underFup})`
+                                                            : ''}
+                                                    </Badge>
+                                                ) : null}
                                             </Group>
                                         </Table.Td>
                                         <Table.Td>

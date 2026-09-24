@@ -1,5 +1,6 @@
 import { relations } from 'drizzle-orm';
 import {
+    bigint,
     bigserial,
     boolean,
     index,
@@ -42,6 +43,30 @@ export const packages = pgTable(
         downloadRate: integer('download_rate').notNull(),
         downloadQuota: integer('download_quota').notNull(),
         uploadQuota: integer('upload_quota').notNull(),
+        fairUsageLimit: integer('fair_usage_limit').default(0).notNull(),
+        fairUsageWindowValue: integer('fair_usage_window_value')
+            .default(1)
+            .notNull(),
+        fairUsageWindowUnit: text('fair_usage_window_unit', {
+            enum: ['session', 'days', 'weeks', 'months'],
+        })
+            .default('session')
+            .notNull(),
+        fairUsageUploadRate: integer('fair_usage_upload_rate')
+            .default(0)
+            .notNull(),
+        fairUsageDownloadRate: integer('fair_usage_download_rate')
+            .default(0)
+            .notNull(),
+        burstUploadRate: integer('burst_upload_rate').default(0).notNull(),
+        burstDownloadRate: integer('burst_download_rate').default(0).notNull(),
+        burstUploadThreshold: integer('burst_upload_threshold')
+            .default(0)
+            .notNull(),
+        burstDownloadThreshold: integer('burst_download_threshold')
+            .default(0)
+            .notNull(),
+        burstTime: integer('burst_time').default(0).notNull(),
         isActive: boolean('is_active').default(true).notNull(),
         createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
             .defaultNow()
@@ -171,6 +196,21 @@ export const activatedPackages = pgTable(
             mode: 'date',
         }).notNull(),
         timeAllowanceSeconds: integer('time_allowance_seconds'),
+        fupWindowStart: timestamp('fup_window_start', {
+            withTimezone: true,
+            mode: 'date',
+        }),
+        fupUsedBytes: bigint('fup_used_bytes', { mode: 'number' })
+            .default(0)
+            .notNull(),
+        fupThresholdReached: boolean('fup_threshold_reached')
+            .default(false)
+            .notNull(),
+        fupEffectiveRateLimit: text('fup_effective_rate_limit'),
+        fupEvaluatedAt: timestamp('fup_evaluated_at', {
+            withTimezone: true,
+            mode: 'date',
+        }),
         deactivatedAt: timestamp('deactivated_at', {
             withTimezone: true,
             mode: 'date',
@@ -184,6 +224,35 @@ export const activatedPackages = pgTable(
             table.pppoeServiceAccountId,
         ),
         unique('activated_packages_payment_id_key').on(table.packagePaymentId),
+    ],
+);
+
+export const radiusUsageDelta = pgTable(
+    'radius_usage_delta',
+    {
+        id: bigserial('id', { mode: 'bigint' }).primaryKey(),
+        radacctId: bigint('radacct_id', { mode: 'bigint' }).references(
+            () => radacct.radacctid,
+            { onDelete: 'set null' },
+        ),
+        activationId: uuid('activation_id')
+            .notNull()
+            .references(() => activatedPackages.id, { onDelete: 'cascade' }),
+        observedAt: timestamp('observed_at', {
+            withTimezone: true,
+            mode: 'date',
+        })
+            .defaultNow()
+            .notNull(),
+        inputOctets: bigint('input_octets', { mode: 'number' }).notNull(),
+        outputOctets: bigint('output_octets', { mode: 'number' }).notNull(),
+    },
+    (table) => [
+        index('radius_usage_delta_activation_observed_idx').on(
+            table.activationId,
+            table.observedAt,
+        ),
+        index('radius_usage_delta_radacct_idx').on(table.radacctId),
     ],
 );
 

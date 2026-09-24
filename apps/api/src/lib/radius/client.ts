@@ -43,6 +43,7 @@ import {
     eq,
     exists,
     getTableColumns,
+    gt,
     gte,
     inArray,
     isNotNull,
@@ -69,6 +70,7 @@ import {
     radacct,
     radcheck,
     radreply,
+    radiusUsageDelta,
     transaction,
     userFlag,
 } from '../../db/schema';
@@ -304,6 +306,11 @@ export interface SessionInfo {
     // Average speed across the session's lifetime so far (closed sessions use
     // their final counters).
     avgSpeedBps: number;
+    fupWindowStart: Date | null;
+    fupRateLimit: string | null;
+    fupUsedBytes: number;
+    fupThresholdReached: boolean;
+    fupEvaluatedAt: Date | null;
 }
 
 // Credentials of one provisioned activation (the shared shape returned by the
@@ -333,6 +340,17 @@ export interface ActivationStatus {
     octetsUsed: number;
     octetsLimit: number | null; // null = unlimited
     remainingOctets: number | null;
+    fairUsage: {
+        limitBytes: number;
+        usedBytes: number;
+        remainingBytes: number;
+        throttled: boolean;
+        windowStart: Date | null;
+        windowValue: number;
+        windowUnit: 'session' | 'days' | 'weeks' | 'months';
+        uploadRate: number;
+        downloadRate: number;
+    } | null;
     online: boolean;
     liveSessions: SessionInfo[];
     avgSpeedBps: number;
@@ -1375,10 +1393,11 @@ export class RadiusClient {
 
         return {
             verdict: 'ok',
-            attributes: this.buildRestReplyAttributes(
+            attributes: await this.buildRestReplyAttributes(
                 row.activation.id,
                 row.pkg,
                 sessionSeconds,
+                row.activation,
             ),
         };
     }
@@ -1486,10 +1505,11 @@ export class RadiusClient {
                 .where(eq(pppoeServiceAccounts.id, account.id));
             return {
                 verdict: 'ok',
-                attributes: this.buildRestReplyAttributes(
+                attributes: await this.buildRestReplyAttributes(
                     row.activation.id,
                     row.pkg,
                     sessionSeconds,
+                    row.activation,
                 ),
             };
         }
@@ -2539,6 +2559,347 @@ export class RadiusClient {
         return reply.code === CODE.COA_ACK;
     }
 
+    private fairUsageWindowStart(
+        activation: typeof activatedPackages.$inferSelect,
+        pkg: typeof packages.$inferSelect,
+        now: Date,
+        session?: SessionInfo,
+    ): Date {
+        if (pkg.fairUsageWindowUnit === 'session') {
+            return session?.startedAt ?? now;
+        }
+
+        const unit =
+            pkg.fairUsageWindowUnit === 'days'
+                ? 'day'
+                : pkg.fairUsageWindowUnit === 'weeks'
+                  ? 'week'
+                  : 'month';
+        const anchor = dayjs(activation.activatedAt);
+        const elapsed = dayjs(now).diff(anchor, unit, true);
+        const periods = Math.max(
+            0,
+            Math.floor(elapsed / pkg.fairUsageWindowValue),
+        );
+        return anchor.add(periods * pkg.fairUsageWindowValue, unit).toDate();
+    }
+
+    private async fairUsageState(
+        activation: typeof activatedPackages.$inferSelect,
+        pkg: typeof packages.$inferSelect,
+        session?: SessionInfo,
+    ): Promise<{ windowStart: Date; usedBytes: number; throttled: boolean }> {
+        await this.captureFairUsageDeltas(activation.id, session);
+        const windowStart = this.fairUsageWindowStart(
+            activation,
+            pkg,
+            new Date(),
+            session,
+        );
+        const [usage] = await db
+            .select({
+                bytes: sql<number>`coalesce(sum(${radiusUsageDelta.inputOctets} + ${radiusUsageDelta.outputOctets}), 0)::float8`,
+            })
+            .from(radiusUsageDelta)
+            .where(
+                and(
+                    eq(radiusUsageDelta.activationId, activation.id),
+                    gte(radiusUsageDelta.observedAt, windowStart),
+                    session
+                        ? eq(
+                              radiusUsageDelta.radacctId,
+                              BigInt(session.radacctId),
+                          )
+                        : undefined,
+                ),
+            );
+        const usedBytes = Number(usage?.bytes ?? 0);
+        const state = {
+            windowStart,
+            usedBytes,
+            throttled:
+                pkg.fairUsageLimit > 0 &&
+                usedBytes >= pkg.fairUsageLimit * 1024,
+        };
+        const evaluatedAt = new Date();
+        if (session) {
+            await db
+                .update(radacct)
+                .set({
+                    fupWindowStart: state.windowStart,
+                    fupUsedBytes: state.usedBytes,
+                    fupThresholdReached: state.throttled,
+                    fupEvaluatedAt: evaluatedAt,
+                })
+                .where(eq(radacct.radacctid, BigInt(session.radacctId)));
+        } else {
+            await db
+                .update(activatedPackages)
+                .set({
+                    fupWindowStart: state.windowStart,
+                    fupUsedBytes: state.usedBytes,
+                    fupThresholdReached: state.throttled,
+                    fupEffectiveRateLimit: this.rateLimitValue(
+                        pkg,
+                        state.throttled,
+                    ),
+                    fupEvaluatedAt: evaluatedAt,
+                })
+                .where(eq(activatedPackages.id, activation.id));
+        }
+        return state;
+    }
+
+    private async captureFairUsageDeltas(
+        activationId: string,
+        session?: SessionInfo,
+    ): Promise<void> {
+        await db.transaction(async (tx) => {
+            // REST authorization and the periodic reconciler can overlap. One
+            // activation-scoped transaction lock keeps both from inserting the
+            // same uncaptured counter increment.
+            await tx.execute(
+                sql`select pg_advisory_xact_lock(hashtext(${activationId}))`,
+            );
+
+            const accountingRows = await tx
+                .select({
+                    radacctId: radacct.radacctid,
+                    inputOctets: radacct.acctinputoctets,
+                    outputOctets: radacct.acctoutputoctets,
+                    observedAt: sql<Date>`coalesce(${radacct.acctupdatetime}, ${radacct.acctstoptime}, ${radacct.acctstarttime}, now())`,
+                })
+                .from(radacct)
+                .where(
+                    and(
+                        eq(radacct.class, activationId),
+                        isNotNull(radacct.acctstarttime),
+                        session
+                            ? eq(
+                                  radacct.radacctid,
+                                  BigInt(session.radacctId),
+                              )
+                            : undefined,
+                    ),
+                );
+            if (accountingRows.length === 0) return;
+
+            const radacctIds = accountingRows.map((row) => row.radacctId);
+            const capturedRows = await tx
+                .select({
+                    radacctId: radiusUsageDelta.radacctId,
+                    inputOctets: sql<number>`coalesce(sum(${radiusUsageDelta.inputOctets}), 0)::float8`,
+                    outputOctets: sql<number>`coalesce(sum(${radiusUsageDelta.outputOctets}), 0)::float8`,
+                })
+                .from(radiusUsageDelta)
+                .where(
+                    and(
+                        eq(radiusUsageDelta.activationId, activationId),
+                        inArray(radiusUsageDelta.radacctId, radacctIds),
+                    ),
+                )
+                .groupBy(radiusUsageDelta.radacctId);
+            const capturedBySession = new Map(
+                capturedRows.map((row) => [String(row.radacctId), row]),
+            );
+
+            const deltas = accountingRows.flatMap((row) => {
+                const captured = capturedBySession.get(String(row.radacctId));
+                const inputOctets = Math.max(
+                    0,
+                    Number(row.inputOctets ?? 0) -
+                        Number(captured?.inputOctets ?? 0),
+                );
+                const outputOctets = Math.max(
+                    0,
+                    Number(row.outputOctets ?? 0) -
+                        Number(captured?.outputOctets ?? 0),
+                );
+                return inputOctets > 0 || outputOctets > 0
+                    ? [
+                          {
+                              radacctId: row.radacctId,
+                              activationId,
+                              observedAt: row.observedAt,
+                              inputOctets,
+                              outputOctets,
+                          },
+                      ]
+                    : [];
+            });
+            if (deltas.length > 0) {
+                await tx.insert(radiusUsageDelta).values(deltas);
+            }
+        });
+    }
+
+    private rateLimitValue(
+        pkg: typeof packages.$inferSelect,
+        throttled: boolean,
+    ): string {
+        const uploadRate = throttled
+            ? pkg.fairUsageUploadRate
+            : pkg.uploadRate;
+        const downloadRate = throttled
+            ? pkg.fairUsageDownloadRate
+            : pkg.downloadRate;
+        const base = `${uploadRate}k/${downloadRate}k`;
+        if (throttled || pkg.burstTime <= 0) return base;
+
+        const burstUpload = pkg.burstUploadRate || uploadRate;
+        const burstDownload = pkg.burstDownloadRate || downloadRate;
+        const thresholdUpload = pkg.burstUploadThreshold || uploadRate;
+        const thresholdDownload = pkg.burstDownloadThreshold || downloadRate;
+        return `${base} ${burstUpload}k/${burstDownload}k ${thresholdUpload}k/${thresholdDownload}k ${pkg.burstTime}/${pkg.burstTime}`;
+    }
+
+    async reconcileFairUsagePackages(): Promise<number> {
+        const rows = await db
+            .select({ activation: activatedPackages, pkg: packages })
+            .from(activatedPackages)
+            .innerJoin(packages, eq(activatedPackages.packageId, packages.id))
+            .where(
+                and(
+                    isNull(activatedPackages.deactivatedAt),
+                    gte(activatedPackages.expireAt, new Date()),
+                    or(
+                        gt(packages.fairUsageLimit, 0),
+                        exists(
+                            db
+                                .select({ one: sql`1` })
+                                .from(radacct)
+                                .where(
+                                    and(
+                                        sql`${radacct.class} = ${activatedPackages.id}::text`,
+                                        isNull(radacct.acctstoptime),
+                                        isNotNull(radacct.acctstarttime),
+                                        isNotNull(radacct.fupRateLimit),
+                                    ),
+                                ),
+                        ),
+                    ),
+                ),
+            );
+
+        let touched = 0;
+        for (const row of rows) {
+            try {
+                const username =
+                    row.pkg.type === 'pppoe'
+                        ? await this.pppoeUsernameForActivation(
+                              row.activation.id,
+                          )
+                        : activationUsername(row.activation.id);
+                const sessions = await this.getSessions({
+                    username,
+                    activationId: row.activation.id,
+                    liveOnly: true,
+                });
+                const enabled = row.pkg.fairUsageLimit > 0;
+                if (!enabled) {
+                    await db
+                        .update(activatedPackages)
+                        .set({
+                            fupWindowStart: null,
+                            fupUsedBytes: 0,
+                            fupThresholdReached: false,
+                            fupEffectiveRateLimit: null,
+                            fupEvaluatedAt: new Date(),
+                        })
+                        .where(eq(activatedPackages.id, row.activation.id));
+                }
+                if (!enabled && sessions.every((s) => s.fupRateLimit === null)) {
+                    continue;
+                }
+                const sharedState =
+                    !enabled || row.pkg.fairUsageWindowUnit === 'session'
+                        ? null
+                        : await this.fairUsageState(row.activation, row.pkg);
+
+                for (const session of sessions) {
+                    const state = enabled
+                        ? (sharedState ??
+                          (await this.fairUsageState(
+                              row.activation,
+                              row.pkg,
+                              session,
+                          )))
+                        : null;
+                    const rateLimit = this.rateLimitValue(
+                        row.pkg,
+                        state?.throttled ?? false,
+                    );
+                    if (
+                        enabled &&
+                        session.fupRateLimit === null &&
+                        !state!.throttled
+                    ) {
+                        // Access-Accept already installed the normal package
+                        // rate. Record that baseline without sending a no-op
+                        // CoA; the first CoA is reserved for a real transition.
+                        await db
+                            .update(radacct)
+                            .set({
+                                fupWindowStart: state!.windowStart,
+                                fupRateLimit: rateLimit,
+                                fupUsedBytes: state!.usedBytes,
+                                fupThresholdReached: false,
+                                fupEvaluatedAt: new Date(),
+                            })
+                            .where(
+                                eq(
+                                    radacct.radacctid,
+                                    BigInt(session.radacctId),
+                                ),
+                            );
+                        continue;
+                    }
+                    if (enabled) {
+                        if (
+                            session.fupRateLimit === rateLimit &&
+                            session.fupWindowStart?.getTime() ===
+                                state!.windowStart.getTime()
+                        ) {
+                            continue;
+                        }
+                    } else if (session.fupRateLimit === null) {
+                        continue;
+                    }
+
+                    const acknowledged = await this.coaRateLimit(
+                        username,
+                        session,
+                        rateLimit,
+                    );
+                    if (!acknowledged) continue;
+                    await db
+                        .update(radacct)
+                        .set({
+                            fupWindowStart: state?.windowStart ?? null,
+                            fupRateLimit: enabled ? rateLimit : null,
+                            fupUsedBytes: state?.usedBytes ?? 0,
+                            fupThresholdReached:
+                                state?.throttled ?? false,
+                            fupEvaluatedAt: new Date(),
+                        })
+                        .where(
+                            eq(
+                                radacct.radacctid,
+                                BigInt(session.radacctId),
+                            ),
+                        );
+                    touched++;
+                }
+            } catch (err) {
+                logger.error('Fair-usage reconciliation failed', {
+                    activationId: row.activation.id,
+                    error: err,
+                });
+            }
+        }
+        return touched;
+    }
+
     // =========================================================================
     // Cumulative time bank (noExpiry packages)
     // =========================================================================
@@ -2926,6 +3287,7 @@ export class RadiusClient {
         activationId: string,
         pkg: typeof packages.$inferSelect,
         sessionSeconds: number,
+        throttled = false,
     ): Array<{ attribute: string; value: string | number }> {
         const attrs: Array<{ attribute: string; value: string | number }> = [
             { attribute: 'Session-Timeout', value: sessionSeconds },
@@ -2933,19 +3295,24 @@ export class RadiusClient {
             { attribute: 'Class', value: activationId },
         ];
 
-        if (pkg.noExpiry) {
+        if (pkg.noExpiry || pkg.fairUsageLimit > 0) {
             attrs.push({
                 attribute: 'Acct-Interim-Interval',
                 value: this.config.bankInterimSeconds,
             });
         }
 
-        if (pkg.uploadRate > 0 || pkg.downloadRate > 0) {
+        if (
+            pkg.uploadRate > 0 ||
+            pkg.downloadRate > 0 ||
+            pkg.burstTime > 0 ||
+            throttled
+        ) {
             // Package rates are Kbps; MikroTik's 'k' suffix denotes thousands.
             // 0 is read as unlimited by RouterOS queuing.
             attrs.push({
                 attribute: 'Mikrotik-Rate-Limit',
-                value: `${pkg.uploadRate}k/${pkg.downloadRate}k`,
+                value: this.rateLimitValue(pkg, throttled),
             });
         }
 
@@ -2988,16 +3355,22 @@ export class RadiusClient {
     // attribute set as radreply, list-qualified into the reply list with the
     // default := operator. Values stay typed (integers as JSON numbers) so
     // rlm_rest builds the pairs without string coercion.
-    private buildRestReplyAttributes(
+    private async buildRestReplyAttributes(
         activationId: string,
         pkg: typeof packages.$inferSelect,
         sessionSeconds: number,
-    ): RadiusRestReply {
+        activation: typeof activatedPackages.$inferSelect,
+    ): Promise<RadiusRestReply> {
+        const fairUsage =
+            pkg.fairUsageLimit > 0
+                ? await this.fairUsageState(activation, pkg)
+                : null;
         const reply: RadiusRestReply = {};
         for (const { attribute, value } of this.sessionReplyAttributes(
             activationId,
             pkg,
             sessionSeconds,
+            fairUsage?.throttled ?? false,
         )) {
             reply[`reply:${attribute}`] = { op: ':=', value: [value] };
         }
@@ -3275,6 +3648,21 @@ export class RadiusClient {
         return this.sendCoARequest(target, target.secret, attrs);
     }
 
+    private async coaRateLimit(
+        username: string,
+        session: SessionInfo,
+        rateLimit: string,
+    ): Promise<boolean> {
+        const target = await this.nasTargetForSession(session);
+        const attrs = this.sessionCoaIdentity(username, session);
+        attrs.push({
+            vendor: MIKROTIK_VENDOR_ID,
+            type: MIKROTIK_ATTR.RATE_LIMIT,
+            value: rateLimit,
+        });
+        return this.sendCoARequest(target, target.secret, attrs);
+    }
+
     // Closes an accounting record after a confirmed (ACKed) disconnect:
     // stop time + Admin-Reset cause (RFC 2866 §5.10 terminology, the value
     // FreeRADIUS itself stores for admin kills).
@@ -3366,6 +3754,11 @@ export class RadiusClient {
             terminateCause: row.acctterminatecause,
             avgSpeedBps:
                 seconds > 0 ? Math.round((totalOctets * 8) / seconds) : 0,
+            fupWindowStart: row.fupWindowStart,
+            fupRateLimit: row.fupRateLimit,
+            fupUsedBytes: Number(row.fupUsedBytes),
+            fupThresholdReached: row.fupThresholdReached,
+            fupEvaluatedAt: row.fupEvaluatedAt,
         };
     }
 
@@ -3402,6 +3795,54 @@ export class RadiusClient {
             });
         const octetsUsed = sessions.reduce((sum, s) => sum + s.totalOctets, 0);
         const quotaBytes = (pkg.downloadQuota + pkg.uploadQuota) * 1024;
+        let fairUsage: ActivationStatus['fairUsage'] = null;
+        if (pkg.fairUsageLimit > 0) {
+            const limitBytes = pkg.fairUsageLimit * 1024;
+            if (pkg.fairUsageWindowUnit === 'session') {
+                const states = await Promise.all(
+                    liveSessions.map((session) =>
+                        this.fairUsageState(activation, pkg, session),
+                    ),
+                );
+                const representative = states.reduce<
+                    (typeof states)[number] | null
+                >(
+                    (current, state) =>
+                        !current || state.usedBytes > current.usedBytes
+                            ? state
+                            : current,
+                    null,
+                );
+                const usedBytes = representative?.usedBytes ?? 0;
+                fairUsage = {
+                    limitBytes,
+                    usedBytes,
+                    remainingBytes: Math.max(0, limitBytes - usedBytes),
+                    throttled: states.some((state) => state.throttled),
+                    windowStart: representative?.windowStart ?? null,
+                    windowValue: pkg.fairUsageWindowValue,
+                    windowUnit: pkg.fairUsageWindowUnit,
+                    uploadRate: pkg.fairUsageUploadRate,
+                    downloadRate: pkg.fairUsageDownloadRate,
+                };
+            } else {
+                const state = await this.fairUsageState(activation, pkg);
+                fairUsage = {
+                    limitBytes,
+                    usedBytes: state.usedBytes,
+                    remainingBytes: Math.max(
+                        0,
+                        limitBytes - state.usedBytes,
+                    ),
+                    throttled: state.throttled,
+                    windowStart: state.windowStart,
+                    windowValue: pkg.fairUsageWindowValue,
+                    windowUnit: pkg.fairUsageWindowUnit,
+                    uploadRate: pkg.fairUsageUploadRate,
+                    downloadRate: pkg.fairUsageDownloadRate,
+                };
+            }
+        }
         const lastActive = sessions.reduce<Date | null>((acc, s) => {
             const latest = s.updatedAt ?? s.startedAt;
             if (!latest) return acc;
@@ -3426,6 +3867,7 @@ export class RadiusClient {
             octetsLimit: quotaBytes > 0 ? quotaBytes : null,
             remainingOctets:
                 quotaBytes > 0 ? Math.max(0, quotaBytes - octetsUsed) : null,
+            fairUsage,
             online: liveSessions.length > 0,
             liveSessions,
             avgSpeedBps: liveSessions.length
@@ -3653,53 +4095,59 @@ export class RadiusClient {
 
         const attempts = Math.max(1, this.config.retries + 1);
         let lastError: unknown = null;
-        for (let attempt = 0; attempt < attempts; attempt++) {
-            try {
-                const response = await this.udpExchange(
-                    packet,
-                    target,
-                    this.config.timeoutMs,
-                );
-                if (response.length < 20) {
-                    throw new RadiusError('Runt RADIUS response');
-                }
-                if (response[1] !== identifier) {
-                    throw new RadiusError(
-                        `RADIUS response identifier mismatch (got ${response[1]}, expected ${identifier})`,
+        const socket = dgram.createSocket('udp4');
+        try {
+            for (let attempt = 0; attempt < attempts; attempt++) {
+                try {
+                    const response = await this.udpExchange(
+                        socket,
+                        packet,
+                        target,
+                        this.config.timeoutMs,
                     );
+                    if (response.length < 20) {
+                        throw new RadiusError('Runt RADIUS response');
+                    }
+                    if (response[1] !== identifier) {
+                        throw new RadiusError(
+                            `RADIUS response identifier mismatch (got ${response[1]}, expected ${identifier})`,
+                        );
+                    }
+                    if (!expectedCodes.has(response[0]!)) {
+                        throw new RadiusError(
+                            `Unexpected RADIUS response code ${response[0]}`,
+                        );
+                    }
+                    if (
+                        !this.validResponseAuthenticator(
+                            response,
+                            authenticator,
+                            secret,
+                        )
+                    ) {
+                        // A bad response authenticator means a shared-secret
+                        // mismatch (RouterOS calls these "bad-replies") — retrying
+                        // will not fix it.
+                        throw new RadiusError(
+                            'RADIUS response authenticator mismatch (check the shared secret)',
+                        );
+                    }
+                    return {
+                        code: response[0]!,
+                        attributes: this.decodeAttributes(response),
+                    };
+                } catch (err) {
+                    lastError = err;
+                    const message = err instanceof Error ? err.message : '';
+                    const retriable =
+                        message.includes('timed out') ||
+                        message.includes('ENOTFOUND') ||
+                        message.includes('EAI_AGAIN');
+                    if (!retriable) throw err;
                 }
-                if (!expectedCodes.has(response[0]!)) {
-                    throw new RadiusError(
-                        `Unexpected RADIUS response code ${response[0]}`,
-                    );
-                }
-                if (
-                    !this.validResponseAuthenticator(
-                        response,
-                        authenticator,
-                        secret,
-                    )
-                ) {
-                    // A bad response authenticator means a shared-secret
-                    // mismatch (RouterOS calls these "bad-replies") — retrying
-                    // will not fix it.
-                    throw new RadiusError(
-                        'RADIUS response authenticator mismatch (check the shared secret)',
-                    );
-                }
-                return {
-                    code: response[0]!,
-                    attributes: this.decodeAttributes(response),
-                };
-            } catch (err) {
-                lastError = err;
-                const message = err instanceof Error ? err.message : '';
-                const retriable =
-                    message.includes('timed out') ||
-                    message.includes('ENOTFOUND') ||
-                    message.includes('EAI_AGAIN');
-                if (!retriable) throw err;
             }
+        } finally {
+            socket.close();
         }
         throw new RadiusError(
             `No RADIUS response from ${target.host}:${target.port}`,
@@ -3708,14 +4156,27 @@ export class RadiusClient {
     }
 
     private udpExchange(
+        socket: dgram.Socket,
         packet: Buffer,
         target: { host: string; port: number },
         timeoutMs: number,
     ): Promise<Buffer> {
         return new Promise((resolve, reject) => {
-            const socket = dgram.createSocket('udp4');
+            const cleanup = () => {
+                clearTimeout(timer);
+                socket.off('error', onError);
+                socket.off('message', onMessage);
+            };
+            const onError = (err: Error) => {
+                cleanup();
+                reject(err);
+            };
+            const onMessage = (msg: Buffer) => {
+                cleanup();
+                resolve(Buffer.from(msg));
+            };
             const timer = setTimeout(() => {
-                socket.close();
+                cleanup();
                 reject(
                     new RadiusError(
                         `RADIUS request to ${target.host}:${target.port} timed out`,
@@ -3723,20 +4184,11 @@ export class RadiusClient {
                 );
             }, timeoutMs);
 
-            socket.once('error', (err) => {
-                clearTimeout(timer);
-                socket.close();
-                reject(err);
-            });
-            socket.once('message', (msg) => {
-                clearTimeout(timer);
-                socket.close();
-                resolve(Buffer.from(msg));
-            });
+            socket.once('error', onError);
+            socket.once('message', onMessage);
             socket.send(packet, target.port, target.host, (err) => {
                 if (err) {
-                    clearTimeout(timer);
-                    socket.close();
+                    cleanup();
                     reject(err);
                 }
             });

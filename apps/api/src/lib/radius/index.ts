@@ -23,6 +23,7 @@ function buildRadiusClient(): RadiusClient {
 const globalRef = globalThis as unknown as {
     __radiusClient?: RadiusClient;
     __radiusBankTicker?: ReturnType<typeof setInterval>;
+    __radiusPolicyReconcile?: Promise<void>;
 };
 export const radiusClient: RadiusClient =
     globalRef.__radiusClient ??
@@ -42,13 +43,20 @@ if (!env.radius.url) {
 const tickerSeconds = Math.max(5, env.radius.bankReconcileSeconds);
 if (!globalRef.__radiusBankTicker) {
     globalRef.__radiusBankTicker = setInterval(() => {
-        void radiusClient
-            .reconcileBankPackages()
+        if (globalRef.__radiusPolicyReconcile) return;
+        globalRef.__radiusPolicyReconcile = Promise.all([
+            radiusClient.reconcileBankPackages(),
+            radiusClient.reconcileFairUsagePackages(),
+        ])
+            .then(() => undefined)
             .catch((err) =>
-                logger.error('Time-bank reconciliation tick failed', {
+                logger.error('RADIUS policy reconciliation tick failed', {
                     error: err,
                 }),
-            );
+            )
+            .finally(() => {
+                globalRef.__radiusPolicyReconcile = undefined;
+            });
     }, tickerSeconds * 1000);
     // Never hold the event loop open for the ticker alone (tests/scripts).
     if (typeof globalRef.__radiusBankTicker.unref === 'function') {

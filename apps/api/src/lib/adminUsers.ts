@@ -295,6 +295,7 @@ async function userAggregates(userIds: string[], adminId: string) {
                     active: number;
                     hotspot: number;
                     pppoe: number;
+                    underFup: number;
                 }
             >(),
             flags: new Map<string, number>(),
@@ -333,6 +334,15 @@ async function userAggregates(userIds: string[], adminId: string) {
             active: sql<number>`count(*) filter (where ${activatedPackages.expireAt} > now() and ${activatedPackages.deactivatedAt} is null)`,
             hotspot: sql<number>`count(*) filter (where ${packages.type} = 'hotspot')`,
             pppoe: sql<number>`count(*) filter (where ${packages.type} = 'pppoe')`,
+            underFup: sql<number>`count(*) filter (where ${activatedPackages.expireAt} > now()
+                and ${activatedPackages.deactivatedAt} is null
+                and ${packages.fairUsageLimit} > 0 and exists (
+                select 1 from ${radacct} fup_session
+                where fup_session.class = ${activatedPackages.id}::text
+                  and fup_session.acctstoptime is null
+                  and fup_session.acctstarttime is not null
+                  and fup_session.fup_rate_limit = concat(${packages.fairUsageUploadRate}, 'k/', ${packages.fairUsageDownloadRate}, 'k')
+            ))`,
         })
         .from(activatedPackages)
         .innerJoin(packages, eq(activatedPackages.packageId, packages.id))
@@ -410,6 +420,7 @@ async function userAggregates(userIds: string[], adminId: string) {
                     active: Number(r.active),
                     hotspot: Number(r.hotspot),
                     pppoe: Number(r.pppoe),
+                    underFup: Number(r.underFup),
                 },
             ]),
         ),
@@ -574,6 +585,7 @@ export async function listAdminUsers(opts: ListAdminUsersOpts) {
         active: 0,
         hotspot: 0,
         pppoe: 0,
+        underFup: 0,
     };
 
     return {
@@ -633,6 +645,7 @@ export async function listAdminUsers(opts: ListAdminUsersOpts) {
                         active: activations?.active ?? 0,
                         hotspot: activations?.hotspot ?? 0,
                         pppoe: activations?.pppoe ?? 0,
+                        underFup: activations?.underFup ?? 0,
                     },
                     lastPaymentAt: (agg.lastPayment.get(u.id) ??
                         null) as Date | null,
@@ -768,6 +781,7 @@ export async function getAdminUserDetail(userId: string, adminId: string) {
             active: activations?.active ?? 0,
             hotspot: activations?.hotspot ?? 0,
             pppoe: activations?.pppoe ?? 0,
+            underFup: activations?.underFup ?? 0,
         },
         usage: {
             sessions: Number(usage?.sessions ?? 0),

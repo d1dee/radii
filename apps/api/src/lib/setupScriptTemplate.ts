@@ -1067,10 +1067,17 @@ $radiiLog "WireGuard firewall access rules configured";
 
 :if ([:len $pppPortalAddress] > 0) do={
     :if ($pppPortalAddress != $pppPortalHost) do={
-        /ip/firewall/address-list/add \
-            list="radii-pppoe-payment" \
-            address=$pppPortalAddress \
-            comment="radii: pppoe payment redirect address";
+        # Adding the hostname above creates a dynamic entry for its resolved
+        # address. Add a separately configured redirect IP only when it is not
+        # already covered, otherwise RouterOS rejects it as a duplicate.
+        :local existingPppPortalAddress [/ip/firewall/address-list/find \
+            where list="radii-pppoe-payment" && address=$pppPortalAddress];
+        :if ([:len $existingPppPortalAddress] = 0) do={
+            /ip/firewall/address-list/add \
+                list="radii-pppoe-payment" \
+                address=$pppPortalAddress \
+                comment="radii: pppoe payment redirect address";
+        };
     };
 };
 

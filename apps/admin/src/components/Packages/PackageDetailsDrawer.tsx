@@ -220,6 +220,46 @@ export function PackageDetailsDrawer({
                         </Grid.Col>
                         <Grid.Col span={6}>
                             <DetailItem
+                                label='Fair Usage'
+                                value={
+                                    pkg.fairUsageLimit > 0
+                                        ? `${pkg.fairUsageLimit.toLocaleString()} KB / ${pkg.fairUsageWindowUnit === 'session' ? 'session' : `${pkg.fairUsageWindowValue} ${pkg.fairUsageWindowUnit}`}`
+                                        : 'Disabled'
+                                }
+                            />
+                        </Grid.Col>
+                        <Grid.Col span={6}>
+                            <DetailItem
+                                label='FUP Rate Up/Down'
+                                value={
+                                    pkg.fairUsageLimit > 0
+                                        ? `${pkg.fairUsageUploadRate} / ${pkg.fairUsageDownloadRate} Kbps`
+                                        : '—'
+                                }
+                            />
+                        </Grid.Col>
+                        <Grid.Col span={6}>
+                            <DetailItem
+                                label='Burst Rate Up/Down'
+                                value={
+                                    pkg.burstTime > 0
+                                        ? `${pkg.burstUploadRate} / ${pkg.burstDownloadRate} Kbps`
+                                        : 'Disabled'
+                                }
+                            />
+                        </Grid.Col>
+                        <Grid.Col span={6}>
+                            <DetailItem
+                                label='Burst Period'
+                                value={
+                                    pkg.burstTime > 0
+                                        ? `${pkg.burstTime} seconds`
+                                        : '—'
+                                }
+                            />
+                        </Grid.Col>
+                        <Grid.Col span={6}>
+                            <DetailItem
                                 label='Created'
                                 value={formatDate(pkg.createdAt)}
                             />

@@ -139,6 +139,7 @@ export function login(body: { phoneNumber: string; pin: string }) {
 }
 
 export type PackageType = 'hotspot' | 'pppoe';
+export type FairUsageWindowUnit = 'session' | 'days' | 'weeks' | 'months';
 
 // Raw package row as returned by the admin endpoints.
 export type PackageRow = {
@@ -156,6 +157,16 @@ export type PackageRow = {
     downloadRate: number;
     downloadQuota: number;
     uploadQuota: number;
+    fairUsageLimit: number;
+    fairUsageWindowValue: number;
+    fairUsageWindowUnit: FairUsageWindowUnit;
+    fairUsageUploadRate: number;
+    fairUsageDownloadRate: number;
+    burstUploadRate: number;
+    burstDownloadRate: number;
+    burstUploadThreshold: number;
+    burstDownloadThreshold: number;
+    burstTime: number;
     // NAS devices the package is restricted to; empty means all devices.
     nasDeviceIds: string[];
     isActive: boolean;
@@ -176,6 +187,16 @@ export type CreatePackageInput = {
     downloadRate: number;
     downloadQuota: number;
     uploadQuota: number;
+    fairUsageLimit: number;
+    fairUsageWindowValue: number;
+    fairUsageWindowUnit: FairUsageWindowUnit;
+    fairUsageUploadRate: number;
+    fairUsageDownloadRate: number;
+    burstUploadRate: number;
+    burstDownloadRate: number;
+    burstUploadThreshold: number;
+    burstDownloadThreshold: number;
+    burstTime: number;
     // NAS devices the package is available on; at least one is required.
     nasDeviceIds: string[];
 };
@@ -347,6 +368,7 @@ export type AdminUserRow = {
         active: number;
         hotspot: number;
         pppoe: number;
+        underFup: number;
     };
     lastPaymentAt: string | null;
     // Per-admin CRM tag (friendly name + location); null when untagged.
@@ -426,6 +448,7 @@ export type AdminUserDetail = {
         active: number;
         hotspot: number;
         pppoe: number;
+        underFup: number;
     };
     usage: {
         sessions: number;
@@ -604,6 +627,17 @@ export type AdminActivationRow = {
     octetsUsed: number;
     octetsLimit: number | null;
     remainingOctets: number | null;
+    fairUsage: {
+        limitBytes: number;
+        usedBytes: number;
+        remainingBytes: number;
+        throttled: boolean;
+        windowStart: string | null;
+        windowValue: number;
+        windowUnit: FairUsageWindowUnit;
+        uploadRate: number;
+        downloadRate: number;
+    } | null;
     online: boolean;
     liveSessions: SessionInfo[];
     avgSpeedBps: number;
@@ -627,6 +661,11 @@ export type SessionInfo = {
     totalOctets: number;
     terminateCause: string | null;
     avgSpeedBps: number;
+    fupWindowStart: string | null;
+    fupRateLimit: string | null;
+    fupUsedBytes: number;
+    fupThresholdReached: boolean;
+    fupEvaluatedAt: string | null;
 };
 
 export type AdminSessionRow = SessionInfo;

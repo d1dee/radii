@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import {
     bigint,
     bigserial,
+    boolean,
     index,
     inet,
     integer,
@@ -48,6 +49,21 @@ export const radacct = pgTable(
         framedinterfaceid: text(),
         delegatedipv6prefix: inet(),
         class: text(),
+        fupWindowStart: timestamp('fup_window_start', {
+            withTimezone: true,
+            mode: 'date',
+        }),
+        fupRateLimit: text('fup_rate_limit'),
+        fupUsedBytes: bigint('fup_used_bytes', { mode: 'number' })
+            .default(0)
+            .notNull(),
+        fupThresholdReached: boolean('fup_threshold_reached')
+            .default(false)
+            .notNull(),
+        fupEvaluatedAt: timestamp('fup_evaluated_at', {
+            withTimezone: true,
+            mode: 'date',
+        }),
     },
     (table) => [
         index('radacct_active_session_idx')

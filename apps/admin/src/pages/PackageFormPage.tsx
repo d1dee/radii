@@ -3,6 +3,7 @@ import {
     Card,
     Center,
     Container,
+    Divider,
     Grid,
     Group,
     Input,
@@ -30,6 +31,7 @@ import {
     getNasDevices,
     updateAdminPackage,
     type CreatePackageInput,
+    type FairUsageWindowUnit,
     type NasDeviceRow,
     type PackageType,
 } from '@/lib/api';
@@ -94,6 +96,16 @@ export default function PackageFormPage() {
             downloadRate: 0,
             downloadQuota: 0,
             uploadQuota: 0,
+            fairUsageLimit: 0,
+            fairUsageWindowValue: 1,
+            fairUsageWindowUnit: 'session',
+            fairUsageUploadRate: 0,
+            fairUsageDownloadRate: 0,
+            burstUploadRate: 0,
+            burstDownloadRate: 0,
+            burstUploadThreshold: 0,
+            burstDownloadThreshold: 0,
+            burstTime: 0,
             nasDeviceIds: [],
         },
         validate: schemaResolver(createPackageSchema),
@@ -153,6 +165,16 @@ export default function PackageFormPage() {
                 downloadRate: pkg.downloadRate,
                 downloadQuota: pkg.downloadQuota,
                 uploadQuota: pkg.uploadQuota,
+                fairUsageLimit: pkg.fairUsageLimit,
+                fairUsageWindowValue: pkg.fairUsageWindowValue,
+                fairUsageWindowUnit: pkg.fairUsageWindowUnit,
+                fairUsageUploadRate: pkg.fairUsageUploadRate,
+                fairUsageDownloadRate: pkg.fairUsageDownloadRate,
+                burstUploadRate: pkg.burstUploadRate,
+                burstDownloadRate: pkg.burstDownloadRate,
+                burstUploadThreshold: pkg.burstUploadThreshold,
+                burstDownloadThreshold: pkg.burstDownloadThreshold,
+                burstTime: pkg.burstTime,
                 nasDeviceIds: pkg.nasDeviceIds ?? [],
             });
             const unit = bestUnitFor(pkg.sessionLength);
@@ -429,6 +451,154 @@ export default function PackageFormPage() {
                                 />
                             </Grid.Col>
                         </Grid>
+                        <Divider
+                            label='Fair usage policy'
+                            labelPosition='left'
+                        />
+                        <Text size='sm' c='dimmed'>
+                            Track combined upload and download usage in a
+                            recurring window. Once the allowance is reached,
+                            active sessions are switched to the throttled rates
+                            with RADIUS CoA. Set the allowance to 0 to disable
+                            fair usage.
+                        </Text>
+                        <Grid>
+                            <Grid.Col span={{ base: 12, sm: 6 }}>
+                                <NumberInput
+                                    label='Fair Usage Allowance (KB)'
+                                    description='Combined upload and download data'
+                                    min={0}
+                                    {...form.getInputProps('fairUsageLimit')}
+                                />
+                            </Grid.Col>
+                            <Grid.Col span={{ base: 12, sm: 6 }}>
+                                <Input.Wrapper
+                                    label='Calculation Window'
+                                    description='Session, or recurring time from activation'
+                                >
+                                    <Group gap='xs' wrap='nowrap'>
+                                        <NumberInput
+                                            aria-label='Fair usage window value'
+                                            min={1}
+                                            step={1}
+                                            disabled={
+                                                form.values
+                                                    .fairUsageWindowUnit ===
+                                                'session'
+                                            }
+                                            style={{ flex: 1 }}
+                                            {...form.getInputProps(
+                                                'fairUsageWindowValue',
+                                            )}
+                                        />
+                                        <Select
+                                            aria-label='Fair usage window unit'
+                                            data={[
+                                                {
+                                                    value: 'session',
+                                                    label: 'Session',
+                                                },
+                                                {
+                                                    value: 'days',
+                                                    label: 'Days',
+                                                },
+                                                {
+                                                    value: 'weeks',
+                                                    label: 'Weeks',
+                                                },
+                                                {
+                                                    value: 'months',
+                                                    label: 'Months',
+                                                },
+                                            ]}
+                                            allowDeselect={false}
+                                            w={130}
+                                            {...form.getInputProps(
+                                                'fairUsageWindowUnit',
+                                            )}
+                                            onChange={(value) =>
+                                                form.setFieldValue(
+                                                    'fairUsageWindowUnit',
+                                                    (value as FairUsageWindowUnit) ??
+                                                        'session',
+                                                )
+                                            }
+                                        />
+                                    </Group>
+                                </Input.Wrapper>
+                            </Grid.Col>
+                        </Grid>
+                        <Grid>
+                            <Grid.Col span={{ base: 12, sm: 6 }}>
+                                <NumberInput
+                                    label='Throttled Upload Rate (Kbps)'
+                                    description='Applied after the allowance is reached'
+                                    min={0}
+                                    {...form.getInputProps(
+                                        'fairUsageUploadRate',
+                                    )}
+                                />
+                            </Grid.Col>
+                            <Grid.Col span={{ base: 12, sm: 6 }}>
+                                <NumberInput
+                                    label='Throttled Download Rate (Kbps)'
+                                    description='Applied after the allowance is reached'
+                                    min={0}
+                                    {...form.getInputProps(
+                                        'fairUsageDownloadRate',
+                                    )}
+                                />
+                            </Grid.Col>
+                        </Grid>
+                        <Divider label='Burst limits' labelPosition='left' />
+                        <Text size='sm' c='dimmed'>
+                            RouterOS permits the burst rates while average
+                            traffic remains below the thresholds during the
+                            burst period. Leave every burst value at 0 to
+                            disable bursting.
+                        </Text>
+                        <Grid>
+                            <Grid.Col span={{ base: 12, sm: 6 }}>
+                                <NumberInput
+                                    label='Burst Upload Rate (Kbps)'
+                                    min={0}
+                                    {...form.getInputProps('burstUploadRate')}
+                                />
+                            </Grid.Col>
+                            <Grid.Col span={{ base: 12, sm: 6 }}>
+                                <NumberInput
+                                    label='Burst Download Rate (Kbps)'
+                                    min={0}
+                                    {...form.getInputProps('burstDownloadRate')}
+                                />
+                            </Grid.Col>
+                        </Grid>
+                        <Grid>
+                            <Grid.Col span={{ base: 12, sm: 6 }}>
+                                <NumberInput
+                                    label='Burst Upload Threshold (Kbps)'
+                                    min={0}
+                                    {...form.getInputProps(
+                                        'burstUploadThreshold',
+                                    )}
+                                />
+                            </Grid.Col>
+                            <Grid.Col span={{ base: 12, sm: 6 }}>
+                                <NumberInput
+                                    label='Burst Download Threshold (Kbps)'
+                                    min={0}
+                                    {...form.getInputProps(
+                                        'burstDownloadThreshold',
+                                    )}
+                                />
+                            </Grid.Col>
+                        </Grid>
+                        <NumberInput
+                            label='Burst Period (seconds)'
+                            description='RouterOS averaging period for both directions'
+                            min={0}
+                            {...form.getInputProps('burstTime')}
+                        />
                         <Textarea
                             label='Description'
                             placeholder='Optional'
