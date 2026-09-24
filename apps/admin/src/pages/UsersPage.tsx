@@ -21,16 +21,18 @@ import { useDebouncedValue } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
 import { PhoneNumberInput } from '@radii/ui';
 import { useCallback, useEffect, useState } from 'react';
-import { MdAdd, MdCheck, MdContentCopy, MdSearch } from 'react-icons/md';
+import { MdAdd, MdCheck, MdContentCopy, MdDelete, MdSearch } from 'react-icons/md';
 
 import { UserDetailsDrawer } from '@/components/Users/UserDetailsDrawer';
 import {
     getAdminUsers,
+    deleteAdminUser,
     getNasDevices,
     getPppoeAccount,
     migratePppoeAccountNas,
     provisionPppoeAccount,
     type AdminUserList,
+    type AdminUserRow,
     type NasDeviceRow,
     type PackageType,
     type PppoeAccountDetail,
@@ -41,6 +43,7 @@ import { warnBackgroundFailure } from '@/lib/clientError';
 import { dayjs } from '@/lib/dayjs';
 import { formatDate, formatMoney } from '@/lib/format';
 import { useAdminSettings } from '@/lib/settings';
+import { notifyResult } from '@/lib/notify';
 
 type TypeFilter = 'all' | PackageType;
 
@@ -82,6 +85,8 @@ export default function UsersPage() {
     const [flaggedOnly, setFlaggedOnly] = useState(false);
     const [page, setPage] = useState(1);
     const [detailsId, setDetailsId] = useState<string | null>(null);
+    const [deleteTarget, setDeleteTarget] = useState<AdminUserRow | null>(null);
+    const [deleteBusy, setDeleteBusy] = useState(false);
     const [nasDevices, setNasDevices] = useState<NasDeviceRow[]>([]);
     const [provisionOpened, setProvisionOpened] = useState(false);
     const [provisionPhone, setProvisionPhone] = useState('');
@@ -283,6 +288,21 @@ export default function UsersPage() {
         setProvisionOpened(true);
     }
 
+    async function submitDelete() {
+        if (!deleteTarget || deleteTarget.pendingClaim) return;
+        setDeleteBusy(true);
+        const result = await deleteAdminUser(deleteTarget.id);
+        setDeleteBusy(false);
+        notifyResult(result, 'User deleted');
+        if (!result.success) return;
+        if (detailsId === deleteTarget.id) setDetailsId(null);
+        setDeleteTarget(null);
+        const regularUsersOnPage =
+            data?.users.filter((candidate) => !candidate.pendingClaim).length ?? 0;
+        if (page > 1 && regularUsersOnPage === 1) setPage(page - 1);
+        else await load(page, true);
+    }
+
     async function submitProvision(event: React.FormEvent<HTMLFormElement>) {
         event.preventDefault();
         if (!provisionNas) {
@@ -385,6 +405,7 @@ export default function UsersPage() {
                                     <Table.Th>Activations</Table.Th>
                                     <Table.Th>Last payment</Table.Th>
                                     <Table.Th>Registered</Table.Th>
+                                    <Table.Th ta='right'>Actions</Table.Th>
                                 </Table.Tr>
                             </Table.Thead>
                             <Table.Tbody>
@@ -509,6 +530,23 @@ export default function UsersPage() {
                                                 {formatDate(u.createdAt)}
                                             </Text>
                                         </Table.Td>
+                                        <Table.Td>
+                                            <Group justify='flex-end'>
+                                                {!u.pendingClaim ? (
+                                                    <ActionIcon
+                                                        variant='light'
+                                                        color='red'
+                                                        aria-label={`Delete ${u.tag?.name || u.name}`}
+                                                        onClick={(event) => {
+                                                            event.stopPropagation();
+                                                            setDeleteTarget(u);
+                                                        }}
+                                                    >
+                                                        <MdDelete size={16} />
+                                                    </ActionIcon>
+                                                ) : null}
+                                            </Group>
+                                        </Table.Td>
                                     </Table.Tr>
                                 ))}
                             </Table.Tbody>
@@ -530,6 +568,43 @@ export default function UsersPage() {
                 userId={detailsId}
                 onClose={() => setDetailsId(null)}
             />
+
+            <Modal
+                opened={deleteTarget !== null}
+                onClose={() => setDeleteTarget(null)}
+                title='Delete user'
+                centered
+                closeOnClickOutside={!deleteBusy}
+                closeOnEscape={!deleteBusy}
+                withCloseButton={!deleteBusy}
+            >
+                <Stack gap='md'>
+                    <Text size='sm'>
+                        Delete{' '}
+                        <Text span fw={600}>
+                            {deleteTarget?.tag?.name || deleteTarget?.name}
+                        </Text>{' '}
+                        permanently?
+                    </Text>
+                    <Text size='sm' c='dimmed'>
+                        This removes the customer sign-in account. Shared customers and users
+                        with payment, activation, or PPPoE history cannot be deleted; ban them
+                        instead.
+                    </Text>
+                    <Group justify='flex-end'>
+                        <Button
+                            variant='default'
+                            onClick={() => setDeleteTarget(null)}
+                            disabled={deleteBusy}
+                        >
+                            Cancel
+                        </Button>
+                        <Button color='red' loading={deleteBusy} onClick={submitDelete}>
+                            Delete user
+                        </Button>
+                    </Group>
+                </Stack>
+            </Modal>
 
             <Modal
                 opened={provisionOpened}

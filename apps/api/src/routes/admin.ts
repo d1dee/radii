@@ -13,6 +13,7 @@ import {
     addUserFlag,
     canAdminManageActivation,
     canAdminManageGlobalUser,
+    deleteAdminUser,
     getAdminNasAddresses,
     getAdminPaymentDetail,
     getAdminReports,
@@ -32,12 +33,14 @@ import {
 import { jsonError } from '../lib/error';
 import {
     createNasDevice,
+    deleteNasDevice,
     getNasDeviceById,
     getNasDevices,
     updateNasDevice,
 } from '../lib/nas';
 import {
     createPackage,
+    deletePackage,
     getNasDeviceAnalytics,
     getNasDeviceIdsByPackage,
     getNasDeviceIdsForPackage,
@@ -47,6 +50,7 @@ import {
     updatePackage,
 } from '../lib/packages';
 import { RadiusError, radiusClient } from '../lib/radius';
+import { removePeer, wgManagementEnabled } from '../lib/wireguard';
 import { apiLogger } from '../logging';
 import {
     getPppoeAccountAdminDetail,
@@ -74,6 +78,16 @@ function isUniqueViolation(e: unknown): boolean {
     };
     return (
         String(err?.cause?.errno ?? err?.cause?.code ?? err?.code) === '23505'
+    );
+}
+
+function isForeignKeyViolation(e: unknown): boolean {
+    const err = e as {
+        code?: string;
+        cause?: { errno?: string | number; code?: string };
+    };
+    return (
+        String(err?.cause?.errno ?? err?.cause?.code ?? err?.code) === '23503'
     );
 }
 
@@ -179,6 +193,37 @@ app.put('/packages/:id', requireAdmin, async (c) => {
         return jsonError(c, 404, 'Package not found');
     }
     return c.json({ success: true, data: { ...row, nasDeviceIds } });
+});
+
+app.delete('/packages/:id', requireAdmin, async (c) => {
+    const packageId = c.req.param('id');
+    if (!packageId) return jsonError(c, 404, 'Package not found');
+    try {
+        const result = await deletePackage(
+            packageId,
+            c.get('adminSession').userId,
+        );
+        if (result === 'not_found') {
+            return jsonError(c, 404, 'Package not found');
+        }
+        if (result === 'in_use') {
+            return jsonError(
+                c,
+                409,
+                'This package has payment or activation history and cannot be deleted',
+            );
+        }
+        return c.json({ success: true, message: 'Package deleted' });
+    } catch (e) {
+        if (isForeignKeyViolation(e)) {
+            return jsonError(
+                c,
+                409,
+                'This package is in use and cannot be deleted',
+            );
+        }
+        throw e;
+    }
 });
 
 app.get('/nas-devices', requireAdmin, async (c) => {
@@ -360,6 +405,49 @@ app.put('/nas-devices/:id', requireAdmin, async (c) => {
     }
 });
 
+app.delete('/nas-devices/:id', requireAdmin, async (c) => {
+    const id = c.req.param('id');
+    if (!id) return jsonError(c, 404, 'NAS device not found');
+    try {
+        const result = await deleteNasDevice(
+            id,
+            c.get('adminSession').userId,
+        );
+        if (result.status === 'not_found') {
+            return jsonError(c, 404, 'NAS device not found');
+        }
+        if (result.status === 'in_use') {
+            const message =
+                result.reason === 'pppoe'
+                    ? 'Move or remove this NAS device’s PPPoE accounts before deleting it'
+                    : result.reason === 'packages'
+                      ? 'Remove this NAS device from its packages before deleting it'
+                      : 'This NAS device has customer or payment history and cannot be deleted';
+            return jsonError(c, 409, message);
+        }
+        if (result.wgPublicKey && wgManagementEnabled()) {
+            try {
+                await removePeer(result.wgPublicKey);
+            } catch (e) {
+                logger.error('Failed to remove deleted NAS WireGuard peer', {
+                    nasDeviceId: id,
+                    error: e,
+                });
+            }
+        }
+        return c.json({ success: true, message: 'NAS device deleted' });
+    } catch (e) {
+        if (isForeignKeyViolation(e)) {
+            return jsonError(
+                c,
+                409,
+                'This NAS device is in use and cannot be deleted',
+            );
+        }
+        throw e;
+    }
+});
+
 // --- Users (hotspot + PPPoE customer management) -----------------------------
 
 const userTypeFilterSchema = z.enum(['hotspot', 'pppoe']);
@@ -498,6 +586,24 @@ app.delete('/users/:id/ban', requireAdmin, async (c) => {
     const row = await setUserBan(id, false);
     if (!row) return jsonError(c, 404, 'User not found');
     return c.json({ success: true, message: 'User unbanned' });
+});
+
+app.delete('/users/:id', requireAdmin, async (c) => {
+    const id = c.req.param('id');
+    if (!id) return jsonError(c, 404, 'User not found');
+    if (!(await canAdminManageGlobalUser(c.get('adminSession').userId, id))) {
+        return jsonError(c, 404, 'User not found');
+    }
+    const result = await deleteAdminUser(id);
+    if (result === 'not_found') return jsonError(c, 404, 'User not found');
+    if (result === 'in_use') {
+        return jsonError(
+            c,
+            409,
+            'This user has payment, activation, or PPPoE history and cannot be deleted; ban the account instead',
+        );
+    }
+    return c.json({ success: true, message: 'User deleted' });
 });
 
 // Per-user payment log.

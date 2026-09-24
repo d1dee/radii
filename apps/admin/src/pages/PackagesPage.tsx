@@ -6,6 +6,7 @@ import {
     Center,
     Group,
     Loader,
+    Modal,
     Select,
     SimpleGrid,
     Stack,
@@ -17,14 +18,20 @@ import {
 } from '@mantine/core';
 import { useDebouncedValue } from '@mantine/hooks';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { MdAdd, MdEdit, MdSearch } from 'react-icons/md';
+import { MdAdd, MdDelete, MdEdit, MdSearch } from 'react-icons/md';
 import { useNavigate } from 'react-router-dom';
 
 import { PackageDetailsDrawer } from '@/components/Packages/PackageDetailsDrawer';
-import { getAdminPackages, type PackageRow, type PackageType } from '@/lib/api';
+import {
+    deleteAdminPackage,
+    getAdminPackages,
+    type PackageRow,
+    type PackageType,
+} from '@/lib/api';
 import { useAutoRefresh } from '@/lib/autoRefresh';
 import { warnBackgroundFailure } from '@/lib/clientError';
 import { formatMoney } from '@/lib/format';
+import { notifyResult } from '@/lib/notify';
 
 function SummaryCard({
     label,
@@ -59,6 +66,8 @@ export default function PackagesPage() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [detailsId, setDetailsId] = useState<string | null>(null);
+    const [deleteTarget, setDeleteTarget] = useState<PackageRow | null>(null);
+    const [deleteBusy, setDeleteBusy] = useState(false);
 
     const [search, setSearch] = useState('');
     const [debouncedSearch] = useDebouncedValue(search, 300);
@@ -112,6 +121,18 @@ export default function PackagesPage() {
             avgPrice,
         };
     }, [filtered]);
+
+    const handleDelete = async () => {
+        if (!deleteTarget) return;
+        setDeleteBusy(true);
+        const result = await deleteAdminPackage(deleteTarget.id);
+        setDeleteBusy(false);
+        notifyResult(result, 'Package deleted');
+        if (!result.success) return;
+        if (detailsId === deleteTarget.id) setDetailsId(null);
+        setDeleteTarget(null);
+        await load(activeTab, true);
+    };
 
     return (
         <Stack gap='md'>
@@ -294,6 +315,17 @@ export default function PackagesPage() {
                                                         >
                                                             <MdEdit size={16} />
                                                         </ActionIcon>
+                                                        <ActionIcon
+                                                            variant='light'
+                                                            color='red'
+                                                            aria-label={`Delete ${pkg.title}`}
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                setDeleteTarget(pkg);
+                                                            }}
+                                                        >
+                                                            <MdDelete size={16} />
+                                                        </ActionIcon>
                                                     </Group>
                                                 </Table.Td>
                                             </Table.Tr>
@@ -310,6 +342,37 @@ export default function PackagesPage() {
                 packageId={detailsId}
                 onClose={() => setDetailsId(null)}
             />
+
+            <Modal
+                opened={deleteTarget !== null}
+                onClose={() => setDeleteTarget(null)}
+                title='Delete package'
+                centered
+                closeOnClickOutside={!deleteBusy}
+                closeOnEscape={!deleteBusy}
+                withCloseButton={!deleteBusy}
+            >
+                <Stack gap='md'>
+                    <Text size='sm'>
+                        Delete <Text span fw={600}>{deleteTarget?.title}</Text> permanently?
+                    </Text>
+                    <Text size='sm' c='dimmed'>
+                        Packages with payment or activation history cannot be deleted.
+                    </Text>
+                    <Group justify='flex-end'>
+                        <Button
+                            variant='default'
+                            onClick={() => setDeleteTarget(null)}
+                            disabled={deleteBusy}
+                        >
+                            Cancel
+                        </Button>
+                        <Button color='red' loading={deleteBusy} onClick={handleDelete}>
+                            Delete package
+                        </Button>
+                    </Group>
+                </Stack>
+            </Modal>
         </Stack>
     );
 }

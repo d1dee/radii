@@ -1294,6 +1294,58 @@ export async function setUserBan(
     return row ?? null;
 }
 
+export type DeleteAdminUserResult = 'deleted' | 'not_found' | 'in_use';
+
+// Customer deletion is deliberately limited to accounts without service or
+// financial history. Those records must remain attributable for reporting.
+export async function deleteAdminUser(
+    userId: string,
+): Promise<DeleteAdminUserResult> {
+    return db.transaction(async (tx) => {
+        const [existing] = await tx
+            .select({ id: user.id })
+            .from(user)
+            .where(eq(user.id, userId))
+            .limit(1);
+        if (!existing) return 'not_found';
+
+        const [payment, activation, pppoeAccount, paymentTransaction] =
+            await Promise.all([
+                tx
+                    .select({ id: packagePayments.id })
+                    .from(packagePayments)
+                    .where(eq(packagePayments.userId, userId))
+                    .limit(1),
+                tx
+                    .select({ id: activatedPackages.id })
+                    .from(activatedPackages)
+                    .where(eq(activatedPackages.userId, userId))
+                    .limit(1),
+                tx
+                    .select({ id: pppoeServiceAccounts.id })
+                    .from(pppoeServiceAccounts)
+                    .where(eq(pppoeServiceAccounts.customerUserId, userId))
+                    .limit(1),
+                tx
+                    .select({ id: transaction.id })
+                    .from(transaction)
+                    .where(eq(transaction.userId, userId))
+                    .limit(1),
+            ]);
+        if (
+            payment.length > 0 ||
+            activation.length > 0 ||
+            pppoeAccount.length > 0 ||
+            paymentTransaction.length > 0
+        ) {
+            return 'in_use';
+        }
+
+        await tx.delete(user).where(eq(user.id, userId));
+        return 'deleted';
+    });
+}
+
 // --- Payment log ----------------------------------------------------------------
 
 export interface ListPaymentsOpts {

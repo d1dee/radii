@@ -23,12 +23,13 @@ import { schemaResolver, useForm } from '@mantine/form';
 import { useDebouncedValue } from '@mantine/hooks';
 import { generateSetupScriptSchema } from '@shared/index';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { MdAdd, MdEdit, MdSearch, MdTerminal } from 'react-icons/md';
+import { MdAdd, MdDelete, MdEdit, MdSearch, MdTerminal } from 'react-icons/md';
 import { useNavigate } from 'react-router-dom';
 
 import { NasDetailsDrawer } from '@/components/NasDevices/NasDetailsDrawer';
 import {
     generateNasSetupScript,
+    deleteNasDevice,
     getNasDevices,
     getNasSetupScript,
     type GenerateSetupScriptInput,
@@ -38,6 +39,7 @@ import {
 } from '@/lib/api';
 import { useAutoRefresh } from '@/lib/autoRefresh';
 import { warnBackgroundFailure } from '@/lib/clientError';
+import { notifyResult } from '@/lib/notify';
 import {
     nasDeviceOsLabel,
     nasDeviceStatusColors,
@@ -85,6 +87,8 @@ export default function NasDevicesPage() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [detailsId, setDetailsId] = useState<string | null>(null);
+    const [deleteTarget, setDeleteTarget] = useState<NasDeviceRow | null>(null);
+    const [deleteBusy, setDeleteBusy] = useState(false);
 
     const [search, setSearch] = useState('');
     const [debouncedSearch] = useDebouncedValue(search, 300);
@@ -243,6 +247,18 @@ export default function NasDevicesPage() {
         void copyToClipboard(scriptRow.script, 'Setup script copied to clipboard');
     };
 
+    const handleDelete = async () => {
+        if (!deleteTarget) return;
+        setDeleteBusy(true);
+        const result = await deleteNasDevice(deleteTarget.id);
+        setDeleteBusy(false);
+        notifyResult(result, 'NAS device deleted');
+        if (!result.success) return;
+        if (detailsId === deleteTarget.id) setDetailsId(null);
+        setDeleteTarget(null);
+        await load(true);
+    };
+
     return (
         <Stack gap='md'>
             <Group justify='space-between'>
@@ -388,6 +404,17 @@ export default function NasDevicesPage() {
                                                 }}
                                             >
                                                 <MdEdit size={16} />
+                                            </ActionIcon>
+                                            <ActionIcon
+                                                variant='light'
+                                                color='red'
+                                                aria-label={`Delete ${device.name}`}
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setDeleteTarget(device);
+                                                }}
+                                            >
+                                                <MdDelete size={16} />
                                             </ActionIcon>
                                         </Group>
                                     </Table.Td>
@@ -569,6 +596,38 @@ export default function NasDevicesPage() {
                 nasDeviceId={detailsId}
                 onClose={() => setDetailsId(null)}
             />
+
+            <Modal
+                opened={deleteTarget !== null}
+                onClose={() => setDeleteTarget(null)}
+                title='Delete NAS device'
+                centered
+                closeOnClickOutside={!deleteBusy}
+                closeOnEscape={!deleteBusy}
+                withCloseButton={!deleteBusy}
+            >
+                <Stack gap='md'>
+                    <Text size='sm'>
+                        Delete <Text span fw={600}>{deleteTarget?.name}</Text> permanently?
+                    </Text>
+                    <Text size='sm' c='dimmed'>
+                        Its setup configuration will be removed. Devices linked to packages,
+                        PPPoE accounts, customers, or payment history cannot be deleted.
+                    </Text>
+                    <Group justify='flex-end'>
+                        <Button
+                            variant='default'
+                            onClick={() => setDeleteTarget(null)}
+                            disabled={deleteBusy}
+                        >
+                            Cancel
+                        </Button>
+                        <Button color='red' loading={deleteBusy} onClick={handleDelete}>
+                            Delete device
+                        </Button>
+                    </Group>
+                </Stack>
+            </Modal>
         </Stack>
     );
 }

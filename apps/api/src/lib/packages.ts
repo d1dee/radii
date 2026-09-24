@@ -196,6 +196,41 @@ export async function updatePackage(
     });
 }
 
+export type DeletePackageResult = 'deleted' | 'not_found' | 'in_use';
+
+export async function deletePackage(
+    id: string,
+    ownerId: string,
+): Promise<DeletePackageResult> {
+    return db.transaction(async (tx) => {
+        const [pkg] = await tx
+            .select({ id: packages.id })
+            .from(packages)
+            .where(and(eq(packages.id, id), eq(packages.createdBy, ownerId)))
+            .limit(1);
+        if (!pkg) return 'not_found';
+
+        const [payment, activation] = await Promise.all([
+            tx
+                .select({ id: packagePayments.id })
+                .from(packagePayments)
+                .where(eq(packagePayments.packageId, id))
+                .limit(1),
+            tx
+                .select({ id: activatedPackages.id })
+                .from(activatedPackages)
+                .where(eq(activatedPackages.packageId, id))
+                .limit(1),
+        ]);
+        if (payment.length > 0 || activation.length > 0) return 'in_use';
+
+        await tx
+            .delete(packages)
+            .where(and(eq(packages.id, id), eq(packages.createdBy, ownerId)));
+        return 'deleted';
+    });
+}
+
 export async function getNasDeviceIdsForPackage(
     packageId: string,
 ): Promise<string[]> {

@@ -252,6 +252,12 @@ export function updateAdminPackage(id: string, body: CreatePackageInput) {
     });
 }
 
+export function deleteAdminPackage(id: string) {
+    return request<{ message?: string }>(`/admin/packages/${id}`, undefined, {
+        method: 'DELETE',
+    });
+}
+
 // Raw NAS device row as returned by the admin endpoints.
 export type NasDeviceRow = {
     id: string;
@@ -299,6 +305,14 @@ export function updateNasDevice(id: string, body: CreateNasDeviceInput) {
     return request<NasDeviceRow>(`/admin/nas-devices/${id}`, body, {
         method: 'PUT',
     });
+}
+
+export function deleteNasDevice(id: string) {
+    return request<{ message?: string }>(
+        `/admin/nas-devices/${id}`,
+        undefined,
+        { method: 'DELETE' },
+    );
 }
 
 export type NasDeviceAnalytics = {
@@ -486,6 +500,12 @@ export function getAdminUsers(query: ListAdminUsersQuery = {}) {
 
 export function getAdminUser(id: string) {
     return request<AdminUserDetail>(`/admin/users/${id}`);
+}
+
+export function deleteAdminUser(id: string) {
+    return request<{ message?: string }>(`/admin/users/${id}`, undefined, {
+        method: 'DELETE',
+    });
 }
 
 export function addUserFlag(
