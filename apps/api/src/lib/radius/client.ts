@@ -39,12 +39,15 @@
 import dayjs from 'dayjs';
 import {
     and,
+    asc,
+    count,
     desc,
     eq,
     exists,
     getTableColumns,
     gt,
     gte,
+    ilike,
     inArray,
     isNotNull,
     isNull,
@@ -502,7 +505,10 @@ export class RadiusClient {
                     activeActivationCondition(),
                 ),
             )
-            .orderBy(desc(activatedPackages.activatedAt))
+            .orderBy(
+                desc(activatedPackages.activatedAt),
+                asc(activatedPackages.id),
+            )
             .limit(1);
         return activation?.id ?? null;
     }
@@ -1811,6 +1817,7 @@ export class RadiusClient {
             userId?: string;
             type?: 'hotspot' | 'pppoe';
             limit?: number;
+            offset?: number;
             activationIds?: string[];
             nasIpAddresses?: string[];
         } = {},
@@ -1833,7 +1840,8 @@ export class RadiusClient {
                 ),
             )
             .orderBy(desc(activatedPackages.activatedAt))
-            .limit(opts.limit ?? 200);
+            .limit(opts.limit ?? 200)
+            .offset(opts.offset ?? 0);
 
         const out: AdminActivationStatus[] = [];
         for (const row of rows) {
@@ -2438,21 +2446,42 @@ export class RadiusClient {
     // are activation placeholders and were never started by accounting.
     async getAdminSessions(
         nasIpAddresses: string[],
-        limit = 100,
-    ): Promise<SessionInfo[]> {
-        if (nasIpAddresses.length === 0) return [];
-        const rows = await db
-            .select()
-            .from(radacct)
-            .where(
-                and(
-                    isNotNull(radacct.acctstarttime),
-                    inArray(radacct.nasipaddress, nasIpAddresses),
-                ),
-            )
-            .orderBy(desc(radacct.acctstarttime))
-            .limit(limit);
-        return rows.map((row) => this.sessionInfoFromRow(row));
+        opts: { q?: string; live?: boolean; page: number; perPage: number },
+    ): Promise<{ total: number; sessions: SessionInfo[] }> {
+        if (nasIpAddresses.length === 0) return { total: 0, sessions: [] };
+        const q = opts.q ? `%${opts.q}%` : undefined;
+        const where = and(
+            isNotNull(radacct.acctstarttime),
+            inArray(radacct.nasipaddress, nasIpAddresses),
+            opts.live === undefined
+                ? undefined
+                : opts.live
+                  ? isNull(radacct.acctstoptime)
+                  : isNotNull(radacct.acctstoptime),
+            q
+                ? or(
+                      ilike(radacct.username, q),
+                      ilike(radacct.acctsessionid, q),
+                      ilike(radacct.callingstationid, q),
+                      ilike(radacct.framedipaddress, q),
+                      ilike(radacct.nasipaddress, q),
+                  )
+                : undefined,
+        );
+        const [countRows, rows] = await Promise.all([
+            db.select({ total: count(radacct.radacctid) }).from(radacct).where(where),
+            db
+                .select()
+                .from(radacct)
+                .where(where)
+                .orderBy(desc(radacct.acctstarttime), asc(radacct.radacctid))
+                .limit(opts.perPage)
+                .offset((opts.page - 1) * opts.perPage),
+        ]);
+        return {
+            total: Number(countRows[0]?.total ?? 0),
+            sessions: rows.map((row) => this.sessionInfoFromRow(row)),
+        };
     }
 
     // =========================================================================

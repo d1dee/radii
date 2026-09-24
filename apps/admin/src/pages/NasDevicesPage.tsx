@@ -22,11 +22,12 @@ import {
 import { schemaResolver, useForm } from '@mantine/form';
 import { useDebouncedValue } from '@mantine/hooks';
 import { generateSetupScriptSchema } from '@shared/index';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MdAdd, MdDelete, MdEdit, MdSearch, MdTerminal } from 'react-icons/md';
 import { useNavigate } from 'react-router-dom';
 
 import { NasDetailsDrawer } from '@/components/NasDevices/NasDetailsDrawer';
+import { TablePagination } from '@/components/TablePagination';
 import {
     generateNasSetupScript,
     deleteNasDevice,
@@ -40,6 +41,7 @@ import {
 import { useAutoRefresh } from '@/lib/autoRefresh';
 import { warnBackgroundFailure } from '@/lib/clientError';
 import { notifyResult } from '@/lib/notify';
+import { useAdminSettings } from '@/lib/settings';
 import {
     nasDeviceOsLabel,
     nasDeviceStatusColors,
@@ -83,7 +85,11 @@ function SummaryCard({
 
 export default function NasDevicesPage() {
     const navigate = useNavigate();
+    const { settings, loaded } = useAdminSettings();
+    const perPage = settings.dashboard.perPage;
     const [devices, setDevices] = useState<NasDeviceRow[]>([]);
+    const [total, setTotal] = useState(0);
+    const [page, setPage] = useState(1);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [detailsId, setDetailsId] = useState<string | null>(null);
@@ -93,6 +99,7 @@ export default function NasDevicesPage() {
     const [search, setSearch] = useState('');
     const [debouncedSearch] = useDebouncedValue(search, 300);
     const [status, setStatus] = useState<string | null>(null);
+    const loadRequest = useRef(0);
 
     const [scriptDevice, setScriptDevice] = useState<NasDeviceRow | null>(null);
     const [scriptRow, setScriptRow] = useState<NasSetupScriptRow | null>(null);
@@ -113,12 +120,19 @@ export default function NasDevicesPage() {
         validate: schemaResolver(generateSetupScriptSchema),
     });
 
-    const load = useCallback(async (silent = false) => {
+    const load = useCallback(async (pageToLoad: number, silent = false) => {
+        const requestId = ++loadRequest.current;
         if (!silent) {
             setLoading(true);
             setError(null);
         }
-        const result = await getNasDevices();
+        const result = await getNasDevices({
+            q: debouncedSearch.trim() || undefined,
+            status: (status as NasDeviceStatus) || undefined,
+            page: pageToLoad,
+            perPage,
+        });
+        if (requestId !== loadRequest.current) return;
         if (!silent) setLoading(false);
         if (!result.success) {
             if (silent) warnBackgroundFailure('refresh NAS devices', result);
@@ -126,44 +140,32 @@ export default function NasDevicesPage() {
             return;
         }
         setError(null);
-        setDevices(result.data ?? []);
-    }, []);
+        setDevices(result.data?.nasDevices ?? []);
+        setTotal(result.data?.total ?? 0);
+    }, [debouncedSearch, status, perPage]);
 
     useEffect(() => {
-        load();
-    }, [load]);
+        setPage(1);
+    }, [debouncedSearch, status, perPage]);
 
-    useAutoRefresh(() => void load(true));
+    useEffect(() => {
+        if (!loaded) return;
+        void load(page);
+    }, [loaded, load, page]);
 
-    const filtered = useMemo(() => {
-        const q = debouncedSearch.trim().toLowerCase();
-        return devices.filter((device) => {
-            if (status && device.status !== status) return false;
-            if (!q) return true;
-            return [
-                device.name,
-                device.ipAddress,
-                device.macAddress,
-                device.model,
-                device.serialNumber,
-                device.location,
-            ]
-                .filter(Boolean)
-                .some((field) => String(field).toLowerCase().includes(q));
-        });
-    }, [devices, debouncedSearch, status]);
+    useAutoRefresh(() => void load(page, true), loaded);
 
     const summary = useMemo(() => {
         const count = (s: NasDeviceStatus) =>
-            filtered.filter((d) => d.status === s).length;
+            devices.filter((d) => d.status === s).length;
         return {
-            total: filtered.length,
+            total,
             active: count('active'),
             inactive: count('inactive'),
             maintenance: count('maintenance'),
             offline: count('offline'),
         };
-    }, [filtered]);
+    }, [devices, total]);
 
     const prefillForm = (
         row: NasSetupScriptRow | null,
@@ -256,7 +258,8 @@ export default function NasDevicesPage() {
         if (!result.success) return;
         if (detailsId === deleteTarget.id) setDetailsId(null);
         setDeleteTarget(null);
-        await load(true);
+        if (page > 1 && devices.length === 1) setPage(page - 1);
+        else await load(page, true);
     };
 
     return (
@@ -285,15 +288,15 @@ export default function NasDevicesPage() {
                         sub={`${summary.inactive} inactive`}
                     />
                     <SummaryCard
-                        label='Active'
+                        label='Active on page'
                         value={String(summary.active)}
                     />
                     <SummaryCard
-                        label='Maintenance'
+                        label='Maintenance on page'
                         value={String(summary.maintenance)}
                     />
                     <SummaryCard
-                        label='Offline'
+                        label='Offline on page'
                         value={String(summary.offline)}
                     />
                 </SimpleGrid>
@@ -325,17 +328,16 @@ export default function NasDevicesPage() {
                 <Text c='red'>{error}</Text>
             ) : devices.length === 0 ? (
                 <Text c='dimmed' py='xl' ta='center'>
-                    No NAS devices yet. Add one to get started.
-                </Text>
-            ) : filtered.length === 0 ? (
-                <Text c='dimmed' py='xl' ta='center'>
-                    No devices match.
+                    {debouncedSearch || status
+                        ? 'No devices match.'
+                        : 'No NAS devices yet. Add one to get started.'}
                 </Text>
             ) : (
                 <Table.ScrollContainer minWidth={900}>
-                    <Table striped highlightOnHover>
+                    <Table striped highlightOnHover stickyHeader>
                         <Table.Thead>
                             <Table.Tr>
+                                <Table.Th>#</Table.Th>
                                 <Table.Th>Name</Table.Th>
                                 <Table.Th>IP Address</Table.Th>
                                 <Table.Th>OS</Table.Th>
@@ -348,12 +350,15 @@ export default function NasDevicesPage() {
                             </Table.Tr>
                         </Table.Thead>
                         <Table.Tbody>
-                            {filtered.map((device) => (
+                            {devices.map((device, i) => (
                                 <Table.Tr
                                     key={device.id}
                                     onClick={() => setDetailsId(device.id)}
                                     style={{ cursor: 'pointer' }}
                                 >
+                                    <Table.Td>
+                                        {(page - 1) * perPage + i + 1}
+                                    </Table.Td>
                                     <Table.Td fw={500}>{device.name}</Table.Td>
                                     <Table.Td>{device.ipAddress}</Table.Td>
                                     <Table.Td>
@@ -424,6 +429,14 @@ export default function NasDevicesPage() {
                     </Table>
                 </Table.ScrollContainer>
             )}
+
+            <TablePagination
+                page={page}
+                perPage={perPage}
+                total={total}
+                onChange={setPage}
+                loading={loading}
+            />
 
             <Modal
                 opened={!!scriptDevice}

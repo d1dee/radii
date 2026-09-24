@@ -7,7 +7,9 @@ import {
     eq,
     exists,
     getTableColumns,
+    ilike,
     inArray,
+    or,
     sql,
 } from 'drizzle-orm';
 import { db } from '../db';
@@ -102,6 +104,49 @@ export async function getPackages(ownerId: string, type?: PackageType) {
         )
         .orderBy(packages.type, packages.category, asc(packages.title));
     return rows;
+}
+
+export async function listAdminPackages(opts: {
+    ownerId: string;
+    type?: PackageType;
+    q?: string;
+    status?: 'active' | 'inactive';
+    page: number;
+    perPage: number;
+}) {
+    const conditions = [eq(packages.createdBy, opts.ownerId)];
+    if (opts.type) conditions.push(eq(packages.type, opts.type));
+    if (opts.status) {
+        conditions.push(eq(packages.isActive, opts.status === 'active'));
+    }
+    if (opts.q) {
+        const q = `%${opts.q}%`;
+        conditions.push(
+            or(
+                ilike(packages.title, q),
+                ilike(packages.category, q),
+                ilike(packages.description, q),
+                ilike(packages.note, q),
+            )!,
+        );
+    }
+    const where = and(...conditions);
+    const [countRows, rows] = await Promise.all([
+        db.select({ total: count(packages.id) }).from(packages).where(where),
+        db
+            .select()
+            .from(packages)
+            .where(where)
+            .orderBy(
+                packages.type,
+                packages.category,
+                asc(packages.title),
+                asc(packages.id),
+            )
+            .limit(opts.perPage)
+            .offset((opts.page - 1) * opts.perPage),
+    ]);
+    return { total: Number(countRows[0]?.total ?? 0), rows };
 }
 
 export async function getPackageById(id: string, ownerId?: string) {
@@ -261,7 +306,12 @@ export async function getNasDeviceIdsByPackage(
     return map;
 }
 
-export async function getPackageAnalytics(packageId: string, ownerId: string) {
+export async function getPackageAnalytics(
+    packageId: string,
+    ownerId: string,
+    page: number,
+    perPage: number,
+) {
     const ownedPayments = and(
         eq(packagePayments.packageId, packageId),
         eq(nasDevice.ownerId, ownerId),
@@ -326,8 +376,9 @@ export async function getPackageAnalytics(packageId: string, ownerId: string) {
         .from(packagePayments)
         .innerJoin(nasDevice, eq(packagePayments.nasDeviceId, nasDevice.id))
         .where(ownedPayments)
-        .orderBy(desc(packagePayments.createdAt))
-        .limit(10);
+        .orderBy(desc(packagePayments.createdAt), desc(packagePayments.id))
+        .limit(perPage)
+        .offset((page - 1) * perPage);
 
     return {
         payments: {
@@ -345,7 +396,12 @@ export async function getPackageAnalytics(packageId: string, ownerId: string) {
             total: Number(activationStats.total),
             active: Number(activationStats.active),
         },
-        recentPayments,
+        recentPayments: {
+            total: Number(paymentStats.total),
+            page,
+            perPage,
+            payments: recentPayments,
+        },
     };
 }
 
@@ -355,6 +411,8 @@ export async function getPackageAnalytics(packageId: string, ownerId: string) {
 export async function getNasDeviceAnalytics(
     nasDeviceId: string,
     nasIpAddresses: string[],
+    page: number,
+    perPage: number,
 ) {
     const linkedPackageIds = () =>
         db
@@ -447,8 +505,9 @@ export async function getNasDeviceAnalytics(
         .from(packagePayments)
         .innerJoin(packages, eq(packagePayments.packageId, packages.id))
         .where(eq(packagePayments.nasDeviceId, nasDeviceId))
-        .orderBy(desc(packagePayments.createdAt))
-        .limit(10);
+        .orderBy(desc(packagePayments.createdAt), desc(packagePayments.id))
+        .limit(perPage)
+        .offset((page - 1) * perPage);
 
     return {
         packages: {
@@ -474,7 +533,12 @@ export async function getNasDeviceAnalytics(
             total: Number(sessionStats.total),
             active: Number(sessionStats.active),
         },
-        recentPayments,
+        recentPayments: {
+            total: Number(paymentStats.total),
+            page,
+            perPage,
+            payments: recentPayments,
+        },
     };
 }
 

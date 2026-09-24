@@ -2,15 +2,16 @@ import {
     ActionIcon,
     Badge,
     Button,
+    Card,
     Center,
     Checkbox,
     CopyButton,
     Group,
     Loader,
     Modal,
-    Pagination,
     SegmentedControl,
     Select,
+    SimpleGrid,
     Stack,
     Table,
     Text,
@@ -20,14 +21,15 @@ import {
 import { useDebouncedValue } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
 import { PhoneNumberInput } from '@radii/ui';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { MdAdd, MdCheck, MdContentCopy, MdDelete, MdSearch } from 'react-icons/md';
 
 import { UserDetailsDrawer } from '@/components/Users/UserDetailsDrawer';
+import { TablePagination } from '@/components/TablePagination';
 import {
     getAdminUsers,
     deleteAdminUser,
-    getNasDevices,
+    getAllNasDevices,
     getPppoeAccount,
     migratePppoeAccountNas,
     provisionPppoeAccount,
@@ -46,6 +48,19 @@ import { useAdminSettings } from '@/lib/settings';
 import { notifyResult } from '@/lib/notify';
 
 type TypeFilter = 'all' | PackageType;
+
+function SummaryCard({ label, value }: { label: string; value: string }) {
+    return (
+        <Card withBorder padding='md' radius='md'>
+            <Text size='xs' c='dimmed'>
+                {label}
+            </Text>
+            <Text size='xl' fw={700} mt={2}>
+                {value}
+            </Text>
+        </Card>
+    );
+}
 
 function CredentialField({ label, value }: { label: string; value: string }) {
     return (
@@ -110,7 +125,7 @@ export default function UsersPage() {
 
     useEffect(() => {
         void (async () => {
-            const res = await getNasDevices();
+            const res = await getAllNasDevices();
             if (res.success && res.data) setNasDevices(res.data);
             else warnBackgroundFailure('load user NAS options', res);
         })();
@@ -275,7 +290,17 @@ export default function UsersPage() {
 
     useAutoRefresh(() => void load(page, true), loaded);
 
-    const totalPages = data ? Math.max(1, Math.ceil(data.total / perPage)) : 1;
+    const summary = useMemo(() => {
+        const users = data?.users ?? [];
+        const online = users.filter((user) => user.online).length;
+        const flagged = users.filter((user) => user.flags > 0).length;
+        const revenue = users.reduce(
+            (sum, user) => sum + Number(user.payments.revenue),
+            0,
+        );
+
+        return { online, flagged, revenue };
+    }, [data]);
 
     function openProvision() {
         setProvisionPhone('');
@@ -358,6 +383,27 @@ export default function UsersPage() {
                 </Group>
             </Group>
 
+            {!loading && !error && data && (
+                <SimpleGrid cols={{ base: 2, lg: 4 }}>
+                    <SummaryCard
+                        label='Customers (filtered)'
+                        value={String(data.total)}
+                    />
+                    <SummaryCard
+                        label='Online on page'
+                        value={String(summary.online)}
+                    />
+                    <SummaryCard
+                        label='Flagged on page'
+                        value={String(summary.flagged)}
+                    />
+                    <SummaryCard
+                        label='Lifetime spend on page'
+                        value={formatMoney(summary.revenue)}
+                    />
+                </SimpleGrid>
+            )}
+
             <Group wrap='wrap'>
                 <TextInput
                     placeholder='Search name, phone or email'
@@ -395,9 +441,10 @@ export default function UsersPage() {
             ) : (
                 <>
                     <Table.ScrollContainer minWidth={900}>
-                        <Table striped highlightOnHover>
+                        <Table striped highlightOnHover stickyHeader>
                             <Table.Thead>
                                 <Table.Tr>
+                                    <Table.Th>#</Table.Th>
                                     <Table.Th>User</Table.Th>
                                     <Table.Th>Status</Table.Th>
                                     <Table.Th>Lifetime spend</Table.Th>
@@ -409,7 +456,7 @@ export default function UsersPage() {
                                 </Table.Tr>
                             </Table.Thead>
                             <Table.Tbody>
-                                {data.users.map((u) => (
+                                {data.users.map((u, i) => (
                                     <Table.Tr
                                         key={u.id}
                                         onClick={
@@ -419,6 +466,9 @@ export default function UsersPage() {
                                         }
                                         style={{ cursor: 'pointer' }}
                                     >
+                                        <Table.Td>
+                                            {(page - 1) * perPage + i + 1}
+                                        </Table.Td>
                                         <Table.Td>
                                             <Text fw={500}>
                                                 {u.tag?.name || u.name}
@@ -552,15 +602,13 @@ export default function UsersPage() {
                             </Table.Tbody>
                         </Table>
                     </Table.ScrollContainer>
-                    {totalPages > 1 && (
-                        <Group justify='center'>
-                            <Pagination
-                                value={page}
-                                onChange={setPage}
-                                total={totalPages}
-                            />
-                        </Group>
-                    )}
+                    <TablePagination
+                        page={page}
+                        perPage={perPage}
+                        total={data.total}
+                        onChange={setPage}
+                        loading={loading}
+                    />
                 </>
             )}
 

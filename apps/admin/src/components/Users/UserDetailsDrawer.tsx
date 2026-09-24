@@ -26,7 +26,7 @@ import {
     Tooltip,
 } from '@mantine/core';
 import type { ReactNode } from 'react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
     MdBlock,
@@ -53,7 +53,7 @@ import {
     deactivateActivation,
     disconnectPppoeAccountSessions,
     getAdminUser,
-    getNasDevices,
+    getAllNasDevices,
     getUserActivations,
     getUserPayments,
     migratePppoeAccountNas,
@@ -71,6 +71,7 @@ import {
     type PppoeAccountStatus,
     type UserPaymentRow,
 } from '@/lib/api';
+import { TablePagination } from '@/components/TablePagination';
 import { warnBackgroundFailure } from '@/lib/clientError';
 import { dayjs } from '@/lib/dayjs';
 import {
@@ -81,6 +82,7 @@ import {
     formatSeconds,
 } from '@/lib/format';
 import { notifyResult } from '@/lib/notify';
+import { useAdminSettings } from '@/lib/settings';
 
 const PAYMENT_BADGE: Record<string, { color: string; label: string }> = {
     paid: { color: 'green', label: 'Paid' },
@@ -127,14 +129,22 @@ export function UserDetailsDrawer({
     userId: string | null;
     onClose: () => void;
 }) {
+    const { settings } = useAdminSettings();
+    const perPage = settings.dashboard.perPage;
     const [detail, setDetail] = useState<AdminUserDetail | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [tab, setTab] = useState<string | null>('valuation');
     const [activations, setActivations] = useState<AdminActivationRow[]>([]);
+    const [activationsTotal, setActivationsTotal] = useState(0);
+    const [activationsPage, setActivationsPage] = useState(1);
     const [activationsLoading, setActivationsLoading] = useState(false);
     const [payments, setPayments] = useState<UserPaymentRow[]>([]);
+    const [paymentsTotal, setPaymentsTotal] = useState(0);
+    const [paymentsPage, setPaymentsPage] = useState(1);
     const [paymentsLoading, setPaymentsLoading] = useState(false);
     const [busy, setBusy] = useState(false);
+    const activationsRequest = useRef(0);
+    const paymentsRequest = useRef(0);
 
     // Modal state.
     const [flagModal, setFlagModal] = useState(false);
@@ -191,28 +201,42 @@ export function UserDetailsDrawer({
         setDetail(res.data);
     }, []);
 
-    const loadActivations = useCallback(async (id: string) => {
+    const loadActivations = useCallback(async (id: string, page: number) => {
+        const requestId = ++activationsRequest.current;
         setActivationsLoading(true);
-        const res = await getUserActivations(id);
+        const res = await getUserActivations(id, { page, perPage });
+        if (requestId !== activationsRequest.current) return;
         setActivationsLoading(false);
-        if (res.success && res.data) setActivations(res.data);
+        if (res.success && res.data) {
+            setActivations(res.data.activations);
+            setActivationsTotal(res.data.total);
+        }
         else warnBackgroundFailure('load user activations', res);
-    }, []);
+    }, [perPage]);
 
-    const loadPayments = useCallback(async (id: string) => {
+    const loadPayments = useCallback(async (id: string, page: number) => {
+        const requestId = ++paymentsRequest.current;
         setPaymentsLoading(true);
-        const res = await getUserPayments(id);
+        const res = await getUserPayments(id, { page, perPage });
+        if (requestId !== paymentsRequest.current) return;
         setPaymentsLoading(false);
-        if (res.success && res.data) setPayments(res.data);
+        if (res.success && res.data) {
+            setPayments(res.data.payments);
+            setPaymentsTotal(res.data.total);
+        }
         else warnBackgroundFailure('load user payments', res);
-    }, []);
+    }, [perPage]);
 
     useEffect(() => {
         if (!userId) return;
         setDetail(null);
         setError(null);
         setActivations([]);
+        setActivationsTotal(0);
+        setActivationsPage(1);
         setPayments([]);
+        setPaymentsTotal(0);
+        setPaymentsPage(1);
         setTab('valuation');
         setShowPassword(false);
         setSelectedPppoeAccountId(null);
@@ -226,9 +250,17 @@ export function UserDetailsDrawer({
 
     useEffect(() => {
         if (!userId || !detail) return;
-        if (tab === 'activations') void loadActivations(userId);
-        if (tab === 'payments') void loadPayments(userId);
-    }, [tab, userId, detail, loadActivations, loadPayments]);
+        if (tab === 'activations') void loadActivations(userId, activationsPage);
+        if (tab === 'payments') void loadPayments(userId, paymentsPage);
+    }, [
+        tab,
+        userId,
+        detail,
+        activationsPage,
+        paymentsPage,
+        loadActivations,
+        loadPayments,
+    ]);
 
     // --- Actions ---------------------------------------------------------------
 
@@ -308,7 +340,7 @@ export function UserDetailsDrawer({
         setBusy(false);
         notifyResult(res, 'Activation restored');
         if (res.success) {
-            void loadActivations(userId);
+            void loadActivations(userId, activationsPage);
             void loadDetail(userId);
         }
     };
@@ -321,7 +353,7 @@ export function UserDetailsDrawer({
         setConfirmDeactivate(null);
         notifyResult(res, 'Activation deactivated');
         if (res.success) {
-            void loadActivations(userId);
+            void loadActivations(userId, activationsPage);
             void loadDetail(userId);
         }
     };
@@ -346,7 +378,7 @@ export function UserDetailsDrawer({
         notifyResult(res, 'Activation limits updated');
         if (res.success) {
             setExpiryEdit(null);
-            void loadActivations(userId);
+            void loadActivations(userId, activationsPage);
             void loadDetail(userId);
         }
     };
@@ -378,7 +410,7 @@ export function UserDetailsDrawer({
         setPppoeNasModal(account);
         if (!nasDevices) {
             void (async () => {
-                const res = await getNasDevices();
+                const res = await getAllNasDevices();
                 if (res.success && res.data) setNasDevices(res.data);
                 else warnBackgroundFailure('load user detail NAS options', res);
             })();
@@ -803,9 +835,10 @@ export function UserDetailsDrawer({
                                     No package activations yet.
                                 </Text>
                             ) : (
-                                <Table striped withTableBorder>
+                                <Table striped withTableBorder stickyHeader>
                                     <Table.Thead>
                                         <Table.Tr>
+                                            <Table.Th>#</Table.Th>
                                             <Table.Th>Package</Table.Th>
                                             <Table.Th>Status</Table.Th>
                                             <Table.Th>Usage</Table.Th>
@@ -816,8 +849,14 @@ export function UserDetailsDrawer({
                                         </Table.Tr>
                                     </Table.Thead>
                                     <Table.Tbody>
-                                        {activations.map((a) => (
+                                        {activations.map((a, i) => (
                                             <Table.Tr key={a.activationId}>
+                                                <Table.Td>
+                                                    {(activationsPage - 1) *
+                                                        perPage +
+                                                        i +
+                                                        1}
+                                                </Table.Td>
                                                 <Table.Td>
                                                     <Text size='sm' fw={500}>
                                                         {a.packageTitle}
@@ -1070,6 +1109,13 @@ export function UserDetailsDrawer({
                                     </Table.Tbody>
                                 </Table>
                             )}
+                            <TablePagination
+                                page={activationsPage}
+                                perPage={perPage}
+                                total={activationsTotal}
+                                onChange={setActivationsPage}
+                                loading={activationsLoading}
+                            />
                         </Tabs.Panel>
 
                         {/* --- Payments -------------------------------------- */}
@@ -1083,9 +1129,10 @@ export function UserDetailsDrawer({
                                     No payments yet.
                                 </Text>
                             ) : (
-                                <Table striped withTableBorder>
+                                <Table striped withTableBorder stickyHeader>
                                     <Table.Thead>
                                         <Table.Tr>
+                                            <Table.Th>#</Table.Th>
                                             <Table.Th>Date</Table.Th>
                                             <Table.Th>Package</Table.Th>
                                             <Table.Th>Amount</Table.Th>
@@ -1094,8 +1141,14 @@ export function UserDetailsDrawer({
                                         </Table.Tr>
                                     </Table.Thead>
                                     <Table.Tbody>
-                                        {payments.map((p) => (
+                                        {payments.map((p, i) => (
                                             <Table.Tr key={p.id}>
+                                                <Table.Td>
+                                                    {(paymentsPage - 1) *
+                                                        perPage +
+                                                        i +
+                                                        1}
+                                                </Table.Td>
                                                 <Table.Td>
                                                     <Text size='xs'>
                                                         {formatDateTime(p.createdAt)}
@@ -1140,6 +1193,13 @@ export function UserDetailsDrawer({
                                     </Table.Tbody>
                                 </Table>
                             )}
+                            <TablePagination
+                                page={paymentsPage}
+                                perPage={perPage}
+                                total={paymentsTotal}
+                                onChange={setPaymentsPage}
+                                loading={paymentsLoading}
+                            />
                         </Tabs.Panel>
 
                         {/* --- PPPoE ----------------------------------------- */}

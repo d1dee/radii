@@ -16,9 +16,10 @@ import {
 } from '@mantine/core';
 import { DateInput } from '@mantine/dates';
 import { notifications } from '@mantine/notifications';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { getAdminReports, type AdminReports } from '@/lib/api';
+import { TablePagination } from '@/components/TablePagination';
 import { useAutoRefresh } from '@/lib/autoRefresh';
 import { warnBackgroundFailure } from '@/lib/clientError';
 import { dayjs } from '@/lib/dayjs';
@@ -60,9 +61,24 @@ export default function ReportsPage() {
         dayjs().subtract(30, 'day').startOf('day').toDate(),
     );
     const [to, setTo] = useState<Date>(dayjs().endOf('day').toDate());
+    const [topPackagesPage, setTopPackagesPage] = useState(1);
+    const [topUsersPage, setTopUsersPage] = useState(1);
+    const [heavyUsersPage, setHeavyUsersPage] = useState(1);
+    const perPage = settings.dashboard.perPage;
+    const loadRequest = useRef(0);
 
     const load = useCallback(
-        async (rangeFrom: Date, rangeTo: Date, silent = false) => {
+        async (
+            rangeFrom: Date,
+            rangeTo: Date,
+            pages = {
+                topPackagesPage,
+                topUsersPage,
+                heavyUsersPage,
+            },
+            silent = false,
+        ) => {
+            const requestId = ++loadRequest.current;
             if (!silent) {
                 setLoading(true);
                 setError(null);
@@ -70,7 +86,14 @@ export default function ReportsPage() {
             const res = await getAdminReports(
                 rangeFrom.toISOString(),
                 rangeTo.toISOString(),
+                {
+                    ...pages,
+                    topPackagesPerPage: perPage,
+                    topUsersPerPage: perPage,
+                    heavyUsersPerPage: perPage,
+                },
             );
+            if (requestId !== loadRequest.current) return;
             if (!silent) setLoading(false);
             if (!res.success) {
                 if (silent) warnBackgroundFailure('refresh reports', res);
@@ -85,7 +108,7 @@ export default function ReportsPage() {
             setError(null);
             setReports(res.data);
         },
-        [],
+        [topPackagesPage, topUsersPage, heavyUsersPage, perPage],
     );
 
     // Waits once for settings so the admin's default range applies to the
@@ -105,7 +128,7 @@ export default function ReportsPage() {
 
     // Keep the currently selected range up to date on the admin's cadence.
     const autoRefreshData = useCallback(() => {
-        void load(from, to, true);
+        void load(from, to, undefined, true);
     }, [load, from, to]);
     useAutoRefresh(autoRefreshData, loaded);
 
@@ -114,8 +137,25 @@ export default function ReportsPage() {
             notifications.show({ color: 'red', message: 'Invalid date range' });
             return;
         }
-        void load(from, dayjs(to).endOf('day').toDate());
+        const firstPages = {
+            topPackagesPage: 1,
+            topUsersPage: 1,
+            heavyUsersPage: 1,
+        };
+        setTopPackagesPage(1);
+        setTopUsersPage(1);
+        setHeavyUsersPage(1);
+        const rangeTo = dayjs(to).endOf('day').toDate();
+        setTo(rangeTo);
+        void load(from, rangeTo, firstPages);
     };
+
+    useEffect(() => {
+        if (!loaded || !reports) return;
+        void load(from, to);
+        // Each report pager reloads its requested ranked slice.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [topPackagesPage, topUsersPage, heavyUsersPage, perPage]);
 
     const statusBreakdown = reports
         ? [
@@ -292,12 +332,12 @@ export default function ReportsPage() {
                                         <Text fw={600} mb='sm'>
                                             Top packages by revenue
                                         </Text>
-                                        {reports.topPackages.length === 0 ? (
+                                        {reports.topPackages.items.length === 0 ? (
                                             <Text size='sm' c='dimmed'>
                                                 No paid purchases in this range.
                                             </Text>
                                         ) : (
-                                            <Table striped h='100%'>
+                                            <Table striped h='100%' stickyHeader>
                                                 <Table.Thead>
                                                     <Table.Tr>
                                                         <Table.Th>#</Table.Th>
@@ -316,7 +356,7 @@ export default function ReportsPage() {
                                                     </Table.Tr>
                                                 </Table.Thead>
                                                 <Table.Tbody>
-                                                    {reports.topPackages.map(
+                                                    {reports.topPackages.items.map(
                                                         (p, i) => (
                                                             <Table.Tr
                                                                 key={
@@ -324,7 +364,7 @@ export default function ReportsPage() {
                                                                 }
                                                             >
                                                                 <Table.Td>
-                                                                    {i + 1}
+                                                                    {(topPackagesPage - 1) * perPage + i + 1}
                                                                 </Table.Td>
                                                                 <Table.Td>
                                                                     {p.title}
@@ -351,6 +391,13 @@ export default function ReportsPage() {
                                                 </Table.Tbody>
                                             </Table>
                                         )}
+                                        <TablePagination
+                                            page={topPackagesPage}
+                                            perPage={perPage}
+                                            total={reports.topPackages.total}
+                                            onChange={setTopPackagesPage}
+                                            loading={loading}
+                                        />
                                     </Card>
                                 </Grid.Col>
                                 <Grid.Col span={{ base: 12, lg: 6 }}>
@@ -358,12 +405,12 @@ export default function ReportsPage() {
                                         <Text fw={600} mb='sm'>
                                             Top customers by spend
                                         </Text>
-                                        {reports.topUsers.length === 0 ? (
+                                        {reports.topUsers.items.length === 0 ? (
                                             <Text size='sm' c='dimmed'>
                                                 No paid purchases in this range.
                                             </Text>
                                         ) : (
-                                            <Table striped>
+                                            <Table striped stickyHeader>
                                                 <Table.Thead>
                                                     <Table.Tr>
                                                         <Table.Th>#</Table.Th>
@@ -379,13 +426,13 @@ export default function ReportsPage() {
                                                     </Table.Tr>
                                                 </Table.Thead>
                                                 <Table.Tbody>
-                                                    {reports.topUsers.map(
+                                                    {reports.topUsers.items.map(
                                                         (u, i) => (
                                                             <Table.Tr
                                                                 key={u.userId}
                                                             >
                                                                 <Table.Td>
-                                                                    {i + 1}
+                                                                    {(topUsersPage - 1) * perPage + i + 1}
                                                                 </Table.Td>
                                                                 <Table.Td>
                                                                     <Text size='sm'>
@@ -416,6 +463,13 @@ export default function ReportsPage() {
                                                 </Table.Tbody>
                                             </Table>
                                         )}
+                                        <TablePagination
+                                            page={topUsersPage}
+                                            perPage={perPage}
+                                            total={reports.topUsers.total}
+                                            onChange={setTopUsersPage}
+                                            loading={loading}
+                                        />
                                     </Card>
                                 </Grid.Col>
                                 <Grid.Col span={12}>
@@ -424,12 +478,12 @@ export default function ReportsPage() {
                                             Heaviest consumers (RADIUS
                                             accounting)
                                         </Text>
-                                        {reports.topUsage.length === 0 ? (
+                                        {reports.heavyUsers.items.length === 0 ? (
                                             <Text size='sm' c='dimmed'>
                                                 No sessions in this range.
                                             </Text>
                                         ) : (
-                                            <Table striped>
+                                            <Table striped stickyHeader>
                                                 <Table.Thead>
                                                     <Table.Tr>
                                                         <Table.Th>#</Table.Th>
@@ -448,13 +502,13 @@ export default function ReportsPage() {
                                                     </Table.Tr>
                                                 </Table.Thead>
                                                 <Table.Tbody>
-                                                    {reports.topUsage.map(
+                                                    {reports.heavyUsers.items.map(
                                                         (u, i) => (
                                                             <Table.Tr
                                                                 key={u.username}
                                                             >
                                                                 <Table.Td>
-                                                                    {i + 1}
+                                                                    {(heavyUsersPage - 1) * perPage + i + 1}
                                                                 </Table.Td>
                                                                 <Table.Td>
                                                                     {u.username ||
@@ -479,6 +533,13 @@ export default function ReportsPage() {
                                                 </Table.Tbody>
                                             </Table>
                                         )}
+                                        <TablePagination
+                                            page={heavyUsersPage}
+                                            perPage={perPage}
+                                            total={reports.heavyUsers.total}
+                                            onChange={setHeavyUsersPage}
+                                            loading={loading}
+                                        />
                                     </Card>
                                 </Grid.Col>
                             </Grid>

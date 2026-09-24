@@ -1,4 +1,4 @@
-import { and, desc, eq } from 'drizzle-orm';
+import { and, asc, count, desc, eq, ilike, or } from 'drizzle-orm';
 import { db } from '../db';
 import {
     hotspotLoginRequest,
@@ -19,6 +19,42 @@ export async function getNasDevices(ownerId: string) {
         .from(nasDevice)
         .where(eq(nasDevice.ownerId, ownerId))
         .orderBy(desc(nasDevice.createdAt));
+}
+
+export async function listAdminNasDevices(opts: {
+    ownerId: string;
+    q?: string;
+    status?: NasDeviceRow['status'];
+    page: number;
+    perPage: number;
+}) {
+    const conditions = [eq(nasDevice.ownerId, opts.ownerId)];
+    if (opts.status) conditions.push(eq(nasDevice.status, opts.status));
+    if (opts.q) {
+        const q = `%${opts.q}%`;
+        conditions.push(
+            or(
+                ilike(nasDevice.name, q),
+                ilike(nasDevice.ipAddress, q),
+                ilike(nasDevice.macAddress, q),
+                ilike(nasDevice.model, q),
+                ilike(nasDevice.serialNumber, q),
+                ilike(nasDevice.location, q),
+            )!,
+        );
+    }
+    const where = and(...conditions);
+    const [countRows, rows] = await Promise.all([
+        db.select({ total: count(nasDevice.id) }).from(nasDevice).where(where),
+        db
+            .select()
+            .from(nasDevice)
+            .where(where)
+            .orderBy(desc(nasDevice.createdAt), asc(nasDevice.id))
+            .limit(opts.perPage)
+            .offset((opts.page - 1) * opts.perPage),
+    ]);
+    return { total: Number(countRows[0]?.total ?? 0), rows };
 }
 
 export async function getNasDeviceById(id: string, ownerId: string) {

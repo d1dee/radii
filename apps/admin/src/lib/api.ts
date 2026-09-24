@@ -140,6 +140,14 @@ export function login(body: { phoneNumber: string; pin: string }) {
 
 export type PackageType = 'hotspot' | 'pppoe';
 export type FairUsageWindowUnit = 'session' | 'days' | 'weeks' | 'months';
+export type PaginationQuery = { page?: number; perPage?: number };
+
+function paginationSearchParams(query: PaginationQuery): URLSearchParams {
+    const params = new URLSearchParams();
+    if (query.page) params.set('page', String(query.page));
+    if (query.perPage) params.set('perPage', String(query.perPage));
+    return params;
+}
 
 // Raw package row as returned by the admin endpoints.
 export type PackageRow = {
@@ -201,10 +209,53 @@ export type CreatePackageInput = {
     nasDeviceIds: string[];
 };
 
-export function getAdminPackages(type?: PackageType) {
-    return request<PackageRow[]>(
-        type ? `/admin/packages?type=${type}` : '/admin/packages',
-    );
+export type AdminPackageList = {
+    total: number;
+    page: number;
+    perPage: number;
+    packages: PackageRow[];
+};
+
+export type ListAdminPackagesQuery = PaginationQuery & {
+    type?: PackageType;
+    q?: string;
+    status?: 'active' | 'inactive';
+};
+
+export function getAdminPackages(query: ListAdminPackagesQuery = {}) {
+    const params = new URLSearchParams();
+    if (query.type) params.set('type', query.type);
+    if (query.q) params.set('q', query.q);
+    if (query.status) params.set('status', query.status);
+    if (query.page) params.set('page', String(query.page));
+    if (query.perPage) params.set('perPage', String(query.perPage));
+    const qs = params.toString();
+    return request<AdminPackageList>(`/admin/packages${qs ? `?${qs}` : ''}`);
+}
+
+export async function getAllAdminPackages(
+    query: Omit<ListAdminPackagesQuery, keyof PaginationQuery> = {},
+) {
+    const packages: PackageRow[] = [];
+    let page = 1;
+    while (true) {
+        const response = await getAdminPackages({ ...query, page, perPage: 100 });
+        if (!response.success || !response.data) {
+            return {
+                success: false,
+                message: response.success
+                    ? 'The server returned an invalid response. Try again.'
+                    : response.message,
+                type: response.success
+                    ? ApiErrorType.NETWORK_ERROR
+                    : response.type,
+            } satisfies ApiEnvelope<PackageRow[]>;
+        }
+        packages.push(...response.data.packages);
+        if (packages.length >= response.data.total) break;
+        page += 1;
+    }
+    return { success: true, data: packages } satisfies ApiEnvelope<PackageRow[]>;
 }
 
 export function getAdminPackage(id: string) {
@@ -229,17 +280,26 @@ export type PackageAnalytics = {
         total: number;
         active: number;
     };
-    recentPayments: Array<{
-        id: string;
-        phoneNumber: string;
-        amount: string;
-        status: PackagePaymentStatus;
-        createdAt: string;
-    }>;
+    recentPayments: {
+        total: number;
+        page: number;
+        perPage: number;
+        payments: Array<{
+            id: string;
+            phoneNumber: string;
+            amount: string;
+            status: PackagePaymentStatus;
+            createdAt: string;
+        }>;
+    };
 };
 
-export function getPackageAnalytics(id: string) {
-    return request<PackageAnalytics>(`/admin/packages/${id}/analytics`);
+export function getPackageAnalytics(id: string, query: PaginationQuery = {}) {
+    const params = paginationSearchParams(query);
+    const qs = params.toString();
+    return request<PackageAnalytics>(
+        `/admin/packages/${id}/analytics${qs ? `?${qs}` : ''}`,
+    );
 }
 
 export function createPackage(body: CreatePackageInput) {
@@ -287,8 +347,51 @@ export type CreateNasDeviceInput = {
     status: NasDeviceStatus;
 };
 
-export function getNasDevices() {
-    return request<NasDeviceRow[]>('/admin/nas-devices');
+export type AdminNasDeviceList = {
+    total: number;
+    page: number;
+    perPage: number;
+    nasDevices: NasDeviceRow[];
+};
+
+export type ListNasDevicesQuery = PaginationQuery & {
+    q?: string;
+    status?: NasDeviceStatus;
+};
+
+export function getNasDevices(query: ListNasDevicesQuery = {}) {
+    const params = paginationSearchParams(query);
+    if (query.q) params.set('q', query.q);
+    if (query.status) params.set('status', query.status);
+    const qs = params.toString();
+    return request<AdminNasDeviceList>(
+        `/admin/nas-devices${qs ? `?${qs}` : ''}`,
+    );
+}
+
+export async function getAllNasDevices() {
+    const nasDevices: NasDeviceRow[] = [];
+    let page = 1;
+    while (true) {
+        const response = await getNasDevices({ page, perPage: 100 });
+        if (!response.success || !response.data) {
+            return {
+                success: false,
+                message: response.success
+                    ? 'The server returned an invalid response. Try again.'
+                    : response.message,
+                type: response.success
+                    ? ApiErrorType.NETWORK_ERROR
+                    : response.type,
+            } satisfies ApiEnvelope<NasDeviceRow[]>;
+        }
+        nasDevices.push(...response.data.nasDevices);
+        if (nasDevices.length >= response.data.total) break;
+        page += 1;
+    }
+    return { success: true, data: nasDevices } satisfies ApiEnvelope<
+        NasDeviceRow[]
+    >;
 }
 
 export function getNasDevice(id: string) {
@@ -339,18 +442,27 @@ export type NasDeviceAnalytics = {
         total: number;
         active: number;
     };
-    recentPayments: Array<{
-        id: string;
-        phoneNumber: string;
-        amount: string;
-        status: PackagePaymentStatus;
-        packageTitle: string;
-        createdAt: string;
-    }>;
+    recentPayments: {
+        total: number;
+        page: number;
+        perPage: number;
+        payments: Array<{
+            id: string;
+            phoneNumber: string;
+            amount: string;
+            status: PackagePaymentStatus;
+            packageTitle: string;
+            createdAt: string;
+        }>;
+    };
 };
 
-export function getNasDeviceAnalytics(id: string) {
-    return request<NasDeviceAnalytics>(`/admin/nas-devices/${id}/analytics`);
+export function getNasDeviceAnalytics(id: string, query: PaginationQuery = {}) {
+    const params = paginationSearchParams(query);
+    const qs = params.toString();
+    return request<NasDeviceAnalytics>(
+        `/admin/nas-devices/${id}/analytics${qs ? `?${qs}` : ''}`,
+    );
 }
 
 // --- Users (hotspot + PPPoE management) ------------------------------------
@@ -621,8 +733,19 @@ export type UserPaymentRow = {
     updatedAt: string;
 };
 
-export function getUserPayments(id: string) {
-    return request<UserPaymentRow[]>(`/admin/users/${id}/payments`);
+export type UserPaymentList = {
+    total: number;
+    page: number;
+    perPage: number;
+    payments: UserPaymentRow[];
+};
+
+export function getUserPayments(id: string, query: PaginationQuery = {}) {
+    const params = paginationSearchParams(query);
+    const qs = params.toString();
+    return request<UserPaymentList>(
+        `/admin/users/${id}/payments${qs ? `?${qs}` : ''}`,
+    );
 }
 
 // Mirrors the API's ActivationStatus (apps/api/src/lib/radius/client.ts).
@@ -690,8 +813,19 @@ export type SessionInfo = {
 
 export type AdminSessionRow = SessionInfo;
 
-export function getUserActivations(id: string) {
-    return request<AdminActivationRow[]>(`/admin/users/${id}/activations`);
+export type AdminActivationList = {
+    total: number;
+    page: number;
+    perPage: number;
+    activations: AdminActivationRow[];
+};
+
+export function getUserActivations(id: string, query: PaginationQuery = {}) {
+    const params = paginationSearchParams(query);
+    const qs = params.toString();
+    return request<AdminActivationList>(
+        `/admin/users/${id}/activations${qs ? `?${qs}` : ''}`,
+    );
 }
 
 export function setPppoePassword(accountId: string, password?: string) {
@@ -845,21 +979,21 @@ export type AdminReports = {
         failed: number;
         revenue: number;
     }>;
-    topPackages: Array<{
+    topPackages: PaginatedItems<{
         packageId: string;
         title: string;
         type: PackageType;
         paid: number;
         revenue: number;
     }>;
-    topUsers: Array<{
+    topUsers: PaginatedItems<{
         userId: string;
         userName: string;
         phoneNumber: string;
         paid: number;
         revenue: number;
     }>;
-    topUsage: Array<{
+    heavyUsers: PaginatedItems<{
         username: string;
         sessions: number;
         seconds: number;
@@ -867,8 +1001,31 @@ export type AdminReports = {
     }>;
 };
 
-export function getAdminReports(from: string, to: string) {
+export type PaginatedItems<T> = {
+    total: number;
+    page: number;
+    perPage: number;
+    items: T[];
+};
+
+export type AdminReportsQuery = {
+    topPackagesPage?: number;
+    topPackagesPerPage?: number;
+    topUsersPage?: number;
+    topUsersPerPage?: number;
+    heavyUsersPage?: number;
+    heavyUsersPerPage?: number;
+};
+
+export function getAdminReports(
+    from: string,
+    to: string,
+    query: AdminReportsQuery = {},
+) {
     const params = new URLSearchParams({ from, to });
+    for (const [key, value] of Object.entries(query)) {
+        if (value !== undefined) params.set(key, String(value));
+    }
     return request<AdminReports>(`/admin/reports?${params.toString()}`);
 }
 
@@ -904,8 +1061,26 @@ export function updateActivation(
     );
 }
 
-export function getRadiusSessions(limit = 100) {
-    return request<SessionInfo[]>(`/admin/radius/sessions?limit=${limit}`);
+export type AdminSessionList = {
+    total: number;
+    page: number;
+    perPage: number;
+    sessions: SessionInfo[];
+};
+
+export type ListRadiusSessionsQuery = PaginationQuery & {
+    q?: string;
+    live?: boolean;
+};
+
+export function getRadiusSessions(query: ListRadiusSessionsQuery = {}) {
+    const params = paginationSearchParams(query);
+    if (query.q) params.set('q', query.q);
+    if (query.live !== undefined) params.set('live', query.live ? '1' : '0');
+    const qs = params.toString();
+    return request<AdminSessionList>(
+        `/admin/radius/sessions${qs ? `?${qs}` : ''}`,
+    );
 }
 
 export type AdminSessionDetail = {

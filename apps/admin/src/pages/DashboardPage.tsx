@@ -38,6 +38,7 @@ import {
     type AdminReports,
     type NetworkUsage,
 } from '@/lib/api';
+import { TablePagination } from '@/components/TablePagination';
 import { useAutoRefresh } from '@/lib/autoRefresh';
 import { warnBackgroundFailure } from '@/lib/clientError';
 import { dayjs } from '@/lib/dayjs';
@@ -108,15 +109,26 @@ export default function DashboardPage() {
     const [preset, setPreset] = useState('30d');
     const [from, setFrom] = useState<Date>(() => presetRange(30).from);
     const [to, setTo] = useState<Date>(() => presetRange(30).to);
+    const [topUsersPage, setTopUsersPage] = useState(1);
+    const topUsersPerPage = 6;
+    const reportsRequest = useRef(0);
 
     const loadReports = useCallback(
         async (rangeFrom: Date, rangeTo: Date, silent = false) => {
+            const requestId = ++reportsRequest.current;
             if (!silent) setLoading(true);
             setError(null);
             const res = await getAdminReports(
                 rangeFrom.toISOString(),
                 rangeTo.toISOString(),
+                {
+                    topPackagesPerPage: 10,
+                    topUsersPage,
+                    topUsersPerPage,
+                    heavyUsersPerPage: 10,
+                },
             );
+            if (requestId !== reportsRequest.current) return;
             if (!silent) setLoading(false);
             if (!res.success) {
                 if (silent) warnBackgroundFailure('refresh dashboard reports', res);
@@ -130,7 +142,7 @@ export default function DashboardPage() {
             }
             setReports(res.data);
         },
-        [],
+        [topUsersPage],
     );
 
     const loadUsage = useCallback(async () => {
@@ -165,7 +177,14 @@ export default function DashboardPage() {
     }, [loadUsage, loadReports, from, to]);
     useAutoRefresh(autoRefreshData);
 
+    useEffect(() => {
+        if (!loaded || !reports) return;
+        void loadReports(from, to);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [topUsersPage]);
+
     const applyPreset = (label: string) => {
+        setTopUsersPage(1);
         setPreset(label);
         const found = rangePresets.find((p) => p.label === label);
         if (!found) return;
@@ -181,6 +200,7 @@ export default function DashboardPage() {
             return;
         }
         setPreset('');
+        setTopUsersPage(1);
         const rangeTo = dayjs(to).endOf('day').toDate();
         setTo(rangeTo);
         void loadReports(dayjs(from).startOf('day').toDate(), rangeTo);
@@ -206,7 +226,7 @@ export default function DashboardPage() {
           ]
         : [];
 
-    const packageChartData = (reports?.topPackages ?? []).map((p) => ({
+    const packageChartData = (reports?.topPackages.items ?? []).map((p) => ({
         package: p.title,
         revenue: p.revenue,
         paid: p.paid,
@@ -465,19 +485,24 @@ export default function DashboardPage() {
                                 <Text fw={600} mb='sm'>
                                     Top customers
                                 </Text>
-                                {reports.topUsers.length === 0 ? (
+                                {reports.topUsers.items.length === 0 ? (
                                     <Text size='sm' c='dimmed'>
                                         No paid purchases in this range.
                                     </Text>
                                 ) : (
-                                    <Table striped verticalSpacing={6}>
+                                    <Table striped verticalSpacing={6} stickyHeader>
+                                        <Table.Thead>
+                                            <Table.Tr>
+                                                <Table.Th>#</Table.Th>
+                                                <Table.Th>Customer</Table.Th>
+                                                <Table.Th ta='right'>Spent</Table.Th>
+                                            </Table.Tr>
+                                        </Table.Thead>
                                         <Table.Tbody>
-                                            {reports.topUsers
-                                                .slice(0, 6)
-                                                .map((u, i) => (
+                                            {reports.topUsers.items.map((u, i) => (
                                                     <Table.Tr key={u.userId}>
                                                         <Table.Td w={30}>
-                                                            {i + 1}
+                                                            {(topUsersPage - 1) * topUsersPerPage + i + 1}
                                                         </Table.Td>
                                                         <Table.Td>
                                                             <Text size='sm'>
@@ -509,6 +534,13 @@ export default function DashboardPage() {
                                         </Table.Tbody>
                                     </Table>
                                 )}
+                                <TablePagination
+                                    page={topUsersPage}
+                                    perPage={topUsersPerPage}
+                                    total={reports.topUsers.total}
+                                    onChange={setTopUsersPage}
+                                    loading={loading}
+                                />
                             </Card>
                         </Grid.Col>
                     </Grid>

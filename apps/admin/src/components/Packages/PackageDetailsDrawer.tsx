@@ -13,18 +13,20 @@ import {
     Title,
 } from '@mantine/core';
 import type { ReactNode } from 'react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import {
     getAdminPackage,
-    getNasDevices,
+    getAllNasDevices,
     getPackageAnalytics,
     type PackageAnalytics,
     type PackagePaymentStatus,
     type PackageRow,
 } from '@/lib/api';
+import { TablePagination } from '@/components/TablePagination';
 import { warnBackgroundFailure } from '@/lib/clientError';
 import { formatDate } from '@/lib/format';
+import { useAdminSettings } from '@/lib/settings';
 
 const STATUS_BADGE: Record<
     PackagePaymentStatus,
@@ -96,16 +98,20 @@ export function PackageDetailsDrawer({
     packageId: string | null;
     onClose: () => void;
 }) {
+    const { settings } = useAdminSettings();
+    const perPage = settings.dashboard.perPage;
     const [pkg, setPkg] = useState<PackageRow | null>(null);
     const [analytics, setAnalytics] = useState<PackageAnalytics | null>(null);
     const [error, setError] = useState<string | null>(null);
+    const [paymentsPage, setPaymentsPage] = useState(1);
+    const loadRequest = useRef(0);
     const [nasDeviceNames, setNasDeviceNames] = useState<
         Record<string, string>
     >({});
 
     useEffect(() => {
         (async () => {
-            const result = await getNasDevices();
+            const result = await getAllNasDevices();
             if (result.success && result.data) {
                 setNasDeviceNames(
                     Object.fromEntries(result.data.map((d) => [d.id, d.name])),
@@ -121,6 +127,12 @@ export function PackageDetailsDrawer({
 
     useEffect(() => {
         if (!packageId) return;
+        setPaymentsPage(1);
+    }, [packageId]);
+
+    useEffect(() => {
+        if (!packageId) return;
+        const requestId = ++loadRequest.current;
         setPkg(null);
         setAnalytics(null);
         setError(null);
@@ -128,8 +140,12 @@ export function PackageDetailsDrawer({
         (async () => {
             const [pkgRes, analyticsRes] = await Promise.all([
                 getAdminPackage(packageId),
-                getPackageAnalytics(packageId),
+                getPackageAnalytics(packageId, {
+                    page: paymentsPage,
+                    perPage,
+                }),
             ]);
+            if (requestId !== loadRequest.current) return;
             if (!pkgRes.success) {
                 setError(pkgRes.message);
                 return;
@@ -145,7 +161,7 @@ export function PackageDetailsDrawer({
             setPkg(pkgRes.data);
             setAnalytics(analyticsRes.data);
         })();
-    }, [packageId]);
+    }, [packageId, paymentsPage, perPage]);
 
     const repeatRate =
         analytics && analytics.buyers.unique > 0
@@ -369,12 +385,13 @@ export function PackageDetailsDrawer({
 
                     <Divider label='Recent payments' labelPosition='left' />
 
-                    {analytics.recentPayments.length === 0 ? (
+                    {analytics.recentPayments.payments.length === 0 ? (
                         <Text c='dimmed'>No payments yet.</Text>
                     ) : (
-                        <Table striped withTableBorder>
+                        <Table striped withTableBorder stickyHeader>
                             <Table.Thead>
                                 <Table.Tr>
+                                    <Table.Th>#</Table.Th>
                                     <Table.Th>Phone</Table.Th>
                                     <Table.Th>Amount</Table.Th>
                                     <Table.Th>Status</Table.Th>
@@ -382,8 +399,11 @@ export function PackageDetailsDrawer({
                                 </Table.Tr>
                             </Table.Thead>
                             <Table.Tbody>
-                                {analytics.recentPayments.map((p) => (
+                                {analytics.recentPayments.payments.map((p, i) => (
                                     <Table.Tr key={p.id}>
+                                        <Table.Td>
+                                            {(paymentsPage - 1) * perPage + i + 1}
+                                        </Table.Td>
                                         <Table.Td>{p.phoneNumber}</Table.Td>
                                         <Table.Td>
                                             Ksh{' '}
@@ -410,6 +430,12 @@ export function PackageDetailsDrawer({
                             </Table.Tbody>
                         </Table>
                     )}
+                    <TablePagination
+                        page={paymentsPage}
+                        perPage={perPage}
+                        total={analytics.recentPayments.total}
+                        onChange={setPaymentsPage}
+                    />
                 </Stack>
             )}
         </Drawer>

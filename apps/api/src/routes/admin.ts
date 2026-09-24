@@ -36,6 +36,7 @@ import {
     deleteNasDevice,
     getNasDeviceById,
     getNasDevices,
+    listAdminNasDevices,
     updateNasDevice,
 } from '../lib/nas';
 import {
@@ -47,6 +48,7 @@ import {
     getPackageAnalytics,
     getPackageById,
     getPackages,
+    listAdminPackages,
     updatePackage,
 } from '../lib/packages';
 import { RadiusError, radiusClient } from '../lib/radius';
@@ -92,6 +94,27 @@ function isForeignKeyViolation(e: unknown): boolean {
 }
 
 const packageTypeSchema = z.enum(['hotspot', 'pppoe']);
+const pageSizes = new Set([10, 25, 50, 100]);
+
+function paginationParams(
+    pageValue: string | undefined,
+    perPageValue: string | undefined,
+    extraPageSizes: number[] = [],
+) {
+    const rawPage = Number(pageValue ?? 1);
+    const rawPerPage = Number(perPageValue ?? 25);
+    return {
+        page:
+            Number.isInteger(rawPage) && rawPage > 0
+                ? rawPage
+                : 1,
+        perPage:
+            Number.isInteger(rawPerPage) &&
+            (pageSizes.has(rawPerPage) || extraPageSizes.includes(rawPerPage))
+                ? rawPerPage
+                : 25,
+    };
+}
 
 // Packages may only be linked to NAS devices owned by the current admin.
 async function ownsAllNasDevices(
@@ -112,17 +135,34 @@ app.get('/packages', requireAdmin, async (c) => {
     ) {
         return jsonError(c, 400, 'Invalid package type filter');
     }
-    const rows = await getPackages(
-        c.var.adminSession.userId,
-        typeParam as 'hotspot' | 'pppoe' | undefined,
+    const statusParam = c.req.query('status');
+    if (statusParam && !['active', 'inactive'].includes(statusParam)) {
+        return jsonError(c, 400, 'Invalid package status filter');
+    }
+    const { page, perPage } = paginationParams(
+        c.req.query('page'),
+        c.req.query('perPage'),
     );
+    const { total, rows } = await listAdminPackages({
+        ownerId: c.var.adminSession.userId,
+        type: typeParam as 'hotspot' | 'pppoe' | undefined,
+        q: c.req.query('q')?.trim() || undefined,
+        status: statusParam as 'active' | 'inactive' | undefined,
+        page,
+        perPage,
+    });
     const links = await getNasDeviceIdsByPackage(rows.map((r) => r.id));
     return c.json({
         success: true,
-        data: rows.map((row) => ({
-            ...row,
-            nasDeviceIds: links[row.id] ?? [],
-        })),
+        data: {
+            total,
+            page,
+            perPage,
+            packages: rows.map((row) => ({
+                ...row,
+                nasDeviceIds: links[row.id] ?? [],
+            })),
+        },
     });
 });
 
@@ -166,7 +206,11 @@ app.get('/packages/:id/analytics', requireAdmin, async (c) => {
     if (!pkg) {
         return jsonError(c, 404, 'Package not found');
     }
-    const data = await getPackageAnalytics(packageId, adminId);
+    const { page, perPage } = paginationParams(
+        c.req.query('page'),
+        c.req.query('perPage'),
+    );
+    const data = await getPackageAnalytics(packageId, adminId, page, perPage);
     return c.json({ success: true, data });
 });
 
@@ -227,8 +271,36 @@ app.delete('/packages/:id', requireAdmin, async (c) => {
 });
 
 app.get('/nas-devices', requireAdmin, async (c) => {
-    const rows = await getNasDevices(c.var.adminSession.userId);
-    return c.json({ success: true, data: rows });
+    const statusParam = c.req.query('status');
+    const statusSchema = z.enum([
+        'active',
+        'inactive',
+        'maintenance',
+        'offline',
+    ]);
+    if (statusParam && !statusSchema.safeParse(statusParam).success) {
+        return jsonError(c, 400, 'Invalid NAS device status filter');
+    }
+    const { page, perPage } = paginationParams(
+        c.req.query('page'),
+        c.req.query('perPage'),
+    );
+    const { total, rows } = await listAdminNasDevices({
+        ownerId: c.var.adminSession.userId,
+        q: c.req.query('q')?.trim() || undefined,
+        status: statusParam as
+            | 'active'
+            | 'inactive'
+            | 'maintenance'
+            | 'offline'
+            | undefined,
+        page,
+        perPage,
+    });
+    return c.json({
+        success: true,
+        data: { total, page, perPage, nasDevices: rows },
+    });
 });
 
 app.post('/nas-devices', requireAdmin, async (c) => {
@@ -294,12 +366,21 @@ app.get('/nas-devices/:id/analytics', requireAdmin, async (c) => {
     if (!device) {
         return jsonError(c, 404, 'NAS device not found');
     }
-    const data = await getNasDeviceAnalytics(device.id, [
-        ...(await getAdminNasAddresses(
-            c.get('adminSession').userId,
-            device.id,
-        )),
-    ]);
+    const { page, perPage } = paginationParams(
+        c.req.query('page'),
+        c.req.query('perPage'),
+    );
+    const data = await getNasDeviceAnalytics(
+        device.id,
+        [
+            ...(await getAdminNasAddresses(
+                c.get('adminSession').userId,
+                device.id,
+            )),
+        ],
+        page,
+        perPage,
+    );
     return c.json({ success: true, data });
 });
 
@@ -610,7 +691,16 @@ app.delete('/users/:id', requireAdmin, async (c) => {
 app.get('/users/:id/payments', requireAdmin, async (c) => {
     const id = c.req.param('id');
     if (!id) return jsonError(c, 404, 'User not found');
-    const data = await getUserPayments(id, c.get('adminSession').userId);
+    const { page, perPage } = paginationParams(
+        c.req.query('page'),
+        c.req.query('perPage'),
+    );
+    const data = await getUserPayments(
+        id,
+        c.get('adminSession').userId,
+        page,
+        perPage,
+    );
     return c.json({ success: true, data });
 });
 
@@ -624,16 +714,27 @@ app.get('/users/:id/activations', requireAdmin, async (c) => {
         return jsonError(c, 404, 'User not found');
     }
     try {
+        const { page, perPage } = paginationParams(
+            c.req.query('page'),
+            c.req.query('perPage'),
+        );
         const activationIds = await getOwnedActivationIds(adminId, id);
         const addresses = [...(await getAdminNasAddresses(adminId))];
         const all = await radiusClient.getAdminActivations({
             userId: id,
             activationIds,
             nasIpAddresses: addresses,
+            limit: perPage,
+            offset: (page - 1) * perPage,
         });
         return c.json({
             success: true,
-            data: all,
+            data: {
+                total: activationIds.length,
+                page,
+                perPage,
+                activations: all,
+            },
         });
     } catch (err) {
         logger.error('RADIUS activation listing failed', { error: err });
@@ -935,7 +1036,24 @@ app.get('/reports', requireAdmin, async (c) => {
     if (from.getTime() > to.getTime()) {
         return jsonError(c, 400, 'Invalid date range');
     }
-    const data = await getAdminReports(c.get('adminSession').userId, from, to);
+    const topPackages = paginationParams(
+        c.req.query('topPackagesPage'),
+        c.req.query('topPackagesPerPage'),
+    );
+    const topUsers = paginationParams(
+        c.req.query('topUsersPage'),
+        c.req.query('topUsersPerPage'),
+        [6],
+    );
+    const heavyUsers = paginationParams(
+        c.req.query('heavyUsersPage'),
+        c.req.query('heavyUsersPerPage'),
+    );
+    const data = await getAdminReports(c.get('adminSession').userId, from, to, {
+        topPackages,
+        topUsers,
+        heavyUsers,
+    });
     return c.json({ success: true, data });
 });
 
@@ -1031,13 +1149,30 @@ app.get('/radius/summary', requireAdmin, async (c) => {
 // RADIUS accounting sessions, most recent first, limited to sessions on the
 // requesting admin's NAS devices
 // (matched on NAS-IP-Address: direct IP or WireGuard tunnel address).
-// ?limit=<n> (default 100).
+// Supports q/live filters and page/perPage pagination.
 app.get('/radius/sessions', requireAdmin, async (c) => {
-    const raw = Number(c.req.query('limit') ?? 100);
-    const limit = Number.isFinite(raw) && raw > 0 ? Math.min(raw, 500) : 100;
+    const liveParam = c.req.query('live');
+    if (liveParam && !['1', '0', 'true', 'false'].includes(liveParam)) {
+        return jsonError(c, 400, 'Invalid live session filter');
+    }
+    const { page, perPage } = paginationParams(
+        c.req.query('page'),
+        c.req.query('perPage'),
+    );
     const addresses = await getAdminNasAddresses(c.get('adminSession').userId);
-    const data = await radiusClient.getAdminSessions([...addresses], limit);
-    return c.json({ success: true, data });
+    const data = await radiusClient.getAdminSessions([...addresses], {
+        q: c.req.query('q')?.trim() || undefined,
+        live:
+            liveParam === undefined
+                ? undefined
+                : liveParam === '1' || liveParam === 'true',
+        page,
+        perPage,
+    });
+    return c.json({
+        success: true,
+        data: { ...data, page, perPage },
+    });
 });
 
 app.get('/radius/sessions/:radacctId', requireAdmin, async (c) => {

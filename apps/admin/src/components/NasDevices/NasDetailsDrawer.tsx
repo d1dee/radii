@@ -13,10 +13,10 @@ import {
     Title,
 } from '@mantine/core';
 import type { ReactNode } from 'react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import {
-    getAdminPackages,
+    getAllAdminPackages,
     getNasDevice,
     getNasDeviceAnalytics,
     getNasSetupScript,
@@ -26,8 +26,10 @@ import {
     type PackagePaymentStatus,
     type PackageRow,
 } from '@/lib/api';
+import { TablePagination } from '@/components/TablePagination';
 import { nasDeviceOsLabel, nasDeviceStatusColors } from '@/lib/nas';
 import { formatDate } from '@/lib/format';
+import { useAdminSettings } from '@/lib/settings';
 
 const STATUS_BADGE: Record<
     PackagePaymentStatus,
@@ -90,6 +92,8 @@ export function NasDetailsDrawer({
     nasDeviceId: string | null;
     onClose: () => void;
 }) {
+    const { settings } = useAdminSettings();
+    const perPage = settings.dashboard.perPage;
     const [device, setDevice] = useState<NasDeviceRow | null>(null);
     const [analytics, setAnalytics] = useState<NasDeviceAnalytics | null>(
         null,
@@ -97,9 +101,16 @@ export function NasDetailsDrawer({
     const [linkedPackages, setLinkedPackages] = useState<PackageRow[]>([]);
     const [scriptRow, setScriptRow] = useState<NasSetupScriptRow | null>(null);
     const [error, setError] = useState<string | null>(null);
+    const [paymentsPage, setPaymentsPage] = useState(1);
+    const loadRequest = useRef(0);
+
+    useEffect(() => {
+        if (nasDeviceId) setPaymentsPage(1);
+    }, [nasDeviceId]);
 
     useEffect(() => {
         if (!nasDeviceId) return;
+        const requestId = ++loadRequest.current;
         setDevice(null);
         setAnalytics(null);
         setLinkedPackages([]);
@@ -110,10 +121,14 @@ export function NasDetailsDrawer({
             const [deviceRes, analyticsRes, packagesRes, scriptRes] =
                 await Promise.all([
                     getNasDevice(nasDeviceId),
-                    getNasDeviceAnalytics(nasDeviceId),
-                    getAdminPackages(),
+                    getNasDeviceAnalytics(nasDeviceId, {
+                        page: paymentsPage,
+                        perPage,
+                    }),
+                    getAllAdminPackages(),
                     getNasSetupScript(nasDeviceId),
                 ]);
+            if (requestId !== loadRequest.current) return;
             if (!deviceRes.success) {
                 setError(deviceRes.message);
                 return;
@@ -139,7 +154,7 @@ export function NasDetailsDrawer({
                 setScriptRow(scriptRes.data);
             }
         })();
-    }, [nasDeviceId]);
+    }, [nasDeviceId, paymentsPage, perPage]);
 
     const repeatRate =
         analytics && analytics.buyers.unique > 0
@@ -329,12 +344,13 @@ export function NasDetailsDrawer({
 
                     <Divider label='Recent payments' labelPosition='left' />
 
-                    {analytics.recentPayments.length === 0 ? (
+                    {analytics.recentPayments.payments.length === 0 ? (
                         <Text c='dimmed'>No payments yet.</Text>
                     ) : (
-                        <Table striped withTableBorder>
+                        <Table striped withTableBorder stickyHeader>
                             <Table.Thead>
                                 <Table.Tr>
+                                    <Table.Th>#</Table.Th>
                                     <Table.Th>Phone</Table.Th>
                                     <Table.Th>Package</Table.Th>
                                     <Table.Th>Amount</Table.Th>
@@ -343,8 +359,11 @@ export function NasDetailsDrawer({
                                 </Table.Tr>
                             </Table.Thead>
                             <Table.Tbody>
-                                {analytics.recentPayments.map((p) => (
+                                {analytics.recentPayments.payments.map((p, i) => (
                                     <Table.Tr key={p.id}>
+                                        <Table.Td>
+                                            {(paymentsPage - 1) * perPage + i + 1}
+                                        </Table.Td>
                                         <Table.Td>{p.phoneNumber}</Table.Td>
                                         <Table.Td>{p.packageTitle}</Table.Td>
                                         <Table.Td>
@@ -372,6 +391,12 @@ export function NasDetailsDrawer({
                             </Table.Tbody>
                         </Table>
                     )}
+                    <TablePagination
+                        page={paymentsPage}
+                        perPage={perPage}
+                        total={analytics.recentPayments.total}
+                        onChange={setPaymentsPage}
+                    />
                 </Stack>
             )}
         </Drawer>

@@ -5,7 +5,6 @@ import {
     Center,
     Group,
     Loader,
-    Pagination,
     Select,
     SimpleGrid,
     Stack,
@@ -21,6 +20,7 @@ import { useSearchParams } from 'react-router-dom';
 import { MdClose, MdSearch } from 'react-icons/md';
 
 import { PaymentDetailsDrawer } from '@/components/Payments/PaymentDetailsDrawer';
+import { TablePagination } from '@/components/TablePagination';
 import {
     getAdminPayments,
     type AdminPaymentList,
@@ -121,8 +121,6 @@ export default function PaymentsPage() {
 
     useAutoRefresh(() => void load(page, true), loaded);
 
-    const totalPages = data ? Math.max(1, Math.ceil(data.total / perPage)) : 1;
-
     return (
         <>
             <Stack pb='md' gap={4}>
@@ -222,7 +220,7 @@ export default function PaymentsPage() {
             ) : (
                 <>
                     <Table.ScrollContainer minWidth='md' pb='md'>
-                        <Table withRowBorders highlightOnHover>
+                        <Table withRowBorders highlightOnHover stickyHeader>
                             <Table.Thead>
                                 <Table.Tr>
                                     <Table.Th>#</Table.Th>
@@ -241,7 +239,9 @@ export default function PaymentsPage() {
                                         onClick={() => setDetailsId(p.id)}
                                         style={{ cursor: 'pointer' }}
                                     >
-                                        <Table.Td>{i + 1}</Table.Td>
+                                        <Table.Td>
+                                            {(page - 1) * perPage + i + 1}
+                                        </Table.Td>
                                         <Table.Td>
                                             <Text size='sm'>
                                                 {formatDateTime(p.createdAt)}
@@ -303,15 +303,15 @@ export default function PaymentsPage() {
                     </Table.ScrollContainer>
                 </>
             )}
-            {totalPages > 1 && (
-                <Group justify='center' style={{ flexShrink: 0 }}>
-                    <Pagination
-                        value={page}
-                        onChange={setPage}
-                        total={totalPages}
-                    />
-                </Group>
-            )}
+            {data ? (
+                <TablePagination
+                    page={page}
+                    perPage={perPage}
+                    total={data.total}
+                    onChange={setPage}
+                    loading={loading}
+                />
+            ) : null}
             <PaymentDetailsDrawer
                 paymentId={detailsId}
                 onClose={() => setDetailsId(null)}

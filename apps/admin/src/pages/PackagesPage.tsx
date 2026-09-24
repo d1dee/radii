@@ -17,11 +17,12 @@ import {
     Title,
 } from '@mantine/core';
 import { useDebouncedValue } from '@mantine/hooks';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MdAdd, MdDelete, MdEdit, MdSearch } from 'react-icons/md';
 import { useNavigate } from 'react-router-dom';
 
 import { PackageDetailsDrawer } from '@/components/Packages/PackageDetailsDrawer';
+import { TablePagination } from '@/components/TablePagination';
 import {
     deleteAdminPackage,
     getAdminPackages,
@@ -32,6 +33,7 @@ import { useAutoRefresh } from '@/lib/autoRefresh';
 import { warnBackgroundFailure } from '@/lib/clientError';
 import { formatMoney } from '@/lib/format';
 import { notifyResult } from '@/lib/notify';
+import { useAdminSettings } from '@/lib/settings';
 
 function SummaryCard({
     label,
@@ -61,8 +63,12 @@ function SummaryCard({
 
 export default function PackagesPage() {
     const navigate = useNavigate();
+    const { settings, loaded } = useAdminSettings();
+    const perPage = settings.dashboard.perPage;
     const [activeTab, setActiveTab] = useState<PackageType>('hotspot');
     const [packages, setPackages] = useState<PackageRow[]>([]);
+    const [total, setTotal] = useState(0);
+    const [page, setPage] = useState(1);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [detailsId, setDetailsId] = useState<string | null>(null);
@@ -72,55 +78,61 @@ export default function PackagesPage() {
     const [search, setSearch] = useState('');
     const [debouncedSearch] = useDebouncedValue(search, 300);
     const [status, setStatus] = useState<string | null>(null);
+    const loadRequest = useRef(0);
 
-    const load = useCallback(async (type: PackageType, silent = false) => {
-        if (!silent) {
-            setLoading(true);
+    const load = useCallback(
+        async (pageToLoad: number, silent = false) => {
+            const requestId = ++loadRequest.current;
+            if (!silent) {
+                setLoading(true);
+                setError(null);
+            }
+            const result = await getAdminPackages({
+                type: activeTab,
+                q: debouncedSearch.trim() || undefined,
+                status: (status as 'active' | 'inactive') || undefined,
+                page: pageToLoad,
+                perPage,
+            });
+            if (requestId !== loadRequest.current) return;
+            if (!silent) setLoading(false);
+            if (!result.success) {
+                if (silent) warnBackgroundFailure('refresh packages', result);
+                else setError(result.message || 'Failed to load packages');
+                return;
+            }
             setError(null);
-        }
-        const result = await getAdminPackages(type);
-        if (!silent) setLoading(false);
-        if (!result.success) {
-            if (silent) warnBackgroundFailure('refresh packages', result);
-            else setError(result.message || 'Failed to load packages');
-            return;
-        }
-        setError(null);
-        setPackages(result.data ?? []);
-    }, []);
+            setPackages(result.data?.packages ?? []);
+            setTotal(result.data?.total ?? 0);
+        },
+        [activeTab, debouncedSearch, status, perPage],
+    );
 
     useEffect(() => {
-        load(activeTab);
-    }, [activeTab, load]);
+        setPage(1);
+    }, [activeTab, debouncedSearch, status, perPage]);
 
-    useAutoRefresh(() => void load(activeTab, true));
+    useEffect(() => {
+        if (!loaded) return;
+        void load(page);
+    }, [loaded, load, page]);
 
-    const filtered = useMemo(() => {
-        const q = debouncedSearch.trim().toLowerCase();
-        return packages.filter((pkg) => {
-            if (status === 'active' && !pkg.isActive) return false;
-            if (status === 'inactive' && pkg.isActive) return false;
-            if (!q) return true;
-            return [pkg.title, pkg.category, pkg.description, pkg.note]
-                .filter(Boolean)
-                .some((field) => String(field).toLowerCase().includes(q));
-        });
-    }, [packages, debouncedSearch, status]);
+    useAutoRefresh(() => void load(page, true), loaded);
 
     const summary = useMemo(() => {
-        const active = filtered.filter((p) => p.isActive).length;
-        const prices = filtered.map((p) => Number(p.price));
+        const active = packages.filter((p) => p.isActive).length;
+        const prices = packages.map((p) => Number(p.price));
         const avgPrice =
             prices.length > 0
                 ? prices.reduce((sum, p) => sum + p, 0) / prices.length
                 : 0;
         return {
-            total: filtered.length,
+            total,
             active,
-            inactive: filtered.length - active,
+            inactive: packages.length - active,
             avgPrice,
         };
-    }, [filtered]);
+    }, [packages, total]);
 
     const handleDelete = async () => {
         if (!deleteTarget) return;
@@ -131,7 +143,8 @@ export default function PackagesPage() {
         if (!result.success) return;
         if (detailsId === deleteTarget.id) setDetailsId(null);
         setDeleteTarget(null);
-        await load(activeTab, true);
+        if (page > 1 && packages.length === 1) setPage(page - 1);
+        else await load(page, true);
     };
 
     return (
@@ -170,15 +183,15 @@ export default function PackagesPage() {
                                     value={String(summary.total)}
                                 />
                                 <SummaryCard
-                                    label='Active'
+                                    label='Active on page'
                                     value={String(summary.active)}
                                 />
                                 <SummaryCard
-                                    label='Inactive'
+                                    label='Inactive on page'
                                     value={String(summary.inactive)}
                                 />
                                 <SummaryCard
-                                    label='Avg Price'
+                                    label='Avg price on page'
                                     value={formatMoney(summary.avgPrice)}
                                 />
                             </SimpleGrid>
@@ -215,17 +228,16 @@ export default function PackagesPage() {
                             <Text c='red'>{error}</Text>
                         ) : packages.length === 0 ? (
                             <Text c='dimmed' py='xl' ta='center'>
-                                No {activeTab} packages yet.
-                            </Text>
-                        ) : filtered.length === 0 ? (
-                            <Text c='dimmed' py='xl' ta='center'>
-                                No packages match.
+                                {debouncedSearch || status
+                                    ? 'No packages match.'
+                                    : `No ${activeTab} packages yet.`}
                             </Text>
                         ) : (
                             <Table.ScrollContainer minWidth={900}>
-                                <Table striped highlightOnHover>
+                                <Table striped highlightOnHover stickyHeader>
                                     <Table.Thead>
                                         <Table.Tr>
+                                            <Table.Th>#</Table.Th>
                                             <Table.Th>Title</Table.Th>
                                             <Table.Th>Category</Table.Th>
                                             <Table.Th>Price</Table.Th>
@@ -245,7 +257,7 @@ export default function PackagesPage() {
                                         </Table.Tr>
                                     </Table.Thead>
                                     <Table.Tbody>
-                                        {filtered.map((pkg) => (
+                                        {packages.map((pkg, i) => (
                                             <Table.Tr
                                                 key={pkg.id}
                                                 onClick={() =>
@@ -253,6 +265,11 @@ export default function PackagesPage() {
                                                 }
                                                 style={{ cursor: 'pointer' }}
                                             >
+                                                <Table.Td>
+                                                    {(page - 1) * perPage +
+                                                        i +
+                                                        1}
+                                                </Table.Td>
                                                 <Table.Td fw={500}>
                                                     {pkg.title}
                                                 </Table.Td>
@@ -321,10 +338,14 @@ export default function PackagesPage() {
                                                             aria-label={`Delete ${pkg.title}`}
                                                             onClick={(e) => {
                                                                 e.stopPropagation();
-                                                                setDeleteTarget(pkg);
+                                                                setDeleteTarget(
+                                                                    pkg,
+                                                                );
                                                             }}
                                                         >
-                                                            <MdDelete size={16} />
+                                                            <MdDelete
+                                                                size={16}
+                                                            />
                                                         </ActionIcon>
                                                     </Group>
                                                 </Table.Td>
@@ -334,6 +355,13 @@ export default function PackagesPage() {
                                 </Table>
                             </Table.ScrollContainer>
                         )}
+                        <TablePagination
+                            page={page}
+                            perPage={perPage}
+                            total={total}
+                            onChange={setPage}
+                            loading={loading}
+                        />
                     </Stack>
                 </Tabs.Panel>
             </Tabs>
@@ -354,10 +382,15 @@ export default function PackagesPage() {
             >
                 <Stack gap='md'>
                     <Text size='sm'>
-                        Delete <Text span fw={600}>{deleteTarget?.title}</Text> permanently?
+                        Delete{' '}
+                        <Text span fw={600}>
+                            {deleteTarget?.title}
+                        </Text>{' '}
+                        permanently?
                     </Text>
                     <Text size='sm' c='dimmed'>
-                        Packages with payment or activation history cannot be deleted.
+                        Packages with payment or activation history cannot be
+                        deleted.
                     </Text>
                     <Group justify='flex-end'>
                         <Button
@@ -367,7 +400,11 @@ export default function PackagesPage() {
                         >
                             Cancel
                         </Button>
-                        <Button color='red' loading={deleteBusy} onClick={handleDelete}>
+                        <Button
+                            color='red'
+                            loading={deleteBusy}
+                            onClick={handleDelete}
+                        >
                             Delete package
                         </Button>
                     </Group>

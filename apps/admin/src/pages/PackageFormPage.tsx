@@ -28,7 +28,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
     createPackage,
     getAdminPackage,
-    getNasDevices,
+    getAllNasDevices,
     updateAdminPackage,
     type CreatePackageInput,
     type FairUsageWindowUnit,
@@ -127,7 +127,7 @@ export default function PackageFormPage() {
 
     useEffect(() => {
         (async () => {
-            const result = await getNasDevices();
+            const result = await getAllNasDevices();
             if (result.success && result.data) {
                 setNasDevices(result.data);
             } else {

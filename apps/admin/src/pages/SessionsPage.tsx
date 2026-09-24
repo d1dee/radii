@@ -2,11 +2,13 @@ import {
     ActionIcon,
     Badge,
     Button,
+    Card,
     Center,
     Group,
     Loader,
     Modal,
     NumberInput,
+    SimpleGrid,
     Stack,
     Switch,
     Table,
@@ -16,11 +18,12 @@ import {
     Tooltip,
 } from '@mantine/core';
 import { useDebouncedValue } from '@mantine/hooks';
-import { useCallback, useEffect, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MdDelete, MdEdit, MdRefresh, MdSearch } from 'react-icons/md';
+import { useSearchParams } from 'react-router-dom';
 
 import { SessionDetailsDrawer } from '@/components/Sessions/SessionDetailsDrawer';
+import { TablePagination } from '@/components/TablePagination';
 import {
     disconnectSession,
     editSessionTimeout,
@@ -36,12 +39,30 @@ import {
     formatTime,
 } from '@/lib/format';
 import { notifyResult } from '@/lib/notify';
+import { useAdminSettings } from '@/lib/settings';
+
+function SummaryCard({ label, value }: { label: string; value: string }) {
+    return (
+        <Card withBorder padding='md' radius='md'>
+            <Text size='xs' c='dimmed'>
+                {label}
+            </Text>
+            <Text size='xl' fw={700} mt={2}>
+                {value}
+            </Text>
+        </Card>
+    );
+}
 
 export default function SessionsPage() {
     // Deep links (e.g. "View sessions" from a PPPoE account card) seed the
     // search box via /sessions?q=<username>.
     const [searchParams] = useSearchParams();
+    const { settings, loaded } = useAdminSettings();
+    const perPage = settings.dashboard.perPage;
     const [sessions, setSessions] = useState<SessionInfo[]>([]);
+    const [total, setTotal] = useState(0);
+    const [page, setPage] = useState(1);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [lastLoaded, setLastLoaded] = useState<Date | null>(null);
@@ -56,34 +77,62 @@ export default function SessionsPage() {
     const [editSession, setEditSession] = useState<SessionInfo | null>(null);
     const [editMinutes, setEditMinutes] = useState<number | string>('');
     const [busy, setBusy] = useState(false);
+    const loadRequest = useRef(0);
 
-    const load = useCallback(async () => {
-        const res = await getRadiusSessions(500);
-        setLoading(false);
-        if (!res.success) {
-            setError(res.message || 'Failed to load sessions');
-            return;
-        }
-        setError(null);
-        setSessions(res.data ?? []);
-        setLastLoaded(new Date());
-    }, []);
+    const load = useCallback(
+        async (pageToLoad: number, silent = false) => {
+            const requestId = ++loadRequest.current;
+            if (!silent) {
+                setLoading(true);
+                setError(null);
+            }
+            const res = await getRadiusSessions({
+                q: debouncedSearch.trim() || undefined,
+                live: liveOnly || undefined,
+                page: pageToLoad,
+                perPage,
+            });
+            if (requestId !== loadRequest.current) return;
+            if (!silent) setLoading(false);
+            if (!res.success) {
+                setError(res.message || 'Failed to load sessions');
+                return;
+            }
+            setError(null);
+            setSessions(res.data?.sessions ?? []);
+            setTotal(res.data?.total ?? 0);
+            setLastLoaded(new Date());
+        },
+        [debouncedSearch, liveOnly, perPage],
+    );
 
     useEffect(() => {
-        void load();
-    }, [load]);
+        setPage(1);
+    }, [debouncedSearch, liveOnly, perPage]);
 
-    useAutoRefresh(() => void load());
+    useEffect(() => {
+        if (!loaded) return;
+        void load(page);
+    }, [loaded, load, page]);
 
-    const query = debouncedSearch.trim().toLowerCase();
-    const filtered = sessions.filter(
-        (session) =>
-            (!liveOnly || session.live) &&
-            (!query ||
-                `${session.username} ${session.callingStationId ?? ''} ${session.framedIpAddress ?? ''} ${session.nasIpAddress}`
-                    .toLowerCase()
-                    .includes(query)),
-    );
+    useAutoRefresh(() => void load(page, true), loaded);
+
+    const summary = useMemo(() => {
+        const live = sessions.filter((session) => session.live).length;
+        const transferred = sessions.reduce(
+            (sum, session) => sum + session.totalOctets,
+            0,
+        );
+        const averageSpeed =
+            sessions.length > 0
+                ? sessions.reduce(
+                      (sum, session) => sum + session.avgSpeedBps,
+                      0,
+                  ) / sessions.length
+                : 0;
+
+        return { live, transferred, averageSpeed };
+    }, [sessions]);
 
     const doDisconnect = async (session: SessionInfo) => {
         setBusy(true);
@@ -93,7 +142,7 @@ export default function SessionsPage() {
         notifyResult(res, 'Session disconnected');
         if (res.success) {
             setDetailsId(null);
-            void load();
+            void load(page, true);
         }
     };
 
@@ -107,7 +156,7 @@ export default function SessionsPage() {
         setBusy(false);
         setEditSession(null);
         notifyResult(res, 'Session time updated');
-        if (res.success) void load();
+        if (res.success) void load(page, true);
     };
 
     return (
@@ -129,12 +178,33 @@ export default function SessionsPage() {
                         size='xs'
                         variant='light'
                         leftSection={<MdRefresh size={14} />}
-                        onClick={() => void load()}
+                        onClick={() => void load(page)}
                     >
                         Refresh
                     </Button>
                 </Group>
             </Group>
+
+            {!loading && !error && (
+                <SimpleGrid cols={{ base: 2, lg: 4 }}>
+                    <SummaryCard
+                        label='Sessions (filtered)'
+                        value={String(total)}
+                    />
+                    <SummaryCard
+                        label='Live on page'
+                        value={String(summary.live)}
+                    />
+                    <SummaryCard
+                        label='Data on page'
+                        value={formatBytes(summary.transferred)}
+                    />
+                    <SummaryCard
+                        label='Avg speed on page'
+                        value={formatSpeed(summary.averageSpeed)}
+                    />
+                </SimpleGrid>
+            )}
 
             <Group wrap='wrap'>
                 <TextInput
@@ -150,7 +220,7 @@ export default function SessionsPage() {
                     onChange={(e) => setLiveOnly(e.currentTarget.checked)}
                 />
                 <Badge variant='light' size='lg'>
-                    {filtered.length} {liveOnly ? 'live' : 'sessions'}
+                    {total} {liveOnly ? 'live' : 'sessions'}
                 </Badge>
             </Group>
 
@@ -160,15 +230,16 @@ export default function SessionsPage() {
                 </Center>
             ) : error ? (
                 <Text c='red'>{error}</Text>
-            ) : filtered.length === 0 ? (
+            ) : sessions.length === 0 ? (
                 <Text c='dimmed' py='xl' ta='center'>
                     No sessions match.
                 </Text>
             ) : (
                 <Table.ScrollContainer minWidth={1200}>
-                    <Table striped highlightOnHover>
+                    <Table striped highlightOnHover stickyHeader>
                         <Table.Thead>
                             <Table.Tr>
+                                <Table.Th>#</Table.Th>
                                 <Table.Th>User</Table.Th>
                                 <Table.Th>Client</Table.Th>
                                 <Table.Th>NAS</Table.Th>
@@ -182,12 +253,15 @@ export default function SessionsPage() {
                             </Table.Tr>
                         </Table.Thead>
                         <Table.Tbody>
-                            {filtered.map((s) => (
+                            {sessions.map((s, i) => (
                                 <Table.Tr
                                     key={s.radacctId}
                                     onClick={() => setDetailsId(s.radacctId)}
                                     style={{ cursor: 'pointer' }}
                                 >
+                                    <Table.Td>
+                                        {(page - 1) * perPage + i + 1}
+                                    </Table.Td>
                                     <Table.Td>
                                         <Text size='sm' fw={500}>
                                             {s.username || '—'}
@@ -293,6 +367,14 @@ export default function SessionsPage() {
                     </Table>
                 </Table.ScrollContainer>
             )}
+
+            <TablePagination
+                page={page}
+                perPage={perPage}
+                total={total}
+                onChange={setPage}
+                loading={loading}
+            />
 
             <SessionDetailsDrawer
                 sessionId={detailsId}
