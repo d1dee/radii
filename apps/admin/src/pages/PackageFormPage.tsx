@@ -22,7 +22,7 @@ import {
 import { schemaResolver, useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
 import { createPackageSchema } from '@shared/index';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 
 import {
@@ -38,6 +38,95 @@ import {
 import { warnBackgroundFailure } from '@/lib/clientError';
 
 const ALL_NAS_VALUE = 'all';
+
+const RATE_UNITS = [
+    { value: 'kbps', label: 'Kbps', multiplier: 1 },
+    { value: 'mbps', label: 'Mbps', multiplier: 1_000 },
+    { value: 'gbps', label: 'Gbps', multiplier: 1_000_000 },
+    { value: 'tbps', label: 'Tbps', multiplier: 1_000_000_000 },
+] as const;
+
+const DATA_UNITS = [
+    { value: 'kb', label: 'KB', multiplier: 1 },
+    { value: 'mb', label: 'MB', multiplier: 1_024 },
+    { value: 'gb', label: 'GB', multiplier: 1_048_576 },
+    { value: 'tb', label: 'TB', multiplier: 1_073_741_824 },
+] as const;
+
+type MeasurementUnit = {
+    value: string;
+    label: string;
+    multiplier: number;
+};
+
+function bestMeasurementUnit(
+    baseValue: number,
+    units: readonly MeasurementUnit[],
+): MeasurementUnit {
+    if (baseValue <= 0) return units[0];
+
+    for (let index = units.length - 1; index > 0; index -= 1) {
+        if (baseValue >= units[index].multiplier) return units[index];
+    }
+
+    return units[0];
+}
+
+function MeasurementInput({
+    label,
+    description,
+    baseValue,
+    units,
+    error,
+    onChange,
+    onBlur,
+}: {
+    label: string;
+    description?: string;
+    baseValue: number;
+    units: readonly MeasurementUnit[];
+    error?: ReactNode;
+    onChange: (value: number) => void;
+    onBlur?: () => void;
+}) {
+    const [unitValue, setUnitValue] = useState(
+        () => bestMeasurementUnit(baseValue, units).value,
+    );
+    const unit = units.find(({ value }) => value === unitValue) ?? units[0];
+
+    return (
+        <Input.Wrapper label={label} description={description} error={error}>
+            <Group gap='xs' wrap='nowrap'>
+                <NumberInput
+                    aria-label={label}
+                    min={0}
+                    step={1}
+                    value={baseValue / unit.multiplier}
+                    onBlur={onBlur}
+                    onChange={(value) => {
+                        const numericValue =
+                            typeof value === 'number' && Number.isFinite(value)
+                                ? value
+                                : 0;
+                        onChange(Math.round(numericValue * unit.multiplier));
+                    }}
+                    style={{ flex: 1 }}
+                />
+                <Select
+                    aria-label={`${label} unit`}
+                    data={units.map(({ value, label: unitLabel }) => ({
+                        value,
+                        label: unitLabel,
+                    }))}
+                    value={unitValue}
+                    allowDeselect={false}
+                    w={110}
+                    onChange={(value) => value && setUnitValue(value)}
+                />
+            </Group>
+        </Input.Wrapper>
+    );
+}
 
 // Session length is entered in a human-friendly unit and stored as minutes.
 // A month is normalized to 30 days (43200 minutes).
@@ -275,8 +364,8 @@ export default function PackageFormPage() {
                     </Title>
                     <Text size='sm' c='dimmed'>
                         Packages are only available on the NAS devices you link
-                        below. Rates are in Kbps and quotas in KB; use 0 for
-                        unlimited.
+                        below. Choose convenient units for rates and quotas; use
+                        0 for unlimited.
                     </Text>
                 </Stack>
                 <form onSubmit={form.onSubmit(handleSubmit)}>
@@ -417,37 +506,65 @@ export default function PackageFormPage() {
                         </Grid>
                         <Grid>
                             <Grid.Col span={6}>
-                                <NumberInput
-                                    label='Upload Rate (Kbps)'
+                                <MeasurementInput
+                                    label='Upload Rate'
                                     description='0 = unlimited'
-                                    min={0}
-                                    {...form.getInputProps('uploadRate')}
+                                    baseValue={form.values.uploadRate}
+                                    units={RATE_UNITS}
+                                    error={form.errors.uploadRate}
+                                    onBlur={
+                                        form.getInputProps('uploadRate').onBlur
+                                    }
+                                    onChange={(value) =>
+                                        form.setFieldValue('uploadRate', value)
+                                    }
                                 />
                             </Grid.Col>
                             <Grid.Col span={6}>
-                                <NumberInput
-                                    label='Download Rate (Kbps)'
+                                <MeasurementInput
+                                    label='Download Rate'
                                     description='0 = unlimited'
-                                    min={0}
-                                    {...form.getInputProps('downloadRate')}
+                                    baseValue={form.values.downloadRate}
+                                    units={RATE_UNITS}
+                                    error={form.errors.downloadRate}
+                                    onBlur={
+                                        form.getInputProps('downloadRate').onBlur
+                                    }
+                                    onChange={(value) =>
+                                        form.setFieldValue('downloadRate', value)
+                                    }
                                 />
                             </Grid.Col>
                         </Grid>
                         <Grid>
                             <Grid.Col span={6}>
-                                <NumberInput
-                                    label='Upload Quota (KB)'
+                                <MeasurementInput
+                                    label='Upload Quota'
                                     description='0 = unlimited'
-                                    min={0}
-                                    {...form.getInputProps('uploadQuota')}
+                                    baseValue={form.values.uploadQuota}
+                                    units={DATA_UNITS}
+                                    error={form.errors.uploadQuota}
+                                    onBlur={
+                                        form.getInputProps('uploadQuota').onBlur
+                                    }
+                                    onChange={(value) =>
+                                        form.setFieldValue('uploadQuota', value)
+                                    }
                                 />
                             </Grid.Col>
                             <Grid.Col span={6}>
-                                <NumberInput
-                                    label='Download Quota (KB)'
+                                <MeasurementInput
+                                    label='Download Quota'
                                     description='0 = unlimited'
-                                    min={0}
-                                    {...form.getInputProps('downloadQuota')}
+                                    baseValue={form.values.downloadQuota}
+                                    units={DATA_UNITS}
+                                    error={form.errors.downloadQuota}
+                                    onBlur={
+                                        form.getInputProps('downloadQuota').onBlur
+                                    }
+                                    onChange={(value) =>
+                                        form.setFieldValue('downloadQuota', value)
+                                    }
                                 />
                             </Grid.Col>
                         </Grid>
@@ -464,11 +581,22 @@ export default function PackageFormPage() {
                         </Text>
                         <Grid>
                             <Grid.Col span={{ base: 12, sm: 6 }}>
-                                <NumberInput
-                                    label='Fair Usage Allowance (KB)'
+                                <MeasurementInput
+                                    label='Fair Usage Allowance'
                                     description='Combined upload and download data'
-                                    min={0}
-                                    {...form.getInputProps('fairUsageLimit')}
+                                    baseValue={form.values.fairUsageLimit}
+                                    units={DATA_UNITS}
+                                    error={form.errors.fairUsageLimit}
+                                    onBlur={
+                                        form.getInputProps('fairUsageLimit')
+                                            .onBlur
+                                    }
+                                    onChange={(value) =>
+                                        form.setFieldValue(
+                                            'fairUsageLimit',
+                                            value,
+                                        )
+                                    }
                                 />
                             </Grid.Col>
                             <Grid.Col span={{ base: 12, sm: 6 }}>
@@ -530,23 +658,43 @@ export default function PackageFormPage() {
                         </Grid>
                         <Grid>
                             <Grid.Col span={{ base: 12, sm: 6 }}>
-                                <NumberInput
-                                    label='Throttled Upload Rate (Kbps)'
+                                <MeasurementInput
+                                    label='Throttled Upload Rate'
                                     description='Applied after the allowance is reached'
-                                    min={0}
-                                    {...form.getInputProps(
-                                        'fairUsageUploadRate',
-                                    )}
+                                    baseValue={form.values.fairUsageUploadRate}
+                                    units={RATE_UNITS}
+                                    error={form.errors.fairUsageUploadRate}
+                                    onBlur={
+                                        form.getInputProps(
+                                            'fairUsageUploadRate',
+                                        ).onBlur
+                                    }
+                                    onChange={(value) =>
+                                        form.setFieldValue(
+                                            'fairUsageUploadRate',
+                                            value,
+                                        )
+                                    }
                                 />
                             </Grid.Col>
                             <Grid.Col span={{ base: 12, sm: 6 }}>
-                                <NumberInput
-                                    label='Throttled Download Rate (Kbps)'
+                                <MeasurementInput
+                                    label='Throttled Download Rate'
                                     description='Applied after the allowance is reached'
-                                    min={0}
-                                    {...form.getInputProps(
-                                        'fairUsageDownloadRate',
-                                    )}
+                                    baseValue={form.values.fairUsageDownloadRate}
+                                    units={RATE_UNITS}
+                                    error={form.errors.fairUsageDownloadRate}
+                                    onBlur={
+                                        form.getInputProps(
+                                            'fairUsageDownloadRate',
+                                        ).onBlur
+                                    }
+                                    onChange={(value) =>
+                                        form.setFieldValue(
+                                            'fairUsageDownloadRate',
+                                            value,
+                                        )
+                                    }
                                 />
                             </Grid.Col>
                         </Grid>
@@ -559,37 +707,81 @@ export default function PackageFormPage() {
                         </Text>
                         <Grid>
                             <Grid.Col span={{ base: 12, sm: 6 }}>
-                                <NumberInput
-                                    label='Burst Upload Rate (Kbps)'
-                                    min={0}
-                                    {...form.getInputProps('burstUploadRate')}
+                                <MeasurementInput
+                                    label='Burst Upload Rate'
+                                    baseValue={form.values.burstUploadRate}
+                                    units={RATE_UNITS}
+                                    error={form.errors.burstUploadRate}
+                                    onBlur={
+                                        form.getInputProps('burstUploadRate')
+                                            .onBlur
+                                    }
+                                    onChange={(value) =>
+                                        form.setFieldValue(
+                                            'burstUploadRate',
+                                            value,
+                                        )
+                                    }
                                 />
                             </Grid.Col>
                             <Grid.Col span={{ base: 12, sm: 6 }}>
-                                <NumberInput
-                                    label='Burst Download Rate (Kbps)'
-                                    min={0}
-                                    {...form.getInputProps('burstDownloadRate')}
+                                <MeasurementInput
+                                    label='Burst Download Rate'
+                                    baseValue={form.values.burstDownloadRate}
+                                    units={RATE_UNITS}
+                                    error={form.errors.burstDownloadRate}
+                                    onBlur={
+                                        form.getInputProps('burstDownloadRate')
+                                            .onBlur
+                                    }
+                                    onChange={(value) =>
+                                        form.setFieldValue(
+                                            'burstDownloadRate',
+                                            value,
+                                        )
+                                    }
                                 />
                             </Grid.Col>
                         </Grid>
                         <Grid>
                             <Grid.Col span={{ base: 12, sm: 6 }}>
-                                <NumberInput
-                                    label='Burst Upload Threshold (Kbps)'
-                                    min={0}
-                                    {...form.getInputProps(
-                                        'burstUploadThreshold',
-                                    )}
+                                <MeasurementInput
+                                    label='Burst Upload Threshold'
+                                    baseValue={form.values.burstUploadThreshold}
+                                    units={RATE_UNITS}
+                                    error={form.errors.burstUploadThreshold}
+                                    onBlur={
+                                        form.getInputProps(
+                                            'burstUploadThreshold',
+                                        ).onBlur
+                                    }
+                                    onChange={(value) =>
+                                        form.setFieldValue(
+                                            'burstUploadThreshold',
+                                            value,
+                                        )
+                                    }
                                 />
                             </Grid.Col>
                             <Grid.Col span={{ base: 12, sm: 6 }}>
-                                <NumberInput
-                                    label='Burst Download Threshold (Kbps)'
-                                    min={0}
-                                    {...form.getInputProps(
-                                        'burstDownloadThreshold',
-                                    )}
+                                <MeasurementInput
+                                    label='Burst Download Threshold'
+                                    baseValue={
+                                        form.values.burstDownloadThreshold
+                                    }
+                                    units={RATE_UNITS}
+                                    error={form.errors.burstDownloadThreshold}
+                                    onBlur={
+                                        form.getInputProps(
+                                            'burstDownloadThreshold',
+                                        ).onBlur
+                                    }
+                                    onChange={(value) =>
+                                        form.setFieldValue(
+                                            'burstDownloadThreshold',
+                                            value,
+                                        )
+                                    }
                                 />
                             </Grid.Col>
                         </Grid>
