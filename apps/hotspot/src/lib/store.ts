@@ -6,9 +6,51 @@ import {
     getContacts,
     getPackages,
     getStatus,
+    LOGIN_REQUEST_KEY,
     type Client,
 } from './api.ts';
 import { storeLogger } from './logging.ts';
+
+const UNKNOWN_LOGIN_REQUEST = 'Unknown login request';
+const UNKNOWN_LOGIN_REQUEST_CACHE_KEY = 'radii.unknownLoginRequestId';
+
+function currentLoginRequestId() {
+    return (
+        new URLSearchParams(window.location.search).get('login_request') ??
+        localStorage.getItem(LOGIN_REQUEST_KEY)
+    );
+}
+
+function isCachedUnknownLoginRequest(loginRequestId: string | null) {
+    try {
+        return (
+            Boolean(loginRequestId) &&
+            sessionStorage.getItem(UNKNOWN_LOGIN_REQUEST_CACHE_KEY) ===
+                loginRequestId
+        );
+    } catch {
+        return false;
+    }
+}
+
+function cacheUnknownLoginRequest(loginRequestId: string | null, unknown: boolean) {
+    try {
+        if (unknown && loginRequestId) {
+            sessionStorage.setItem(
+                UNKNOWN_LOGIN_REQUEST_CACHE_KEY,
+                loginRequestId,
+            );
+        } else if (
+            !loginRequestId ||
+            sessionStorage.getItem(UNKNOWN_LOGIN_REQUEST_CACHE_KEY) ===
+                loginRequestId
+        ) {
+            sessionStorage.removeItem(UNKNOWN_LOGIN_REQUEST_CACHE_KEY);
+        }
+    } catch {
+        // Storage can be unavailable in restricted captive-portal browsers.
+    }
+}
 
 type PortalSnapshot = {
     client: Client | undefined;
@@ -26,12 +68,16 @@ type QuotaSnapshot = {
     error: string | null;
 };
 
+const initialUnknownLoginRequest = isCachedUnknownLoginRequest(
+    currentLoginRequestId(),
+);
+
 let portalSnapshot: PortalSnapshot = {
     client: undefined,
     clientError: null,
     packages: undefined,
-    packagesError: null,
-    packagesLoading: true,
+    packagesError: initialUnknownLoginRequest ? UNKNOWN_LOGIN_REQUEST : null,
+    packagesLoading: !initialUnknownLoginRequest,
     contacts: defaultAdminSettings.contacts,
     contactsError: null,
 };
@@ -77,6 +123,7 @@ export function loadHotspotPortal(
 ) {
     if (publicScope !== loginRequestId || (force && !publicFlight)) {
         const scopeChanged = publicScope !== loginRequestId;
+        const cachedUnknown = isCachedUnknownLoginRequest(loginRequestId);
         publicScope = loginRequestId;
         publishPortal({
             ...(scopeChanged
@@ -85,8 +132,10 @@ export function loadHotspotPortal(
                       contacts: defaultAdminSettings.contacts,
                   }
                 : {}),
-            packagesLoading: true,
-            packagesError: null,
+            packagesLoading:
+                !cachedUnknown &&
+                (scopeChanged || portalSnapshot.packages === undefined),
+            packagesError: cachedUnknown ? UNKNOWN_LOGIN_REQUEST : null,
             contactsError: null,
         });
         const flight = (async () => {
@@ -96,6 +145,11 @@ export function loadHotspotPortal(
                     loginRequestId ? getPackages(loginRequestId) : null,
                 ]);
                 if (publicScope !== loginRequestId) return;
+                if (packages?.success) {
+                    cacheUnknownLoginRequest(loginRequestId, false);
+                } else if (packages?.message === UNKNOWN_LOGIN_REQUEST) {
+                    cacheUnknownLoginRequest(loginRequestId, true);
+                }
                 publishPortal({
                     contacts:
                         contacts.success && contacts.data
@@ -134,8 +188,12 @@ export function loadHotspotPortal(
     }
 
     if (clientUserId !== userId || (force && !clientFlight)) {
+        const userChanged = clientUserId !== userId;
         clientUserId = userId;
-        publishPortal({ client: undefined, clientError: null });
+        publishPortal({
+            ...(userChanged ? { client: undefined } : {}),
+            clientError: null,
+        });
         clientFlight = userId
             ? getClientData()
                   .then((result) => {
@@ -177,14 +235,17 @@ export function refreshHotspotQuota(loginRequestId: string | null) {
         quotaScope = loginRequestId;
         publishQuota({ quota: [], error: null, loading: true });
     }
-    publishQuota({ loading: quotaSnapshot.quota.length === 0 });
     const flight = getStatus(loginRequestId)
         .then((result) => {
             if (quotaScope !== loginRequestId) return;
             if (result.success) {
-                publishQuota({ quota: result.data ?? [], error: null });
+                publishQuota({
+                    quota: result.data ?? [],
+                    error: null,
+                    loading: false,
+                });
             } else {
-                publishQuota({ error: result.message });
+                publishQuota({ error: result.message, loading: false });
             }
         })
         .catch((error: unknown) => {
@@ -195,12 +256,12 @@ export function refreshHotspotQuota(loginRequestId: string | null) {
             if (quotaScope === loginRequestId) {
                 publishQuota({
                     error: 'Could not load your active package. Try again.',
+                    loading: false,
                 });
             }
         })
         .finally(() => {
             if (quotaFlight === flight) {
-                publishQuota({ loading: false });
                 quotaFlight = null;
             }
         });

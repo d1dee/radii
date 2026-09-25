@@ -164,7 +164,7 @@ export function loadPppoePortal(
                       contacts: defaultAdminSettings.contacts,
                   }
                 : {}),
-            packagesLoading: true,
+            packagesLoading: scopeChanged || portalSnapshot.packages === undefined,
             packagesError: null,
             contactsError: null,
         });
@@ -213,8 +213,12 @@ export function loadPppoePortal(
     }
 
     if (clientUserId !== userId || (force && !clientFlight)) {
+        const userChanged = clientUserId !== userId;
         clientUserId = userId;
-        publishPortal({ client: undefined, clientError: null });
+        publishPortal({
+            ...(userChanged ? { client: undefined } : {}),
+            clientError: null,
+        });
         if (!userId) {
             publishAccount({
                 clients: [],
@@ -364,14 +368,17 @@ export function refreshPppoeQuota(
     }
     if (quotaFlight && quotaFlightAccountId === accountId) return quotaFlight;
     quotaFlightAccountId = accountId;
-    publishQuota({ loading: quotaSnapshot.quota.length === 0, error: null });
     const flight = getStatus(accountId)
         .then((result) => {
             if (accountSnapshot.selectedAccountId !== accountId) return;
             if (result.success) {
-                publishQuota({ quota: result.data ?? [], error: null });
+                publishQuota({
+                    quota: result.data ?? [],
+                    error: null,
+                    loading: false,
+                });
             } else {
-                publishQuota({ error: result.message });
+                publishQuota({ error: result.message, loading: false });
             }
         })
         .catch((error: unknown) => {
@@ -382,13 +389,11 @@ export function refreshPppoeQuota(
             if (accountSnapshot.selectedAccountId === accountId) {
                 publishQuota({
                     error: 'Could not load your active package. Try again.',
+                    loading: false,
                 });
             }
         })
         .finally(() => {
-            if (accountSnapshot.selectedAccountId === accountId) {
-                publishQuota({ loading: false });
-            }
             if (quotaFlightAccountId === accountId) {
                 quotaFlight = null;
                 quotaFlightAccountId = null;
