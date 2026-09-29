@@ -21,7 +21,11 @@ import {
     type AdminPaymentEvent,
     type PackagePaymentStatus,
 } from '@/lib/api';
-import { formatDateTime, formatMoney } from '@/lib/format';
+import {
+    formatDateTime,
+    formatMoney,
+    formatPaymentAmount,
+} from '@/lib/format';
 
 const STATUS_BADGE: Record<
     PackagePaymentStatus,
@@ -223,7 +227,7 @@ export function PaymentDetailsDrawer({
                         <Grid.Col span={{ base: 12, sm: 6 }}>
                             <DetailItem
                                 label='Amount'
-                                value={formatMoney(payment.amount)}
+                                value={formatPaymentAmount(payment.amount)}
                             />
                         </Grid.Col>
                         <Grid.Col span={{ base: 12, sm: 6 }}>

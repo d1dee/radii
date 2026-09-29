@@ -74,6 +74,29 @@ export function formatPackagePrice(price: number | string): string {
     return Number(price) === 0 ? 'Free' : formatMoney(price);
 }
 
+// Payment amounts: a zero-amount payment (free package purchase) shows
+// "Free" instead of a zero currency total.
+export const formatPaymentAmount = formatPackagePrice;
+
+// Payment reference display: a short provider label (e.g. "Mpesa") plus the
+// raw provider transaction code as an optional secondary value. Free package
+// purchases settle internally and store `free:<paymentId>` as the provider
+// transaction ID; collapse those to a "Free" label without the raw UUID.
+export function formatPaymentReference(
+    provider: string | null,
+    providerTransactionId: string | null,
+): { label: string; code: string | null } {
+    if (provider === 'internal' && providerTransactionId?.startsWith('free:'))
+        return { label: 'Free', code: null };
+    const prefix = provider?.split('-')[0];
+    return {
+        label: prefix
+            ? prefix.charAt(0).toUpperCase() + prefix.slice(1)
+            : '—',
+        code: providerTransactionId,
+    };
+}
+
 export function formatBytes(octets: number): string {
     if (!Number.isFinite(octets) || octets <= 0) return '0 B';
     const units = ['B', 'KB', 'MB', 'GB', 'TB'];
@@ -122,13 +145,19 @@ export function formatSeconds(totalSeconds: number): string {
     return `${secs}s`;
 }
 
-// Bits per second into a readable rate.
+// Bits per second into a readable rate, scaled through Kbps/Mbps/Gbps/Tbps.
 export function formatSpeed(bps: number): string {
     if (!Number.isFinite(bps) || bps <= 0) return '0 Kbps';
-    if (bps >= 1_000_000) {
-        return `${(bps / 1_000_000).toLocaleString(undefined, {
-            maximumFractionDigits: 2,
-        })} Mbps`;
+
+    const units = ['Kbps', 'Mbps', 'Gbps', 'Tbps'];
+    let value = bps / 1000;
+    let unit = 0;
+    while (value >= 1000 && unit < units.length - 1) {
+        value /= 1000;
+        unit++;
     }
-    return `${Math.round(bps / 1000).toLocaleString()} Kbps`;
+
+    return `${value.toLocaleString(undefined, {
+        maximumFractionDigits: value >= 100 ? 0 : 2,
+    })} ${units[unit]}`;
 }

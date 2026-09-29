@@ -1,4 +1,3 @@
-import { DateTimePicker } from '@mantine/dates';
 import {
     ActionIcon,
     Avatar,
@@ -25,9 +24,9 @@ import {
     Title,
     Tooltip,
 } from '@mantine/core';
+import { DateTimePicker } from '@mantine/dates';
 import type { ReactNode } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import {
     MdBlock,
     MdCheckCircle,
@@ -45,7 +44,10 @@ import {
     MdVisibilityOff,
     MdWifiTetheringOff,
 } from 'react-icons/md';
+import { useNavigate } from 'react-router-dom';
 
+import { PaymentRefCell } from '@/components/Payments/PaymentRefCell';
+import { TablePagination } from '@/components/TablePagination';
 import {
     activateActivation,
     addUserFlag,
@@ -71,7 +73,6 @@ import {
     type PppoeAccountStatus,
     type UserPaymentRow,
 } from '@/lib/api';
-import { TablePagination } from '@/components/TablePagination';
 import { warnBackgroundFailure } from '@/lib/clientError';
 import { dayjs } from '@/lib/dayjs';
 import {
@@ -80,6 +81,7 @@ import {
     formatDateTime,
     formatMoney,
     formatPackageRate,
+    formatPaymentAmount,
     formatSeconds,
 } from '@/lib/format';
 import { notifyResult } from '@/lib/notify';
@@ -159,7 +161,9 @@ export function UserDetailsDrawer({
         currentRemainingSeconds: number;
     } | null>(null);
     const [expiryValue, setExpiryValue] = useState<Date | null>(null);
-    const [remainingMinutes, setRemainingMinutes] = useState<number | string>(0);
+    const [remainingMinutes, setRemainingMinutes] = useState<number | string>(
+        0,
+    );
     const [confirmDeactivate, setConfirmDeactivate] = useState<string | null>(
         null,
     );
@@ -202,31 +206,35 @@ export function UserDetailsDrawer({
         setDetail(res.data);
     }, []);
 
-    const loadActivations = useCallback(async (id: string, page: number) => {
-        const requestId = ++activationsRequest.current;
-        setActivationsLoading(true);
-        const res = await getUserActivations(id, { page, perPage });
-        if (requestId !== activationsRequest.current) return;
-        setActivationsLoading(false);
-        if (res.success && res.data) {
-            setActivations(res.data.activations);
-            setActivationsTotal(res.data.total);
-        }
-        else warnBackgroundFailure('load user activations', res);
-    }, [perPage]);
+    const loadActivations = useCallback(
+        async (id: string, page: number) => {
+            const requestId = ++activationsRequest.current;
+            setActivationsLoading(true);
+            const res = await getUserActivations(id, { page, perPage });
+            if (requestId !== activationsRequest.current) return;
+            setActivationsLoading(false);
+            if (res.success && res.data) {
+                setActivations(res.data.activations);
+                setActivationsTotal(res.data.total);
+            } else warnBackgroundFailure('load user activations', res);
+        },
+        [perPage],
+    );
 
-    const loadPayments = useCallback(async (id: string, page: number) => {
-        const requestId = ++paymentsRequest.current;
-        setPaymentsLoading(true);
-        const res = await getUserPayments(id, { page, perPage });
-        if (requestId !== paymentsRequest.current) return;
-        setPaymentsLoading(false);
-        if (res.success && res.data) {
-            setPayments(res.data.payments);
-            setPaymentsTotal(res.data.total);
-        }
-        else warnBackgroundFailure('load user payments', res);
-    }, [perPage]);
+    const loadPayments = useCallback(
+        async (id: string, page: number) => {
+            const requestId = ++paymentsRequest.current;
+            setPaymentsLoading(true);
+            const res = await getUserPayments(id, { page, perPage });
+            if (requestId !== paymentsRequest.current) return;
+            setPaymentsLoading(false);
+            if (res.success && res.data) {
+                setPayments(res.data.payments);
+                setPaymentsTotal(res.data.total);
+            } else warnBackgroundFailure('load user payments', res);
+        },
+        [perPage],
+    );
 
     useEffect(() => {
         if (!userId) return;
@@ -251,7 +259,8 @@ export function UserDetailsDrawer({
 
     useEffect(() => {
         if (!userId || !detail) return;
-        if (tab === 'activations') void loadActivations(userId, activationsPage);
+        if (tab === 'activations')
+            void loadActivations(userId, activationsPage);
         if (tab === 'payments') void loadPayments(userId, paymentsPage);
     }, [
         tab,
@@ -723,7 +732,8 @@ export function UserDetailsDrawer({
                                             value={
                                                 detail.payments.firstAt
                                                     ? formatDate(
-                                                          detail.payments.firstAt,
+                                                          detail.payments
+                                                              .firstAt,
                                                       )
                                                     : '—'
                                             }
@@ -735,7 +745,8 @@ export function UserDetailsDrawer({
                                             value={
                                                 detail.payments.lastAt
                                                     ? dayjs(
-                                                          detail.payments.lastAt,
+                                                          detail.payments
+                                                              .lastAt,
                                                       ).fromNow()
                                                     : '—'
                                             }
@@ -790,7 +801,10 @@ export function UserDetailsDrawer({
                                                 <Group justify='space-between'>
                                                     <Group gap='xs'>
                                                         <MdFlag color='orange' />
-                                                        <Text size='sm' fw={600}>
+                                                        <Text
+                                                            size='sm'
+                                                            fw={600}
+                                                        >
                                                             {flag.reason}
                                                         </Text>
                                                     </Group>
@@ -808,12 +822,22 @@ export function UserDetailsDrawer({
                                                     </ActionIcon>
                                                 </Group>
                                                 {flag.note ? (
-                                                    <Text size='xs' c='dimmed' mt={4}>
+                                                    <Text
+                                                        size='xs'
+                                                        c='dimmed'
+                                                        mt={4}
+                                                    >
                                                         {flag.note}
                                                     </Text>
                                                 ) : null}
-                                                <Text size='xs' c='dimmed' mt={4}>
-                                                    {formatDateTime(flag.createdAt)}
+                                                <Text
+                                                    size='xs'
+                                                    c='dimmed'
+                                                    mt={4}
+                                                >
+                                                    {formatDateTime(
+                                                        flag.createdAt,
+                                                    )}
                                                     {flag.creatorName
                                                         ? ` · by ${flag.creatorName}`
                                                         : ''}
@@ -836,12 +860,12 @@ export function UserDetailsDrawer({
                                     No package activations yet.
                                 </Text>
                             ) : (
-                                <Table striped withTableBorder stickyHeader>
+                                <Table striped stickyHeader>
                                     <Table.Thead>
                                         <Table.Tr>
                                             <Table.Th>#</Table.Th>
-                                            <Table.Th>Package</Table.Th>
-                                            <Table.Th>Status</Table.Th>
+                                            <Table.Th w={100}>Package</Table.Th>
+                                            <Table.Th w={130}>Status</Table.Th>
                                             <Table.Th>Usage</Table.Th>
                                             <Table.Th>Expires</Table.Th>
                                             <Table.Th ta='right'>
@@ -863,7 +887,7 @@ export function UserDetailsDrawer({
                                                         {a.packageTitle}
                                                     </Text>
                                                     <Text size='xs' c='dimmed'>
-                                                        {a.packageType} ·{' '}
+                                                        {a.packageType} ●{' '}
                                                         {a.username}
                                                     </Text>
                                                 </Table.Td>
@@ -883,8 +907,8 @@ export function UserDetailsDrawer({
                                                                 a.deactivated
                                                                     ? 'red'
                                                                     : a.expired
-                                                                    ? 'gray'
-                                                                    : 'blue'
+                                                                      ? 'gray'
+                                                                      : 'blue'
                                                             }
                                                             variant='light'
                                                             size='sm'
@@ -892,8 +916,8 @@ export function UserDetailsDrawer({
                                                             {a.deactivated
                                                                 ? 'Deactivated'
                                                                 : a.expired
-                                                                ? 'Expired'
-                                                                : 'Active'}
+                                                                  ? 'Expired'
+                                                                  : 'Active'}
                                                         </Badge>
                                                         {a.fairUsage
                                                             ?.throttled ? (
@@ -927,16 +951,17 @@ export function UserDetailsDrawer({
                                                     </Text>
                                                     <Text size='xs' c='dimmed'>
                                                         {formatSeconds(
-                                                            a.remainingSeconds ?? 0,
+                                                            a.remainingSeconds ??
+                                                                0,
                                                         )}{' '}
-                                                        remaining
-                                                    </Text>
-                                                    <Text size='xs' c='dimmed'>
-                                                        {formatBytes(a.octetsUsed)}
+                                                        remaining ●{' '}
+                                                        {formatBytes(
+                                                            a.octetsUsed,
+                                                        )}{' '}
                                                         {a.octetsLimit
                                                             ? ` / ${formatBytes(a.octetsLimit)}`
                                                             : ''}
-                                                    </Text>
+                                                    </Text>{' '}
                                                     {a.fairUsage ? (
                                                         <Stack gap={3} mt={5}>
                                                             <Progress
@@ -944,7 +969,8 @@ export function UserDetailsDrawer({
                                                                     100,
                                                                     (a.fairUsage
                                                                         .usedBytes /
-                                                                        a.fairUsage
+                                                                        a
+                                                                            .fairUsage
                                                                             .limitBytes) *
                                                                         100,
                                                                 )}
@@ -995,12 +1021,14 @@ export function UserDetailsDrawer({
                                                                 >
                                                                     Throttled to{' '}
                                                                     {formatPackageRate(
-                                                                        a.fairUsage
+                                                                        a
+                                                                            .fairUsage
                                                                             .uploadRate,
                                                                     )}{' '}
                                                                     /{' '}
                                                                     {formatPackageRate(
-                                                                        a.fairUsage
+                                                                        a
+                                                                            .fairUsage
                                                                             .downloadRate,
                                                                     )}{' '}
                                                                     up/down
@@ -1011,7 +1039,8 @@ export function UserDetailsDrawer({
                                                                     c='dimmed'
                                                                 >
                                                                     {formatBytes(
-                                                                        a.fairUsage
+                                                                        a
+                                                                            .fairUsage
                                                                             .remainingBytes,
                                                                     )}{' '}
                                                                     remaining
@@ -1022,7 +1051,9 @@ export function UserDetailsDrawer({
                                                 </Table.Td>
                                                 <Table.Td>
                                                     <Text size='xs'>
-                                                        {formatDateTime(a.expireAt)}
+                                                        {formatDateTime(
+                                                            a.expireAt,
+                                                        )}
                                                     </Text>
                                                     <Text size='xs' c='dimmed'>
                                                         {a.deactivatedAt
@@ -1041,7 +1072,9 @@ export function UserDetailsDrawer({
                                                                     variant='light'
                                                                     color='green'
                                                                     aria-label='Activate'
-                                                                    loading={busy}
+                                                                    loading={
+                                                                        busy
+                                                                    }
                                                                     onClick={() =>
                                                                         void doActivate(
                                                                             a.activationId,
@@ -1049,7 +1082,9 @@ export function UserDetailsDrawer({
                                                                     }
                                                                 >
                                                                     <MdPowerSettingsNew
-                                                                        size={16}
+                                                                        size={
+                                                                            16
+                                                                        }
                                                                     />
                                                                 </ActionIcon>
                                                             </Tooltip>
@@ -1066,7 +1101,9 @@ export function UserDetailsDrawer({
                                                                     }
                                                                 >
                                                                     <MdBlock
-                                                                        size={16}
+                                                                        size={
+                                                                            16
+                                                                        }
                                                                     />
                                                                 </ActionIcon>
                                                             </Tooltip>
@@ -1076,16 +1113,19 @@ export function UserDetailsDrawer({
                                                                 variant='light'
                                                                 aria-label='Edit activation limits'
                                                                 onClick={() => {
-                                                                    setExpiryEdit({
-                                                                        activationId:
-                                                                            a.activationId,
-                                                                        current: new Date(
-                                                                            a.expireAt,
-                                                                        ),
-                                                                        currentRemainingSeconds:
-                                                                            a.remainingSeconds ??
-                                                                            0,
-                                                                    });
+                                                                    setExpiryEdit(
+                                                                        {
+                                                                            activationId:
+                                                                                a.activationId,
+                                                                            current:
+                                                                                new Date(
+                                                                                    a.expireAt,
+                                                                                ),
+                                                                            currentRemainingSeconds:
+                                                                                a.remainingSeconds ??
+                                                                                0,
+                                                                        },
+                                                                    );
                                                                     setExpiryValue(
                                                                         new Date(
                                                                             a.expireAt,
@@ -1100,7 +1140,9 @@ export function UserDetailsDrawer({
                                                                     );
                                                                 }}
                                                             >
-                                                                <MdEdit size={16} />
+                                                                <MdEdit
+                                                                    size={16}
+                                                                />
                                                             </ActionIcon>
                                                         </Tooltip>
                                                     </Group>
@@ -1130,7 +1172,7 @@ export function UserDetailsDrawer({
                                     No payments yet.
                                 </Text>
                             ) : (
-                                <Table striped withTableBorder stickyHeader>
+                                <Table striped stickyHeader>
                                     <Table.Thead>
                                         <Table.Tr>
                                             <Table.Th>#</Table.Th>
@@ -1152,7 +1194,9 @@ export function UserDetailsDrawer({
                                                 </Table.Td>
                                                 <Table.Td>
                                                     <Text size='xs'>
-                                                        {formatDateTime(p.createdAt)}
+                                                        {formatDateTime(
+                                                            p.createdAt,
+                                                        )}
                                                     </Text>
                                                 </Table.Td>
                                                 <Table.Td>
@@ -1164,7 +1208,9 @@ export function UserDetailsDrawer({
                                                     </Text>
                                                 </Table.Td>
                                                 <Table.Td>
-                                                    {formatMoney(p.amount)}
+                                                    {formatPaymentAmount(
+                                                        p.amount,
+                                                    )}
                                                 </Table.Td>
                                                 <Table.Td>
                                                     <Badge
@@ -1181,13 +1227,12 @@ export function UserDetailsDrawer({
                                                     </Badge>
                                                 </Table.Td>
                                                 <Table.Td>
-                                                    <Text size='xs' c='dimmed'>
-                                                        {p.providerTransactionId ??
-                                                            '—'}
-                                                        {p.provider
-                                                            ? ` (${p.provider})`
-                                                            : ''}
-                                                    </Text>
+                                                    <PaymentRefCell
+                                                        provider={p.provider}
+                                                        providerTransactionId={
+                                                            p.providerTransactionId
+                                                        }
+                                                    />
                                                 </Table.Td>
                                             </Table.Tr>
                                         ))}
@@ -1285,10 +1330,14 @@ export function UserDetailsDrawer({
                                                                     <ActionIcon
                                                                         variant='subtle'
                                                                         aria-label={`Copy username for ${account.label || account.username}`}
-                                                                        onClick={copy}
+                                                                        onClick={
+                                                                            copy
+                                                                        }
                                                                     >
                                                                         <MdContentCopy
-                                                                            size={14}
+                                                                            size={
+                                                                                14
+                                                                            }
                                                                         />
                                                                     </ActionIcon>
                                                                 )}
@@ -1303,7 +1352,8 @@ export function UserDetailsDrawer({
                                                                 : 'password'
                                                         }
                                                         value={
-                                                            account.password ?? ''
+                                                            account.password ??
+                                                            ''
                                                         }
                                                         placeholder='Not provisioned'
                                                         readOnly
@@ -1318,18 +1368,24 @@ export function UserDetailsDrawer({
                                                                     }
                                                                     onClick={() =>
                                                                         setShowPassword(
-                                                                            (v) =>
+                                                                            (
+                                                                                v,
+                                                                            ) =>
                                                                                 !v,
                                                                         )
                                                                     }
                                                                 >
                                                                     {showPassword ? (
                                                                         <MdVisibilityOff
-                                                                            size={14}
+                                                                            size={
+                                                                                14
+                                                                            }
                                                                         />
                                                                     ) : (
                                                                         <MdVisibility
-                                                                            size={14}
+                                                                            size={
+                                                                                14
+                                                                            }
                                                                         />
                                                                     )}
                                                                 </ActionIcon>
@@ -1339,7 +1395,9 @@ export function UserDetailsDrawer({
                                                                         ''
                                                                     }
                                                                 >
-                                                                    {({ copy }) => (
+                                                                    {({
+                                                                        copy,
+                                                                    }) => (
                                                                         <ActionIcon
                                                                             variant='subtle'
                                                                             aria-label={`Copy password for ${account.label || account.username}`}
@@ -1351,7 +1409,9 @@ export function UserDetailsDrawer({
                                                                             }
                                                                         >
                                                                             <MdContentCopy
-                                                                                size={14}
+                                                                                size={
+                                                                                    14
+                                                                                }
                                                                             />
                                                                         </ActionIcon>
                                                                     )}
@@ -1369,7 +1429,9 @@ export function UserDetailsDrawer({
                                                                 variant='light'
                                                                 leftSection={
                                                                     <MdLockReset
-                                                                        size={14}
+                                                                        size={
+                                                                            14
+                                                                        }
                                                                     />
                                                                 }
                                                                 onClick={() => {
@@ -1389,7 +1451,9 @@ export function UserDetailsDrawer({
                                                                 variant='light'
                                                                 leftSection={
                                                                     <MdSwapHoriz
-                                                                        size={14}
+                                                                        size={
+                                                                            14
+                                                                        }
                                                                     />
                                                                 }
                                                                 onClick={() =>
@@ -1405,7 +1469,9 @@ export function UserDetailsDrawer({
                                                                 variant='light'
                                                                 leftSection={
                                                                     <MdEdit
-                                                                        size={14}
+                                                                        size={
+                                                                            14
+                                                                        }
                                                                     />
                                                                 }
                                                                 onClick={() => {
@@ -1425,7 +1491,9 @@ export function UserDetailsDrawer({
                                                                 variant='light'
                                                                 leftSection={
                                                                     <MdWifiTetheringOff
-                                                                        size={14}
+                                                                        size={
+                                                                            14
+                                                                        }
                                                                     />
                                                                 }
                                                                 onClick={() =>
@@ -1434,7 +1502,8 @@ export function UserDetailsDrawer({
                                                                     )
                                                                 }
                                                             >
-                                                                Disconnect sessions
+                                                                Disconnect
+                                                                sessions
                                                             </Button>
                                                             {account.status ===
                                                             'active' ? (
@@ -1445,7 +1514,9 @@ export function UserDetailsDrawer({
                                                                         color='orange'
                                                                         leftSection={
                                                                             <MdBlock
-                                                                                size={14}
+                                                                                size={
+                                                                                    14
+                                                                                }
                                                                             />
                                                                         }
                                                                         onClick={() =>
@@ -1465,7 +1536,9 @@ export function UserDetailsDrawer({
                                                                         color='red'
                                                                         leftSection={
                                                                             <MdClose
-                                                                                size={14}
+                                                                                size={
+                                                                                    14
+                                                                                }
                                                                             />
                                                                         }
                                                                         onClick={() =>
@@ -1487,7 +1560,9 @@ export function UserDetailsDrawer({
                                                                     color='green'
                                                                     leftSection={
                                                                         <MdCheckCircle
-                                                                            size={14}
+                                                                            size={
+                                                                                14
+                                                                            }
                                                                         />
                                                                     }
                                                                     onClick={() =>
@@ -1507,7 +1582,9 @@ export function UserDetailsDrawer({
                                                                 variant='subtle'
                                                                 rightSection={
                                                                     <MdOpenInNew
-                                                                        size={14}
+                                                                        size={
+                                                                            14
+                                                                        }
                                                                     />
                                                                 }
                                                                 onClick={() =>
@@ -1523,7 +1600,9 @@ export function UserDetailsDrawer({
                                                                 variant='subtle'
                                                                 rightSection={
                                                                     <MdOpenInNew
-                                                                        size={14}
+                                                                        size={
+                                                                            14
+                                                                        }
                                                                     />
                                                                 }
                                                                 onClick={() =>
@@ -1540,10 +1619,11 @@ export function UserDetailsDrawer({
                                                             c='dimmed'
                                                         >
                                                             Rotating the
-                                                            password, reassigning
-                                                            the network,
-                                                            suspending or closing
-                                                            the account all
+                                                            password,
+                                                            reassigning the
+                                                            network, suspending
+                                                            or closing the
+                                                            account all
                                                             disconnect its live
                                                             PPP sessions.
                                                         </Text>
@@ -1600,7 +1680,8 @@ export function UserDetailsDrawer({
             >
                 <Stack>
                     <Text size='sm' c='dimmed'>
-                        Banned users cannot log in to the portals until unbanned.
+                        Banned users cannot log in to the portals until
+                        unbanned.
                     </Text>
                     <Textarea
                         label='Reason (optional)'
@@ -1669,10 +1750,10 @@ export function UserDetailsDrawer({
             >
                 <Stack>
                     <Text size='sm'>
-                        This removes the RADIUS provisioning and terminates every
-                        live session of this activation. Expiry and remaining
-                        time are preserved, but the package is hidden from the
-                        customer until it is reactivated.
+                        This removes the RADIUS provisioning and terminates
+                        every live session of this activation. Expiry and
+                        remaining time are preserved, but the package is hidden
+                        from the customer until it is reactivated.
                     </Text>
                     <Group justify='flex-end'>
                         <Button
@@ -1739,7 +1820,9 @@ export function UserDetailsDrawer({
                         label='New password (optional)'
                         description='Leave empty to generate a random one. Min 6 characters.'
                         value={pppoeNewPassword}
-                        onChange={(e) => setPppoeNewPassword(e.currentTarget.value)}
+                        onChange={(e) =>
+                            setPppoeNewPassword(e.currentTarget.value)
+                        }
                     />
                     <Button
                         onClick={() => void submitPppoePassword()}
@@ -1770,7 +1853,9 @@ export function UserDetailsDrawer({
                     <Select
                         label='NAS device'
                         placeholder={
-                            nasDevices === null ? 'Loading devices…' : 'Pick a network'
+                            nasDevices === null
+                                ? 'Loading devices…'
+                                : 'Pick a network'
                         }
                         data={(nasDevices ?? []).map((device) => ({
                             value: device.id,
@@ -1897,10 +1982,15 @@ export function UserDetailsDrawer({
                         label='Label'
                         placeholder='e.g. Home line, Shop router'
                         value={pppoeLabelValue}
-                        onChange={(e) => setPppoeLabelValue(e.currentTarget.value)}
+                        onChange={(e) =>
+                            setPppoeLabelValue(e.currentTarget.value)
+                        }
                         maxLength={80}
                     />
-                    <Button onClick={() => void submitPppoeLabel()} loading={busy}>
+                    <Button
+                        onClick={() => void submitPppoeLabel()}
+                        loading={busy}
+                    >
                         Save label
                     </Button>
                 </Stack>

@@ -20,6 +20,7 @@ import { useSearchParams } from 'react-router-dom';
 import { MdClose, MdSearch } from 'react-icons/md';
 
 import { PaymentDetailsDrawer } from '@/components/Payments/PaymentDetailsDrawer';
+import { PaymentRefCell } from '@/components/Payments/PaymentRefCell';
 import {
     SortableTableHeader,
     type SortDirection,
@@ -57,23 +58,6 @@ function SummaryCard({ label, value }: { label: string; value: string }) {
                 {value}
             </Text>
         </Card>
-    );
-}
-
-function formatProviderReference(
-    payment: AdminPaymentList['payments'][number],
-) {
-    if (
-        payment.provider === 'internal' &&
-        payment.providerTransactionId?.startsWith('free:')
-    ) {
-        return 'free';
-    }
-
-    return (
-        payment.providerTransactionId ??
-        payment.provider?.split('-')[0] ??
-        '—'
     );
 }
 
@@ -380,17 +364,12 @@ export default function PaymentsPage() {
                                             </Badge>
                                         </Table.Td>
                                         <Table.Td>
-                                            <Text
-                                                size='xs'
-                                                c='dimmed'
-                                                truncate
-                                                maw={200}
-                                                title={formatProviderReference(
-                                                    p,
-                                                )}
-                                            >
-                                                {formatProviderReference(p)}
-                                            </Text>
+                                            <PaymentRefCell
+                                                provider={p.provider}
+                                                providerTransactionId={
+                                                    p.providerTransactionId
+                                                }
+                                            />
                                         </Table.Td>
                                     </Table.Tr>
                                 ))}

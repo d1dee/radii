@@ -15,6 +15,7 @@ import {
 import type { ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
 
+import { TablePagination } from '@/components/TablePagination';
 import {
     getAdminPackage,
     getAllNasDevices,
@@ -23,13 +24,13 @@ import {
     type PackagePaymentStatus,
     type PackageRow,
 } from '@/lib/api';
-import { TablePagination } from '@/components/TablePagination';
 import { warnBackgroundFailure } from '@/lib/clientError';
 import {
     formatDate,
     formatPackagePrice,
     formatPackageQuota,
     formatPackageRate,
+    formatPaymentAmount,
 } from '@/lib/format';
 import { useAdminSettings } from '@/lib/settings';
 
@@ -122,10 +123,7 @@ export function PackageDetailsDrawer({
                     Object.fromEntries(result.data.map((d) => [d.id, d.name])),
                 );
             } else {
-                warnBackgroundFailure(
-                    'load package detail NAS names',
-                    result,
-                );
+                warnBackgroundFailure('load package detail NAS names', result);
             }
         })();
     }, []);
@@ -393,7 +391,7 @@ export function PackageDetailsDrawer({
                     {analytics.recentPayments.payments.length === 0 ? (
                         <Text c='dimmed'>No payments yet.</Text>
                     ) : (
-                        <Table striped withTableBorder stickyHeader>
+                        <Table striped stickyHeader>
                             <Table.Thead>
                                 <Table.Tr>
                                     <Table.Th>#</Table.Th>
@@ -404,34 +402,41 @@ export function PackageDetailsDrawer({
                                 </Table.Tr>
                             </Table.Thead>
                             <Table.Tbody>
-                                {analytics.recentPayments.payments.map((p, i) => (
-                                    <Table.Tr key={p.id}>
-                                        <Table.Td>
-                                            {(paymentsPage - 1) * perPage + i + 1}
-                                        </Table.Td>
-                                        <Table.Td>{p.phoneNumber}</Table.Td>
-                                        <Table.Td>
-                                            Ksh{' '}
-                                            {Number(p.amount).toLocaleString()}
-                                        </Table.Td>
-                                        <Table.Td>
-                                            <Badge
-                                                size='sm'
-                                                color={
-                                                    STATUS_BADGE[p.status].color
-                                                }
-                                                variant='light'
-                                            >
-                                                {STATUS_BADGE[p.status].label}
-                                            </Badge>
-                                        </Table.Td>
-                                        <Table.Td>
-                                            {new Date(
-                                                p.createdAt,
-                                            ).toLocaleString()}
-                                        </Table.Td>
-                                    </Table.Tr>
-                                ))}
+                                {analytics.recentPayments.payments.map(
+                                    (p, i) => (
+                                        <Table.Tr key={p.id}>
+                                            <Table.Td>
+                                                {(paymentsPage - 1) * perPage +
+                                                    i +
+                                                    1}
+                                            </Table.Td>
+                                            <Table.Td>{p.phoneNumber}</Table.Td>
+                                            <Table.Td>
+                                                {formatPaymentAmount(p.amount)}
+                                            </Table.Td>
+                                            <Table.Td>
+                                                <Badge
+                                                    size='sm'
+                                                    color={
+                                                        STATUS_BADGE[p.status]
+                                                            .color
+                                                    }
+                                                    variant='light'
+                                                >
+                                                    {
+                                                        STATUS_BADGE[p.status]
+                                                            .label
+                                                    }
+                                                </Badge>
+                                            </Table.Td>
+                                            <Table.Td>
+                                                {new Date(
+                                                    p.createdAt,
+                                                ).toLocaleString()}
+                                            </Table.Td>
+                                        </Table.Tr>
+                                    ),
+                                )}
                             </Table.Tbody>
                         </Table>
                     )}

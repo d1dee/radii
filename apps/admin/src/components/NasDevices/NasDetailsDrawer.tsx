@@ -15,6 +15,7 @@ import {
 import type { ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
 
+import { TablePagination } from '@/components/TablePagination';
 import {
     getAllAdminPackages,
     getNasDevice,
@@ -26,9 +27,12 @@ import {
     type PackagePaymentStatus,
     type PackageRow,
 } from '@/lib/api';
-import { TablePagination } from '@/components/TablePagination';
+import {
+    formatDate,
+    formatPackagePrice,
+    formatPaymentAmount,
+} from '@/lib/format';
 import { nasDeviceOsLabel, nasDeviceStatusColors } from '@/lib/nas';
-import { formatDate, formatPackagePrice } from '@/lib/format';
 import { useAdminSettings } from '@/lib/settings';
 
 const STATUS_BADGE: Record<
@@ -95,9 +99,7 @@ export function NasDetailsDrawer({
     const { settings } = useAdminSettings();
     const perPage = settings.dashboard.perPage;
     const [device, setDevice] = useState<NasDeviceRow | null>(null);
-    const [analytics, setAnalytics] = useState<NasDeviceAnalytics | null>(
-        null,
-    );
+    const [analytics, setAnalytics] = useState<NasDeviceAnalytics | null>(null);
     const [linkedPackages, setLinkedPackages] = useState<PackageRow[]>([]);
     const [scriptRow, setScriptRow] = useState<NasSetupScriptRow | null>(null);
     const [error, setError] = useState<string | null>(null);
@@ -158,7 +160,9 @@ export function NasDetailsDrawer({
 
     const repeatRate =
         analytics && analytics.buyers.unique > 0
-            ? Math.round((analytics.buyers.repeat / analytics.buyers.unique) * 100)
+            ? Math.round(
+                  (analytics.buyers.repeat / analytics.buyers.unique) * 100,
+              )
             : 0;
 
     return (
@@ -347,7 +351,7 @@ export function NasDetailsDrawer({
                     {analytics.recentPayments.payments.length === 0 ? (
                         <Text c='dimmed'>No payments yet.</Text>
                     ) : (
-                        <Table striped withTableBorder stickyHeader>
+                        <Table striped stickyHeader>
                             <Table.Thead>
                                 <Table.Tr>
                                     <Table.Th>#</Table.Th>
@@ -359,35 +363,44 @@ export function NasDetailsDrawer({
                                 </Table.Tr>
                             </Table.Thead>
                             <Table.Tbody>
-                                {analytics.recentPayments.payments.map((p, i) => (
-                                    <Table.Tr key={p.id}>
-                                        <Table.Td>
-                                            {(paymentsPage - 1) * perPage + i + 1}
-                                        </Table.Td>
-                                        <Table.Td>{p.phoneNumber}</Table.Td>
-                                        <Table.Td>{p.packageTitle}</Table.Td>
-                                        <Table.Td>
-                                            Ksh{' '}
-                                            {Number(p.amount).toLocaleString()}
-                                        </Table.Td>
-                                        <Table.Td>
-                                            <Badge
-                                                size='sm'
-                                                color={
-                                                    STATUS_BADGE[p.status].color
-                                                }
-                                                variant='light'
-                                            >
-                                                {STATUS_BADGE[p.status].label}
-                                            </Badge>
-                                        </Table.Td>
-                                        <Table.Td>
-                                            {new Date(
-                                                p.createdAt,
-                                            ).toLocaleString()}
-                                        </Table.Td>
-                                    </Table.Tr>
-                                ))}
+                                {analytics.recentPayments.payments.map(
+                                    (p, i) => (
+                                        <Table.Tr key={p.id}>
+                                            <Table.Td>
+                                                {(paymentsPage - 1) * perPage +
+                                                    i +
+                                                    1}
+                                            </Table.Td>
+                                            <Table.Td>{p.phoneNumber}</Table.Td>
+                                            <Table.Td>
+                                                {p.packageTitle}
+                                            </Table.Td>
+                                            <Table.Td>
+                                                {formatPaymentAmount(p.amount)}
+                                            </Table.Td>
+                                            <Table.Td>
+                                                <Badge
+                                                    size='sm'
+                                                    color={
+                                                        STATUS_BADGE[p.status]
+                                                            .color
+                                                    }
+                                                    variant='light'
+                                                >
+                                                    {
+                                                        STATUS_BADGE[p.status]
+                                                            .label
+                                                    }
+                                                </Badge>
+                                            </Table.Td>
+                                            <Table.Td>
+                                                {new Date(
+                                                    p.createdAt,
+                                                ).toLocaleString()}
+                                            </Table.Td>
+                                        </Table.Tr>
+                                    ),
+                                )}
                             </Table.Tbody>
                         </Table>
                     )}

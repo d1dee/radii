@@ -27,7 +27,7 @@ import {
 import {
     formatBytes,
     formatDateTime,
-    formatMoney,
+    formatPaymentAmount,
     formatSeconds,
     formatSpeed,
 } from '@/lib/format';
@@ -395,7 +395,9 @@ export function SessionDetailsDrawer({
                                 <>
                                     <Group gap='xs'>
                                         <Text fw={600}>
-                                            {formatMoney(detail.payment.amount)}
+                                            {formatPaymentAmount(
+                                                detail.payment.amount,
+                                            )}
                                         </Text>
                                         <Badge
                                             size='xs'
