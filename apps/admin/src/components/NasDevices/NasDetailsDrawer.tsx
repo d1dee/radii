@@ -28,7 +28,7 @@ import {
 } from '@/lib/api';
 import { TablePagination } from '@/components/TablePagination';
 import { nasDeviceOsLabel, nasDeviceStatusColors } from '@/lib/nas';
-import { formatDate } from '@/lib/format';
+import { formatDate, formatPackagePrice } from '@/lib/format';
 import { useAdminSettings } from '@/lib/settings';
 
 const STATUS_BADGE: Record<
@@ -275,8 +275,8 @@ export function NasDetailsDrawer({
                                     variant='light'
                                     color={pkg.isActive ? undefined : 'gray'}
                                 >
-                                    {pkg.title} · Ksh{' '}
-                                    {Number(pkg.price).toLocaleString()}
+                                    {pkg.title} ·{' '}
+                                    {formatPackagePrice(pkg.price)}
                                 </Badge>
                             ))}
                         </Group>

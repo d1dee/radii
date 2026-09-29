@@ -31,7 +31,12 @@ import {
 } from '@/lib/api';
 import { useAutoRefresh } from '@/lib/autoRefresh';
 import { warnBackgroundFailure } from '@/lib/clientError';
-import { formatMoney } from '@/lib/format';
+import {
+    formatMoney,
+    formatPackagePrice,
+    formatPackageQuota,
+    formatPackageRate,
+} from '@/lib/format';
 import { notifyResult } from '@/lib/notify';
 import { useAdminSettings } from '@/lib/settings';
 
@@ -243,12 +248,8 @@ export default function PackagesPage() {
                                             <Table.Th>Price</Table.Th>
                                             <Table.Th>Session</Table.Th>
                                             <Table.Th>Devices</Table.Th>
-                                            <Table.Th>
-                                                Rate Up/Down (Kbps)
-                                            </Table.Th>
-                                            <Table.Th>
-                                                Quota Up/Down (KB)
-                                            </Table.Th>
+                                            <Table.Th>Rate Up/Down</Table.Th>
+                                            <Table.Th>Quota Up/Down</Table.Th>
                                             <Table.Th>Expiry</Table.Th>
                                             <Table.Th>Status</Table.Th>
                                             <Table.Th ta='right'>
@@ -277,7 +278,9 @@ export default function PackagesPage() {
                                                     {pkg.category}
                                                 </Table.Td>
                                                 <Table.Td>
-                                                    {formatMoney(pkg.price)}
+                                                    {formatPackagePrice(
+                                                        pkg.price,
+                                                    )}
                                                 </Table.Td>
                                                 <Table.Td>
                                                     {pkg.noExpiry
@@ -288,13 +291,22 @@ export default function PackagesPage() {
                                                     {pkg.maxDevices}
                                                 </Table.Td>
                                                 <Table.Td>
-                                                    {pkg.uploadRate} /{' '}
-                                                    {pkg.downloadRate}
+                                                    {formatPackageRate(
+                                                        pkg.uploadRate,
+                                                    )}{' '}
+                                                    /{' '}
+                                                    {formatPackageRate(
+                                                        pkg.downloadRate,
+                                                    )}
                                                 </Table.Td>
                                                 <Table.Td>
-                                                    {pkg.uploadQuota.toLocaleString()}{' '}
+                                                    {formatPackageQuota(
+                                                        pkg.uploadQuota,
+                                                    )}{' '}
                                                     /{' '}
-                                                    {pkg.downloadQuota.toLocaleString()}
+                                                    {formatPackageQuota(
+                                                        pkg.downloadQuota,
+                                                    )}
                                                 </Table.Td>
                                                 <Table.Td>
                                                     {pkg.noExpiry

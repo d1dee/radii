@@ -25,7 +25,12 @@ import {
 } from '@/lib/api';
 import { TablePagination } from '@/components/TablePagination';
 import { warnBackgroundFailure } from '@/lib/clientError';
-import { formatDate } from '@/lib/format';
+import {
+    formatDate,
+    formatPackagePrice,
+    formatPackageQuota,
+    formatPackageRate,
+} from '@/lib/format';
 import { useAdminSettings } from '@/lib/settings';
 
 const STATUS_BADGE: Record<
@@ -203,7 +208,7 @@ export function PackageDetailsDrawer({
                         <Grid.Col span={6}>
                             <DetailItem
                                 label='Price'
-                                value={`Ksh ${Number(pkg.price).toLocaleString()}`}
+                                value={formatPackagePrice(pkg.price)}
                             />
                         </Grid.Col>
                         <Grid.Col span={6}>
@@ -225,13 +230,13 @@ export function PackageDetailsDrawer({
                         <Grid.Col span={6}>
                             <DetailItem
                                 label='Rate Up/Down'
-                                value={`${pkg.uploadRate} / ${pkg.downloadRate} Kbps`}
+                                value={`${formatPackageRate(pkg.uploadRate)} / ${formatPackageRate(pkg.downloadRate)}`}
                             />
                         </Grid.Col>
                         <Grid.Col span={6}>
                             <DetailItem
                                 label='Quota Up/Down'
-                                value={`${pkg.uploadQuota.toLocaleString()} / ${pkg.downloadQuota.toLocaleString()} KB`}
+                                value={`${formatPackageQuota(pkg.uploadQuota)} / ${formatPackageQuota(pkg.downloadQuota)}`}
                             />
                         </Grid.Col>
                         <Grid.Col span={6}>
@@ -239,7 +244,7 @@ export function PackageDetailsDrawer({
                                 label='Fair Usage'
                                 value={
                                     pkg.fairUsageLimit > 0
-                                        ? `${pkg.fairUsageLimit.toLocaleString()} KB / ${pkg.fairUsageWindowUnit === 'session' ? 'session' : `${pkg.fairUsageWindowValue} ${pkg.fairUsageWindowUnit}`}`
+                                        ? `${formatPackageQuota(pkg.fairUsageLimit)} / ${pkg.fairUsageWindowUnit === 'session' ? 'session' : `${pkg.fairUsageWindowValue} ${pkg.fairUsageWindowUnit}`}`
                                         : 'Disabled'
                                 }
                             />
@@ -249,7 +254,7 @@ export function PackageDetailsDrawer({
                                 label='FUP Rate Up/Down'
                                 value={
                                     pkg.fairUsageLimit > 0
-                                        ? `${pkg.fairUsageUploadRate} / ${pkg.fairUsageDownloadRate} Kbps`
+                                        ? `${formatPackageRate(pkg.fairUsageUploadRate)} / ${formatPackageRate(pkg.fairUsageDownloadRate)}`
                                         : '—'
                                 }
                             />
@@ -259,7 +264,7 @@ export function PackageDetailsDrawer({
                                 label='Burst Rate Up/Down'
                                 value={
                                     pkg.burstTime > 0
-                                        ? `${pkg.burstUploadRate} / ${pkg.burstDownloadRate} Kbps`
+                                        ? `${formatPackageRate(pkg.burstUploadRate)} / ${formatPackageRate(pkg.burstDownloadRate)}`
                                         : 'Disabled'
                                 }
                             />

@@ -79,6 +79,7 @@ import {
     formatDate,
     formatDateTime,
     formatMoney,
+    formatPackageRate,
     formatSeconds,
 } from '@/lib/format';
 import { notifyResult } from '@/lib/notify';
@@ -993,16 +994,16 @@ export function UserDetailsDrawer({
                                                                     c='dimmed'
                                                                 >
                                                                     Throttled to{' '}
-                                                                    {
+                                                                    {formatPackageRate(
                                                                         a.fairUsage
-                                                                            .uploadRate
-                                                                    }{' '}
+                                                                            .uploadRate,
+                                                                    )}{' '}
                                                                     /{' '}
-                                                                    {
+                                                                    {formatPackageRate(
                                                                         a.fairUsage
-                                                                            .downloadRate
-                                                                    }{' '}
-                                                                    Kbps up/down
+                                                                            .downloadRate,
+                                                                    )}{' '}
+                                                                    up/down
                                                                 </Text>
                                                             ) : (
                                                                 <Text

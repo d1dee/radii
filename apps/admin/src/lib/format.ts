@@ -70,6 +70,10 @@ export function formatMoney(amount: number | string): string {
     })}`;
 }
 
+export function formatPackagePrice(price: number | string): string {
+    return Number(price) === 0 ? 'Free' : formatMoney(price);
+}
+
 export function formatBytes(octets: number): string {
     if (!Number.isFinite(octets) || octets <= 0) return '0 B';
     const units = ['B', 'KB', 'MB', 'GB', 'TB'];
@@ -81,6 +85,26 @@ export function formatBytes(octets: number): string {
     }
     return `${value.toLocaleString(undefined, {
         maximumFractionDigits: value >= 100 ? 0 : 1,
+    })} ${units[unit]}`;
+}
+
+export function formatPackageQuota(quotaKb: number): string {
+    return quotaKb === 0 ? 'Unlimited' : formatBytes(quotaKb * 1024);
+}
+
+export function formatPackageRate(rateKbps: number): string {
+    if (rateKbps === 0) return 'Unlimited';
+
+    const units = ['Kbps', 'Mbps', 'Gbps', 'Tbps'];
+    let value = rateKbps;
+    let unit = 0;
+    while (value >= 1000 && unit < units.length - 1) {
+        value /= 1000;
+        unit++;
+    }
+
+    return `${value.toLocaleString(undefined, {
+        maximumFractionDigits: value >= 100 ? 0 : 2,
     })} ${units[unit]}`;
 }
 
