@@ -27,6 +27,10 @@ import { MdAdd, MdDelete, MdEdit, MdSearch, MdTerminal } from 'react-icons/md';
 import { useNavigate } from 'react-router-dom';
 
 import { NasDetailsDrawer } from '@/components/NasDevices/NasDetailsDrawer';
+import {
+    SortableTableHeader,
+    type SortDirection,
+} from '@/components/SortableTableHeader';
 import { TablePagination } from '@/components/TablePagination';
 import {
     generateNasSetupScript,
@@ -35,6 +39,7 @@ import {
     getNasSetupScript,
     type GenerateSetupScriptInput,
     type NasDeviceRow,
+    type NasDeviceSortKey,
     type NasDeviceStatus,
     type NasSetupScriptRow,
 } from '@/lib/api';
@@ -101,6 +106,9 @@ export default function NasDevicesPage() {
     const [search, setSearch] = useState('');
     const [debouncedSearch] = useDebouncedValue(search, 300);
     const [status, setStatus] = useState<string | null>(null);
+    const [connection, setConnection] = useState<string | null>(null);
+    const [sortBy, setSortBy] = useState<NasDeviceSortKey | null>(null);
+    const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
     const loadRequest = useRef(0);
 
     const [scriptDevice, setScriptDevice] = useState<NasDeviceRow | null>(null);
@@ -122,34 +130,61 @@ export default function NasDevicesPage() {
         validate: schemaResolver(generateSetupScriptSchema),
     });
 
-    const load = useCallback(async (pageToLoad: number, silent = false) => {
-        const requestId = ++loadRequest.current;
-        if (!silent) {
-            setLoading(true);
+    const load = useCallback(
+        async (pageToLoad: number, silent = false) => {
+            const requestId = ++loadRequest.current;
+            if (!silent) {
+                setLoading(true);
+                setError(null);
+            }
+            const result = await getNasDevices({
+                q: debouncedSearch.trim() || undefined,
+                status: (status as NasDeviceStatus) || undefined,
+                online:
+                    connection === null ? undefined : connection === 'online',
+                sortBy: sortBy ?? undefined,
+                sortDirection: sortBy ? sortDirection : undefined,
+                page: pageToLoad,
+                perPage,
+            });
+            if (requestId !== loadRequest.current) return;
+            if (!silent) setLoading(false);
+            if (!result.success) {
+                if (silent)
+                    warnBackgroundFailure('refresh NAS devices', result);
+                else setError(result.message || 'Failed to load NAS devices');
+                return;
+            }
             setError(null);
-        }
-        const result = await getNasDevices({
-            q: debouncedSearch.trim() || undefined,
-            status: (status as NasDeviceStatus) || undefined,
-            page: pageToLoad,
+            setDevices(result.data?.nasDevices ?? []);
+            setTotal(result.data?.total ?? 0);
+            setOnlineTotal(result.data?.onlineTotal ?? 0);
+        },
+        [
+            debouncedSearch,
+            status,
+            connection,
+            sortBy,
+            sortDirection,
             perPage,
-        });
-        if (requestId !== loadRequest.current) return;
-        if (!silent) setLoading(false);
-        if (!result.success) {
-            if (silent) warnBackgroundFailure('refresh NAS devices', result);
-            else setError(result.message || 'Failed to load NAS devices');
-            return;
-        }
-        setError(null);
-        setDevices(result.data?.nasDevices ?? []);
-        setTotal(result.data?.total ?? 0);
-        setOnlineTotal(result.data?.onlineTotal ?? 0);
-    }, [debouncedSearch, status, perPage]);
+        ],
+    );
 
     useEffect(() => {
         setPage(1);
-    }, [debouncedSearch, status, perPage]);
+    }, [
+        debouncedSearch,
+        status,
+        connection,
+        sortBy,
+        sortDirection,
+        perPage,
+    ]);
+
+    const handleSort = (key: NasDeviceSortKey, direction: SortDirection) => {
+        setSortBy(key);
+        setSortDirection(direction);
+    };
 
     useEffect(() => {
         if (!loaded) return;
@@ -331,6 +366,17 @@ export default function NasDevicesPage() {
                     data={nasDeviceStatusOptions}
                     w={160}
                 />
+                <Select
+                    placeholder='Connection'
+                    clearable
+                    value={connection}
+                    onChange={setConnection}
+                    data={[
+                        { value: 'online', label: 'Online' },
+                        { value: 'offline', label: 'Offline' },
+                    ]}
+                    w={160}
+                />
             </Group>
 
             {loading ? (
@@ -341,7 +387,7 @@ export default function NasDevicesPage() {
                 <Text c='red'>{error}</Text>
             ) : devices.length === 0 ? (
                 <Text c='dimmed' py='xl' ta='center'>
-                    {debouncedSearch || status
+                    {debouncedSearch || status || connection
                         ? 'No devices match.'
                         : 'No NAS devices yet. Add one to get started.'}
                 </Text>
@@ -351,16 +397,71 @@ export default function NasDevicesPage() {
                         <Table.Thead>
                             <Table.Tr>
                                 <Table.Th>#</Table.Th>
-                                <Table.Th>Name</Table.Th>
-                                <Table.Th>IP Address</Table.Th>
+                                <SortableTableHeader
+                                    label='Name'
+                                    sortKey='name'
+                                    sortBy={sortBy}
+                                    sortDirection={sortDirection}
+                                    onSort={handleSort}
+                                />
+                                <SortableTableHeader
+                                    label='IP Address'
+                                    sortKey='ipAddress'
+                                    sortBy={sortBy}
+                                    sortDirection={sortDirection}
+                                    onSort={handleSort}
+                                />
                                 <Table.Th>OS</Table.Th>
-                                <Table.Th>Model</Table.Th>
-                                <Table.Th>Serial Number</Table.Th>
-                                <Table.Th>Firmware</Table.Th>
-                                <Table.Th>Location</Table.Th>
-                                <Table.Th>Connection</Table.Th>
-                                <Table.Th>Last seen</Table.Th>
-                                <Table.Th>Status</Table.Th>
+                                <SortableTableHeader
+                                    label='Model'
+                                    sortKey='model'
+                                    sortBy={sortBy}
+                                    sortDirection={sortDirection}
+                                    onSort={handleSort}
+                                />
+                                <SortableTableHeader
+                                    label='Serial Number'
+                                    sortKey='serialNumber'
+                                    sortBy={sortBy}
+                                    sortDirection={sortDirection}
+                                    onSort={handleSort}
+                                />
+                                <SortableTableHeader
+                                    label='Firmware'
+                                    sortKey='firmwareVersion'
+                                    sortBy={sortBy}
+                                    sortDirection={sortDirection}
+                                    onSort={handleSort}
+                                />
+                                <SortableTableHeader
+                                    label='Location'
+                                    sortKey='location'
+                                    sortBy={sortBy}
+                                    sortDirection={sortDirection}
+                                    onSort={handleSort}
+                                />
+                                <SortableTableHeader
+                                    label='Connection'
+                                    sortKey='online'
+                                    sortBy={sortBy}
+                                    sortDirection={sortDirection}
+                                    onSort={handleSort}
+                                />
+                                <SortableTableHeader
+                                    label='Last seen'
+                                    sortKey='lastSeen'
+                                    sortBy={sortBy}
+                                    sortDirection={sortDirection}
+                                    onSort={handleSort}
+                                    initialDirection='desc'
+                                />
+                                <SortableTableHeader
+                                    label='Status'
+                                    sortKey='status'
+                                    sortBy={sortBy}
+                                    sortDirection={sortDirection}
+                                    onSort={handleSort}
+                                />
                                 <Table.Th ta='right'>Actions</Table.Th>
                             </Table.Tr>
                         </Table.Thead>
@@ -391,10 +492,14 @@ export default function NasDevicesPage() {
                                     </Table.Td>
                                     <Table.Td>
                                         <Badge
-                                            color={device.online ? 'green' : 'gray'}
+                                            color={
+                                                device.online ? 'green' : 'gray'
+                                            }
                                             variant='light'
                                         >
-                                            {device.online ? 'Online' : 'Offline'}
+                                            {device.online
+                                                ? 'Online'
+                                                : 'Offline'}
                                         </Badge>
                                     </Table.Td>
                                     <Table.Td>

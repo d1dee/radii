@@ -22,11 +22,16 @@ import { MdAdd, MdDelete, MdEdit, MdSearch } from 'react-icons/md';
 import { useNavigate } from 'react-router-dom';
 
 import { PackageDetailsDrawer } from '@/components/Packages/PackageDetailsDrawer';
+import {
+    SortableTableHeader,
+    type SortDirection,
+} from '@/components/SortableTableHeader';
 import { TablePagination } from '@/components/TablePagination';
 import {
     deleteAdminPackage,
     getAdminPackages,
     type PackageRow,
+    type PackageSortKey,
     type PackageType,
 } from '@/lib/api';
 import { useAutoRefresh } from '@/lib/autoRefresh';
@@ -83,6 +88,8 @@ export default function PackagesPage() {
     const [search, setSearch] = useState('');
     const [debouncedSearch] = useDebouncedValue(search, 300);
     const [status, setStatus] = useState<string | null>(null);
+    const [sortBy, setSortBy] = useState<PackageSortKey | null>(null);
+    const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
     const loadRequest = useRef(0);
 
     const load = useCallback(
@@ -96,6 +103,8 @@ export default function PackagesPage() {
                 type: activeTab,
                 q: debouncedSearch.trim() || undefined,
                 status: (status as 'active' | 'inactive') || undefined,
+                sortBy: sortBy ?? undefined,
+                sortDirection: sortBy ? sortDirection : undefined,
                 page: pageToLoad,
                 perPage,
             });
@@ -110,12 +119,17 @@ export default function PackagesPage() {
             setPackages(result.data?.packages ?? []);
             setTotal(result.data?.total ?? 0);
         },
-        [activeTab, debouncedSearch, status, perPage],
+        [activeTab, debouncedSearch, status, sortBy, sortDirection, perPage],
     );
 
     useEffect(() => {
         setPage(1);
-    }, [activeTab, debouncedSearch, status, perPage]);
+    }, [activeTab, debouncedSearch, status, sortBy, sortDirection, perPage]);
+
+    const handleSort = (key: PackageSortKey, direction: SortDirection) => {
+        setSortBy(key);
+        setSortDirection(direction);
+    };
 
     useEffect(() => {
         if (!loaded) return;
@@ -243,15 +257,51 @@ export default function PackagesPage() {
                                     <Table.Thead>
                                         <Table.Tr>
                                             <Table.Th>#</Table.Th>
-                                            <Table.Th>Title</Table.Th>
-                                            <Table.Th>Category</Table.Th>
-                                            <Table.Th>Price</Table.Th>
-                                            <Table.Th>Session</Table.Th>
-                                            <Table.Th>Devices</Table.Th>
+                                            <SortableTableHeader
+                                                label='Title'
+                                                sortKey='title'
+                                                sortBy={sortBy}
+                                                sortDirection={sortDirection}
+                                                onSort={handleSort}
+                                            />
+                                            <SortableTableHeader
+                                                label='Category'
+                                                sortKey='category'
+                                                sortBy={sortBy}
+                                                sortDirection={sortDirection}
+                                                onSort={handleSort}
+                                            />
+                                            <SortableTableHeader
+                                                label='Price'
+                                                sortKey='price'
+                                                sortBy={sortBy}
+                                                sortDirection={sortDirection}
+                                                onSort={handleSort}
+                                            />
+                                            <SortableTableHeader
+                                                label='Session'
+                                                sortKey='sessionLength'
+                                                sortBy={sortBy}
+                                                sortDirection={sortDirection}
+                                                onSort={handleSort}
+                                            />
+                                            <SortableTableHeader
+                                                label='Devices'
+                                                sortKey='maxDevices'
+                                                sortBy={sortBy}
+                                                sortDirection={sortDirection}
+                                                onSort={handleSort}
+                                            />
                                             <Table.Th>Rate Up/Down</Table.Th>
                                             <Table.Th>Quota Up/Down</Table.Th>
                                             <Table.Th>Expiry</Table.Th>
-                                            <Table.Th>Status</Table.Th>
+                                            <SortableTableHeader
+                                                label='Status'
+                                                sortKey='isActive'
+                                                sortBy={sortBy}
+                                                sortDirection={sortDirection}
+                                                onSort={handleSort}
+                                            />
                                             <Table.Th ta='right'>
                                                 Actions
                                             </Table.Th>

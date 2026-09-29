@@ -27,6 +27,13 @@ import {
 type InsertPackage = typeof packages.$inferInsert;
 export type PackageRow = typeof packages.$inferSelect;
 export type PackageType = 'hotspot' | 'pppoe';
+export type AdminPackageSortBy =
+    | 'title'
+    | 'category'
+    | 'price'
+    | 'sessionLength'
+    | 'maxDevices'
+    | 'isActive';
 
 // Only packages explicitly linked to the given NAS device are returned; a
 // package without any link rows never shows up. Pass nasDeviceId=null to list
@@ -111,6 +118,8 @@ export async function listAdminPackages(opts: {
     type?: PackageType;
     q?: string;
     status?: 'active' | 'inactive';
+    sortBy?: AdminPackageSortBy;
+    sortDirection?: 'asc' | 'desc';
     page: number;
     perPage: number;
 }) {
@@ -131,18 +140,37 @@ export async function listAdminPackages(opts: {
         );
     }
     const where = and(...conditions);
+    const direction = opts.sortDirection === 'asc' ? asc : desc;
+    const orderBy = (() => {
+        switch (opts.sortBy) {
+            case 'title':
+                return [direction(packages.title), asc(packages.id)];
+            case 'category':
+                return [direction(packages.category), asc(packages.id)];
+            case 'price':
+                return [direction(packages.price), asc(packages.id)];
+            case 'sessionLength':
+                return [direction(packages.sessionLength), asc(packages.id)];
+            case 'maxDevices':
+                return [direction(packages.maxDevices), asc(packages.id)];
+            case 'isActive':
+                return [direction(packages.isActive), asc(packages.id)];
+            default:
+                return [
+                    asc(packages.type),
+                    asc(packages.category),
+                    asc(packages.title),
+                    asc(packages.id),
+                ];
+        }
+    })();
     const [countRows, rows] = await Promise.all([
         db.select({ total: count(packages.id) }).from(packages).where(where),
         db
             .select()
             .from(packages)
             .where(where)
-            .orderBy(
-                packages.type,
-                packages.category,
-                asc(packages.title),
-                asc(packages.id),
-            )
+            .orderBy(...orderBy)
             .limit(opts.perPage)
             .offset((opts.page - 1) * opts.perPage),
     ]);

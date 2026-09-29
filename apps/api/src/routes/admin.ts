@@ -94,6 +94,70 @@ function isForeignKeyViolation(e: unknown): boolean {
 }
 
 const packageTypeSchema = z.enum(['hotspot', 'pppoe']);
+const sortDirectionSchema = z.enum(['asc', 'desc']);
+const packageSortSchema = z.object({
+    sortBy: z
+        .enum([
+            'title',
+            'category',
+            'price',
+            'sessionLength',
+            'maxDevices',
+            'isActive',
+        ])
+        .optional(),
+    sortDirection: sortDirectionSchema.optional(),
+});
+const nasDeviceSortSchema = z.object({
+    sortBy: z
+        .enum([
+            'name',
+            'ipAddress',
+            'model',
+            'serialNumber',
+            'firmwareVersion',
+            'location',
+            'online',
+            'lastSeen',
+            'status',
+        ])
+        .optional(),
+    sortDirection: sortDirectionSchema.optional(),
+});
+const userSortSchema = z.object({
+    sortBy: z
+        .enum([
+            'name',
+            'revenue',
+            'payments',
+            'activations',
+            'lastPaymentAt',
+            'createdAt',
+        ])
+        .optional(),
+    sortDirection: sortDirectionSchema.optional(),
+});
+const paymentSortSchema = z.object({
+    sortBy: z
+        .enum(['createdAt', 'customer', 'package', 'amount', 'status'])
+        .optional(),
+    sortDirection: sortDirectionSchema.optional(),
+});
+const sessionSortSchema = z.object({
+    sortBy: z
+        .enum([
+            'username',
+            'nasIpAddress',
+            'live',
+            'startedAt',
+            'stoppedAt',
+            'seconds',
+            'totalOctets',
+            'avgSpeedBps',
+        ])
+        .optional(),
+    sortDirection: sortDirectionSchema.optional(),
+});
 const pageSizes = new Set([10, 25, 50, 100]);
 
 function paginationParams(
@@ -128,6 +192,13 @@ async function ownsAllNasDevices(
 }
 
 app.get('/packages', requireAdmin, async (c) => {
+    const sort = packageSortSchema.safeParse({
+        sortBy: c.req.query('sortBy'),
+        sortDirection: c.req.query('sortDirection'),
+    });
+    if (!sort.success) {
+        return jsonError(c, 400, 'Invalid package sort');
+    }
     const typeParam = c.req.query('type');
     if (
         typeParam !== undefined &&
@@ -148,6 +219,7 @@ app.get('/packages', requireAdmin, async (c) => {
         type: typeParam as 'hotspot' | 'pppoe' | undefined,
         q: c.req.query('q')?.trim() || undefined,
         status: statusParam as 'active' | 'inactive' | undefined,
+        ...sort.data,
         page,
         perPage,
     });
@@ -271,6 +343,13 @@ app.delete('/packages/:id', requireAdmin, async (c) => {
 });
 
 app.get('/nas-devices', requireAdmin, async (c) => {
+    const sort = nasDeviceSortSchema.safeParse({
+        sortBy: c.req.query('sortBy'),
+        sortDirection: c.req.query('sortDirection'),
+    });
+    if (!sort.success) {
+        return jsonError(c, 400, 'Invalid NAS device sort');
+    }
     const statusParam = c.req.query('status');
     const statusSchema = z.enum([
         'active',
@@ -280,6 +359,10 @@ app.get('/nas-devices', requireAdmin, async (c) => {
     ]);
     if (statusParam && !statusSchema.safeParse(statusParam).success) {
         return jsonError(c, 400, 'Invalid NAS device status filter');
+    }
+    const onlineParam = c.req.query('online');
+    if (onlineParam && !['1', '0'].includes(onlineParam)) {
+        return jsonError(c, 400, 'Invalid NAS device connection filter');
     }
     const { page, perPage } = paginationParams(
         c.req.query('page'),
@@ -294,6 +377,9 @@ app.get('/nas-devices', requireAdmin, async (c) => {
             | 'maintenance'
             | 'offline'
             | undefined,
+        online:
+            onlineParam === undefined ? undefined : onlineParam === '1',
+        ...sort.data,
         page,
         perPage,
     });
@@ -536,8 +622,22 @@ const userTypeFilterSchema = z.enum(['hotspot', 'pppoe']);
 // Customer list with lifetime value aggregates; supports search, service-type
 // and flagged filters, paginated.
 app.get('/users', requireAdmin, async (c) => {
+    const sort = userSortSchema.safeParse({
+        sortBy: c.req.query('sortBy'),
+        sortDirection: c.req.query('sortDirection'),
+    });
+    if (!sort.success) {
+        return jsonError(c, 400, 'Invalid user sort');
+    }
     const q = c.req.query('q')?.trim() || undefined;
-    const flagged = c.req.query('flagged') === '1';
+    const flaggedParam = c.req.query('flagged');
+    if (
+        flaggedParam &&
+        !['1', '0', 'true', 'false'].includes(flaggedParam)
+    ) {
+        return jsonError(c, 400, 'Invalid flagged user filter');
+    }
+    const flagged = flaggedParam === '1' || flaggedParam === 'true';
     const typeParam = c.req.query('type');
     const type = typeParam
         ? userTypeFilterSchema.safeParse(typeParam).success
@@ -547,15 +647,18 @@ app.get('/users', requireAdmin, async (c) => {
     if (typeParam && !type) {
         return jsonError(c, 400, 'Invalid user type filter');
     }
-    const page = Number(c.req.query('page') ?? 1);
-    const perPage = Number(c.req.query('perPage') ?? 50);
+    const { page, perPage } = paginationParams(
+        c.req.query('page'),
+        c.req.query('perPage'),
+    );
     const data = await listAdminUsers({
         adminId: c.get('adminSession').userId,
         q,
         type,
         flagged,
-        page: Number.isFinite(page) ? page : 1,
-        perPage: Number.isFinite(perPage) ? perPage : 50,
+        ...sort.data,
+        page,
+        perPage,
     });
     return c.json({ success: true, data });
 });
@@ -972,9 +1075,20 @@ app.post('/pppoe-accounts/:id/password', requireAdmin, async (c) => {
 const paymentStatusSchema = z.enum(['pending', 'paid', 'failed']);
 
 app.get('/payments', requireAdmin, async (c) => {
+    const sort = paymentSortSchema.safeParse({
+        sortBy: c.req.query('sortBy'),
+        sortDirection: c.req.query('sortDirection'),
+    });
+    if (!sort.success) {
+        return jsonError(c, 400, 'Invalid payment sort');
+    }
     const statusParam = c.req.query('status');
     if (statusParam && !paymentStatusSchema.safeParse(statusParam).success) {
         return jsonError(c, 400, 'Invalid payment status filter');
+    }
+    const typeParam = c.req.query('type');
+    if (typeParam && !packageTypeSchema.safeParse(typeParam).success) {
+        return jsonError(c, 400, 'Invalid payment package type filter');
     }
     const fromParam = c.req.query('from');
     const toParam = c.req.query('to');
@@ -986,6 +1100,9 @@ app.get('/payments', requireAdmin, async (c) => {
     ) {
         return jsonError(c, 400, 'Invalid date range');
     }
+    if (from && to && from > to) {
+        return jsonError(c, 400, 'Invalid date range');
+    }
     const pppoeAccountIdParam = c.req.query('pppoeAccountId');
     if (
         pppoeAccountIdParam &&
@@ -993,17 +1110,21 @@ app.get('/payments', requireAdmin, async (c) => {
     ) {
         return jsonError(c, 400, 'Invalid PPPoE account filter');
     }
-    const page = Number(c.req.query('page') ?? 1);
-    const perPage = Number(c.req.query('perPage') ?? 50);
+    const { page, perPage } = paginationParams(
+        c.req.query('page'),
+        c.req.query('perPage'),
+    );
     const data = await listPayments({
         adminId: c.get('adminSession').userId,
         status: statusParam as 'pending' | 'paid' | 'failed' | undefined,
+        type: typeParam as 'hotspot' | 'pppoe' | undefined,
         pppoeAccountId: pppoeAccountIdParam || undefined,
         q: c.req.query('q')?.trim() || undefined,
         from,
         to,
-        page: Number.isFinite(page) ? page : 1,
-        perPage: Number.isFinite(perPage) ? perPage : 50,
+        ...sort.data,
+        page,
+        perPage,
     });
     return c.json({ success: true, data });
 });
@@ -1151,6 +1272,13 @@ app.get('/radius/summary', requireAdmin, async (c) => {
 // (matched on NAS-IP-Address: direct IP or WireGuard tunnel address).
 // Supports q/live filters and page/perPage pagination.
 app.get('/radius/sessions', requireAdmin, async (c) => {
+    const sort = sessionSortSchema.safeParse({
+        sortBy: c.req.query('sortBy'),
+        sortDirection: c.req.query('sortDirection'),
+    });
+    if (!sort.success) {
+        return jsonError(c, 400, 'Invalid session sort');
+    }
     const liveParam = c.req.query('live');
     if (liveParam && !['1', '0', 'true', 'false'].includes(liveParam)) {
         return jsonError(c, 400, 'Invalid live session filter');
@@ -1166,6 +1294,7 @@ app.get('/radius/sessions', requireAdmin, async (c) => {
             liveParam === undefined
                 ? undefined
                 : liveParam === '1' || liveParam === 'true',
+        ...sort.data,
         page,
         perPage,
     });

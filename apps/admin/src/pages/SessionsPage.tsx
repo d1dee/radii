@@ -8,9 +8,9 @@ import {
     Loader,
     Modal,
     NumberInput,
+    Select,
     SimpleGrid,
     Stack,
-    Switch,
     Table,
     Text,
     TextInput,
@@ -23,14 +23,20 @@ import { MdDelete, MdEdit, MdRefresh, MdSearch } from 'react-icons/md';
 import { useSearchParams } from 'react-router-dom';
 
 import { SessionDetailsDrawer } from '@/components/Sessions/SessionDetailsDrawer';
+import {
+    SortableTableHeader,
+    type SortDirection,
+} from '@/components/SortableTableHeader';
 import { TablePagination } from '@/components/TablePagination';
 import {
     disconnectSession,
     editSessionTimeout,
     getRadiusSessions,
     type SessionInfo,
+    type SessionSortKey,
 } from '@/lib/api';
 import { useAutoRefresh } from '@/lib/autoRefresh';
+import { warnBackgroundFailure } from '@/lib/clientError';
 import {
     formatBytes,
     formatDayTime,
@@ -70,7 +76,9 @@ export default function SessionsPage() {
 
     const [search, setSearch] = useState(searchParams.get('q') ?? '');
     const [debouncedSearch] = useDebouncedValue(search, 300);
-    const [liveOnly, setLiveOnly] = useState(false);
+    const [sessionStatus, setSessionStatus] = useState<string | null>(null);
+    const [sortBy, setSortBy] = useState<SessionSortKey>('startedAt');
+    const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
 
     const [confirmDisconnect, setConfirmDisconnect] =
         useState<SessionInfo | null>(null);
@@ -88,14 +96,20 @@ export default function SessionsPage() {
             }
             const res = await getRadiusSessions({
                 q: debouncedSearch.trim() || undefined,
-                live: liveOnly || undefined,
+                live:
+                    sessionStatus === null
+                        ? undefined
+                        : sessionStatus === 'live',
+                sortBy,
+                sortDirection,
                 page: pageToLoad,
                 perPage,
             });
             if (requestId !== loadRequest.current) return;
             if (!silent) setLoading(false);
             if (!res.success) {
-                setError(res.message || 'Failed to load sessions');
+                if (silent) warnBackgroundFailure('refresh sessions', res);
+                else setError(res.message || 'Failed to load sessions');
                 return;
             }
             setError(null);
@@ -103,12 +117,17 @@ export default function SessionsPage() {
             setTotal(res.data?.total ?? 0);
             setLastLoaded(new Date());
         },
-        [debouncedSearch, liveOnly, perPage],
+        [debouncedSearch, sessionStatus, sortBy, sortDirection, perPage],
     );
 
     useEffect(() => {
         setPage(1);
-    }, [debouncedSearch, liveOnly, perPage]);
+    }, [debouncedSearch, sessionStatus, sortBy, sortDirection, perPage]);
+
+    const handleSort = (key: SessionSortKey, direction: SortDirection) => {
+        setSortBy(key);
+        setSortDirection(direction);
+    };
 
     useEffect(() => {
         if (!loaded) return;
@@ -214,13 +233,24 @@ export default function SessionsPage() {
                     onChange={(e) => setSearch(e.currentTarget.value)}
                     style={{ flex: 1, minWidth: 220 }}
                 />
-                <Switch
-                    label='Live only'
-                    checked={liveOnly}
-                    onChange={(e) => setLiveOnly(e.currentTarget.checked)}
+                <Select
+                    placeholder='Status'
+                    clearable
+                    value={sessionStatus}
+                    onChange={setSessionStatus}
+                    data={[
+                        { value: 'live', label: 'Live' },
+                        { value: 'ended', label: 'Ended' },
+                    ]}
+                    w={140}
                 />
                 <Badge variant='light' size='lg'>
-                    {total} {liveOnly ? 'live' : 'sessions'}
+                    {total}{' '}
+                    {sessionStatus === 'live'
+                        ? 'live'
+                        : sessionStatus === 'ended'
+                          ? 'ended'
+                          : 'sessions'}
                 </Badge>
             </Group>
 
@@ -240,15 +270,69 @@ export default function SessionsPage() {
                         <Table.Thead>
                             <Table.Tr>
                                 <Table.Th>#</Table.Th>
-                                <Table.Th>User</Table.Th>
+                                <SortableTableHeader
+                                    label='User'
+                                    sortKey='username'
+                                    sortBy={sortBy}
+                                    sortDirection={sortDirection}
+                                    onSort={handleSort}
+                                />
                                 <Table.Th>Client</Table.Th>
-                                <Table.Th>NAS</Table.Th>
-                                <Table.Th>Status</Table.Th>
-                                <Table.Th>Started</Table.Th>
-                                <Table.Th>Ended</Table.Th>
-                                <Table.Th>Duration</Table.Th>
-                                <Table.Th>Data</Table.Th>
-                                <Table.Th>Avg speed</Table.Th>
+                                <SortableTableHeader
+                                    label='NAS'
+                                    sortKey='nasIpAddress'
+                                    sortBy={sortBy}
+                                    sortDirection={sortDirection}
+                                    onSort={handleSort}
+                                />
+                                <SortableTableHeader
+                                    label='Status'
+                                    sortKey='live'
+                                    sortBy={sortBy}
+                                    sortDirection={sortDirection}
+                                    onSort={handleSort}
+                                    initialDirection='desc'
+                                />
+                                <SortableTableHeader
+                                    label='Started'
+                                    sortKey='startedAt'
+                                    sortBy={sortBy}
+                                    sortDirection={sortDirection}
+                                    onSort={handleSort}
+                                    initialDirection='desc'
+                                />
+                                <SortableTableHeader
+                                    label='Ended'
+                                    sortKey='stoppedAt'
+                                    sortBy={sortBy}
+                                    sortDirection={sortDirection}
+                                    onSort={handleSort}
+                                    initialDirection='desc'
+                                />
+                                <SortableTableHeader
+                                    label='Duration'
+                                    sortKey='seconds'
+                                    sortBy={sortBy}
+                                    sortDirection={sortDirection}
+                                    onSort={handleSort}
+                                    initialDirection='desc'
+                                />
+                                <SortableTableHeader
+                                    label='Data'
+                                    sortKey='totalOctets'
+                                    sortBy={sortBy}
+                                    sortDirection={sortDirection}
+                                    onSort={handleSort}
+                                    initialDirection='desc'
+                                />
+                                <SortableTableHeader
+                                    label='Avg speed'
+                                    sortKey='avgSpeedBps'
+                                    sortBy={sortBy}
+                                    sortDirection={sortDirection}
+                                    onSort={handleSort}
+                                    initialDirection='desc'
+                                />
                                 <Table.Th ta='right'>Actions</Table.Th>
                             </Table.Tr>
                         </Table.Thead>

@@ -21,10 +21,14 @@ import {
 import { useDebouncedValue } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
 import { PhoneNumberInput } from '@radii/ui';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MdAdd, MdCheck, MdContentCopy, MdDelete, MdSearch } from 'react-icons/md';
 
 import { UserDetailsDrawer } from '@/components/Users/UserDetailsDrawer';
+import {
+    SortableTableHeader,
+    type SortDirection,
+} from '@/components/SortableTableHeader';
 import { TablePagination } from '@/components/TablePagination';
 import {
     getAdminUsers,
@@ -35,6 +39,7 @@ import {
     provisionPppoeAccount,
     type AdminUserList,
     type AdminUserRow,
+    type AdminUserSortKey,
     type NasDeviceRow,
     type PackageType,
     type PppoeAccountDetail,
@@ -98,7 +103,10 @@ export default function UsersPage() {
     const [debouncedSearch] = useDebouncedValue(search, 300);
     const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
     const [flaggedOnly, setFlaggedOnly] = useState(false);
+    const [sortBy, setSortBy] = useState<AdminUserSortKey>('createdAt');
+    const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
     const [page, setPage] = useState(1);
+    const loadRequest = useRef(0);
     const [detailsId, setDetailsId] = useState<string | null>(null);
     const [deleteTarget, setDeleteTarget] = useState<AdminUserRow | null>(null);
     const [deleteBusy, setDeleteBusy] = useState(false);
@@ -251,6 +259,7 @@ export default function UsersPage() {
 
     const load = useCallback(
         async (pageToLoad: number, silent = false) => {
+            const requestId = ++loadRequest.current;
             if (!silent) {
                 setLoading(true);
                 setError(null);
@@ -259,9 +268,12 @@ export default function UsersPage() {
                 q: debouncedSearch.trim() || undefined,
                 type: typeFilter === 'all' ? undefined : typeFilter,
                 flagged: flaggedOnly || undefined,
+                sortBy,
+                sortDirection,
                 page: pageToLoad,
                 perPage,
             });
+            if (requestId !== loadRequest.current) return;
             if (!silent) setLoading(false);
             if (!res.success) {
                 if (silent) warnBackgroundFailure('refresh users', res);
@@ -276,12 +288,31 @@ export default function UsersPage() {
             setError(null);
             setData(res.data);
         },
-        [debouncedSearch, typeFilter, flaggedOnly, perPage],
+        [
+            debouncedSearch,
+            typeFilter,
+            flaggedOnly,
+            sortBy,
+            sortDirection,
+            perPage,
+        ],
     );
 
     useEffect(() => {
         setPage(1);
-    }, [debouncedSearch, typeFilter, flaggedOnly, perPage]);
+    }, [
+        debouncedSearch,
+        typeFilter,
+        flaggedOnly,
+        sortBy,
+        sortDirection,
+        perPage,
+    ]);
+
+    const handleSort = (key: AdminUserSortKey, direction: SortDirection) => {
+        setSortBy(key);
+        setSortDirection(direction);
+    };
 
     useEffect(() => {
         if (!loaded) return;
@@ -445,13 +476,54 @@ export default function UsersPage() {
                             <Table.Thead>
                                 <Table.Tr>
                                     <Table.Th>#</Table.Th>
-                                    <Table.Th>User</Table.Th>
+                                    <SortableTableHeader
+                                        label='User'
+                                        sortKey='name'
+                                        sortBy={sortBy}
+                                        sortDirection={sortDirection}
+                                        onSort={handleSort}
+                                    />
                                     <Table.Th>Status</Table.Th>
-                                    <Table.Th>Lifetime spend</Table.Th>
-                                    <Table.Th>Payments</Table.Th>
-                                    <Table.Th>Activations</Table.Th>
-                                    <Table.Th>Last payment</Table.Th>
-                                    <Table.Th>Registered</Table.Th>
+                                    <SortableTableHeader
+                                        label='Lifetime spend'
+                                        sortKey='revenue'
+                                        sortBy={sortBy}
+                                        sortDirection={sortDirection}
+                                        onSort={handleSort}
+                                        initialDirection='desc'
+                                    />
+                                    <SortableTableHeader
+                                        label='Payments'
+                                        sortKey='payments'
+                                        sortBy={sortBy}
+                                        sortDirection={sortDirection}
+                                        onSort={handleSort}
+                                        initialDirection='desc'
+                                    />
+                                    <SortableTableHeader
+                                        label='Activations'
+                                        sortKey='activations'
+                                        sortBy={sortBy}
+                                        sortDirection={sortDirection}
+                                        onSort={handleSort}
+                                        initialDirection='desc'
+                                    />
+                                    <SortableTableHeader
+                                        label='Last payment'
+                                        sortKey='lastPaymentAt'
+                                        sortBy={sortBy}
+                                        sortDirection={sortDirection}
+                                        onSort={handleSort}
+                                        initialDirection='desc'
+                                    />
+                                    <SortableTableHeader
+                                        label='Registered'
+                                        sortKey='createdAt'
+                                        sortBy={sortBy}
+                                        sortDirection={sortDirection}
+                                        onSort={handleSort}
+                                        initialDirection='desc'
+                                    />
                                     <Table.Th ta='right'>Actions</Table.Th>
                                 </Table.Tr>
                             </Table.Thead>

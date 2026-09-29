@@ -141,6 +141,7 @@ export function login(body: { phoneNumber: string; pin: string }) {
 export type PackageType = 'hotspot' | 'pppoe';
 export type FairUsageWindowUnit = 'session' | 'days' | 'weeks' | 'months';
 export type PaginationQuery = { page?: number; perPage?: number };
+export type SortDirection = 'asc' | 'desc';
 
 function paginationSearchParams(query: PaginationQuery): URLSearchParams {
     const params = new URLSearchParams();
@@ -220,13 +221,25 @@ export type ListAdminPackagesQuery = PaginationQuery & {
     type?: PackageType;
     q?: string;
     status?: 'active' | 'inactive';
+    sortBy?: PackageSortKey;
+    sortDirection?: SortDirection;
 };
+
+export type PackageSortKey =
+    | 'title'
+    | 'category'
+    | 'price'
+    | 'sessionLength'
+    | 'maxDevices'
+    | 'isActive';
 
 export function getAdminPackages(query: ListAdminPackagesQuery = {}) {
     const params = new URLSearchParams();
     if (query.type) params.set('type', query.type);
     if (query.q) params.set('q', query.q);
     if (query.status) params.set('status', query.status);
+    if (query.sortBy) params.set('sortBy', query.sortBy);
+    if (query.sortDirection) params.set('sortDirection', query.sortDirection);
     if (query.page) params.set('page', String(query.page));
     if (query.perPage) params.set('perPage', String(query.perPage));
     const qs = params.toString();
@@ -360,12 +373,31 @@ export type AdminNasDeviceList = {
 export type ListNasDevicesQuery = PaginationQuery & {
     q?: string;
     status?: NasDeviceStatus;
+    online?: boolean;
+    sortBy?: NasDeviceSortKey;
+    sortDirection?: SortDirection;
 };
+
+export type NasDeviceSortKey =
+    | 'name'
+    | 'ipAddress'
+    | 'model'
+    | 'serialNumber'
+    | 'firmwareVersion'
+    | 'location'
+    | 'online'
+    | 'lastSeen'
+    | 'status';
 
 export function getNasDevices(query: ListNasDevicesQuery = {}) {
     const params = paginationSearchParams(query);
     if (query.q) params.set('q', query.q);
     if (query.status) params.set('status', query.status);
+    if (query.online !== undefined) {
+        params.set('online', query.online ? '1' : '0');
+    }
+    if (query.sortBy) params.set('sortBy', query.sortBy);
+    if (query.sortDirection) params.set('sortDirection', query.sortDirection);
     const qs = params.toString();
     return request<AdminNasDeviceList>(
         `/admin/nas-devices${qs ? `?${qs}` : ''}`,
@@ -600,7 +632,17 @@ export type ListAdminUsersQuery = {
     flagged?: boolean;
     page?: number;
     perPage?: number;
+    sortBy?: AdminUserSortKey;
+    sortDirection?: SortDirection;
 };
+
+export type AdminUserSortKey =
+    | 'name'
+    | 'revenue'
+    | 'payments'
+    | 'activations'
+    | 'lastPaymentAt'
+    | 'createdAt';
 
 export function getAdminUsers(query: ListAdminUsersQuery = {}) {
     const params = new URLSearchParams();
@@ -609,6 +651,8 @@ export function getAdminUsers(query: ListAdminUsersQuery = {}) {
     if (query.flagged) params.set('flagged', '1');
     if (query.page) params.set('page', String(query.page));
     if (query.perPage) params.set('perPage', String(query.perPage));
+    if (query.sortBy) params.set('sortBy', query.sortBy);
+    if (query.sortDirection) params.set('sortDirection', query.sortDirection);
     const qs = params.toString();
     return request<AdminUserList>(`/admin/users${qs ? `?${qs}` : ''}`);
 }
@@ -938,17 +982,28 @@ export function setPppoeAccountLabel(accountId: string, label: string | null) {
 
 export type ListPaymentsQuery = {
     status?: PackagePaymentStatus;
+    type?: PackageType;
     q?: string;
     pppoeAccountId?: string;
     from?: string;
     to?: string;
     page?: number;
     perPage?: number;
+    sortBy?: PaymentSortKey;
+    sortDirection?: SortDirection;
 };
+
+export type PaymentSortKey =
+    | 'createdAt'
+    | 'customer'
+    | 'package'
+    | 'amount'
+    | 'status';
 
 export function getAdminPayments(query: ListPaymentsQuery = {}) {
     const params = new URLSearchParams();
     if (query.status) params.set('status', query.status);
+    if (query.type) params.set('type', query.type);
     if (query.q) params.set('q', query.q);
     if (query.pppoeAccountId) {
         params.set('pppoeAccountId', query.pppoeAccountId);
@@ -957,6 +1012,8 @@ export function getAdminPayments(query: ListPaymentsQuery = {}) {
     if (query.to) params.set('to', query.to);
     if (query.page) params.set('page', String(query.page));
     if (query.perPage) params.set('perPage', String(query.perPage));
+    if (query.sortBy) params.set('sortBy', query.sortBy);
+    if (query.sortDirection) params.set('sortDirection', query.sortDirection);
     const qs = params.toString();
     return request<AdminPaymentList>(`/admin/payments${qs ? `?${qs}` : ''}`);
 }
@@ -1074,12 +1131,26 @@ export type AdminSessionList = {
 export type ListRadiusSessionsQuery = PaginationQuery & {
     q?: string;
     live?: boolean;
+    sortBy?: SessionSortKey;
+    sortDirection?: SortDirection;
 };
+
+export type SessionSortKey =
+    | 'username'
+    | 'nasIpAddress'
+    | 'live'
+    | 'startedAt'
+    | 'stoppedAt'
+    | 'seconds'
+    | 'totalOctets'
+    | 'avgSpeedBps';
 
 export function getRadiusSessions(query: ListRadiusSessionsQuery = {}) {
     const params = paginationSearchParams(query);
     if (query.q) params.set('q', query.q);
     if (query.live !== undefined) params.set('live', query.live ? '1' : '0');
+    if (query.sortBy) params.set('sortBy', query.sortBy);
+    if (query.sortDirection) params.set('sortDirection', query.sortDirection);
     const qs = params.toString();
     return request<AdminSessionList>(
         `/admin/radius/sessions${qs ? `?${qs}` : ''}`,

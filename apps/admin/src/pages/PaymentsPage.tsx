@@ -15,16 +15,22 @@ import {
 } from '@mantine/core';
 import { DateInput } from '@mantine/dates';
 import { useDebouncedValue } from '@mantine/hooks';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { MdClose, MdSearch } from 'react-icons/md';
 
 import { PaymentDetailsDrawer } from '@/components/Payments/PaymentDetailsDrawer';
+import {
+    SortableTableHeader,
+    type SortDirection,
+} from '@/components/SortableTableHeader';
 import { TablePagination } from '@/components/TablePagination';
 import {
     getAdminPayments,
     type AdminPaymentList,
     type PackagePaymentStatus,
+    type PackageType,
+    type PaymentSortKey,
 } from '@/lib/api';
 import { useAutoRefresh } from '@/lib/autoRefresh';
 import { warnBackgroundFailure } from '@/lib/clientError';
@@ -89,27 +95,36 @@ export default function PaymentsPage() {
     const [detailsId, setDetailsId] = useState<string | null>(null);
 
     const [status, setStatus] = useState<string | null>(null);
+    const [packageType, setPackageType] = useState<string | null>(null);
     const [search, setSearch] = useState('');
     const [debouncedSearch] = useDebouncedValue(search, 300);
     const [from, setFrom] = useState<Date | null>(null);
     const [to, setTo] = useState<Date | null>(null);
     const [page, setPage] = useState(1);
+    const [sortBy, setSortBy] = useState<PaymentSortKey>('createdAt');
+    const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+    const loadRequest = useRef(0);
 
     const load = useCallback(
         async (pageToLoad: number, silent = false) => {
+            const requestId = ++loadRequest.current;
             if (!silent) {
                 setLoading(true);
                 setError(null);
             }
             const res = await getAdminPayments({
                 status: (status as PackagePaymentStatus) || undefined,
+                type: (packageType as PackageType) || undefined,
                 q: debouncedSearch.trim() || undefined,
                 pppoeAccountId,
                 from: from ? from.toISOString() : undefined,
                 to: to ? dayjs(to).endOf('day').toISOString() : undefined,
+                sortBy,
+                sortDirection,
                 page: pageToLoad,
                 perPage,
             });
+            if (requestId !== loadRequest.current) return;
             if (!silent) setLoading(false);
             if (!res.success) {
                 if (silent) warnBackgroundFailure('refresh payments', res);
@@ -124,12 +139,37 @@ export default function PaymentsPage() {
             setError(null);
             setData(res.data);
         },
-        [status, debouncedSearch, pppoeAccountId, from, to, perPage],
+        [
+            status,
+            packageType,
+            debouncedSearch,
+            pppoeAccountId,
+            from,
+            to,
+            sortBy,
+            sortDirection,
+            perPage,
+        ],
     );
 
     useEffect(() => {
         setPage(1);
-    }, [status, debouncedSearch, pppoeAccountId, from, to, perPage]);
+    }, [
+        status,
+        packageType,
+        debouncedSearch,
+        pppoeAccountId,
+        from,
+        to,
+        sortBy,
+        sortDirection,
+        perPage,
+    ]);
+
+    const handleSort = (key: PaymentSortKey, direction: SortDirection) => {
+        setSortBy(key);
+        setSortDirection(direction);
+    };
 
     useEffect(() => {
         if (!loaded) return;
@@ -171,7 +211,7 @@ export default function PaymentsPage() {
 
                 <Group wrap='wrap'>
                     <TextInput
-                        placeholder='Search phone, name or receipt code'
+                        placeholder='Search phone, name, package or receipt code'
                         leftSection={<MdSearch />}
                         value={search}
                         onChange={(e) => setSearch(e.currentTarget.value)}
@@ -188,6 +228,17 @@ export default function PaymentsPage() {
                             { value: 'failed', label: 'Failed' },
                         ]}
                         w={140}
+                    />
+                    <Select
+                        placeholder='Package type'
+                        clearable
+                        value={packageType}
+                        onChange={setPackageType}
+                        data={[
+                            { value: 'hotspot', label: 'Hotspot' },
+                            { value: 'pppoe', label: 'PPPoE' },
+                        ]}
+                        w={150}
                     />
                     {pppoeAccountId && (
                         <Badge
@@ -241,11 +292,43 @@ export default function PaymentsPage() {
                             <Table.Thead>
                                 <Table.Tr>
                                     <Table.Th>#</Table.Th>
-                                    <Table.Th>Date</Table.Th>
-                                    <Table.Th>Customer</Table.Th>
-                                    <Table.Th>Package</Table.Th>
-                                    <Table.Th>Amount</Table.Th>
-                                    <Table.Th>Status</Table.Th>
+                                    <SortableTableHeader
+                                        label='Date'
+                                        sortKey='createdAt'
+                                        sortBy={sortBy}
+                                        sortDirection={sortDirection}
+                                        onSort={handleSort}
+                                        initialDirection='desc'
+                                    />
+                                    <SortableTableHeader
+                                        label='Customer'
+                                        sortKey='customer'
+                                        sortBy={sortBy}
+                                        sortDirection={sortDirection}
+                                        onSort={handleSort}
+                                    />
+                                    <SortableTableHeader
+                                        label='Package'
+                                        sortKey='package'
+                                        sortBy={sortBy}
+                                        sortDirection={sortDirection}
+                                        onSort={handleSort}
+                                    />
+                                    <SortableTableHeader
+                                        label='Amount'
+                                        sortKey='amount'
+                                        sortBy={sortBy}
+                                        sortDirection={sortDirection}
+                                        onSort={handleSort}
+                                        initialDirection='desc'
+                                    />
+                                    <SortableTableHeader
+                                        label='Status'
+                                        sortKey='status'
+                                        sortBy={sortBy}
+                                        sortDirection={sortDirection}
+                                        onSort={handleSort}
+                                    />
                                     <Table.Th>Provider ref</Table.Th>
                                 </Table.Tr>
                             </Table.Thead>

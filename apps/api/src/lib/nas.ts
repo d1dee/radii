@@ -8,6 +8,7 @@ import {
     ilike,
     or,
     sql,
+    type SQL,
 } from 'drizzle-orm';
 import { db } from '../db';
 import {
@@ -23,6 +24,16 @@ import {
 
 type InsertNasDevice = typeof nasDevice.$inferInsert;
 export type NasDeviceRow = typeof nasDevice.$inferSelect;
+export type AdminNasDeviceSortBy =
+    | 'name'
+    | 'ipAddress'
+    | 'model'
+    | 'serialNumber'
+    | 'firmwareVersion'
+    | 'location'
+    | 'online'
+    | 'lastSeen'
+    | 'status';
 
 export async function getNasDevices(ownerId: string) {
     return db
@@ -36,11 +47,27 @@ export async function listAdminNasDevices(opts: {
     ownerId: string;
     q?: string;
     status?: NasDeviceRow['status'];
+    online?: boolean;
+    sortBy?: AdminNasDeviceSortBy;
+    sortDirection?: 'asc' | 'desc';
     page: number;
     perPage: number;
 }) {
-    const conditions = [eq(nasDevice.ownerId, opts.ownerId)];
+    const online = sql<boolean>`exists (
+        select 1
+        from ${radacct} accounting
+        where (
+            accounting.nasipaddress = ${nasDevice.ipAddress}
+            or accounting.nasipaddress = ${nasSetupScript.wgClientIp}
+        )
+        and accounting.acctstarttime is not null
+        and accounting.acctstoptime is null
+    )`;
+    const conditions: SQL[] = [eq(nasDevice.ownerId, opts.ownerId)];
     if (opts.status) conditions.push(eq(nasDevice.status, opts.status));
+    if (opts.online !== undefined) {
+        conditions.push(opts.online ? online : sql`not (${online})`);
+    }
     if (opts.q) {
         const q = `%${opts.q}%`;
         conditions.push(
@@ -55,22 +82,42 @@ export async function listAdminNasDevices(opts: {
         );
     }
     const where = and(...conditions);
-    const online = sql<boolean>`exists (
-        select 1
-        from ${radacct} accounting
-        where (
-            accounting.nasipaddress = ${nasDevice.ipAddress}
-            or accounting.nasipaddress = ${nasSetupScript.wgClientIp}
-        )
-        and accounting.acctstarttime is not null
-        and accounting.acctstoptime is null
-    )`;
     const lastSeen = sql<Date | null>`(
         select max(coalesce(accounting.acctupdatetime, accounting.acctstarttime))
         from ${radacct} accounting
         where accounting.nasipaddress = ${nasDevice.ipAddress}
             or accounting.nasipaddress = ${nasSetupScript.wgClientIp}
     )`;
+    const direction = opts.sortDirection === 'asc' ? asc : desc;
+    const nullableOrder = (value: Parameters<typeof asc>[0]) => [
+        sql<number>`case when ${value} is null then 1 else 0 end`,
+        direction(value),
+        asc(nasDevice.id),
+    ];
+    const orderBy = (() => {
+        switch (opts.sortBy) {
+            case 'name':
+                return [direction(nasDevice.name), asc(nasDevice.id)];
+            case 'ipAddress':
+                return [direction(nasDevice.ipAddress), asc(nasDevice.id)];
+            case 'model':
+                return nullableOrder(nasDevice.model);
+            case 'serialNumber':
+                return nullableOrder(nasDevice.serialNumber);
+            case 'firmwareVersion':
+                return nullableOrder(nasDevice.firmwareVersion);
+            case 'location':
+                return nullableOrder(nasDevice.location);
+            case 'online':
+                return [direction(online), asc(nasDevice.id)];
+            case 'lastSeen':
+                return nullableOrder(lastSeen);
+            case 'status':
+                return [direction(nasDevice.status), asc(nasDevice.id)];
+            default:
+                return [desc(nasDevice.createdAt), asc(nasDevice.id)];
+        }
+    })();
     const [countRows, rows] = await Promise.all([
         db
             .select({
@@ -95,7 +142,7 @@ export async function listAdminNasDevices(opts: {
                 eq(nasSetupScript.nasDeviceId, nasDevice.id),
             )
             .where(where)
-            .orderBy(desc(nasDevice.createdAt), asc(nasDevice.id))
+            .orderBy(...orderBy)
             .limit(opts.perPage)
             .offset((opts.page - 1) * opts.perPage),
     ]);

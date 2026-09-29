@@ -316,6 +316,16 @@ export interface SessionInfo {
     fupEvaluatedAt: Date | null;
 }
 
+export type AdminSessionSortBy =
+    | 'username'
+    | 'nasIpAddress'
+    | 'live'
+    | 'startedAt'
+    | 'stoppedAt'
+    | 'seconds'
+    | 'totalOctets'
+    | 'avgSpeedBps';
+
 // Credentials of one provisioned activation (the shared shape returned by the
 // provisioning/credential flows of both the hotspot and PPPoE portals).
 export interface ProvisionedCredentials {
@@ -2446,7 +2456,14 @@ export class RadiusClient {
     // are activation placeholders and were never started by accounting.
     async getAdminSessions(
         nasIpAddresses: string[],
-        opts: { q?: string; live?: boolean; page: number; perPage: number },
+        opts: {
+            q?: string;
+            live?: boolean;
+            sortBy?: AdminSessionSortBy;
+            sortDirection?: 'asc' | 'desc';
+            page: number;
+            perPage: number;
+        },
     ): Promise<{ total: number; sessions: SessionInfo[] }> {
         if (nasIpAddresses.length === 0) return { total: 0, sessions: [] };
         const q = opts.q ? `%${opts.q}%` : undefined;
@@ -2468,13 +2485,63 @@ export class RadiusClient {
                   )
                 : undefined,
         );
+        const live = sql<boolean>`${radacct.acctstoptime} is null`;
+        const seconds = sql<number>`case
+            when ${radacct.acctstoptime} is null then greatest(
+                0,
+                extract(epoch from (now() - ${radacct.acctstarttime}))
+            )
+            else coalesce(${radacct.acctsessiontime}, 0)
+        end`;
+        const totalOctets = sql<number>`(
+            coalesce(${radacct.acctinputoctets}, 0)
+            + coalesce(${radacct.acctoutputoctets}, 0)
+        )`;
+        const avgSpeedBps = sql<number>`case
+            when ${seconds} > 0 then (${totalOctets} * 8) / ${seconds}
+            else 0
+        end`;
+        const direction = opts.sortDirection === 'asc' ? asc : desc;
+        const nullableOrder = (value: Parameters<typeof asc>[0]) => [
+            sql<number>`case when ${value} is null then 1 else 0 end`,
+            direction(value),
+            asc(radacct.radacctid),
+        ];
+        const orderBy = (() => {
+            switch (opts.sortBy) {
+                case 'username':
+                    return nullableOrder(radacct.username);
+                case 'nasIpAddress':
+                    return [
+                        direction(radacct.nasipaddress),
+                        asc(radacct.radacctid),
+                    ];
+                case 'live':
+                    return [direction(live), asc(radacct.radacctid)];
+                case 'startedAt':
+                    return nullableOrder(radacct.acctstarttime);
+                case 'stoppedAt':
+                    return nullableOrder(radacct.acctstoptime);
+                case 'seconds':
+                    return [direction(seconds), asc(radacct.radacctid)];
+                case 'totalOctets':
+                    return [direction(totalOctets), asc(radacct.radacctid)];
+                case 'avgSpeedBps':
+                    return [direction(avgSpeedBps), asc(radacct.radacctid)];
+                default:
+                    return [
+                        desc(radacct.acctstarttime),
+                        asc(radacct.radacctid),
+                    ];
+            }
+        })();
         const [countRows, rows] = await Promise.all([
             db.select({ total: count(radacct.radacctid) }).from(radacct).where(where),
             db
                 .select()
                 .from(radacct)
                 .where(where)
-                .orderBy(desc(radacct.acctstarttime), asc(radacct.radacctid))
+                .orderBy(...orderBy)
                 .limit(opts.perPage)
                 .offset((opts.page - 1) * opts.perPage),
         ]);

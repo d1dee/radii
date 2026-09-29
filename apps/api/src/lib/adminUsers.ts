@@ -27,6 +27,7 @@ import {
     sql,
     type SQL,
 } from 'drizzle-orm';
+import { unionAll } from 'drizzle-orm/pg-core';
 import { db } from '../db';
 import {
     activatedPackages,
@@ -49,6 +50,13 @@ import {
 import { calculateActivationTime } from './radius/activationLimits';
 
 export type AdminUserTypeFilter = 'hotspot' | 'pppoe';
+export type AdminUserSortBy =
+    | 'name'
+    | 'revenue'
+    | 'payments'
+    | 'activations'
+    | 'lastPaymentAt'
+    | 'createdAt';
 
 // --- Tenant scoping ---------------------------------------------------------
 
@@ -272,6 +280,8 @@ export interface ListAdminUsersOpts {
     type?: AdminUserTypeFilter;
     // Only users carrying at least one flag raised by this admin.
     flagged?: boolean;
+    sortBy?: AdminUserSortBy;
+    sortDirection?: 'asc' | 'desc';
     page?: number;
     perPage?: number;
 }
@@ -507,64 +517,196 @@ export async function listAdminUsers(opts: ListAdminUsersOpts) {
     }
     const where = and(...conditions);
 
-    const [[stats], users] = await Promise.all([
+    // Correlated subqueries below must qualify the outer user PK explicitly:
+    // inside a raw SQL template Drizzle renders `${user.id}` unqualified, and
+    // the joined payment/NAS tables also have an `id` column (ambiguous).
+    const outerUserId = sql.raw('"user"."id"');
+    const paymentCount = sql<number>`(
+        select count(*)::int
+        from ${packagePayments} user_payment
+        inner join ${nasDevice} payment_nas
+            on user_payment.nas_device_id = payment_nas.id
+        where user_payment.user_id = ${outerUserId}
+            and payment_nas.owner_id = ${opts.adminId}
+    )`;
+    const revenue = sql<number>`(
+        select coalesce(sum(user_payment.amount) filter (
+            where user_payment.status = 'paid'
+        ), 0)::float8
+        from ${packagePayments} user_payment
+        inner join ${nasDevice} payment_nas
+            on user_payment.nas_device_id = payment_nas.id
+        where user_payment.user_id = ${outerUserId}
+            and payment_nas.owner_id = ${opts.adminId}
+    )`;
+    const activationCount = sql<number>`(
+        select count(*)::int
+        from ${activatedPackages} user_activation
+        inner join ${packagePayments} activation_payment
+            on user_activation.package_payment_id = activation_payment.id
+        inner join ${nasDevice} activation_nas
+            on activation_payment.nas_device_id = activation_nas.id
+        where user_activation.user_id = ${outerUserId}
+            and activation_nas.owner_id = ${opts.adminId}
+    )`;
+    const lastPaymentAt = sql<Date | null>`(
+        select max(user_payment.created_at)
+        from ${packagePayments} user_payment
+        inner join ${nasDevice} payment_nas
+            on user_payment.nas_device_id = payment_nas.id
+        where user_payment.user_id = ${outerUserId}
+            and payment_nas.owner_id = ${opts.adminId}
+    )`;
+    // Provisioned-by-phone PPPoE accounts have no `user` row. Include them in
+    // the same sortable candidate set so totals and page boundaries are
+    // coherent without changing their tenant visibility.
+    const includePending = !opts.flagged && opts.type !== 'hotspot';
+    const pendingConditions: SQL[] = includePending
+        ? [
+              isNull(pppoeServiceAccounts.customerUserId),
+              eq(pppoeServiceAccounts.tenantAdminId, opts.adminId),
+          ]
+        : [sql`false`];
+    if (includePending && opts.q) {
+        const q = `%${opts.q.trim()}%`;
+        pendingConditions.push(
+            or(
+                ilike(pppoeServiceAccounts.normalizedPhone, q),
+                ilike(pppoeServiceAccounts.username, q),
+                ilike(pppoeServiceAccounts.label, q),
+            )!,
+        );
+    }
+    const pendingWhere = and(...pendingConditions);
+    const pendingName = sql<string>`coalesce(${pppoeServiceAccounts.label}, ${pppoeServiceAccounts.normalizedPhone})`;
+    const candidates = unionAll(
+        db
+            .select({
+                kind: sql<string>`'user'`.as('kind'),
+                id: user.id,
+                name: user.name,
+                revenue: revenue.as('revenue'),
+                payments: paymentCount.as('payments'),
+                activations: activationCount.as('activations'),
+                lastPaymentAt: lastPaymentAt.as('last_payment_at'),
+                lastPaymentRank:
+                    sql<number>`case when ${lastPaymentAt} is null then 1 else 0 end`.as(
+                        'last_payment_rank',
+                    ),
+                defaultRank: sql<number>`1`.as('default_rank'),
+                createdAt: sql<Date>`${user.createdAt}`.as('created_at'),
+            })
+            .from(user)
+            .where(where),
+        db
+            .select({
+                kind: sql<string>`'pending'`.as('kind'),
+                // UNION requires matching types: user.id is text while the
+                // PPPoE account id is uuid.
+                id: sql<string>`${pppoeServiceAccounts.id}::text`.as('id'),
+                name: pendingName.as('name'),
+                revenue: sql<number>`0::float8`.as('revenue'),
+                payments: sql<number>`0::int`.as('payments'),
+                activations: sql<number>`0::int`.as('activations'),
+                lastPaymentAt:
+                    sql<Date | null>`null::timestamptz`.as('last_payment_at'),
+                lastPaymentRank: sql<number>`1`.as('last_payment_rank'),
+                defaultRank: sql<number>`0`.as('default_rank'),
+                createdAt:
+                    sql<Date>`${pppoeServiceAccounts.createdAt}`.as(
+                        'created_at',
+                    ),
+            })
+            .from(pppoeServiceAccounts)
+            .where(pendingWhere),
+    );
+    const direction = opts.sortDirection === 'asc' ? asc : desc;
+    const candidateId = sql<string>`"id"`;
+    const candidateKind = sql<string>`"kind"`;
+    const candidateOrder = (() => {
+        const tieBreakers = [asc(candidateId), asc(candidateKind)];
+        switch (opts.sortBy) {
+            case 'name':
+                return [direction(sql<string>`"name"`), ...tieBreakers];
+            case 'revenue':
+                return [direction(sql<number>`"revenue"`), ...tieBreakers];
+            case 'payments':
+                return [direction(sql<number>`"payments"`), ...tieBreakers];
+            case 'activations':
+                return [
+                    direction(sql<number>`"activations"`),
+                    ...tieBreakers,
+                ];
+            case 'lastPaymentAt':
+                return [
+                    asc(sql<number>`"last_payment_rank"`),
+                    direction(sql<Date>`"last_payment_at"`),
+                    ...tieBreakers,
+                ];
+            case 'createdAt':
+                return [
+                    direction(sql<Date>`"created_at"`),
+                    ...tieBreakers,
+                ];
+            default:
+                return [
+                    asc(sql<number>`"default_rank"`),
+                    desc(sql<Date>`"created_at"`),
+                    ...tieBreakers,
+                ];
+        }
+    })();
+    const [[stats], pendingCountRows, pageCandidates] = await Promise.all([
         db.select({ total: count(user.id) }).from(user).where(where),
         db
-            .select()
-            .from(user)
-            .where(where)
-            .orderBy(desc(user.createdAt), asc(user.id))
+            .select({ total: count(pppoeServiceAccounts.id) })
+            .from(pppoeServiceAccounts)
+            .where(pendingWhere),
+        candidates
+            .orderBy(...candidateOrder)
             .limit(perPage)
             .offset((page - 1) * perPage),
     ]);
-
-    // Provisioned-by-phone PPPoE accounts that no customer has claimed yet
-    // have no `user` row; pin them to the top of the first page so admins can
-    // see what they pre-provisioned. They are tenant-scoped by their
-    // provisioning admin and never carry flags, payments or activations, so
-    // the flagged and hotspot-only filters exclude them.
-    const includePending = !opts.flagged && opts.type !== 'hotspot';
-    let pendingClaims: Array<
-        typeof pppoeServiceAccounts.$inferSelect & { nasName: string | null }
-    > = [];
-    if (includePending && page === 1) {
-        const pendingConditions: SQL[] = [
-            isNull(pppoeServiceAccounts.customerUserId),
-            eq(pppoeServiceAccounts.tenantAdminId, opts.adminId),
-        ];
-        if (opts.q) {
-            const q = `%${opts.q.trim()}%`;
-            pendingConditions.push(
-                or(
-                    ilike(pppoeServiceAccounts.normalizedPhone, q),
-                    ilike(pppoeServiceAccounts.username, q),
-                    ilike(pppoeServiceAccounts.label, q),
-                )!,
-            );
-        }
-        pendingClaims = await db
-            .select({
-                account: pppoeServiceAccounts,
-                nasName: nasDevice.name,
-            })
-            .from(pppoeServiceAccounts)
-            .leftJoin(
-                nasDevice,
-                eq(pppoeServiceAccounts.nasDeviceId, nasDevice.id),
-            )
-            .where(and(...pendingConditions))
-            .orderBy(
-                desc(pppoeServiceAccounts.createdAt),
-                asc(pppoeServiceAccounts.id),
-            )
-            .limit(perPage)
-            .then((rows) =>
-                rows.map(({ account, nasName }) => ({
-                    ...account,
-                    nasName: nasName ?? null,
-                })),
-            );
-    }
+    const pendingTotal = Number(pendingCountRows[0]?.total ?? 0);
+    const userIds = pageCandidates
+        .filter((candidate) => candidate.kind === 'user')
+        .map((candidate) => candidate.id);
+    const pendingIds = pageCandidates
+        .filter((candidate) => candidate.kind === 'pending')
+        .map((candidate) => candidate.id);
+    const [users, pendingClaims] = await Promise.all([
+        userIds.length > 0
+            ? db
+                  .select()
+                  .from(user)
+                  .where(inArray(user.id, userIds))
+            : Promise.resolve([] as Array<typeof user.$inferSelect>),
+        pendingIds.length > 0
+            ? db
+                  .select({
+                      account: pppoeServiceAccounts,
+                      nasName: nasDevice.name,
+                  })
+                  .from(pppoeServiceAccounts)
+                  .leftJoin(
+                      nasDevice,
+                      eq(pppoeServiceAccounts.nasDeviceId, nasDevice.id),
+                  )
+                  .where(inArray(pppoeServiceAccounts.id, pendingIds))
+                  .then((rows) =>
+                      rows.map(({ account, nasName }) => ({
+                          ...account,
+                          nasName: nasName ?? null,
+                      })),
+                  )
+            : Promise.resolve(
+                  [] as Array<
+                      typeof pppoeServiceAccounts.$inferSelect & {
+                          nasName: string | null;
+                      }
+                  >,
+              ),
+    ]);
 
     const [agg, tags] = await Promise.all([
         userAggregates(
@@ -591,73 +733,80 @@ export async function listAdminUsers(opts: ListAdminUsersOpts) {
         pppoe: 0,
         underFup: 0,
     };
+    const usersById = new Map(users.map((row) => [row.id, row]));
+    const pendingById = new Map(pendingClaims.map((row) => [row.id, row]));
 
     return {
-        total: Number(stats.total),
+        total: Number(stats.total) + pendingTotal,
         page,
         perPage,
-        users: [
-            ...pendingClaims.map((account) => ({
-                id: account.id,
-                pendingClaim: true as const,
-                name: account.label ?? account.normalizedPhone,
-                email: null as string | null,
-                phoneNumber: account.normalizedPhone,
-                image: null as string | null,
-                role: null as string | null,
-                banned: false,
-                banReason: null as string | null,
-                createdAt: account.createdAt,
-                flags: 0,
-                online: false,
-                payments: emptyPayments,
-                activations: emptyActivations,
-                lastPaymentAt: null as Date | null,
-                tag: null as UserAdminTag | null,
-                pppoe: {
-                    username: account.username,
-                    label: account.label,
-                    status: account.status,
-                    nasName: account.nasName,
+        users: pageCandidates.map((candidate) => {
+            if (candidate.kind === 'pending') {
+                const account = pendingById.get(candidate.id);
+                return account
+                    ? {
+                          id: account.id,
+                          pendingClaim: true as const,
+                          name: account.label ?? account.normalizedPhone,
+                          email: null as string | null,
+                          phoneNumber: account.normalizedPhone,
+                          image: null as string | null,
+                          role: null as string | null,
+                          banned: false,
+                          banReason: null as string | null,
+                          createdAt: account.createdAt,
+                          flags: 0,
+                          online: false,
+                          payments: emptyPayments,
+                          activations: emptyActivations,
+                          lastPaymentAt: null as Date | null,
+                          tag: null as UserAdminTag | null,
+                          pppoe: {
+                              username: account.username,
+                              label: account.label,
+                              status: account.status,
+                              nasName: account.nasName,
+                          },
+                      }
+                    : null;
+            }
+            const u = usersById.get(candidate.id);
+            if (!u) return null;
+            const payments = agg.payments.get(u.id);
+            const activations = agg.activations.get(u.id);
+            return {
+                id: u.id,
+                pendingClaim: false as const,
+                name: u.name,
+                email: u.email as string | null,
+                phoneNumber: u.username ?? '',
+                image: u.image,
+                role: u.role,
+                banned: u.banned ?? false,
+                banReason: u.banReason,
+                createdAt: u.createdAt,
+                flags: agg.flags.get(u.id) ?? 0,
+                online: agg.online.has(u.id),
+                payments: {
+                    total: payments?.total ?? 0,
+                    paid: payments?.paid ?? 0,
+                    pending: payments?.pending ?? 0,
+                    failed: payments?.failed ?? 0,
+                    revenue: payments?.revenue ?? 0,
                 },
-            })),
-            ...users.map((u) => {
-                const payments = agg.payments.get(u.id);
-                const activations = agg.activations.get(u.id);
-                return {
-                    id: u.id,
-                    pendingClaim: false as const,
-                    name: u.name,
-                    email: u.email as string | null,
-                    phoneNumber: u.username ?? '',
-                    image: u.image,
-                    role: u.role,
-                    banned: u.banned ?? false,
-                    banReason: u.banReason,
-                    createdAt: u.createdAt,
-                    flags: agg.flags.get(u.id) ?? 0,
-                    online: agg.online.has(u.id),
-                    payments: {
-                        total: payments?.total ?? 0,
-                        paid: payments?.paid ?? 0,
-                        pending: payments?.pending ?? 0,
-                        failed: payments?.failed ?? 0,
-                        revenue: payments?.revenue ?? 0,
-                    },
-                    activations: {
-                        total: activations?.total ?? 0,
-                        active: activations?.active ?? 0,
-                        hotspot: activations?.hotspot ?? 0,
-                        pppoe: activations?.pppoe ?? 0,
-                        underFup: activations?.underFup ?? 0,
-                    },
-                    lastPaymentAt: (agg.lastPayment.get(u.id) ??
-                        null) as Date | null,
-                    tag: tags.get(u.id) ?? null,
-                    pppoe: null,
-                };
-            }),
-        ],
+                activations: {
+                    total: activations?.total ?? 0,
+                    active: activations?.active ?? 0,
+                    hotspot: activations?.hotspot ?? 0,
+                    pppoe: activations?.pppoe ?? 0,
+                    underFup: activations?.underFup ?? 0,
+                },
+                lastPaymentAt: (agg.lastPayment.get(u.id) ??
+                    null) as Date | null,
+                tag: tags.get(u.id) ?? null,
+                pppoe: null,
+            };
+        }).filter((row) => row !== null),
     };
 }
 
@@ -1357,12 +1506,20 @@ export interface ListPaymentsOpts {
     // are listed.
     adminId: string;
     status?: 'pending' | 'paid' | 'failed';
+    type?: AdminUserTypeFilter;
     // Matches payer phone, name or the provider's transaction code.
     q?: string;
     // Restrict to payments purchased through one PPPoE service account.
     pppoeAccountId?: string;
     from?: Date;
     to?: Date;
+    sortBy?:
+        | 'createdAt'
+        | 'customer'
+        | 'package'
+        | 'amount'
+        | 'status';
+    sortDirection?: 'asc' | 'desc';
     page?: number;
     perPage?: number;
 }
@@ -1374,6 +1531,7 @@ export async function listPayments(opts: ListPaymentsOpts) {
     // Tenant scope: payments stamped with one of the admin's NAS devices.
     const conditions = [scopedToAdminNas(opts.adminId)];
     if (opts.status) conditions.push(eq(packagePayments.status, opts.status));
+    if (opts.type) conditions.push(eq(packages.type, opts.type));
     if (opts.pppoeAccountId) {
         conditions.push(
             eq(packagePayments.pppoeServiceAccountId, opts.pppoeAccountId),
@@ -1388,11 +1546,43 @@ export async function listPayments(opts: ListPaymentsOpts) {
                 ilike(packagePayments.phoneNumber, q),
                 ilike(user.name, q),
                 ilike(user.username, q),
+                ilike(packages.title, q),
                 ilike(transaction.providerTransactionId, q),
+                ilike(transaction.providerReference, q),
             )!,
         );
     }
     const where = and(...conditions);
+    const direction = opts.sortDirection === 'asc' ? asc : desc;
+    const customer = sql<string>`coalesce(${user.name}, ${packagePayments.phoneNumber})`;
+    const paymentOrder = (() => {
+        switch (opts.sortBy) {
+            case 'createdAt':
+                return [
+                    direction(packagePayments.createdAt),
+                    asc(packagePayments.id),
+                ];
+            case 'customer':
+                return [direction(customer), asc(packagePayments.id)];
+            case 'package':
+                return [direction(packages.title), asc(packagePayments.id)];
+            case 'amount':
+                return [
+                    direction(packagePayments.amount),
+                    asc(packagePayments.id),
+                ];
+            case 'status':
+                return [
+                    direction(packagePayments.status),
+                    asc(packagePayments.id),
+                ];
+            default:
+                return [
+                    desc(packagePayments.createdAt),
+                    desc(packagePayments.id),
+                ];
+        }
+    })();
 
     const [[stats], rows] = await Promise.all([
         db
@@ -1405,6 +1595,7 @@ export async function listPayments(opts: ListPaymentsOpts) {
             })
             .from(packagePayments)
             .innerJoin(nasDevice, eq(packagePayments.nasDeviceId, nasDevice.id))
+            .innerJoin(packages, eq(packagePayments.packageId, packages.id))
             .leftJoin(user, eq(packagePayments.userId, user.id))
             .leftJoin(
                 transaction,
@@ -1432,7 +1623,7 @@ export async function listPayments(opts: ListPaymentsOpts) {
         .innerJoin(packages, eq(packagePayments.packageId, packages.id))
         .leftJoin(transaction, eq(packagePayments.transaction, transaction.id))
         .where(where)
-        .orderBy(desc(packagePayments.createdAt), desc(packagePayments.id))
+        .orderBy(...paymentOrder)
         .limit(perPage)
         .offset((page - 1) * perPage),
     ]);
