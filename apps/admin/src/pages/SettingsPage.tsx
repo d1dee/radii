@@ -33,6 +33,7 @@ import {
     MdInventory2,
     MdPalette,
     MdPayment,
+    MdVpnKey,
 } from 'react-icons/md';
 
 import { previewDateTime } from '@/lib/format';
@@ -102,9 +103,10 @@ export default function SettingsPage() {
                 <Stack gap={4}>
                     <Title order={2}>Settings</Title>
                     <Text c='dimmed' size='sm'>
-                        These settings only affect your admin console. Payments
-                        fall back to the server-wide M-Pesa configuration when
-                        you have not set your own credentials.
+                        Manage your console preferences and the customer portal
+                        experience for your network. Payments fall back to the
+                        server-wide M-Pesa configuration when you have not set
+                        your own credentials.
                     </Text>
                 </Stack>
 
@@ -140,6 +142,12 @@ export default function SettingsPage() {
                         >
                             Packages
                         </Tabs.Tab>
+                        <Tabs.Tab
+                            value='pppoe'
+                            leftSection={<MdVpnKey size={16} />}
+                        >
+                            PPPoE
+                        </Tabs.Tab>
                     </Tabs.List>
 
                     <Tabs.Panel value='appearance' pt='lg'>
@@ -156,6 +164,9 @@ export default function SettingsPage() {
                     </Tabs.Panel>
                     <Tabs.Panel value='packages' pt='lg'>
                         <PackagesSection />
+                    </Tabs.Panel>
+                    <Tabs.Panel value='pppoe' pt='lg'>
+                        <PppoeSection />
                     </Tabs.Panel>
                 </Tabs>
             </Stack>
@@ -534,6 +545,61 @@ function PackagesSection() {
                     <Group justify='flex-end'>
                         <Button type='submit' loading={saving}>
                             Save Package Settings
+                        </Button>
+                    </Group>
+                </Stack>
+            </form>
+        </>
+    );
+}
+
+// --- PPPoE customer self-service --------------------------------------------
+
+function PppoeSection() {
+    const { settings, saveSettings } = useAdminSettings();
+    const [saving, setSaving] = useState(false);
+
+    const form = useForm<AdminSettings['pppoe']>({
+        initialValues: settings.pppoe,
+    });
+
+    const handleSubmit = async (values: AdminSettings['pppoe']) => {
+        setSaving(true);
+        const res = await saveSettings({ ...settings, pppoe: values });
+        setSaving(false);
+        notifySaved(
+            'PPPoE settings saved',
+            res.success,
+            res.success ? undefined : res.message,
+        );
+    };
+
+    return (
+        <>
+            <SectionHeader
+                title='PPPoE Customer Self-Service'
+                description='Control whether customers can access their PPPoE passwords in the portal.'
+            />
+            <form onSubmit={form.onSubmit(handleSubmit)}>
+                <Stack gap='md' maw='48em'>
+                    <Switch
+                        label='Show PPPoE passwords to customers'
+                        description='When enabled, customers can reveal, copy, and rotate their PPPoE password. Passwords remain hidden by default.'
+                        {...form.getInputProps('showPasswordsInPortal', {
+                            type: 'checkbox',
+                        })}
+                    />
+                    <Alert icon={<TbInfoTriangle />} color='orange'>
+                        <Text size='sm'>
+                            Enable this only when customers need password
+                            self-service. Anyone with portal access could copy
+                            the credential and use it to connect to your network.
+                        </Text>
+                    </Alert>
+                    <Divider />
+                    <Group justify='flex-end'>
+                        <Button type='submit' loading={saving}>
+                            Save PPPoE Settings
                         </Button>
                     </Group>
                 </Stack>

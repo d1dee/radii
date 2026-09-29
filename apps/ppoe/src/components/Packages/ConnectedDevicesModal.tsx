@@ -18,10 +18,7 @@ import {
 } from '@lib/store.ts';
 import { notifications } from '@mantine/notifications';
 import { timeRemaining } from './functions.ts';
-import {
-    formatPackagePrice,
-    formatPackageRate,
-} from './PackagePricing.tsx';
+import { formatPackagePrice, formatPackageRate } from './PackagePricing.tsx';
 
 interface Props {
     accountId: string | null;
@@ -55,10 +52,7 @@ export function ConnectedDevicesModal({ accountId, isOpen, onClose }: Props) {
                 });
                 return;
             }
-            await Promise.all([
-                refreshPppoeAccounts(),
-                refreshPppoeQuota(),
-            ]);
+            await Promise.all([refreshPppoeAccounts(), refreshPppoeQuota()]);
             notifications.show({
                 title: 'Success',
                 message: 'Session has been disconnected successfully',
@@ -107,7 +101,7 @@ export function ConnectedDevicesModal({ accountId, isOpen, onClose }: Props) {
                     </Table.Td>
                     <Table.Td>
                         <Text size='sm' c='dimmed'>
-                            Configure your dialer with the credentials under
+                            Configure your router with the credentials under
                             Your PPPoE Accounts.
                         </Text>
                     </Table.Td>

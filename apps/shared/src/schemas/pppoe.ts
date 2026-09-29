@@ -10,7 +10,8 @@
 export type PppoeActivation = {
     activationId: string;
     username: string;
-    password: string;
+    password: string | null;
+    passwordVisible: boolean;
 };
 
 // Service-level dialer defaults the portal shows to every customer (the NAS
@@ -35,6 +36,7 @@ export type PppoeClient = {
     status: 'active' | 'suspended' | 'closed';
     username: string;
     password: string | null;
+    passwordVisible: boolean;
     online: boolean;
     lastUsedAt: string | null;
     availableOnPortal: boolean;
@@ -52,6 +54,7 @@ export type PppoeClientConfig =
         accountId: string;
         username: string;
         password: string | null;
+        passwordVisible: boolean;
         tenantName: string;
         packageTitle: string | null;
         expireAt: string | null;

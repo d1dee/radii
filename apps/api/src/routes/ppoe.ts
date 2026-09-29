@@ -23,6 +23,8 @@ import {
     user,
 } from '../db/schema';
 import { env } from '../env';
+import { getAdminIdForNasDevice, getAdminSettings } from '../lib/adminSettings';
+import { customerVisibleToAdmin } from '../lib/adminUsers';
 import {
     forgotPinPhoneOtp,
     loginPhonePin,
@@ -30,15 +32,9 @@ import {
     registerPhonePin,
     resetPinPhoneOtp,
 } from '../lib/authHelpers';
-import {
-    getAdminIdForNasDevice,
-    getAdminSettings,
-} from '../lib/adminSettings';
-import { customerVisibleToAdmin } from '../lib/adminUsers';
 import { jsonError } from '../lib/error';
 import {
     createPayment,
-    getPackageById,
     getOrderPackageForNas,
     getPackagesGroupedByCategory,
     getPaymentById,
@@ -173,38 +169,53 @@ app.get('/config', (c) => {
 app.get('/clients', requireAuth, async (c) => {
     const currentUser = c.get('user');
     const nasDeviceId = c.req.query('nas');
-    const clients = await radiusClient.getPppoeClients(
-        currentUser!.id,
-    );
-    return c.json({
-        success: true,
-        data: clients.map((client) => {
+    const clients = await radiusClient.getPppoeClients(currentUser!.id);
+    const visibilityByTenant = new Map<string, Promise<boolean>>();
+    const passwordVisibleFor = (tenantId: string) => {
+        let visibility = visibilityByTenant.get(tenantId);
+        if (!visibility) {
+            visibility = getAdminSettings(tenantId).then(
+                (settings) => settings.pppoe.showPasswordsInPortal,
+            );
+            visibilityByTenant.set(tenantId, visibility);
+        }
+        return visibility;
+    };
+    const data = await Promise.all(
+        clients.map(async (client) => {
+            const passwordVisible = await passwordVisibleFor(client.tenantId);
             const activeActivation = client.activations.find(
                 (activation) => !activation.expired && !activation.deactivated,
             );
             return {
-            accountId: client.accountId,
-            tenantName: client.tenantName,
-            nasDeviceId: client.nasDeviceId,
-            nasName: client.nasName,
-            label: client.label,
-            status: client.status,
-            username: client.username,
-            password: client.password,
-            online: client.online,
-            lastUsedAt: client.lastUsedAt?.toISOString() ?? null,
-            availableOnPortal: Boolean(nasDeviceId) &&
-                client.nasDeviceId === nasDeviceId,
-            activeActivation: activeActivation
-                ? {
-                      activationId: activeActivation.activationId,
-                      packageTitle: activeActivation.packageTitle,
-                      activatedAt: activeActivation.activatedAt.toISOString(),
-                      expireAt: activeActivation.expireAt.toISOString(),
-                  }
-                : null,
+                accountId: client.accountId,
+                tenantName: client.tenantName,
+                nasDeviceId: client.nasDeviceId,
+                nasName: client.nasName,
+                label: client.label,
+                status: client.status,
+                username: client.username,
+                password: passwordVisible ? client.password : null,
+                passwordVisible,
+                online: client.online,
+                lastUsedAt: client.lastUsedAt?.toISOString() ?? null,
+                availableOnPortal:
+                    Boolean(nasDeviceId) && client.nasDeviceId === nasDeviceId,
+                activeActivation: activeActivation
+                    ? {
+                          activationId: activeActivation.activationId,
+                          packageTitle: activeActivation.packageTitle,
+                          activatedAt:
+                              activeActivation.activatedAt.toISOString(),
+                          expireAt: activeActivation.expireAt.toISOString(),
+                      }
+                    : null,
             };
         }),
+    );
+    return c.json({
+        success: true,
+        data,
     });
 });
 
@@ -222,13 +233,16 @@ app.get('/clients/:id/config', requireAuth, async (c) => {
     const activeActivation = client.activations.find(
         (activation) => !activation.expired && !activation.deactivated,
     );
+    const passwordVisible = (await getAdminSettings(client.tenantId)).pppoe
+        .showPasswordsInPortal;
 
     return c.json({
         success: true,
         data: {
             accountId: client.accountId,
             username: client.username,
-            password: client.password,
+            password: passwordVisible ? client.password : null,
+            passwordVisible,
             tenantName: client.tenantName,
             packageTitle: activeActivation?.packageTitle ?? null,
             expireAt: activeActivation?.expireAt.toISOString() ?? null,
@@ -247,6 +261,20 @@ app.post('/clients/:id/rotate-password', requireAuth, async (c) => {
     if (!accountId) return jsonError(c, 400, 'Missing account id');
 
     const currentUser = c.get('user');
+    const account = await getPppoeAccountOwnedByCustomer(
+        accountId,
+        currentUser!.id,
+    );
+    if (!account) return jsonError(c, 404, 'Unknown PPPoE client');
+    const passwordVisible = (await getAdminSettings(account.tenantAdminId))
+        .pppoe.showPasswordsInPortal;
+    if (!passwordVisible) {
+        return jsonError(
+            c,
+            403,
+            'PPPoE password self-service is disabled by your provider.',
+        );
+    }
     try {
         const rotated = await radiusClient.rotatePppoePassword(
             accountId,
@@ -265,6 +293,7 @@ app.post('/clients/:id/rotate-password', requireAuth, async (c) => {
                 activationId: rotated.activationId,
                 username: rotated.username,
                 password: rotated.password,
+                passwordVisible: true,
             },
         });
     } catch (err) {
@@ -374,9 +403,7 @@ app.post('/order', requireAuth, async (c) => {
     const isFree = Number(pkg.price) === 0;
     const phoneNumber =
         parsed.data.phoneNumber ??
-        (isFree
-            ? currentUser!.username?.trim() || currentUser!.email
-            : null);
+        (isFree ? currentUser!.username?.trim() || currentUser!.email : null);
     if (!phoneNumber) {
         return jsonError(c, 400, 'Invalid order payload');
     }
@@ -426,7 +453,7 @@ app.post('/order', requireAuth, async (c) => {
     }
     const activation =
         row.status === 'paid'
-            ? await pppoeActivationForPayment(row.id)
+            ? await pppoeActivationForPayment(row.id, tenantAdminId)
             : null;
 
     return c.json({
@@ -473,7 +500,10 @@ app.get('/payment/pending/latest', requireAuth, async (c) => {
     );
     const activation =
         status === 'paid'
-            ? await pppoeActivationForPayment(payment.package_payments.id)
+            ? await pppoeActivationForPayment(
+                  payment.package_payments.id,
+                  tenantAdminId,
+              )
             : null;
     return c.json({
         success: true,
@@ -507,7 +537,12 @@ app.get('/payment/:id', requireAuth, async (c) => {
     // Once paid, make sure the package is activated on RADIUS (idempotent)
     // and hand the portal the dialer credentials.
     const activation =
-        status === 'paid' ? await pppoeActivationForPayment(payment.id) : null;
+        status === 'paid'
+            ? await pppoeActivationForPayment(
+                  payment.id,
+                  payment.tenantAdminId,
+              )
+            : null;
     return c.json({
         success: true,
         data: {
@@ -525,14 +560,20 @@ app.get('/payment/:id', requireAuth, async (c) => {
 // leave `activation` null and the client keeps polling.
 async function pppoeActivationForPayment(
     paymentId: string,
+    tenantAdminId: string,
 ): Promise<PppoeActivation | null> {
     try {
-        const provisioned = await radiusClient.ensureProvisioned(paymentId);
+        const [provisioned, settings] = await Promise.all([
+            radiusClient.ensureProvisioned(paymentId),
+            getAdminSettings(tenantAdminId),
+        ]);
         if (!provisioned) return null;
+        const passwordVisible = settings.pppoe.showPasswordsInPortal;
         return {
             activationId: provisioned.activationId,
             username: provisioned.username,
-            password: provisioned.password,
+            password: passwordVisible ? provisioned.password : null,
+            passwordVisible,
         };
     } catch (err) {
         logger.error('PPPoE payment activation failed', {
@@ -582,7 +623,7 @@ app.post('/payment/:id/verify', requireAuth, async (c) => {
     // portal needs the dialer credentials, derived here idempotently.
     const activation =
         result.status === 'paid' && result.paymentId
-            ? await pppoeActivationForPayment(result.paymentId)
+            ? await pppoeActivationForPayment(result.paymentId, tenantAdminId)
             : null;
 
     return c.json({
@@ -623,10 +664,7 @@ app.post('/deauth/:activationId', requireAuth, async (c) => {
             and(
                 eq(activatedPackages.id, activationId),
                 eq(activatedPackages.userId, currentUser!.id),
-                eq(
-                    activatedPackages.pppoeServiceAccountId,
-                    body.accountId,
-                ),
+                eq(activatedPackages.pppoeServiceAccountId, body.accountId),
             ),
         )
         .limit(1);

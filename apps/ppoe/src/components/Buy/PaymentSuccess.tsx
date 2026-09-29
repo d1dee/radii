@@ -35,6 +35,7 @@ export function PaymentSuccess({
                 <CredentialsCard
                     username={activation.username}
                     password={activation.password}
+                    passwordVisible={activation.passwordVisible}
                     config={config}
                 />
 

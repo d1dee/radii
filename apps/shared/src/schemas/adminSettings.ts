@@ -151,12 +151,19 @@ export const adminPackagesSettingsSchema = z.object({
     noExpiryValidityMonths: z.number().int().min(1).max(120).nullish(),
 });
 
+export const adminPppoeSettingsSchema = z.object({
+    // Customer portal password self-service is opt-in because PPPoE
+    // credentials grant direct network access.
+    showPasswordsInPortal: z.boolean().default(false),
+});
+
 export const adminSettingsSchema = z.object({
     appearance: adminAppearanceSettingsSchema.prefault({}),
     dashboard: adminDashboardSettingsSchema.prefault({}),
     mpesa: adminMpesaSettingsSchema.prefault({}),
     contacts: adminContactsSettingsSchema.prefault({}),
     packages: adminPackagesSettingsSchema.prefault({}),
+    pppoe: adminPppoeSettingsSchema.prefault({}),
 });
 
 export type AdminSettings = z.output<typeof adminSettingsSchema>;

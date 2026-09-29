@@ -202,9 +202,7 @@ export function PppoeAccountCard() {
                                     size='xs'
                                     variant='light'
                                     color='red'
-                                    onClick={() =>
-                                        void refreshPppoeAccounts()
-                                    }
+                                    onClick={() => void refreshPppoeAccounts()}
                                 >
                                     Try again
                                 </Button>
@@ -217,7 +215,7 @@ export function PppoeAccountCard() {
                             title='No active PPPoE package'
                         >
                             Buy a package below, then configure your router or
-                            phone dialer with the credentials shown here.
+                            phone router with the credentials shown here.
                         </Alert>
                     )
                 ) : (
@@ -365,6 +363,9 @@ export function PppoeAccountCard() {
                                         <CredentialsCard
                                             username={selected.username}
                                             password={selected.password}
+                                            passwordVisible={
+                                                selected.passwordVisible
+                                            }
                                             config={config}
                                             packageTitle={
                                                 selected.activeActivation
@@ -386,25 +387,29 @@ export function PppoeAccountCard() {
                                                         ).toLocaleString()}`
                                                       : 'No active package'}
                                             </Text>
-                                            <Button
-                                                size='xs'
-                                                variant='light'
-                                                color='orange'
-                                                loading={
-                                                    rotating ===
-                                                    selected.accountId
-                                                }
-                                                disabled={
-                                                    selected.status !==
-                                                        'active' ||
-                                                    !selected.activeActivation
-                                                }
-                                                onClick={() =>
-                                                    rotate(selected.accountId)
-                                                }
-                                            >
-                                                Rotate password
-                                            </Button>
+                                            {selected.passwordVisible ? (
+                                                <Button
+                                                    size='xs'
+                                                    variant='light'
+                                                    color='orange'
+                                                    loading={
+                                                        rotating ===
+                                                        selected.accountId
+                                                    }
+                                                    disabled={
+                                                        selected.status !==
+                                                            'active' ||
+                                                        !selected.activeActivation
+                                                    }
+                                                    onClick={() =>
+                                                        rotate(
+                                                            selected.accountId,
+                                                        )
+                                                    }
+                                                >
+                                                    Rotate password
+                                                </Button>
+                                            ) : null}
                                         </Group>
                                     </Stack>
                                 </Collapse>
@@ -537,11 +542,13 @@ function AccountOption({
 export function CredentialsCard({
     username,
     password,
+    passwordVisible,
     config,
     packageTitle,
 }: {
     username: string;
     password: string | null;
+    passwordVisible: boolean;
     config?: PppoeServiceConfig | null;
     packageTitle?: string;
 }) {
@@ -562,32 +569,41 @@ export function CredentialsCard({
                 rightSection={<CopyControl value={username} />}
             />
 
-            <TextInput
-                label='PPPoE Password'
-                type={revealed ? 'text' : 'password'}
-                value={password ?? 'Not provisioned'}
-                readOnly
-                rightSection={
-                    password ? (
-                        <Group gap={4} wrap='nowrap'>
-                            <Tooltip
-                                label={
-                                    revealed ? 'Hide password' : 'Show password'
-                                }
-                            >
-                                <ActionIcon
-                                    variant='subtle'
-                                    color='gray'
-                                    onClick={() => setRevealed((v) => !v)}
+            {passwordVisible ? (
+                <TextInput
+                    label='PPPoE Password'
+                    type={revealed ? 'text' : 'password'}
+                    value={password ?? 'Not provisioned'}
+                    readOnly
+                    rightSection={
+                        password ? (
+                            <Group gap={4} wrap='nowrap'>
+                                <Tooltip
+                                    label={
+                                        revealed
+                                            ? 'Hide password'
+                                            : 'Show password'
+                                    }
                                 >
-                                    <AiOutlineEye size={16} />
-                                </ActionIcon>
-                            </Tooltip>
-                            <CopyControl value={password} />
-                        </Group>
-                    ) : null
-                }
-            />
+                                    <ActionIcon
+                                        variant='subtle'
+                                        color='gray'
+                                        onClick={() => setRevealed((v) => !v)}
+                                    >
+                                        <AiOutlineEye size={16} />
+                                    </ActionIcon>
+                                </Tooltip>
+                                <CopyControl value={password} />
+                            </Group>
+                        ) : null
+                    }
+                />
+            ) : (
+                <Alert color='gray' variant='light'>
+                    Your provider has disabled PPPoE password self-service.
+                    Contact support if you need help configuring your router.
+                </Alert>
+            )}
 
             {config ? (
                 <Stack gap='xs'>
@@ -615,8 +631,9 @@ export function CredentialsCard({
             ) : null}
 
             <Text size='xs' c='dimmed'>
-                Configure these credentials on your router or phone PPPoE dialer
-                to connect.
+                {passwordVisible
+                    ? 'Configure these credentials on your router to connect.'
+                    : 'Use the username above when contacting support about this service line.'}
             </Text>
         </Stack>
     );

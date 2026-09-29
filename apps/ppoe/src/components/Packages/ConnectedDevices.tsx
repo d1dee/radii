@@ -16,17 +16,13 @@ export function ConnectedDevice({ quota, onOpen }: Props) {
     if (quota.length > 0) {
         if (!anyOnline) {
             return (
-                <Alert
-                    title='Not connected'
-                    color={'orange'}
-                    mt='md'
-                >
+                <Alert title='Not connected' color={'orange'} mt='md'>
                     <Stack gap='sm'>
                         <span>
                             Your package is active but no PPPoE session is
-                            online. Configure your router or phone dialer with
-                            the credentials under Your PPPoE Accounts, or free
-                            a session slot if the maximum devices is reached.
+                            online. Configure your router with the credentials
+                            under Your PPPoE Accounts, or free a session slot if
+                            the maximum devices is reached.
                         </span>
                         <Button
                             color='orange'
@@ -74,7 +70,7 @@ export function ConnectedDevice({ quota, onOpen }: Props) {
                 mt='md'
             >
                 Buy a new package below, then use the PPPoE credentials it
-                issues to connect your router or phone.
+                issues to connect your router.
             </Alert>
         );
     }
