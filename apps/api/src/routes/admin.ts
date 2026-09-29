@@ -1270,7 +1270,7 @@ app.get('/radius/summary', requireAdmin, async (c) => {
 // RADIUS accounting sessions, most recent first, limited to sessions on the
 // requesting admin's NAS devices
 // (matched on NAS-IP-Address: direct IP or WireGuard tunnel address).
-// Supports q/live filters and page/perPage pagination.
+// Supports q/live/type filters and page/perPage pagination.
 app.get('/radius/sessions', requireAdmin, async (c) => {
     const sort = sessionSortSchema.safeParse({
         sortBy: c.req.query('sortBy'),
@@ -1283,6 +1283,10 @@ app.get('/radius/sessions', requireAdmin, async (c) => {
     if (liveParam && !['1', '0', 'true', 'false'].includes(liveParam)) {
         return jsonError(c, 400, 'Invalid live session filter');
     }
+    const typeParam = c.req.query('type');
+    if (typeParam && !['hotspot', 'pppoe'].includes(typeParam)) {
+        return jsonError(c, 400, 'Invalid session type filter');
+    }
     const { page, perPage } = paginationParams(
         c.req.query('page'),
         c.req.query('perPage'),
@@ -1294,6 +1298,7 @@ app.get('/radius/sessions', requireAdmin, async (c) => {
             liveParam === undefined
                 ? undefined
                 : liveParam === '1' || liveParam === 'true',
+        sessionType: typeParam as 'hotspot' | 'pppoe' | undefined,
         ...sort.data,
         page,
         perPage,

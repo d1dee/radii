@@ -52,6 +52,7 @@ import {
     isNotNull,
     isNull,
     ne,
+    notExists,
     or,
     sql,
 } from 'drizzle-orm';
@@ -315,6 +316,13 @@ export interface SessionInfo {
     fupThresholdReached: boolean;
     fupEvaluatedAt: Date | null;
 }
+
+// Session row for the admin session board: the accounting fields plus the
+// derived session type and the resolved NAS device name.
+export type AdminSessionInfo = SessionInfo & {
+    sessionType: 'hotspot' | 'pppoe';
+    nasName: string | null;
+};
 
 export type AdminSessionSortBy =
     | 'username'
@@ -2459,14 +2467,38 @@ export class RadiusClient {
         opts: {
             q?: string;
             live?: boolean;
+            sessionType?: 'hotspot' | 'pppoe';
             sortBy?: AdminSessionSortBy;
             sortDirection?: 'asc' | 'desc';
             page: number;
             perPage: number;
         },
-    ): Promise<{ total: number; sessions: SessionInfo[] }> {
+    ): Promise<{ total: number; sessions: AdminSessionInfo[] }> {
         if (nasIpAddresses.length === 0) return { total: 0, sessions: [] };
         const q = opts.q ? `%${opts.q}%` : undefined;
+        // True when the accounting username is a stable PPPoE dialer account;
+        // every other session dialed through the hotspot.
+        const pppoeFlag = sql<boolean>`exists (
+            select 1
+            from ${pppoeServiceAccounts} psa
+            where psa.username = ${radacct.username}
+        )`;
+        // NAS name resolved from the direct IP or the WireGuard tunnel address.
+        const nasName = sql<string | null>`(
+            select matched.name
+            from ${nasDevice} matched
+            left join ${nasSetupScript} tunnel
+                on tunnel.nas_device_id = matched.id
+            where matched.ip_address = ${radacct.nasipaddress}
+                or tunnel.wg_client_ip = ${radacct.nasipaddress}
+            limit 1
+        )`;
+        // A session is PPPoE when its username is one of the stable PPPoE
+        // service-account dialers; everything else dialed through the hotspot.
+        const pppoeAccountMatch = db
+            .select({ id: pppoeServiceAccounts.id })
+            .from(pppoeServiceAccounts)
+            .where(eq(pppoeServiceAccounts.username, radacct.username));
         const where = and(
             isNotNull(radacct.acctstarttime),
             inArray(radacct.nasipaddress, nasIpAddresses),
@@ -2475,13 +2507,18 @@ export class RadiusClient {
                 : opts.live
                   ? isNull(radacct.acctstoptime)
                   : isNotNull(radacct.acctstoptime),
+            opts.sessionType === undefined
+                ? undefined
+                : opts.sessionType === 'pppoe'
+                  ? exists(pppoeAccountMatch)
+                  : notExists(pppoeAccountMatch),
             q
                 ? or(
                       ilike(radacct.username, q),
                       ilike(radacct.acctsessionid, q),
                       ilike(radacct.callingstationid, q),
-                      ilike(radacct.framedipaddress, q),
-                      ilike(radacct.nasipaddress, q),
+                      ilike(sql`${radacct.framedipaddress}::text`, q),
+                      ilike(sql`${radacct.nasipaddress}::text`, q),
                   )
                 : undefined,
         );
@@ -2538,7 +2575,11 @@ export class RadiusClient {
         const [countRows, rows] = await Promise.all([
             db.select({ total: count(radacct.radacctid) }).from(radacct).where(where),
             db
-                .select()
+                .select({
+                    ...getTableColumns(radacct),
+                    pppoeFlag,
+                    nasName,
+                })
                 .from(radacct)
                 .where(where)
                 .orderBy(...orderBy)
@@ -2547,7 +2588,11 @@ export class RadiusClient {
         ]);
         return {
             total: Number(countRows[0]?.total ?? 0),
-            sessions: rows.map((row) => this.sessionInfoFromRow(row)),
+            sessions: rows.map((row) => ({
+                ...this.sessionInfoFromRow(row),
+                sessionType: row.pppoeFlag ? 'pppoe' : 'hotspot',
+                nasName: row.nasName,
+            })),
         };
     }
 

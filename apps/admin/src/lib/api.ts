@@ -858,7 +858,12 @@ export type SessionInfo = {
     fupEvaluatedAt: string | null;
 };
 
-export type AdminSessionRow = SessionInfo;
+export type SessionTypeFilter = 'hotspot' | 'pppoe';
+
+export type AdminSessionRow = SessionInfo & {
+    sessionType: SessionTypeFilter;
+    nasName: string | null;
+};
 
 export type AdminActivationList = {
     total: number;
@@ -1125,12 +1130,13 @@ export type AdminSessionList = {
     total: number;
     page: number;
     perPage: number;
-    sessions: SessionInfo[];
+    sessions: AdminSessionRow[];
 };
 
 export type ListRadiusSessionsQuery = PaginationQuery & {
     q?: string;
     live?: boolean;
+    sessionType?: SessionTypeFilter;
     sortBy?: SessionSortKey;
     sortDirection?: SortDirection;
 };
@@ -1149,6 +1155,7 @@ export function getRadiusSessions(query: ListRadiusSessionsQuery = {}) {
     const params = paginationSearchParams(query);
     if (query.q) params.set('q', query.q);
     if (query.live !== undefined) params.set('live', query.live ? '1' : '0');
+    if (query.sessionType) params.set('type', query.sessionType);
     if (query.sortBy) params.set('sortBy', query.sortBy);
     if (query.sortDirection) params.set('sortDirection', query.sortDirection);
     const qs = params.toString();

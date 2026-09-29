@@ -73,7 +73,7 @@ export async function listAdminNasDevices(opts: {
         conditions.push(
             or(
                 ilike(nasDevice.name, q),
-                ilike(nasDevice.ipAddress, q),
+                ilike(sql`${nasDevice.ipAddress}::text`, q),
                 ilike(nasDevice.macAddress, q),
                 ilike(nasDevice.model, q),
                 ilike(nasDevice.serialNumber, q),

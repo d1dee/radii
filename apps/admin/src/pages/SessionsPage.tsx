@@ -32,8 +32,10 @@ import {
     disconnectSession,
     editSessionTimeout,
     getRadiusSessions,
+    type AdminSessionRow,
     type SessionInfo,
     type SessionSortKey,
+    type SessionTypeFilter,
 } from '@/lib/api';
 import { useAutoRefresh } from '@/lib/autoRefresh';
 import { warnBackgroundFailure } from '@/lib/clientError';
@@ -66,7 +68,7 @@ export default function SessionsPage() {
     const [searchParams] = useSearchParams();
     const { settings, loaded } = useAdminSettings();
     const perPage = settings.dashboard.perPage;
-    const [sessions, setSessions] = useState<SessionInfo[]>([]);
+    const [sessions, setSessions] = useState<AdminSessionRow[]>([]);
     const [total, setTotal] = useState(0);
     const [page, setPage] = useState(1);
     const [loading, setLoading] = useState(true);
@@ -77,6 +79,9 @@ export default function SessionsPage() {
     const [search, setSearch] = useState(searchParams.get('q') ?? '');
     const [debouncedSearch] = useDebouncedValue(search, 300);
     const [sessionStatus, setSessionStatus] = useState<string | null>(null);
+    const [sessionType, setSessionType] = useState<SessionTypeFilter | null>(
+        null,
+    );
     const [sortBy, setSortBy] = useState<SessionSortKey>('startedAt');
     const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
 
@@ -100,6 +105,7 @@ export default function SessionsPage() {
                     sessionStatus === null
                         ? undefined
                         : sessionStatus === 'live',
+                sessionType: sessionType ?? undefined,
                 sortBy,
                 sortDirection,
                 page: pageToLoad,
@@ -117,12 +123,26 @@ export default function SessionsPage() {
             setTotal(res.data?.total ?? 0);
             setLastLoaded(new Date());
         },
-        [debouncedSearch, sessionStatus, sortBy, sortDirection, perPage],
+        [
+            debouncedSearch,
+            sessionStatus,
+            sessionType,
+            sortBy,
+            sortDirection,
+            perPage,
+        ],
     );
 
     useEffect(() => {
         setPage(1);
-    }, [debouncedSearch, sessionStatus, sortBy, sortDirection, perPage]);
+    }, [
+        debouncedSearch,
+        sessionStatus,
+        sessionType,
+        sortBy,
+        sortDirection,
+        perPage,
+    ]);
 
     const handleSort = (key: SessionSortKey, direction: SortDirection) => {
         setSortBy(key);
@@ -244,6 +264,19 @@ export default function SessionsPage() {
                     ]}
                     w={140}
                 />
+                <Select
+                    placeholder='Type'
+                    clearable
+                    value={sessionType}
+                    onChange={(value) =>
+                        setSessionType(value as SessionTypeFilter | null)
+                    }
+                    data={[
+                        { value: 'hotspot', label: 'Hotspot' },
+                        { value: 'pppoe', label: 'PPPoE' },
+                    ]}
+                    w={140}
+                />
                 <Badge variant='light' size='lg'>
                     {total}{' '}
                     {sessionStatus === 'live'
@@ -294,16 +327,8 @@ export default function SessionsPage() {
                                     initialDirection='desc'
                                 />
                                 <SortableTableHeader
-                                    label='Started'
+                                    label='Started / Ended'
                                     sortKey='startedAt'
-                                    sortBy={sortBy}
-                                    sortDirection={sortDirection}
-                                    onSort={handleSort}
-                                    initialDirection='desc'
-                                />
-                                <SortableTableHeader
-                                    label='Ended'
-                                    sortKey='stoppedAt'
                                     sortBy={sortBy}
                                     sortDirection={sortDirection}
                                     onSort={handleSort}
@@ -347,9 +372,24 @@ export default function SessionsPage() {
                                         {(page - 1) * perPage + i + 1}
                                     </Table.Td>
                                     <Table.Td>
-                                        <Text size='sm' fw={500}>
-                                            {s.username || '—'}
-                                        </Text>
+                                        <Group gap={6} wrap='nowrap'>
+                                            <Text size='sm' fw={500}>
+                                                {s.username || '—'}
+                                            </Text>
+                                            <Badge
+                                                variant='light'
+                                                size='xs'
+                                                color={
+                                                    s.sessionType === 'pppoe'
+                                                        ? 'violet'
+                                                        : 'blue'
+                                                }
+                                            >
+                                                {s.sessionType === 'pppoe'
+                                                    ? 'PPPoE'
+                                                    : 'Hotspot'}
+                                            </Badge>
+                                        </Group>
                                         <Text size='xs' c='dimmed'>
                                             {s.acctSessionId}
                                         </Text>
@@ -363,7 +403,12 @@ export default function SessionsPage() {
                                         </Text>
                                     </Table.Td>
                                     <Table.Td>
-                                        <Text size='sm'>{s.nasIpAddress}</Text>
+                                        <Text size='sm'>
+                                            {s.nasName ?? '—'}
+                                        </Text>
+                                        <Text size='xs' c='dimmed'>
+                                            {s.nasIpAddress}
+                                        </Text>
                                     </Table.Td>
                                     <Table.Td>
                                         <Badge
@@ -380,12 +425,10 @@ export default function SessionsPage() {
                                                 ? formatDayTime(s.startedAt)
                                                 : '—'}
                                         </Text>
-                                    </Table.Td>
-                                    <Table.Td>
-                                        <Text size='sm'>
+                                        <Text size='xs' c='dimmed'>
                                             {s.stoppedAt
-                                                ? formatDayTime(s.stoppedAt)
-                                                : '—'}
+                                                ? `→ ${formatDayTime(s.stoppedAt)}`
+                                                : '→ live'}
                                         </Text>
                                     </Table.Td>
                                     <Table.Td>
