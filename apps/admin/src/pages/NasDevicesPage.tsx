@@ -476,7 +476,21 @@ export default function NasDevicesPage() {
                                         {(page - 1) * perPage + i + 1}
                                     </Table.Td>
                                     <Table.Td fw={500}>{device.name}</Table.Td>
-                                    <Table.Td>{device.ipAddress}</Table.Td>
+                                    <Table.Td>
+                                        <Stack gap={0}>
+                                            <Text size='sm'>
+                                                {device.ipAddress}
+                                            </Text>
+                                            {device.wgClientIp ? (
+                                                <Text size='xs' c='dimmed'>
+                                                    WG {device.wgClientIp}
+                                                    {device.wgPublicKey
+                                                        ? ` · ${device.wgPublicKey.slice(0, 8)}…`
+                                                        : ''}
+                                                </Text>
+                                            ) : null}
+                                        </Stack>
+                                    </Table.Td>
                                     <Table.Td>
                                         {nasDeviceOsLabel(device.metadata?.os)}
                                     </Table.Td>

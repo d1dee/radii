@@ -2,6 +2,7 @@ import {
     Badge,
     Card,
     Center,
+    Code,
     Divider,
     Drawer,
     Grid,
@@ -197,7 +198,18 @@ export function NasDetailsDrawer({
                         <Grid.Col span={6}>
                             <DetailItem
                                 label='IP Address'
-                                value={device.ipAddress}
+                                value={
+                                    <Stack gap={0}>
+                                        <Text size='sm' fw={500}>
+                                            {device.ipAddress}
+                                        </Text>
+                                        {device.wgClientIp ? (
+                                            <Text size='xs' c='dimmed'>
+                                                WG {device.wgClientIp}
+                                            </Text>
+                                        ) : null}
+                                    </Stack>
+                                }
                             />
                         </Grid.Col>
                         <Grid.Col span={6}>
@@ -258,6 +270,53 @@ export function NasDetailsDrawer({
                     ) : (
                         <Text size='sm' c='dimmed'>
                             Not generated yet.
+                        </Text>
+                    )}
+
+                    <Divider label='WireGuard tunnel' labelPosition='left' />
+
+                    {device.wgClientIp || device.wgPublicKey ? (
+                        <Grid>
+                            <Grid.Col span={6}>
+                                <DetailItem
+                                    label='Tunnel IP'
+                                    value={device.wgClientIp ?? '—'}
+                                />
+                            </Grid.Col>
+                            <Grid.Col span={6}>
+                                <DetailItem
+                                    label='Key reported'
+                                    value={
+                                        scriptRow?.wgKeyReportedAt
+                                            ? new Date(
+                                                  scriptRow.wgKeyReportedAt,
+                                              ).toLocaleString()
+                                            : 'Never'
+                                    }
+                                />
+                            </Grid.Col>
+                            <Grid.Col span={12}>
+                                <DetailItem
+                                    label='Device public key'
+                                    value={
+                                        device.wgPublicKey ? (
+                                            <Code
+                                                style={{
+                                                    overflowWrap: 'anywhere',
+                                                }}
+                                            >
+                                                {device.wgPublicKey}
+                                            </Code>
+                                        ) : (
+                                            '—'
+                                        )
+                                    }
+                                />
+                            </Grid.Col>
+                        </Grid>
+                    ) : (
+                        <Text size='sm' c='dimmed'>
+                            No WireGuard tunnel — generate a setup script first.
                         </Text>
                     )}
 

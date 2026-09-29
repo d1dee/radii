@@ -346,6 +346,10 @@ export type NasDeviceRow = {
     metadata: Record<string, unknown> | null;
     online: boolean;
     lastSeen: string | null;
+    // WireGuard tunnel details from the device's setup script (null when no
+    // setup script has been generated).
+    wgClientIp: string | null;
+    wgPublicKey: string | null;
     createdAt: string;
     updatedAt: string;
 };

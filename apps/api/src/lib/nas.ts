@@ -135,6 +135,8 @@ export async function listAdminNasDevices(opts: {
                 ...getTableColumns(nasDevice),
                 online,
                 lastSeen,
+                wgClientIp: nasSetupScript.wgClientIp,
+                wgPublicKey: nasSetupScript.wgPublicKey,
             })
             .from(nasDevice)
             .leftJoin(
@@ -155,8 +157,13 @@ export async function listAdminNasDevices(opts: {
 
 export async function getNasDeviceById(id: string, ownerId: string) {
     const [row] = await db
-        .select()
+        .select({
+            ...getTableColumns(nasDevice),
+            wgClientIp: nasSetupScript.wgClientIp,
+            wgPublicKey: nasSetupScript.wgPublicKey,
+        })
         .from(nasDevice)
+        .leftJoin(nasSetupScript, eq(nasSetupScript.nasDeviceId, nasDevice.id))
         .where(and(eq(nasDevice.ownerId, ownerId), eq(nasDevice.id, id)))
         .limit(1);
     return row;
