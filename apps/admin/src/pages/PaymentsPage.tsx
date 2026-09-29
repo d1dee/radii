@@ -54,6 +54,23 @@ function SummaryCard({ label, value }: { label: string; value: string }) {
     );
 }
 
+function formatProviderReference(
+    payment: AdminPaymentList['payments'][number],
+) {
+    if (
+        payment.provider === 'internal' &&
+        payment.providerTransactionId?.startsWith('free:')
+    ) {
+        return 'free';
+    }
+
+    return (
+        payment.providerTransactionId ??
+        payment.provider?.split('-')[0] ??
+        '—'
+    );
+}
+
 export default function PaymentsPage() {
     // Deep links (e.g. "View payments" from a PPPoE account card) filter the
     // log to one account via /payments?pppoeAccountId=<id>.
@@ -285,15 +302,11 @@ export default function PaymentsPage() {
                                                 c='dimmed'
                                                 truncate
                                                 maw={200}
-                                                title={
-                                                    p.providerTransactionId ??
-                                                    p.provider?.split('-')[0] ??
-                                                    undefined
-                                                }
+                                                title={formatProviderReference(
+                                                    p,
+                                                )}
                                             >
-                                                {p.providerTransactionId ??
-                                                    p.provider?.split('-')[0] ??
-                                                    '—'}
+                                                {formatProviderReference(p)}
                                             </Text>
                                         </Table.Td>
                                     </Table.Tr>
