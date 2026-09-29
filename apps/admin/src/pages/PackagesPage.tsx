@@ -11,7 +11,6 @@ import {
     SimpleGrid,
     Stack,
     Table,
-    Tabs,
     Text,
     TextInput,
     Title,
@@ -75,7 +74,7 @@ export default function PackagesPage() {
     const navigate = useNavigate();
     const { settings, loaded } = useAdminSettings();
     const perPage = settings.dashboard.perPage;
-    const [activeTab, setActiveTab] = useState<PackageType>('hotspot');
+    const [typeFilter, setTypeFilter] = useState<PackageType | null>(null);
     const [packages, setPackages] = useState<PackageRow[]>([]);
     const [total, setTotal] = useState(0);
     const [page, setPage] = useState(1);
@@ -100,7 +99,7 @@ export default function PackagesPage() {
                 setError(null);
             }
             const result = await getAdminPackages({
-                type: activeTab,
+                type: typeFilter ?? undefined,
                 q: debouncedSearch.trim() || undefined,
                 status: (status as 'active' | 'inactive') || undefined,
                 sortBy: sortBy ?? undefined,
@@ -119,12 +118,12 @@ export default function PackagesPage() {
             setPackages(result.data?.packages ?? []);
             setTotal(result.data?.total ?? 0);
         },
-        [activeTab, debouncedSearch, status, sortBy, sortDirection, perPage],
+        [typeFilter, debouncedSearch, status, sortBy, sortDirection, perPage],
     );
 
     useEffect(() => {
         setPage(1);
-    }, [activeTab, debouncedSearch, status, sortBy, sortDirection, perPage]);
+    }, [typeFilter, debouncedSearch, status, sortBy, sortDirection, perPage]);
 
     const handleSort = (key: PackageSortKey, direction: SortDirection) => {
         setSortBy(key);
@@ -178,255 +177,252 @@ export default function PackagesPage() {
                 </Stack>
                 <Button
                     leftSection={<MdAdd />}
-                    onClick={() => navigate(`/packages/add?type=${activeTab}`)}
+                    onClick={() =>
+                        navigate(
+                            `/packages/add?type=${typeFilter ?? 'hotspot'}`,
+                        )
+                    }
                 >
                     Add Package
                 </Button>
             </Group>
 
-            <Tabs
-                value={activeTab}
-                onChange={(v) => setActiveTab((v as PackageType) ?? 'hotspot')}
-            >
-                <Tabs.List>
-                    <Tabs.Tab value='hotspot'>Hotspot</Tabs.Tab>
-                    <Tabs.Tab value='pppoe'>PPPoE</Tabs.Tab>
-                </Tabs.List>
-
-                <Tabs.Panel value={activeTab} pt='md'>
-                    <Stack gap='md'>
-                        {!loading && !error && (
-                            <SimpleGrid cols={{ base: 2, lg: 4 }}>
-                                <SummaryCard
-                                    label='Packages (filtered)'
-                                    value={String(summary.total)}
-                                />
-                                <SummaryCard
-                                    label='Active on page'
-                                    value={String(summary.active)}
-                                />
-                                <SummaryCard
-                                    label='Inactive on page'
-                                    value={String(summary.inactive)}
-                                />
-                                <SummaryCard
-                                    label='Avg price on page'
-                                    value={formatMoney(summary.avgPrice)}
-                                />
-                            </SimpleGrid>
-                        )}
-
-                        <Group wrap='wrap'>
-                            <TextInput
-                                placeholder='Search title, category or description'
-                                leftSection={<MdSearch />}
-                                value={search}
-                                onChange={(e) =>
-                                    setSearch(e.currentTarget.value)
-                                }
-                                style={{ flex: 1, minWidth: 220 }}
-                            />
-                            <Select
-                                placeholder='Status'
-                                clearable
-                                value={status}
-                                onChange={setStatus}
-                                data={[
-                                    { value: 'active', label: 'Active' },
-                                    { value: 'inactive', label: 'Inactive' },
-                                ]}
-                                w={140}
-                            />
-                        </Group>
-
-                        {loading ? (
-                            <Center py='xl'>
-                                <Loader />
-                            </Center>
-                        ) : error ? (
-                            <Text c='red'>{error}</Text>
-                        ) : packages.length === 0 ? (
-                            <Text c='dimmed' py='xl' ta='center'>
-                                {debouncedSearch || status
-                                    ? 'No packages match.'
-                                    : `No ${activeTab} packages yet.`}
-                            </Text>
-                        ) : (
-                            <Table.ScrollContainer minWidth={900}>
-                                <Table striped highlightOnHover stickyHeader>
-                                    <Table.Thead>
-                                        <Table.Tr>
-                                            <Table.Th>#</Table.Th>
-                                            <SortableTableHeader
-                                                label='Title'
-                                                sortKey='title'
-                                                sortBy={sortBy}
-                                                sortDirection={sortDirection}
-                                                onSort={handleSort}
-                                            />
-                                            <SortableTableHeader
-                                                label='Category'
-                                                sortKey='category'
-                                                sortBy={sortBy}
-                                                sortDirection={sortDirection}
-                                                onSort={handleSort}
-                                            />
-                                            <SortableTableHeader
-                                                label='Price'
-                                                sortKey='price'
-                                                sortBy={sortBy}
-                                                sortDirection={sortDirection}
-                                                onSort={handleSort}
-                                            />
-                                            <SortableTableHeader
-                                                label='Session'
-                                                sortKey='sessionLength'
-                                                sortBy={sortBy}
-                                                sortDirection={sortDirection}
-                                                onSort={handleSort}
-                                            />
-                                            <SortableTableHeader
-                                                label='Devices'
-                                                sortKey='maxDevices'
-                                                sortBy={sortBy}
-                                                sortDirection={sortDirection}
-                                                onSort={handleSort}
-                                            />
-                                            <Table.Th>Rate Up/Down</Table.Th>
-                                            <Table.Th>Quota Up/Down</Table.Th>
-                                            <Table.Th>Expiry</Table.Th>
-                                            <SortableTableHeader
-                                                label='Status'
-                                                sortKey='isActive'
-                                                sortBy={sortBy}
-                                                sortDirection={sortDirection}
-                                                onSort={handleSort}
-                                            />
-                                            <Table.Th ta='right'>
-                                                Actions
-                                            </Table.Th>
-                                        </Table.Tr>
-                                    </Table.Thead>
-                                    <Table.Tbody>
-                                        {packages.map((pkg, i) => (
-                                            <Table.Tr
-                                                key={pkg.id}
-                                                onClick={() =>
-                                                    setDetailsId(pkg.id)
-                                                }
-                                                style={{ cursor: 'pointer' }}
-                                            >
-                                                <Table.Td>
-                                                    {(page - 1) * perPage +
-                                                        i +
-                                                        1}
-                                                </Table.Td>
-                                                <Table.Td fw={500}>
-                                                    {pkg.title}
-                                                </Table.Td>
-                                                <Table.Td>
-                                                    {pkg.category}
-                                                </Table.Td>
-                                                <Table.Td>
-                                                    {formatPackagePrice(
-                                                        pkg.price,
-                                                    )}
-                                                </Table.Td>
-                                                <Table.Td>
-                                                    {pkg.noExpiry
-                                                        ? '—'
-                                                        : `${pkg.sessionLength} min`}
-                                                </Table.Td>
-                                                <Table.Td>
-                                                    {pkg.maxDevices}
-                                                </Table.Td>
-                                                <Table.Td>
-                                                    {formatPackageRate(
-                                                        pkg.uploadRate,
-                                                    )}{' '}
-                                                    /{' '}
-                                                    {formatPackageRate(
-                                                        pkg.downloadRate,
-                                                    )}
-                                                </Table.Td>
-                                                <Table.Td>
-                                                    {formatPackageQuota(
-                                                        pkg.uploadQuota,
-                                                    )}{' '}
-                                                    /{' '}
-                                                    {formatPackageQuota(
-                                                        pkg.downloadQuota,
-                                                    )}
-                                                </Table.Td>
-                                                <Table.Td>
-                                                    {pkg.noExpiry
-                                                        ? 'No expiry'
-                                                        : 'Expires'}
-                                                </Table.Td>
-                                                <Table.Td>
-                                                    <Badge
-                                                        color={
-                                                            pkg.isActive
-                                                                ? 'green'
-                                                                : 'gray'
-                                                        }
-                                                        variant='light'
-                                                    >
-                                                        {pkg.isActive
-                                                            ? 'Active'
-                                                            : 'Inactive'}
-                                                    </Badge>
-                                                </Table.Td>
-                                                <Table.Td>
-                                                    <Group
-                                                        justify='flex-end'
-                                                        gap='xs'
-                                                    >
-                                                        <ActionIcon
-                                                            variant='light'
-                                                            aria-label={`Edit ${pkg.title}`}
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                navigate(
-                                                                    `/packages/${pkg.id}/edit`,
-                                                                );
-                                                            }}
-                                                        >
-                                                            <MdEdit size={16} />
-                                                        </ActionIcon>
-                                                        <ActionIcon
-                                                            variant='light'
-                                                            color='red'
-                                                            aria-label={`Delete ${pkg.title}`}
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                setDeleteTarget(
-                                                                    pkg,
-                                                                );
-                                                            }}
-                                                        >
-                                                            <MdDelete
-                                                                size={16}
-                                                            />
-                                                        </ActionIcon>
-                                                    </Group>
-                                                </Table.Td>
-                                            </Table.Tr>
-                                        ))}
-                                    </Table.Tbody>
-                                </Table>
-                            </Table.ScrollContainer>
-                        )}
-                        <TablePagination
-                            page={page}
-                            perPage={perPage}
-                            total={total}
-                            onChange={setPage}
-                            loading={loading}
+            <Stack gap='md'>
+                {!loading && !error && (
+                    <SimpleGrid cols={{ base: 2, lg: 4 }}>
+                        <SummaryCard
+                            label='Packages (filtered)'
+                            value={String(summary.total)}
                         />
-                    </Stack>
-                </Tabs.Panel>
-            </Tabs>
+                        <SummaryCard
+                            label='Active on page'
+                            value={String(summary.active)}
+                        />
+                        <SummaryCard
+                            label='Inactive on page'
+                            value={String(summary.inactive)}
+                        />
+                        <SummaryCard
+                            label='Avg price on page'
+                            value={formatMoney(summary.avgPrice)}
+                        />
+                    </SimpleGrid>
+                )}
+
+                <Group wrap='wrap'>
+                    <TextInput
+                        placeholder='Search title, category or description'
+                        leftSection={<MdSearch />}
+                        value={search}
+                        onChange={(e) => setSearch(e.currentTarget.value)}
+                        style={{ flex: 1, minWidth: 220 }}
+                    />
+                    <Select
+                        placeholder='Type'
+                        clearable
+                        value={typeFilter}
+                        onChange={(v) => setTypeFilter(v as PackageType | null)}
+                        data={[
+                            { value: 'hotspot', label: 'Hotspot' },
+                            { value: 'pppoe', label: 'PPPoE' },
+                        ]}
+                        w={140}
+                    />
+                    <Select
+                        placeholder='Status'
+                        clearable
+                        value={status}
+                        onChange={setStatus}
+                        data={[
+                            { value: 'active', label: 'Active' },
+                            { value: 'inactive', label: 'Inactive' },
+                        ]}
+                        w={140}
+                    />
+                </Group>
+
+                {loading ? (
+                    <Center py='xl'>
+                        <Loader />
+                    </Center>
+                ) : error ? (
+                    <Text c='red'>{error}</Text>
+                ) : packages.length === 0 ? (
+                    <Text c='dimmed' py='xl' ta='center'>
+                        {debouncedSearch || status || typeFilter
+                            ? 'No packages match.'
+                            : 'No packages yet.'}
+                    </Text>
+                ) : (
+                    <Table.ScrollContainer minWidth={980}>
+                        <Table striped highlightOnHover stickyHeader>
+                            <Table.Thead>
+                                <Table.Tr>
+                                    <Table.Th>#</Table.Th>
+                                    <SortableTableHeader
+                                        label='Title'
+                                        sortKey='title'
+                                        sortBy={sortBy}
+                                        sortDirection={sortDirection}
+                                        onSort={handleSort}
+                                    />
+                                    <Table.Th>Type</Table.Th>
+                                    <SortableTableHeader
+                                        label='Category'
+                                        sortKey='category'
+                                        sortBy={sortBy}
+                                        sortDirection={sortDirection}
+                                        onSort={handleSort}
+                                    />
+                                    <SortableTableHeader
+                                        label='Price'
+                                        sortKey='price'
+                                        sortBy={sortBy}
+                                        sortDirection={sortDirection}
+                                        onSort={handleSort}
+                                    />
+                                    <SortableTableHeader
+                                        label='Session'
+                                        sortKey='sessionLength'
+                                        sortBy={sortBy}
+                                        sortDirection={sortDirection}
+                                        onSort={handleSort}
+                                    />
+                                    <SortableTableHeader
+                                        label='Devices'
+                                        sortKey='maxDevices'
+                                        sortBy={sortBy}
+                                        sortDirection={sortDirection}
+                                        onSort={handleSort}
+                                    />
+                                    <Table.Th>Rate Up/Down</Table.Th>
+                                    <Table.Th>Quota Up/Down</Table.Th>
+                                    <Table.Th>Expiry</Table.Th>
+                                    <SortableTableHeader
+                                        label='Status'
+                                        sortKey='isActive'
+                                        sortBy={sortBy}
+                                        sortDirection={sortDirection}
+                                        onSort={handleSort}
+                                    />
+                                    <Table.Th ta='right'>Actions</Table.Th>
+                                </Table.Tr>
+                            </Table.Thead>
+                            <Table.Tbody>
+                                {packages.map((pkg, i) => (
+                                    <Table.Tr
+                                        key={pkg.id}
+                                        onClick={() => setDetailsId(pkg.id)}
+                                        style={{ cursor: 'pointer' }}
+                                    >
+                                        <Table.Td>
+                                            {(page - 1) * perPage + i + 1}
+                                        </Table.Td>
+                                        <Table.Td fw={500}>
+                                            {pkg.title}
+                                        </Table.Td>
+                                        <Table.Td>
+                                            <Badge
+                                                color={
+                                                    pkg.type === 'hotspot'
+                                                        ? 'blue'
+                                                        : 'violet'
+                                                }
+                                                variant='light'
+                                            >
+                                                {pkg.type === 'hotspot'
+                                                    ? 'Hotspot'
+                                                    : 'PPPoE'}
+                                            </Badge>
+                                        </Table.Td>
+                                        <Table.Td>{pkg.category}</Table.Td>
+                                        <Table.Td>
+                                            {formatPackagePrice(pkg.price)}
+                                        </Table.Td>
+                                        <Table.Td>
+                                            {pkg.noExpiry
+                                                ? '—'
+                                                : `${pkg.sessionLength} min`}
+                                        </Table.Td>
+                                        <Table.Td>{pkg.maxDevices}</Table.Td>
+                                        <Table.Td>
+                                            {formatPackageRate(
+                                                pkg.uploadRate,
+                                            )}{' '}
+                                            /{' '}
+                                            {formatPackageRate(
+                                                pkg.downloadRate,
+                                            )}
+                                        </Table.Td>
+                                        <Table.Td>
+                                            {formatPackageQuota(
+                                                pkg.uploadQuota,
+                                            )}{' '}
+                                            /{' '}
+                                            {formatPackageQuota(
+                                                pkg.downloadQuota,
+                                            )}
+                                        </Table.Td>
+                                        <Table.Td>
+                                            {pkg.noExpiry
+                                                ? 'No expiry'
+                                                : 'Expires'}
+                                        </Table.Td>
+                                        <Table.Td>
+                                            <Badge
+                                                color={
+                                                    pkg.isActive
+                                                        ? 'green'
+                                                        : 'gray'
+                                                }
+                                                variant='light'
+                                            >
+                                                {pkg.isActive
+                                                    ? 'Active'
+                                                    : 'Inactive'}
+                                            </Badge>
+                                        </Table.Td>
+                                        <Table.Td>
+                                            <Group justify='flex-end' gap='xs'>
+                                                <ActionIcon
+                                                    variant='light'
+                                                    aria-label={`Edit ${pkg.title}`}
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        navigate(
+                                                            `/packages/${pkg.id}/edit`,
+                                                        );
+                                                    }}
+                                                >
+                                                    <MdEdit size={16} />
+                                                </ActionIcon>
+                                                <ActionIcon
+                                                    variant='light'
+                                                    color='red'
+                                                    aria-label={`Delete ${pkg.title}`}
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        setDeleteTarget(pkg);
+                                                    }}
+                                                >
+                                                    <MdDelete size={16} />
+                                                </ActionIcon>
+                                            </Group>
+                                        </Table.Td>
+                                    </Table.Tr>
+                                ))}
+                            </Table.Tbody>
+                        </Table>
+                    </Table.ScrollContainer>
+                )}
+                <TablePagination
+                    page={page}
+                    perPage={perPage}
+                    total={total}
+                    onChange={setPage}
+                    loading={loading}
+                />
+            </Stack>
 
             <PackageDetailsDrawer
                 packageId={detailsId}
