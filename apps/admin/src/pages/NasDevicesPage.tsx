@@ -40,6 +40,7 @@ import {
 } from '@/lib/api';
 import { useAutoRefresh } from '@/lib/autoRefresh';
 import { warnBackgroundFailure } from '@/lib/clientError';
+import { formatDayTime } from '@/lib/format';
 import { notifyResult } from '@/lib/notify';
 import { useAdminSettings } from '@/lib/settings';
 import {
@@ -89,6 +90,7 @@ export default function NasDevicesPage() {
     const perPage = settings.dashboard.perPage;
     const [devices, setDevices] = useState<NasDeviceRow[]>([]);
     const [total, setTotal] = useState(0);
+    const [onlineTotal, setOnlineTotal] = useState(0);
     const [page, setPage] = useState(1);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -142,6 +144,7 @@ export default function NasDevicesPage() {
         setError(null);
         setDevices(result.data?.nasDevices ?? []);
         setTotal(result.data?.total ?? 0);
+        setOnlineTotal(result.data?.onlineTotal ?? 0);
     }, [debouncedSearch, status, perPage]);
 
     useEffect(() => {
@@ -266,7 +269,17 @@ export default function NasDevicesPage() {
         <Stack gap='md'>
             <Group justify='space-between'>
                 <Stack gap={4}>
-                    <Title order={3}>NAS Devices</Title>
+                    <Group gap='sm'>
+                        <Title order={3}>NAS Devices</Title>
+                        {!loading && !error ? (
+                            <Badge
+                                color={onlineTotal > 0 ? 'green' : 'gray'}
+                                variant='light'
+                            >
+                                {onlineTotal} / {total} NAS connected
+                            </Badge>
+                        ) : null}
+                    </Group>
                     <Text size='sm' c='dimmed'>
                         Routers that authenticate customers against RADIUS and
                         serve your packages.
@@ -333,7 +346,7 @@ export default function NasDevicesPage() {
                         : 'No NAS devices yet. Add one to get started.'}
                 </Text>
             ) : (
-                <Table.ScrollContainer minWidth={900}>
+                <Table.ScrollContainer minWidth={1080}>
                     <Table striped highlightOnHover stickyHeader>
                         <Table.Thead>
                             <Table.Tr>
@@ -345,6 +358,8 @@ export default function NasDevicesPage() {
                                 <Table.Th>Serial Number</Table.Th>
                                 <Table.Th>Firmware</Table.Th>
                                 <Table.Th>Location</Table.Th>
+                                <Table.Th>Connection</Table.Th>
+                                <Table.Th>Last seen</Table.Th>
                                 <Table.Th>Status</Table.Th>
                                 <Table.Th ta='right'>Actions</Table.Th>
                             </Table.Tr>
@@ -373,6 +388,19 @@ export default function NasDevicesPage() {
                                     </Table.Td>
                                     <Table.Td>
                                         {device.location ?? '—'}
+                                    </Table.Td>
+                                    <Table.Td>
+                                        <Badge
+                                            color={device.online ? 'green' : 'gray'}
+                                            variant='light'
+                                        >
+                                            {device.online ? 'Online' : 'Offline'}
+                                        </Badge>
+                                    </Table.Td>
+                                    <Table.Td>
+                                        {device.lastSeen
+                                            ? formatDayTime(device.lastSeen)
+                                            : 'Never connected'}
                                     </Table.Td>
                                     <Table.Td>
                                         <Badge

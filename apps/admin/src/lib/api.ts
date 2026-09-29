@@ -331,6 +331,8 @@ export type NasDeviceRow = {
     ownerId: string;
     status: NasDeviceStatus;
     metadata: Record<string, unknown> | null;
+    online: boolean;
+    lastSeen: string | null;
     createdAt: string;
     updatedAt: string;
 };
@@ -349,6 +351,7 @@ export type CreateNasDeviceInput = {
 
 export type AdminNasDeviceList = {
     total: number;
+    onlineTotal: number;
     page: number;
     perPage: number;
     nasDevices: NasDeviceRow[];

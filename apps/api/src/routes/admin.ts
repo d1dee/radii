@@ -285,7 +285,7 @@ app.get('/nas-devices', requireAdmin, async (c) => {
         c.req.query('page'),
         c.req.query('perPage'),
     );
-    const { total, rows } = await listAdminNasDevices({
+    const { total, onlineTotal, rows } = await listAdminNasDevices({
         ownerId: c.var.adminSession.userId,
         q: c.req.query('q')?.trim() || undefined,
         status: statusParam as
@@ -299,7 +299,7 @@ app.get('/nas-devices', requireAdmin, async (c) => {
     });
     return c.json({
         success: true,
-        data: { total, page, perPage, nasDevices: rows },
+        data: { total, onlineTotal, page, perPage, nasDevices: rows },
     });
 });
 

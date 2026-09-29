@@ -1,4 +1,14 @@
-import { and, asc, count, desc, eq, ilike, or } from 'drizzle-orm';
+import {
+    and,
+    asc,
+    count,
+    desc,
+    eq,
+    getTableColumns,
+    ilike,
+    or,
+    sql,
+} from 'drizzle-orm';
 import { db } from '../db';
 import {
     hotspotLoginRequest,
@@ -8,6 +18,7 @@ import {
     packageNasDevice,
     packagePayments,
     pppoeServiceAccounts,
+    radacct,
 } from '../db/schema';
 
 type InsertNasDevice = typeof nasDevice.$inferInsert;
@@ -44,17 +55,55 @@ export async function listAdminNasDevices(opts: {
         );
     }
     const where = and(...conditions);
+    const online = sql<boolean>`exists (
+        select 1
+        from ${radacct} accounting
+        where (
+            accounting.nasipaddress = ${nasDevice.ipAddress}
+            or accounting.nasipaddress = ${nasSetupScript.wgClientIp}
+        )
+        and accounting.acctstarttime is not null
+        and accounting.acctstoptime is null
+    )`;
+    const lastSeen = sql<Date | null>`(
+        select max(coalesce(accounting.acctupdatetime, accounting.acctstarttime))
+        from ${radacct} accounting
+        where accounting.nasipaddress = ${nasDevice.ipAddress}
+            or accounting.nasipaddress = ${nasSetupScript.wgClientIp}
+    )`;
     const [countRows, rows] = await Promise.all([
-        db.select({ total: count(nasDevice.id) }).from(nasDevice).where(where),
         db
-            .select()
+            .select({
+                total: count(nasDevice.id),
+                onlineTotal: sql<number>`count(*) filter (where ${online})::int`,
+            })
             .from(nasDevice)
+            .leftJoin(
+                nasSetupScript,
+                eq(nasSetupScript.nasDeviceId, nasDevice.id),
+            )
+            .where(where),
+        db
+            .select({
+                ...getTableColumns(nasDevice),
+                online,
+                lastSeen,
+            })
+            .from(nasDevice)
+            .leftJoin(
+                nasSetupScript,
+                eq(nasSetupScript.nasDeviceId, nasDevice.id),
+            )
             .where(where)
             .orderBy(desc(nasDevice.createdAt), asc(nasDevice.id))
             .limit(opts.perPage)
             .offset((opts.page - 1) * opts.perPage),
     ]);
-    return { total: Number(countRows[0]?.total ?? 0), rows };
+    return {
+        total: Number(countRows[0]?.total ?? 0),
+        onlineTotal: Number(countRows[0]?.onlineTotal ?? 0),
+        rows,
+    };
 }
 
 export async function getNasDeviceById(id: string, ownerId: string) {
