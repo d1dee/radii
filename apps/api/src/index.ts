@@ -1,6 +1,6 @@
 import { ApiErrorType } from '@radii/shared';
 import { honoLogger } from '@logtape/hono';
-import { Hono, type MiddlewareHandler } from 'hono';
+import { Hono, type Context, type MiddlewareHandler } from 'hono';
 import { cors } from 'hono/cors';
 import { adminAuth } from './adminAuth';
 import { auth } from './auth';
@@ -9,6 +9,7 @@ import { env } from './env';
 import { radiusClient } from './lib/radius';
 import { reconcileWireGuardPeers } from './lib/wgReconcile';
 import { apiLogger, disposeLogging } from './logging';
+import { rateLimit } from './middleware/rateLimit';
 import routes from './routes';
 import type { AppVariables } from './types';
 
@@ -62,6 +63,13 @@ app.use(
     }),
 );
 
+// Per-IP rate limiting — placed AFTER CORS (so 429 responses still carry
+// CORS headers for browser clients) and BEFORE session resolution (so
+// floods are dropped without paying for the two better-auth getSession DB
+// lookups on every request). Exemptions (/api/radius/rest/*, /api/nas/*)
+// live inside the middleware; /health is not under /api/* and never limited.
+app.use('/api/*', rateLimit);
+
 // Session middleware: resolve BOTH better-auth sessions for every request
 // and attach them (or nothing) to the context for downstream handlers.
 app.use('*', async (c, next) => {
@@ -80,6 +88,41 @@ app.use('*', async (c, next) => {
 
     await next();
 });
+
+// Blocked better-auth routes answer with the same envelope as app.notFound.
+const blockedRoute = (c: Context<{ Variables: AppVariables }>) =>
+    c.json(
+        { success: false, message: 'Not found', type: ApiErrorType.NOT_FOUND },
+        404,
+    );
+
+// The better-auth admin plugin's endpoints (/api/admin/auth/admin/*) are
+// globally scoped: any admin could manage any other tenant's admin
+// (list-users, list-user-sessions with RAW session tokens, set-user-password,
+// ban-user, ...). Tenant-scoped management lives in the /api/admin REST
+// routes, so these are blocked unless ALLOW_ADMIN_PLUGIN_ROUTES is exactly
+// 'true' (the plugin itself also denies every role — see adminAuth.ts).
+// Registered BEFORE the wildcard below so it wins the match deterministically.
+if (!env.allowAdminPluginRoutes) {
+    app.on(['POST', 'GET'], '/api/admin/auth/admin/*', blockedRoute);
+}
+
+// Customers authenticate through the portal REST routes (lib/authHelpers.ts
+// calls auth.api.* server-side); the raw email sign-up/sign-in HTTP routes on
+// the CUSTOMER instance are unintended brute-force surface for the 4-digit
+// PIN and stay blocked. The same applies to sign-in/username: the portal
+// /login REST flow wraps auth.api.signInUsername with the per-account PIN
+// lockout, while the raw HTTP route would bypass it — no frontend calls it.
+// The customer instance's admin plugin surface (/api/auth/admin/*) is
+// globally scoped and unused (tenant management lives in the admin instance
+// and the /api/admin REST routes), so it is blocked deterministically like
+// the admin instance's /api/admin/auth/admin/* above. Paths the portals do
+// need over HTTP (e.g. GET /api/auth/get-session for useSession) and the
+// admin console's own login (/api/admin/auth/sign-in/email) are untouched.
+app.on(['POST', 'GET'], '/api/auth/sign-up/email', blockedRoute);
+app.on(['POST', 'GET'], '/api/auth/sign-in/email', blockedRoute);
+app.on(['POST', 'GET'], '/api/auth/sign-in/username', blockedRoute);
+app.on(['POST', 'GET'], '/api/auth/admin/*', blockedRoute);
 
 // Better Auth handlers — customers on /api/auth/*, the admin console on
 // /api/admin/auth/* (must run before the /api/admin REST routes).

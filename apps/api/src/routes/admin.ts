@@ -3,11 +3,11 @@ import {
     createNasDeviceSchema,
     createPackageSchema,
     generateSetupScriptSchema,
+    maskAdminSettings,
     zPhoneNumber,
 } from '@radii/shared';
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { env } from '../env';
 import { getAdminSettings, saveAdminSettings } from '../lib/adminSettings';
 import {
     addUserFlag,
@@ -60,7 +60,6 @@ import {
     setPppoeAccountLabel,
 } from '../lib/pppoeAccounts';
 import {
-    buildBootstrapScript,
     generateSetupScript,
     getSetupScriptForNasDevice,
     SetupScriptConfigError,
@@ -470,6 +469,39 @@ app.get('/nas-devices/:id/analytics', requireAdmin, async (c) => {
     return c.json({ success: true, data });
 });
 
+// Non-secret fields of a nas_setup_script row that the admin frontend
+// consumes (NasSetupScriptRow in apps/admin/src/lib/api.ts): the rendered
+// script, status/timestamps, WG tunnel facts and the persisted generation
+// options used to prefill the regeneration form. Everything else stays
+// server-side — hotspotPages (the login page embeds the derived portal
+// secret), radiusSecret, wgPsk, bootstrapTokenHash, pageTokenHash and
+// bootstrapExpiresAt are never serialized to the admin API responses.
+type SetupScriptRow = NonNullable<
+    Awaited<ReturnType<typeof getSetupScriptForNasDevice>>
+>;
+
+function publicSetupScriptFields(row: SetupScriptRow) {
+    return {
+        id: row.id,
+        nasDeviceId: row.nasDeviceId,
+        script: row.script,
+        wgPublicKey: row.wgPublicKey,
+        wgClientIp: row.wgClientIp,
+        hotspotInterface: row.hotspotInterface,
+        hotspotNetwork: row.hotspotNetwork,
+        hotspotDnsName: row.hotspotDnsName,
+        brandName: row.brandName,
+        pppoeInterface: row.pppoeInterface,
+        pppoeNetwork: row.pppoeNetwork,
+        ipLockdown: row.ipLockdown,
+        wgKeyReportedAt: row.wgKeyReportedAt,
+        status: row.status,
+        generatedAt: row.generatedAt,
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+    };
+}
+
 // Generate (or regenerate) the device-specific RouterOS setup script and
 // store it. Also registers the device as a FreeRADIUS client.
 app.post('/nas-devices/:id/setup-script', requireAdmin, async (c) => {
@@ -498,7 +530,20 @@ app.post('/nas-devices/:id/setup-script', requireAdmin, async (c) => {
 
     try {
         const row = await generateSetupScript(device, parsed.data);
-        return c.json({ success: true, data: row }, 201);
+        // generateSetupScript already replaced `script` with the one-time
+        // bootstrap one-liner (buildBootstrapScript) and attached the
+        // plaintext bootstrapToken (one-time reveal, never persisted) —
+        // both are kept; all secret row fields are filtered out.
+        return c.json(
+            {
+                success: true,
+                data: {
+                    ...publicSetupScriptFields(row),
+                    bootstrapToken: row.bootstrapToken,
+                },
+            },
+            201,
+        );
     } catch (e) {
         if (e instanceof SetupScriptConfigError) {
             return jsonError(c, 400, e.message);
@@ -520,17 +565,14 @@ app.get('/nas-devices/:id/setup-script', requireAdmin, async (c) => {
         return jsonError(c, 404, 'No setup script generated yet');
     }
 
-    return c.json({
-        success: true,
-        data: {
-            ...row,
-            script: buildBootstrapScript(
-                device.id,
-                row.registrationToken,
-                env.apiUrl,
-            ),
-        },
-    });
+    // The bootstrap token is one-shot and stored only as a hash, so the
+    // paste-into-router bootstrap one-liner is revealed exactly once — in the
+    // generate/regenerate (POST) response. Here we return the stored rendered
+    // script for review; it keeps {{BOOTSTRAP_TOKEN}} / {{PAGE_TOKEN}}
+    // placeholders (live tokens are substituted only when the router fetches
+    // it via the guarded /api/nas/:id/script endpoint). To (re)provision a
+    // device, regenerate the script.
+    return c.json({ success: true, data: publicSetupScriptFields(row) });
 });
 
 app.put('/nas-devices/:id', requireAdmin, async (c) => {
@@ -726,9 +768,14 @@ app.post('/users/:id/flags', requireAdmin, async (c) => {
 });
 
 app.delete('/users/:id/flags/:flagId', requireAdmin, async (c) => {
+    const id = c.req.param('id');
     const flagId = c.req.param('flagId');
-    if (!flagId) return jsonError(c, 404, 'Flag not found');
-    const removed = await removeUserFlag(flagId, c.get('adminSession').userId);
+    if (!id || !flagId) return jsonError(c, 404, 'Flag not found');
+    const removed = await removeUserFlag(
+        flagId,
+        id,
+        c.get('adminSession').userId,
+    );
     if (!removed) return jsonError(c, 404, 'Flag not found');
     return c.json({ success: true });
 });
@@ -1329,9 +1376,11 @@ app.get('/radius/activations/:id', requireAdmin, async (c) => {
     if (!(await isAdminActivationVisible(c.get('adminSession').userId, id))) {
         return jsonError(c, 404, 'Unknown activation');
     }
-    const data = await radiusClient.getPackageStatus(id, [
-        ...(await getAdminNasAddresses(c.get('adminSession').userId)),
-    ]);
+    const data = await radiusClient.getPackageStatus(
+        id,
+        { adminId: c.get('adminSession').userId },
+        [...(await getAdminNasAddresses(c.get('adminSession').userId))],
+    );
     if (!data) return jsonError(c, 404, 'Unknown activation');
     return c.json({ success: true, data });
 });
@@ -1478,7 +1527,10 @@ app.put('/radius/sessions/:radacctId', requireAdmin, async (c) => {
 
 app.get('/settings', requireAdmin, async (c) => {
     const settings = await getAdminSettings(c.get('adminSession').userId);
-    return c.json({ success: true, data: settings });
+    // M-Pesa secrets are write-only: the response carries the mask sentinel
+    // plus `*Set` booleans instead of the stored values (see @radii/shared
+    // adminSettings masking helpers).
+    return c.json({ success: true, data: maskAdminSettings(settings) });
 });
 
 app.put('/settings', requireAdmin, async (c) => {
@@ -1492,11 +1544,13 @@ app.put('/settings', requireAdmin, async (c) => {
             parsed.error.issues[0]?.message ?? 'Invalid settings',
         );
     }
+    // saveAdminSettings merges the stored secrets back in wherever the payload
+    // carries the mask sentinel or an empty value (GET round-trip safety).
     const settings = await saveAdminSettings(
         c.get('adminSession').userId,
         parsed.data,
     );
-    return c.json({ success: true, data: settings });
+    return c.json({ success: true, data: maskAdminSettings(settings) });
 });
 
 export default app;

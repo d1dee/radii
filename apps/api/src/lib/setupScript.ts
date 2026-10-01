@@ -1,25 +1,91 @@
 import type { GenerateSetupScriptInput } from '@radii/shared';
 import { desc, eq } from 'drizzle-orm';
+import { createHash, timingSafeEqual } from 'node:crypto';
 import { db } from '../db';
 import { nas, nasDevice, nasSetupScript } from '../db/schema';
 import { env } from '../env';
 import { apiLogger } from '../logging';
 import type { NasDeviceRow } from './nas';
-import { renderMikrotikSetupScript } from './setupScriptTemplate';
+import {
+    renderMikrotikSetupScript,
+    sanitizeRosComment,
+} from './setupScriptTemplate';
 import { removePeer, wgManagementEnabled } from './wireguard';
 
 const logger = apiLogger.getChild('wireguard');
 
 export class SetupScriptConfigError extends Error {}
 
+// How long a freshly generated bootstrap token stays usable for
+// GET /api/nas/:id/script and POST /api/nas/:id/report. After the first
+// successful report the token is consumed immediately (one-shot); the TTL
+// only bounds the never-used case.
+export const BOOTSTRAP_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
 const TOKEN_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
 
+// Rejection sampling: bytes >= limit would make the first (256 % n)
+// characters of the alphabet more likely (modulo bias), so they are
+// discarded and redrawn until every character is uniformly probable.
 function randomToken(length: number): string {
-    const bytes = new Uint8Array(length);
-    crypto.getRandomValues(bytes);
-    return Array.from(bytes, (b) => TOKEN_CHARS[b % TOKEN_CHARS.length]).join(
-        '',
-    );
+    const limit = 256 - (256 % TOKEN_CHARS.length);
+    const out: string[] = [];
+    while (out.length < length) {
+        const bytes = new Uint8Array(length * 2);
+        crypto.getRandomValues(bytes);
+        for (const byte of bytes) {
+            if (byte >= limit) continue;
+            out.push(TOKEN_CHARS[byte % TOKEN_CHARS.length]!);
+            if (out.length === length) break;
+        }
+    }
+    return out.join('');
+}
+
+function sha256Hex(value: string): string {
+    return createHash('sha256').update(value).digest('hex');
+}
+
+// Tokens are stored only as sha256 hex digests; comparisons run over the
+// fixed-length digests with timingSafeEqual so token checks never leak
+// prefix-match timing.
+export function hashNasToken(token: string): string {
+    return sha256Hex(token);
+}
+
+export function nasTokenMatchesHash(
+    token: string,
+    expectedHash: string,
+): boolean {
+    const presented = Buffer.from(sha256Hex(token), 'utf8');
+    const expected = Buffer.from(expectedHash, 'utf8');
+    if (presented.length !== expected.length) return false;
+    return timingSafeEqual(presented, expected);
+}
+
+// The page token (GET /api/nas/:id/hotspot/:page — branded HTML only, no
+// secrets) is derived deterministically from the bootstrap token so the
+// /script route can embed it at serve time without either plaintext being
+// persisted. Observing the page token does not reveal the bootstrap token
+// (sha256 preimage resistance).
+const PAGE_TOKEN_PREFIX = 'radii-nas-page-token:';
+
+export function deriveNasPageToken(bootstrapToken: string): string {
+    return sha256Hex(PAGE_TOKEN_PREFIX + bootstrapToken);
+}
+
+// Fills the token placeholders deliberately left in the stored script with
+// the live bootstrap token and its derived page token. Only call after the
+// presented token has been verified against bootstrapTokenHash.
+export function substituteNasScriptTokens(
+    script: string,
+    bootstrapToken: string,
+): string {
+    return script
+        .split('{{BOOTSTRAP_TOKEN}}')
+        .join(bootstrapToken)
+        .split('{{PAGE_TOKEN}}')
+        .join(deriveNasPageToken(bootstrapToken));
 }
 
 function randomBase64(byteLength: number): string {
@@ -158,10 +224,10 @@ function parseWgEndpoint(endpoint: string): { host: string; port: number } {
 
 export function buildBootstrapScript(
     deviceId: string,
-    registrationToken: string,
+    bootstrapToken: string,
     apiBase: string,
 ): string {
-    const url = `${apiBase}/api/nas/${deviceId}/script?token=${registrationToken}`;
+    const url = `${apiBase}/api/nas/${deviceId}/script?token=${bootstrapToken}`;
     return `/tool fetch url="${url}" dst-path=radii-setup.rsc; /import radii-setup.rsc`;
 }
 
@@ -248,7 +314,13 @@ export async function generateSetupScript(
 
     const radiusSecret = randomToken(24);
     const wgPsk = randomBase64(32);
-    const registrationToken = randomToken(32);
+    // The bootstrap token is shown to the admin exactly once (in the response
+    // below); only its hash is persisted, along with the derived page-token
+    // hash and the bootstrap expiry.
+    const bootstrapToken = randomToken(32);
+    const bootstrapTokenHash = hashNasToken(bootstrapToken);
+    const pageTokenHash = hashNasToken(deriveNasPageToken(bootstrapToken));
+    const bootstrapExpiresAt = new Date(Date.now() + BOOTSTRAP_TOKEN_TTL_MS);
     const wgServerPublicKey = env.wgServerPublicKey.trim();
     const reportUrl = `${env.apiUrl}/api/nas/${device.id}/report`;
 
@@ -274,7 +346,6 @@ export async function generateSetupScript(
             WG_PSK: wgPsk,
             WG_ALLOWED_ADDRESS: `${wgInterfaceIp}/32`,
             NAS_REPORT_URL: reportUrl,
-            REGISTRATION_TOKEN: registrationToken,
             HOTSPOT_INTERFACE: input.hotspotInterface,
             HOTSPOT_NETWORK: `${hs.network}/${hs.prefixLen}`,
             HOTSPOT_GATEWAY: hs.gateway,
@@ -386,7 +457,9 @@ export async function generateSetupScript(
                     wgClientIp,
                     wgPsk,
                     radiusSecret,
-                    registrationToken,
+                    bootstrapTokenHash,
+                    bootstrapExpiresAt,
+                    pageTokenHash,
                     wgKeyReportedAt: null,
                     status: 'pending',
                     generatedAt: new Date(),
@@ -412,7 +485,9 @@ export async function generateSetupScript(
                 wgClientIp,
                 wgPsk,
                 radiusSecret,
-                registrationToken,
+                bootstrapTokenHash,
+                bootstrapExpiresAt,
+                pageTokenHash,
                 wgKeyReportedAt: null,
                 status: 'pending',
             })
@@ -421,11 +496,10 @@ export async function generateSetupScript(
 
     return {
         ...row,
-        script: buildBootstrapScript(
-            device.id,
-            row.registrationToken,
-            env.apiUrl,
-        ),
+        // Return the plaintext bootstrap token only here (one-time reveal);
+        // it is never persisted and cannot be retrieved again afterwards.
+        bootstrapToken,
+        script: buildBootstrapScript(device.id, bootstrapToken, env.apiUrl),
     };
 }
 
@@ -459,6 +533,25 @@ export async function applyNasReport(
     nasDeviceId: string,
     report: NasReport,
 ) {
+    // Device-reported strings are attacker-influenced (a compromised router
+    // reports arbitrary values) and are written back to the NAS row, where
+    // they land in the NEXT generated script's comment header. Sanitize them
+    // to the same safe charset used at render time so a poisoned report can
+    // never inject RouterOS commands later.
+    const cleanModel = report.model ? sanitizeRosComment(report.model) : '';
+    const cleanSerial = report.serialNumber
+        ? sanitizeRosComment(report.serialNumber)
+        : '';
+    const cleanVersion = report.firmwareVersion
+        ? sanitizeRosComment(report.firmwareVersion)
+        : '';
+    const cleanBoard = report.boardName
+        ? sanitizeRosComment(report.boardName)
+        : '';
+    const cleanArch = report.architecture
+        ? sanitizeRosComment(report.architecture)
+        : '';
+
     return db.transaction(async (tx) => {
         const [existing] = await tx
             .select()
@@ -485,20 +578,19 @@ export async function applyNasReport(
             const deviceUpdate: Record<string, unknown> = {
                 metadata: {
                     ...((device.metadata ?? {}) as Record<string, unknown>),
-                    ...(report.boardName && { boardName: report.boardName }),
-                    ...(report.architecture && {
-                        architecture: report.architecture,
+                    ...(cleanBoard && { boardName: cleanBoard }),
+                    ...(cleanArch && {
+                        architecture: cleanArch,
                     }),
                 },
             };
-            if (report.model) deviceUpdate.model = report.model;
-            if (report.firmwareVersion) {
+            if (cleanModel) deviceUpdate.model = cleanModel;
+            if (cleanVersion) {
                 // "/system resource get version" returns e.g. "7.16.2 (stable)".
-                deviceUpdate.firmwareVersion =
-                    report.firmwareVersion.split(' ')[0];
+                deviceUpdate.firmwareVersion = cleanVersion.split(' ')[0];
             }
-            if (report.serialNumber) {
-                deviceUpdate.serialNumber = report.serialNumber;
+            if (cleanSerial) {
+                deviceUpdate.serialNumber = cleanSerial;
             }
             await tx
                 .transaction(async (tx2) => {

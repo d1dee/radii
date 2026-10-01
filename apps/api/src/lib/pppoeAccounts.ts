@@ -21,11 +21,21 @@ function generatedUsername(id: string): string {
     return `PPP-${id.replace(/-/g, '').slice(0, 16).toUpperCase()}`;
 }
 
+// Rejection sampling: bytes >= limit would make the first (256 % n)
+// characters of the alphabet more likely (modulo bias), so they are
+// discarded and redrawn until every character is uniformly probable.
 function randomFromAlphabet(length: number, alphabet: string): string {
-    const bytes = randomBytes(length);
-    return Array.from(bytes, (byte) => alphabet[byte % alphabet.length]).join(
-        '',
-    );
+    const limit = 256 - (256 % alphabet.length);
+    const out: string[] = [];
+    while (out.length < length) {
+        const bytes = randomBytes(length * 2);
+        for (const byte of bytes) {
+            if (byte >= limit) continue;
+            out.push(alphabet[byte % alphabet.length]!);
+            if (out.length === length) break;
+        }
+    }
+    return out.join('');
 }
 
 function hashClaimCode(code: string): string {

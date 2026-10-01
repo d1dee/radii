@@ -1250,20 +1250,24 @@ export async function getAdminSessionDetail(
                 : Promise.resolve([]),
         ]);
 
-        const adminActorIds = events.flatMap((event) =>
-            event.actorType === 'admin' && event.actorId ? [event.actorId] : [],
+        const hasAdminActor = events.some(
+            (event) => event.actorType === 'admin' && event.actorId,
         );
         const customerActorIds = events.flatMap((event) =>
             event.actorType === 'customer' && event.actorId
                 ? [event.actorId]
                 : [],
         );
+        // Tenant scoping: only the requesting admin's own name is resolved
+        // for admin actors. Any other admin id (legacy/shared rows) falls
+        // through to the generic 'Administrator' label below instead of
+        // surfacing a foreign admin's display name.
         const [adminActors, customerActors] = await Promise.all([
-            adminActorIds.length
+            hasAdminActor
                 ? db
                       .select({ id: adminUser.id, name: adminUser.name })
                       .from(adminUser)
-                      .where(inArray(adminUser.id, adminActorIds))
+                      .where(eq(adminUser.id, adminId))
                 : Promise.resolve([]),
             customerActorIds.length
                 ? db
@@ -1416,11 +1420,23 @@ export async function addUserFlag(
     return flag;
 }
 
-// Only the flag's authoring admin can remove it (tenant-scoped moderation).
-export async function removeUserFlag(flagId: string, adminId: string) {
+// Only the flag's authoring admin can remove it (tenant-scoped moderation),
+// and the flag must belong to the user named in the request path so the URL
+// matches the row being deleted (audit-trail consistency).
+export async function removeUserFlag(
+    flagId: string,
+    userId: string,
+    adminId: string,
+) {
     const removed = await db
         .delete(userFlag)
-        .where(and(eq(userFlag.id, flagId), eq(userFlag.createdBy, adminId)))
+        .where(
+            and(
+                eq(userFlag.id, flagId),
+                eq(userFlag.userId, userId),
+                eq(userFlag.createdBy, adminId),
+            ),
+        )
         .returning();
     return removed.length > 0;
 }
@@ -1747,6 +1763,11 @@ export async function getAdminPaymentDetail(
 
     if (!payment) return null;
 
+    // Provider correlation ids (request/conversation) are deliberately not
+    // exposed to tenant admins: they are the lookup keys of the async status
+    // callback surface, and leaking them would let an admin craft forged
+    // callbacks against their own pending payments. The signed ?ct= token
+    // (never returned here) authenticates real deliveries.
     const logs = payment.transactionId
         ? await db
               .select({
@@ -1754,8 +1775,6 @@ export async function getAdminPaymentDetail(
                   provider: transactionLog.provider,
                   eventType: transactionLog.eventType,
                   payload: transactionLog.payload,
-                  providerRequestId: transactionLog.providerRequestId,
-                  providerConversationId: transactionLog.providerConversationId,
                   createdAt: transactionLog.createdAt,
               })
               .from(transactionLog)

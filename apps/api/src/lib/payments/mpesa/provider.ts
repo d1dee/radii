@@ -33,6 +33,7 @@ import type {
     TransactionStatusResponseInterface,
 } from './deno-mpesa-api/@types/types.d';
 import MpesaApi from './deno-mpesa-api/mod';
+import { signCallbackUrl } from '../callbackToken';
 import { paymentLogError } from '../log';
 
 export const MPESA_PROVIDER_NAME = 'mpesa';
@@ -111,8 +112,11 @@ function isMpesaErrorBody(
     );
 }
 
-// Safaricom only accepts the 254XXXXXXXXX form for M-Pesa-registered numbers.
-function toMpesaPhoneNumber(phoneNumber: string): string | null {
+// Safaricom only accepts the 254XXXXXXXXX form for M-Pesa-registered
+// numbers. Also used to normalize gateway-reported payer numbers (callback
+// MSISDN / PhoneNumber fields) into one comparable form; returns null for
+// anything that is not a Kenyan mobile number.
+export function normalizeMpesaPhoneNumber(phoneNumber: string): string | null {
     const digits = phoneNumber.replace(/\D/g, '');
     if (/^254\d{9}$/.test(digits)) return digits;
     if (/^0[17]\d{8}$/.test(digits)) return `254${digits.slice(1)}`;
@@ -198,7 +202,7 @@ export class MpesaPaymentProvider implements PaymentProvider {
             );
         }
 
-        const phoneNumber = toMpesaPhoneNumber(request.phoneNumber);
+        const phoneNumber = normalizeMpesaPhoneNumber(request.phoneNumber);
         if (!phoneNumber) {
             return failed(
                 `"${request.phoneNumber}" is not a valid Safaricom M-Pesa phone number (expected a Kenyan number, e.g. 254712345678).`,
@@ -216,7 +220,12 @@ export class MpesaPaymentProvider implements PaymentProvider {
             PartyA: Number(phoneNumber),
             PartyB: partyB,
             PhoneNumber: Number(phoneNumber),
-            CallBackURL: `${request.callbackBaseUrl}/${MPESA_CALLBACK_EVENTS.stk}`,
+            CallBackURL: signCallbackUrl(
+                `${request.callbackBaseUrl}/${MPESA_CALLBACK_EVENTS.stk}`,
+                this.name,
+                MPESA_CALLBACK_EVENTS.stk,
+                request.callbackNonce,
+            ),
             passKey: this.config.passkey,
             AccountReference: request.accountReference.slice(0, 12),
             TransactionType: this.config.transactionType,
@@ -331,7 +340,12 @@ export class MpesaPaymentProvider implements PaymentProvider {
                 `"${transactionId}" is not a valid M-Pesa transaction code. Check your M-Pesa message and enter the receipt number only (e.g. NEF61H8J60).`,
             );
         }
-        const statusUrl = `${context.callbackBaseUrl}/${MPESA_CALLBACK_EVENTS.status}`;
+        const statusUrl = signCallbackUrl(
+            `${context.callbackBaseUrl}/${MPESA_CALLBACK_EVENTS.status}`,
+            this.name,
+            MPESA_CALLBACK_EVENTS.status,
+            context.callbackNonce,
+        );
         const response = await this.client.transactionStatus(
             this.config.initiatorPassword,
             {
@@ -421,6 +435,7 @@ export class MpesaPaymentProvider implements PaymentProvider {
                 conversationId: null,
                 transactionId: null,
                 amount: null,
+                payerPhoneNumber: null,
                 payload: raw,
                 message:
                     stk.ResultDesc ||
@@ -439,6 +454,13 @@ export class MpesaPaymentProvider implements PaymentProvider {
             typeof metadata.MpesaReceiptNumber === 'string'
                 ? metadata.MpesaReceiptNumber
                 : null;
+        // The STK callback reports the payer's number in the metadata items
+        // (PhoneNumber); normalize it for the core's payer-binding check.
+        const payer =
+            metadata.PhoneNumber !== undefined &&
+            metadata.PhoneNumber !== null
+                ? normalizeMpesaPhoneNumber(String(metadata.PhoneNumber))
+                : null;
 
         return {
             outcome: 'completed',
@@ -447,6 +469,7 @@ export class MpesaPaymentProvider implements PaymentProvider {
             conversationId: null,
             transactionId: receipt,
             amount: Number.isFinite(amount) ? amount : null,
+            payerPhoneNumber: payer,
             payload: raw,
             message: stk.ResultDesc || 'Payment completed.',
         };
@@ -490,6 +513,12 @@ export class MpesaPaymentProvider implements PaymentProvider {
             resultCode === '0' &&
             resultType === '0' &&
             transactionStatus.toLowerCase() === 'completed';
+        // TransactionStatus results report the payer's number as the MSISDN
+        // result parameter; normalize it for the core's payer-binding check
+        // (absent on some Safaricom payloads — the core then skips it).
+        const payer = parameters.MSISDN
+            ? normalizeMpesaPhoneNumber(parameters.MSISDN)
+            : null;
 
         if (!completed) {
             const timedOut = resultDescription
@@ -503,6 +532,7 @@ export class MpesaPaymentProvider implements PaymentProvider {
                 transactionId:
                     'TransactionID' in result ? result.TransactionID : null,
                 amount: null,
+                payerPhoneNumber: payer,
                 payload: raw,
                 message:
                     resultDescription ||
@@ -523,6 +553,7 @@ export class MpesaPaymentProvider implements PaymentProvider {
             transactionId:
                 'TransactionID' in result ? result.TransactionID : null,
             amount: amount !== null && Number.isFinite(amount) ? amount : null,
+            payerPhoneNumber: payer,
             payload: raw,
             message:
                 `Transaction ${parameters.ReceiptNo ?? ''} completed on M-Pesa.`.trim(),

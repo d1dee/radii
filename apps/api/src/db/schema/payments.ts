@@ -32,6 +32,12 @@ export const transaction = pgTable(
         providerReference: text('provider_reference'),
         description: text('description'),
         metadata: jsonb('metadata'),
+        // Per-event callback nonces ({ [event]: nonce }) embedded in the
+        // signed ?ct= token of every callback URL handed to the gateway for
+        // this transaction (see lib/payments/callbackToken.ts). Async status
+        // callbacks must present the nonce stored for their event, binding
+        // the callback to this exact transaction.
+        callbackNonces: jsonb('callback_nonces'),
         createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
             .defaultNow()
             .notNull(),

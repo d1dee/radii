@@ -7,7 +7,11 @@
 // lib/payments/adminProviders.ts).
 
 import { desc, eq } from 'drizzle-orm';
-import { adminSettingsSchema, type AdminSettings } from '@radii/shared';
+import {
+    adminSettingsSchema,
+    mergeAdminSettingsSecrets,
+    type AdminSettings,
+} from '@radii/shared';
 import { db } from '../db';
 import {
     adminSetting,
@@ -30,11 +34,18 @@ export async function getAdminSettings(adminId: string): Promise<AdminSettings> 
 
 // Validates and upserts the full settings document, then drops any cached
 // per-admin M-Pesa provider so the next payment uses the new credentials.
+// Secret fields (consumerSecret/passkey/initiatorPassword) arrive masked or
+// empty when the client round-trips the GET response; the stored values are
+// merged back in before validation so credentials are never wiped by a save
+// that did not intend to change them.
 export async function saveAdminSettings(
     adminId: string,
     input: unknown,
 ): Promise<AdminSettings> {
-    const settings = adminSettingsSchema.parse(input);
+    const existing = await getAdminSettings(adminId);
+    const settings = adminSettingsSchema.parse(
+        mergeAdminSettingsSecrets(input, existing),
+    );
     await db
         .insert(adminSetting)
         .values({ adminUserId: adminId, settings })
@@ -46,12 +57,15 @@ export async function saveAdminSettings(
     return settings;
 }
 
+const UUID_RE =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 // Owning admin of a NAS device — the tenant-attribution root used to pick the
 // per-admin M-Pesa configuration for payments made through that device.
 export async function getAdminIdForNasDevice(
     nasDeviceId: string | null | undefined,
 ): Promise<string | null> {
-    if (!nasDeviceId) return null;
+    if (!nasDeviceId || !UUID_RE.test(nasDeviceId)) return null;
     const [row] = await db
         .select({ ownerId: nasDevice.ownerId })
         .from(nasDevice)

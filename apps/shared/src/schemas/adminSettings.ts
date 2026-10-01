@@ -65,6 +65,11 @@ export const adminMpesaSettingsSchema = z
         // push/query work without them.
         initiatorName: z.string().max(255).default(''),
         initiatorPassword: z.string().max(255).default(''),
+        // Path to the certificate used to encrypt the initiator password.
+        // Server-enforced: must resolve to a file inside the API's
+        // MPESA_ALLOWED_CERT_DIR (default <api cwd>/certs); paths outside it
+        // (including symlink escapes) are rejected. Empty = the Safaricom
+        // certificate bundled with the provider for the selected environment.
         certificatePath: z.string().max(512).default(''),
         transactionType: mpesaTransactionTypeSchema.default(
             'CustomerPayBillOnline',
@@ -174,3 +179,76 @@ export type AdminSettingsInput = z.input<typeof adminSettingsSchema>;
 export const defaultAdminSettings: AdminSettings = adminSettingsSchema.parse(
     {},
 );
+
+// --- Write-only M-Pesa secrets -------------------------------------------------
+// HTTP responses never return the stored secret values. GET/PUT
+// /admin/settings replace a configured secret with ADMIN_SECRET_MASK (and an
+// empty string when unset) plus companion `<field>Set` booleans so the UI can
+// show the "configured" state. On PUT the mask (or an empty value) means
+// "keep the stored secret"; any other non-empty value overwrites it. Internal
+// server consumers (payments provider, RADIUS) keep reading the real values
+// through getAdminSettings — masking only applies to serialized responses.
+
+export const ADMIN_SECRET_MASK = '__MASKED__';
+
+export const adminMpesaSecretFields = [
+    'consumerSecret',
+    'passkey',
+    'initiatorPassword',
+] as const;
+export type AdminMpesaSecretField = (typeof adminMpesaSecretFields)[number];
+
+// Shape of the settings document as returned by the admin settings API:
+// AdminSettings with masked mpesa secrets and `<field>Set` booleans.
+export type AdminSettingsResponse = Omit<AdminSettings, 'mpesa'> & {
+    mpesa: AdminSettings['mpesa'] & {
+        consumerSecretSet: boolean;
+        passkeySet: boolean;
+        initiatorPasswordSet: boolean;
+    };
+};
+
+export function maskAdminSettings(
+    settings: AdminSettings,
+): AdminSettingsResponse {
+    return {
+        ...settings,
+        mpesa: {
+            ...settings.mpesa,
+            consumerSecret: settings.mpesa.consumerSecret
+                ? ADMIN_SECRET_MASK
+                : '',
+            passkey: settings.mpesa.passkey ? ADMIN_SECRET_MASK : '',
+            initiatorPassword: settings.mpesa.initiatorPassword
+                ? ADMIN_SECRET_MASK
+                : '',
+            consumerSecretSet: settings.mpesa.consumerSecret !== '',
+            passkeySet: settings.mpesa.passkey !== '',
+            initiatorPasswordSet: settings.mpesa.initiatorPassword !== '',
+        },
+    };
+}
+
+// Substitutes the stored secrets back into a raw PUT payload so a round-trip
+// of the masked GET response never wipes real credentials. Runs before
+// adminSettingsSchema.parse so validation sees the effective values.
+export function mergeAdminSettingsSecrets(
+    input: unknown,
+    existing: AdminSettings,
+): unknown {
+    if (typeof input !== 'object' || input === null) return input;
+    const raw = input as Record<string, unknown>;
+    if (typeof raw.mpesa !== 'object' || raw.mpesa === null) return input;
+    const mpesa = { ...(raw.mpesa as Record<string, unknown>) };
+    for (const field of adminMpesaSecretFields) {
+        const value = mpesa[field];
+        if (
+            value === undefined ||
+            value === '' ||
+            value === ADMIN_SECRET_MASK
+        ) {
+            mpesa[field] = existing.mpesa[field];
+        }
+    }
+    return { ...raw, mpesa };
+}

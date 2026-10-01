@@ -6,6 +6,9 @@
 // credentials the caller falls back to the server-wide provider registered
 // from env (see ./index.ts).
 
+import { realpathSync } from 'node:fs';
+import path from 'node:path';
+import { env } from '../../env';
 import { apiLogger } from '../../logging';
 import { getAdminSettings } from '../adminSettings';
 import { MPESA_PROVIDER_NAME, MpesaPaymentProvider } from './mpesa/provider';
@@ -38,6 +41,51 @@ interface CachedProvider {
 }
 
 const cache = new Map<string, CachedProvider>();
+
+function isInsideDir(dir: string, target: string): boolean {
+    const prefix = dir.endsWith(path.sep) ? dir : `${dir}${path.sep}`;
+    return target === dir || target.startsWith(prefix);
+}
+
+// Containment for admin-supplied certificate paths: mpesa.certificatePath
+// from admin settings is untrusted input consumed by readFileSync in the
+// provider constructor, so it must resolve to a file inside
+// MPESA_ALLOWED_CERT_DIR (default <api cwd>/certs) — otherwise an admin
+// could point it at any readable server file. Symlink escapes are rejected
+// via realpath when the file exists. The operator-level env
+// MPESA_CERTIFICATE_PATH is trusted and bypasses this check.
+function resolveAdminCertificatePath(
+    certificatePath: string,
+    providerName: string,
+): string {
+    const reject = (): never => {
+        throw new PaymentProviderError(
+            `certificatePath must point to a certificate inside the allowed directory (${env.mpesa.allowedCertDir}).`,
+            providerName,
+        );
+    };
+    const allowedDir = path.resolve(env.mpesa.allowedCertDir);
+    const resolved = path.resolve(certificatePath);
+    if (!isInsideDir(allowedDir, resolved)) reject();
+    let realTarget: string | null = null;
+    try {
+        realTarget = realpathSync(resolved);
+    } catch (err) {
+        // A missing file is left to the provider constructor's own clear
+        // error; unexpected failures (permissions, ...) reject fail-closed.
+        if ((err as NodeJS.ErrnoException).code !== 'ENOENT') reject();
+    }
+    if (realTarget) {
+        let realDir = allowedDir;
+        try {
+            realDir = realpathSync(allowedDir);
+        } catch {
+            // Allowed dir does not exist: nothing inside it can be reached.
+        }
+        if (!isInsideDir(realDir, realTarget)) reject();
+    }
+    return resolved;
+}
 
 // Called by saveAdminSettings so the next payment picks up new credentials.
 export function invalidateAdminMpesaProvider(adminId: string): void {
@@ -86,7 +134,12 @@ export async function getAdminMpesaProvider(
             environment: mpesa.environment,
             initiatorName: mpesa.initiatorName || undefined,
             initiatorPassword: mpesa.initiatorPassword || undefined,
-            certificatePath: mpesa.certificatePath || undefined,
+            certificatePath: mpesa.certificatePath
+                ? resolveAdminCertificatePath(
+                      mpesa.certificatePath,
+                      adminMpesaProviderName(adminId),
+                  )
+                : undefined,
             transactionType: mpesa.transactionType,
         },
         adminMpesaProviderName(adminId),

@@ -32,10 +32,12 @@ import {
     parseAdminIdFromProviderName,
     resolveProviderByName,
 } from './adminProviders';
+import { newCallbackNonce } from './callbackToken';
 import { paymentLogError, paymentLogInfo, paymentLogWarn } from './log';
 import {
     MPESA_CALLBACK_EVENTS,
     MPESA_PROVIDER_NAME,
+    normalizeMpesaPhoneNumber,
 } from './mpesa/provider';
 import {
     PaymentProviderError,
@@ -233,6 +235,10 @@ export class PaymentService {
             };
         }
 
+        // Nonce for the STK callback URL handed to the gateway; stored on the
+        // transaction row and embedded (HMAC-signed) in the URL so only
+        // deliveries to a server-issued callback URL pass route auth.
+        const stkCallbackNonce = newCallbackNonce();
         const txRow = await db.transaction(async (trx) => {
             const [row] = await trx
                 .insert(transaction)
@@ -243,6 +249,9 @@ export class PaymentService {
                     provider: provider.name,
                     status: 'pending',
                     description: `Package purchase: ${pkg.title}`,
+                    callbackNonces: {
+                        [MPESA_CALLBACK_EVENTS.stk]: stkCallbackNonce,
+                    },
                     metadata: {
                         packagePaymentId: payment.id,
                         packageId: pkg.id,
@@ -275,6 +284,7 @@ export class PaymentService {
                 accountReference: payment.id.replace(/-/g, '').slice(0, 12),
                 description: pkg.title,
                 callbackBaseUrl: this.callbackBaseUrl(provider.name),
+                callbackNonce: stkCallbackNonce,
             });
         } catch (err) {
             paymentLogError(
@@ -633,10 +643,32 @@ export class PaymentService {
         }
 
         // 4. Submit a fresh verification to the provider.
+        //
+        // Mint the status-callback nonce first and bind it to the
+        // transaction row: the async status callback carries it in its
+        // signed ?ct= token and is only accepted when it matches, so a
+        // forged (or replayed from another transaction) status callback
+        // cannot complete this payment. A re-submitted verification
+        // overwrites the nonce, retiring any earlier in-flight query's URL.
+        const statusCallbackNonce = newCallbackNonce();
+        await db
+            .update(transaction)
+            .set({
+                callbackNonces: {
+                    ...((target.tx.callbackNonces ?? {}) as Record<
+                        string,
+                        string
+                    >),
+                    [MPESA_CALLBACK_EVENTS.status]: statusCallbackNonce,
+                },
+            })
+            .where(eq(transaction.id, target.tx.id));
+
         let result;
         try {
             result = await provider.verifyTransaction(code, {
                 callbackBaseUrl: this.callbackBaseUrl(provider.name),
+                callbackNonce: statusCallbackNonce,
             });
         } catch (err) {
             paymentLogError(
@@ -669,6 +701,47 @@ export class PaymentService {
         }
 
         if (result.outcome === 'completed') {
+            // Same completion guards as the async status-callback path: the
+            // receipt must be for the package amount and paid by the phone
+            // number on the payment.
+            const rejection =
+                (await this.amountMismatch(
+                    target.tx,
+                    result.amount ?? null,
+                )) ??
+                this.payerMismatch(
+                    target.payment.phoneNumber,
+                    result.payerPhoneNumber ?? null,
+                    {
+                        transactionId: target.tx.id,
+                        paymentId: target.payment.id,
+                        provider: provider.name,
+                        source: 'receipt_verification',
+                        receipt: code,
+                    },
+                );
+            if (rejection) {
+                const rejected = await this.applyOutcome(
+                    target.tx,
+                    'failed',
+                    {
+                        transactionId: code,
+                        source: 'receipt_verification',
+                        message: rejection,
+                        amount: result.amount ?? null,
+                    },
+                );
+                return {
+                    paymentId: target.payment.id,
+                    status: rejected
+                        ? 'failed'
+                        : await this.getPackagePaymentStatus(
+                              target.payment.id,
+                              target.payment.status,
+                          ),
+                    message: rejection,
+                };
+            }
             const transitioned = await this.applyOutcome(
                 target.tx,
                 'completed',
@@ -719,10 +792,14 @@ export class PaymentService {
 
     // Dispatches an inbound webhook to the owning provider and reconciles the
     // referenced transaction. Returns the HTTP response for the gateway.
+    // callbackNonce is the nonce from the route-verified signed ?ct= token
+    // (see ./callbackToken.ts); status callbacks are additionally bound to
+    // the transaction row that issued the verification URL through it.
     async handleProviderCallback(
         providerName: string,
         event: string,
         payload: unknown,
+        callbackNonce?: string | null,
     ): Promise<CallbackRouteResponse> {
         let provider = await this.resolveProvider(providerName);
         if (!provider && parseAdminIdFromProviderName(providerName)) {
@@ -800,6 +877,26 @@ export class PaymentService {
         }
 
         if (event === MPESA_CALLBACK_EVENTS.status) {
+            // Safaricom's Transaction Status callbacks carry no signature of
+            // their own: the signed URL token's nonce must equal the one
+            // stored on this transaction when the status query was submitted
+            // (verifyTransactionCode). This is what authenticates status
+            // completions, together with the amount-match below.
+            const storedNonces = (txRow.callbackNonces ?? {}) as Record<
+                string,
+                string
+            >;
+            if (!callbackNonce || storedNonces[event] !== callbackNonce) {
+                paymentLogWarn('callback_nonce_mismatch', {
+                    transactionId: txRow.id,
+                    provider: providerName,
+                    event,
+                    reference: result.reference,
+                    providerConversationId: result.conversationId,
+                    outcome: result.outcome,
+                });
+                return { status: 200, body: { success: true } };
+            }
             await this.appendLog(
                 txRow.id,
                 txRow.provider,
@@ -900,13 +997,25 @@ export class PaymentService {
                 event === MPESA_CALLBACK_EVENTS.status
                     ? await this.amountMismatch(txRow, result.amount)
                     : null;
-            if (mismatch) {
+            // Payer binding: refuse completion when the gateway reports a
+            // different payer than the phone number on the linked package
+            // payment. Skipped when either side is absent — some Safaricom
+            // payloads omit the MSISDN/PhoneNumber, in which case the amount
+            // match and (for status) the stored-nonce check still apply.
+            const rejection =
+                mismatch ??
+                (await this.payerMismatchForTransaction(
+                    txRow,
+                    result.payerPhoneNumber,
+                    { provider: providerName, event },
+                ));
+            if (rejection) {
                 await this.applyOutcome(txRow, 'failed', {
                     transactionId: result.transactionId,
                     source: `callback_${event}`,
-                    message: mismatch,
+                    message: rejection,
                     amount: result.amount,
-                    payload: { ...result.payload, message: mismatch },
+                    payload: { ...result.payload, message: rejection },
                     requestId: result.requestId,
                     conversationId: result.conversationId,
                 });
@@ -1023,6 +1132,51 @@ export class PaymentService {
             return `Payment amount mismatch: the package costs ${expected} but the provider reported ${reportedAmount}.`;
         }
         return null;
+    }
+
+    // Payer binding: compares the gateway-reported payer number with the
+    // phone number on the package payment. Returns a rejection message on
+    // mismatch, or null to proceed. Limitation: when either side is
+    // absent/unparseable the check is skipped (not every gateway payload
+    // reports the payer); the amount and nonce guards still apply.
+    private payerMismatch(
+        expectedPhoneNumber: string | null | undefined,
+        reportedPayer: string | null | undefined,
+        context: Record<string, unknown>,
+    ): string | null {
+        if (!reportedPayer) return null;
+        const expected = normalizeMpesaPhoneNumber(expectedPhoneNumber ?? '');
+        if (!expected || expected === reportedPayer) return null;
+        paymentLogWarn('payer_mismatch', {
+            ...context,
+            expectedPayer: expected,
+            reportedPayer,
+        });
+        return 'This receipt was paid from a different phone number than the one on the payment.';
+    }
+
+    // Payer binding for callback reconciliation: loads the package payment
+    // linked through the transaction metadata and defers to payerMismatch.
+    private async payerMismatchForTransaction(
+        txRow: TransactionRow,
+        reportedPayer: string | null,
+        context: Record<string, unknown>,
+    ): Promise<string | null> {
+        if (!reportedPayer) return null;
+        const packagePaymentId = (
+            txRow.metadata as { packagePaymentId?: string } | null
+        )?.packagePaymentId;
+        if (!packagePaymentId) return null;
+        const [payment] = await db
+            .select({ phoneNumber: packagePayments.phoneNumber })
+            .from(packagePayments)
+            .where(eq(packagePayments.id, packagePaymentId))
+            .limit(1);
+        return this.payerMismatch(payment?.phoneNumber, reportedPayer, {
+            transactionId: txRow.id,
+            paymentId: packagePaymentId,
+            ...context,
+        });
     }
 
     // Flips the transaction (and any linked package payment) to a final state

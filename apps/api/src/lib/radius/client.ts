@@ -62,6 +62,7 @@ import { db } from '../../db';
 import { env } from '../../env';
 import { apiLogger } from '../../logging';
 import { getAdminSettings } from '../adminSettings';
+import { getAdminNasAddresses } from '../adminUsers';
 import {
     activatedPackages,
     activationEvents,
@@ -123,9 +124,17 @@ function isUniqueViolation(error: unknown): boolean {
     );
 }
 
-function activationOwnedByAdmin(adminId?: string) {
-    return adminId
-        ? exists(
+// Explicit tenant scope for activation/package operations: a plain admin id
+// restricts the query to that tenant, the literal 'system' selects the
+// unconstrained internal reconciler flows. Optional adminId parameters were
+// a fail-open pattern (undefined silently disabled the tenant filter), so
+// every scoped helper takes one of the two as a REQUIRED argument.
+export type TenantScope = string | 'system';
+
+function activationOwnedByAdmin(scope: TenantScope) {
+    return scope === 'system'
+        ? undefined
+        : exists(
               db
                   .select({ one: sql`1` })
                   .from(packagePayments)
@@ -139,11 +148,27 @@ function activationOwnedByAdmin(adminId?: string) {
                               packagePayments.id,
                               activatedPackages.packagePaymentId,
                           ),
-                          eq(nasDevice.ownerId, adminId),
+                          eq(nasDevice.ownerId, scope),
                       ),
                   ),
-          )
-        : undefined;
+          );
+}
+
+// Owning tenant of an activation, resolved through the same chain
+// activationOwnedByAdmin filters on: activation -> packagePayments ->
+// nasDevice.ownerId. Null when the attribution chain is broken (NAS device
+// gone or payment never stamped with one), which tenant checks must treat
+// as "not owned" rather than as "system".
+async function activationTenantOwnerId(
+    activation: typeof activatedPackages.$inferSelect,
+): Promise<string | null> {
+    const [row] = await db
+        .select({ ownerId: nasDevice.ownerId })
+        .from(packagePayments)
+        .innerJoin(nasDevice, eq(packagePayments.nasDeviceId, nasDevice.id))
+        .where(eq(packagePayments.id, activation.packagePaymentId))
+        .limit(1);
+    return row?.ownerId ?? null;
 }
 
 export class RadiusError extends Error {
@@ -223,6 +248,39 @@ const GIGAWORD = 2 ** 32;
 const ZERO_AUTH = Buffer.alloc(16);
 const CREDENTIAL_CHARS =
     'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+
+// Default hotspot servlet DNS name the setup-script generator falls back to
+// when the admin did not configure one. Mirrors DEFAULT_HOTSPOT_DNS_NAME in
+// routes/hotspot.ts; deliberately duplicated instead of imported so the lib
+// never depends on route code.
+const DEFAULT_HOTSPOT_DNS_NAME = 'hotspot.radii.lan';
+
+const IPV4_RE = /^\d{1,3}(\.\d{1,3}){3}$/;
+
+// First usable address of a hotspot network CIDR — the router's hotspot
+// gateway, which the servlet puts in $(link-login)/$(link-login-only) when no
+// hotspot DNS name is configured. Replicates hotspotGatewayOf in
+// routes/hotspot.ts; the small duplication across the route/lib boundary is
+// intentional (see DEFAULT_HOTSPOT_DNS_NAME above).
+function hotspotGatewayOf(cidr: string | null): string | null {
+    if (!cidr) return null;
+    const [ip, prefixRaw] = cidr.split('/');
+    const prefixLen = parseInt(prefixRaw ?? '', 10);
+    if (!ip || !IPV4_RE.test(ip) || Number.isNaN(prefixLen)) return null;
+    const parts = ip.split('.').map((p) => parseInt(p, 10));
+    if (parts.some((p) => p > 255)) return null;
+    const network =
+        (((parts[0]! << 24) | (parts[1]! << 16) | (parts[2]! << 8) | parts[3]!) >>>
+            0) &
+        ((~0 << (32 - prefixLen)) >>> 0);
+    const gateway = (network + 1) >>> 0;
+    return [
+        (gateway >>> 24) & 0xff,
+        (gateway >>> 16) & 0xff,
+        (gateway >>> 8) & 0xff,
+        gateway & 0xff,
+    ].join('.');
+}
 
 export interface RadiusConfig {
     // RADIUS server, e.g. "radius://127.0.0.1" or "10.99.0.1:1812" (auth port
@@ -403,12 +461,22 @@ export interface NetworkUsage {
     topUsers: Array<{ username: string; octets: number; sessions: number }>;
 }
 
+// Rejection sampling: bytes >= limit would make the first (256 % n)
+// characters of the alphabet more likely (modulo bias), so they are
+// discarded and redrawn until every character is uniformly probable
+// (same pattern as randomHotspotPassword in routes/hotspot.ts).
 function randomCredentialPassword(length: number): string {
-    const bytes = randomBytes(length);
-    return Array.from(
-        bytes,
-        (b) => CREDENTIAL_CHARS[b % CREDENTIAL_CHARS.length]!,
-    ).join('');
+    const limit = 256 - (256 % CREDENTIAL_CHARS.length);
+    const out: string[] = [];
+    while (out.length < length) {
+        const bytes = randomBytes(length * 2);
+        for (const byte of bytes) {
+            if (byte >= limit) continue;
+            out.push(CREDENTIAL_CHARS[byte % CREDENTIAL_CHARS.length]!);
+            if (out.length === length) break;
+        }
+    }
+    return out.join('');
 }
 
 // Activation id -> hotspot username, deterministic so re-activation of the
@@ -693,6 +761,7 @@ export class RadiusClient {
         setTimeout(() => {
             void this.disconnectLivePppoeSessions(
                 username,
+                account.tenantAdminId,
                 hadActiveActivation,
             ).catch((err) =>
                 logger.error('Delayed PPPoE reconnect failed', { error: err }),
@@ -909,16 +978,29 @@ export class RadiusClient {
     }
 
     // Full status + usage of one activation: remaining time/bytes, live
-    // sessions, average speed.
+    // sessions, average speed. The scope is enforced here rather than left
+    // to the caller: a customer only sees their own activation, an admin
+    // only one issued on their network (the activationOwnedByAdmin chain),
+    // and 'system' skips the check for internal flows.
     async getPackageStatus(
         activationId: string,
+        scope: { userId: string } | { adminId: string } | 'system',
         nasIpAddresses?: string[],
     ): Promise<ActivationStatus | null> {
         const [row] = await db
             .select({ activation: activatedPackages, pkg: packages })
             .from(activatedPackages)
             .innerJoin(packages, eq(activatedPackages.packageId, packages.id))
-            .where(eq(activatedPackages.id, activationId))
+            .where(
+                and(
+                    eq(activatedPackages.id, activationId),
+                    scope === 'system'
+                        ? undefined
+                        : 'userId' in scope
+                          ? eq(activatedPackages.userId, scope.userId)
+                          : activationOwnedByAdmin(scope.adminId),
+                ),
+            )
             .limit(1);
         if (!row) return null;
         return this.activationStatusFromRows(
@@ -1044,23 +1126,14 @@ export class RadiusClient {
         });
 
         // Terminate the running PPP session(s) so the client must re-dial
-        // with the new password; the package itself stays active.
-        const liveRows = await db
-            .select()
-            .from(radacct)
-            .where(
-                and(
-                    eq(radacct.username, username),
-                    isNull(radacct.acctstoptime),
-                    isNotNull(radacct.acctstarttime),
-                ),
-            );
-        for (const row of liveRows) {
-            const session = this.sessionInfoFromRow(row);
-            if (await this.terminateSessionAtNas(username, session)) {
-                await this.closeSessionRecord(session);
-            }
-        }
+        // with the new password; the package itself stays active. The sweep
+        // goes through the tenant-scoped helper: all tenants share one
+        // accounting table, so only the account's tenant NAS addresses are
+        // eligible rows and Disconnect-Request targets.
+        await this.disconnectLivePppoeSessions(
+            username,
+            account.tenantAdminId,
+        );
         return {
             activationId: activation.activationId,
             username,
@@ -1072,11 +1145,17 @@ export class RadiusClient {
     // must locate them by the stable username rather than the new activation.
     // restrictedOnly limits the sweep to live sessions that dialed under the
     // restricted profile (class NULL), leaving normally authorized sessions of
-    // an already-active account untouched.
+    // an already-active account untouched. The sweep is tenant-scoped: all
+    // tenants share one accounting table, so the username alone must never
+    // resolve a Disconnect-Request target — only the admin's exclusively-owned
+    // NAS addresses are eligible rows and CoA targets.
     private async disconnectLivePppoeSessions(
         username: string,
+        adminId: string,
         restrictedOnly?: boolean,
     ): Promise<number> {
+        const addresses = [...(await getAdminNasAddresses(adminId))];
+        if (addresses.length === 0) return 0;
         const liveRows = await db
             .select()
             .from(radacct)
@@ -1085,6 +1164,7 @@ export class RadiusClient {
                     eq(radacct.username, username),
                     isNull(radacct.acctstoptime),
                     isNotNull(radacct.acctstarttime),
+                    inArray(radacct.nasipaddress, addresses),
                     restrictedOnly ? isNull(radacct.class) : undefined,
                 ),
             );
@@ -1092,7 +1172,9 @@ export class RadiusClient {
         for (const row of liveRows) {
             const session = this.sessionInfoFromRow(row);
             try {
-                if (await this.terminateSessionAtNas(username, session)) {
+                if (
+                    await this.terminateSessionAtNas(username, session, adminId)
+                ) {
                     await this.closeSessionRecord(session);
                     disconnected += 1;
                 }
@@ -1152,6 +1234,7 @@ export class RadiusClient {
             .where(eq(pppoeServiceAccounts.id, accountId));
         const sessionsDisconnected = await this.disconnectLivePppoeSessions(
             account.username,
+            adminId,
         );
         return { username: account.username, sessionsDisconnected };
     }
@@ -1253,7 +1336,10 @@ export class RadiusClient {
         const sessionsDisconnected =
             status === 'active'
                 ? 0
-                : await this.disconnectLivePppoeSessions(account.username);
+                : await this.disconnectLivePppoeSessions(
+                      account.username,
+                      adminId,
+                  );
         return {
             username: account.username,
             status,
@@ -1280,6 +1366,7 @@ export class RadiusClient {
         if (!account) throw new RadiusError('Unknown PPPoE account');
         const sessionsDisconnected = await this.disconnectLivePppoeSessions(
             account.username,
+            adminId,
         );
         return { username: account.username, sessionsDisconnected };
     }
@@ -1394,6 +1481,32 @@ export class RadiusClient {
     > {
         const row = await this.resolveActivationByUsername(username);
         if (!row) return this.restAuthorizePppoe(username, nasIpAddress);
+        // Every tenant shares this one FreeRADIUS, so the requesting NAS is
+        // the roaming boundary: hotspot credentials only authenticate on a
+        // device owned by the tenant the activation was paid through
+        // (activation -> packagePayments -> nasDevice.ownerId, the same chain
+        // activationOwnedByAdmin filters on). A tenant may own several NAS
+        // devices and a package may be linked to several of them, so OWNER ids
+        // are compared, not device ids — intra-tenant roaming stays allowed.
+        // Mirrors the NAS-ownership rejection in restAuthorizePppoe.
+        const device = nasIpAddress
+            ? await resolveNasDeviceByIp(nasIpAddress)
+            : null;
+        const activationOwnerId = await activationTenantOwnerId(row.activation);
+        if (
+            !device ||
+            !activationOwnerId ||
+            device.ownerId !== activationOwnerId
+        ) {
+            logger.warn('Rejected hotspot authorization from foreign NAS', {
+                username,
+                nasIpAddress: nasIpAddress ?? null,
+                nasDeviceId: device?.id ?? null,
+                deviceOwnerId: device?.ownerId ?? null,
+                activationOwnerId,
+            });
+            return { verdict: 'deactivated' };
+        }
         if (row.activation.deactivatedAt !== null) {
             return { verdict: 'deactivated' };
         }
@@ -1569,9 +1682,9 @@ export class RadiusClient {
         opts: {
             markDeactivated?: boolean;
             actorId?: string;
-            adminId?: string;
+            adminId: TenantScope;
             nasIpAddresses?: string[];
-        } = {},
+        },
     ): Promise<{
         ok: boolean;
         message: string;
@@ -1579,6 +1692,11 @@ export class RadiusClient {
         sessionsDisconnected: number;
         failures: Array<{ nasIpAddress: string; reason: string }>;
     }> {
+        // Session-targeted Disconnect-Requests only carry an owner filter for
+        // request-driven (admin) scopes; 'system' reconciler flows have no
+        // tenant to constrain to.
+        const dmAdminId =
+            opts.adminId === 'system' ? undefined : opts.adminId;
         const [activation] = await db
             .select()
             .from(activatedPackages)
@@ -1648,7 +1766,7 @@ export class RadiusClient {
                     const ack = await this.terminateSessionAtNas(
                         username,
                         session,
-                        opts.adminId,
+                        dmAdminId,
                     );
                     if (ack) {
                         sessionsDisconnected++;
@@ -1769,10 +1887,29 @@ export class RadiusClient {
         const username =
             activation.username ?? activationUsername(activationId);
 
+        // Customer-driven flow: the caller verified the activation belongs to
+        // the requesting user, but the Disconnect-Request target resolution
+        // must stay inside the owning tenant too. Resolve the owner through
+        // the activation -> packagePayments -> nasDevice.ownerId chain and
+        // constrain both the radacct sweep and the terminate calls to it. A
+        // broken attribution chain is treated as "not owned" rather than
+        // "system": no NAS may be targeted without a resolvable owner.
+        const tenantAdminId = await activationTenantOwnerId(activation);
+        if (!tenantAdminId) {
+            return {
+                ok: false,
+                message: 'Owning tenant of the activation is unknown',
+                sessionsFound: 0,
+                sessionsDisconnected: 0,
+                failures: [],
+            };
+        }
+
         let liveSessions = await this.getSessions({
             username,
             activationId,
             liveOnly: true,
+            nasIpAddresses: [...(await getAdminNasAddresses(tenantAdminId))],
         });
         if (opts.sessionId) {
             liveSessions = liveSessions.filter(
@@ -1793,7 +1930,11 @@ export class RadiusClient {
         const failures: Array<{ nasIpAddress: string; reason: string }> = [];
         for (const session of liveSessions) {
             try {
-                const ack = await this.terminateSessionAtNas(username, session);
+                const ack = await this.terminateSessionAtNas(
+                    username,
+                    session,
+                    tenantAdminId,
+                );
                 if (ack) {
                     sessionsDisconnected++;
                     await this.closeSessionRecord(session);
@@ -1829,17 +1970,18 @@ export class RadiusClient {
 
     // All activations (including expired/deactivated ones) of one user — or
     // of every user when no userId is given — enriched with RADIUS usage.
+    // activationIds is REQUIRED and carries the ids the caller resolved as
+    // admin-owned: an empty list matches nothing instead of everything, so
+    // omitting the scope can never widen the result across tenants.
     // Newest first. The optional type matches the underlying package type.
-    async getAdminActivations(
-        opts: {
-            userId?: string;
-            type?: 'hotspot' | 'pppoe';
-            limit?: number;
-            offset?: number;
-            activationIds?: string[];
-            nasIpAddresses?: string[];
-        } = {},
-    ): Promise<AdminActivationStatus[]> {
+    async getAdminActivations(opts: {
+        userId?: string;
+        type?: 'hotspot' | 'pppoe';
+        limit?: number;
+        offset?: number;
+        activationIds: string[];
+        nasIpAddresses?: string[];
+    }): Promise<AdminActivationStatus[]> {
         const rows = await db
             .select({ activation: activatedPackages, pkg: packages })
             .from(activatedPackages)
@@ -1850,11 +1992,9 @@ export class RadiusClient {
                         ? eq(activatedPackages.userId, opts.userId)
                         : undefined,
                     opts.type ? eq(packages.type, opts.type) : undefined,
-                    opts.activationIds
-                        ? opts.activationIds.length > 0
-                            ? inArray(activatedPackages.id, opts.activationIds)
-                            : sql`false`
-                        : undefined,
+                    opts.activationIds.length > 0
+                        ? inArray(activatedPackages.id, opts.activationIds)
+                        : sql`false`,
                 ),
             )
             .orderBy(desc(activatedPackages.activatedAt))
@@ -1887,10 +2027,10 @@ export class RadiusClient {
     async reactivateActivation(
         activationId: string,
         opts: {
-            adminId?: string;
+            adminId: TenantScope;
             actorId?: string;
             nasIpAddresses?: string[];
-        } = {},
+        },
     ): Promise<{
         ok: boolean;
         message: string;
@@ -2014,10 +2154,10 @@ export class RadiusClient {
         expireAt: Date,
         remainingSeconds: number,
         opts: {
-            adminId?: string;
+            adminId: TenantScope;
             actorId?: string;
             nasIpAddresses?: string[];
-        } = {},
+        },
     ): Promise<{ ok: boolean; message: string }> {
         const [row] = await db
             .select({ activation: activatedPackages, pkg: packages })
@@ -2268,15 +2408,14 @@ export class RadiusClient {
     // the new credential takes effect on the next dial.
     async setPppoePassword(
         accountId: string,
-        password?: string,
-        adminId?: string,
+        password: string | undefined,
+        adminId: string,
         nasIpAddresses: string[] = [],
     ): Promise<{
         username: string;
         password: string;
         sessionsDisconnected: number;
     }> {
-        if (!adminId) throw new RadiusError('Unknown PPPoE account');
         const [account] = await db
             .select()
             .from(pppoeServiceAccounts)
@@ -3138,8 +3277,21 @@ export class RadiusClient {
         });
 
         if (remainingSeconds <= 0 || usage.expireAt.getTime() <= Date.now()) {
+            // This also runs request-driven (restAuthorize/login paths), so
+            // scope the deactivation to the activation's owning tenant when
+            // attribution resolves; 'system' stays the fallback for legacy or
+            // broken rows (and keeps the reconciler call site working).
+            const [activationRow] = await db
+                .select({ activation: activatedPackages })
+                .from(activatedPackages)
+                .where(eq(activatedPackages.id, activationId))
+                .limit(1);
+            const tenantAdminId = activationRow
+                ? await activationTenantOwnerId(activationRow.activation)
+                : null;
             await this.deactivateActivation(activationId, {
                 markDeactivated: false,
+                adminId: tenantAdminId ?? 'system',
             });
             return { active: false, remainingSeconds: 0 };
         }
@@ -3203,6 +3355,7 @@ export class RadiusClient {
                 ) {
                     await this.deactivateActivation(row.activation.id, {
                         markDeactivated: false,
+                        adminId: 'system',
                     });
                     touched++;
                     continue;
@@ -3240,12 +3393,34 @@ export class RadiusClient {
 
     // Validity window (months) for a cumulative time-bank (noExpiry)
     // activation: the owning admin's packages.noExpiryValidityMonths console
-    // setting, falling back to the server env default when unset.
+    // setting, falling back to the server env default when unset. The tenant
+    // is resolved along the payment attribution chain (payment tenant -> NAS
+    // device owner -> package creator) so the settings read always belongs
+    // to the tenant the payment is attributed to.
     private async noExpiryValidityMonths(
         payment: typeof packagePayments.$inferSelect,
         pkg: typeof packages.$inferSelect,
     ): Promise<number> {
-        const adminId = payment.tenantAdminId ?? pkg.createdBy;
+        let adminId = payment.tenantAdminId;
+        if (!adminId && payment.nasDeviceId) {
+            const [device] = await db
+                .select({ ownerId: nasDevice.ownerId })
+                .from(nasDevice)
+                .where(eq(nasDevice.id, payment.nasDeviceId))
+                .limit(1);
+            adminId = device?.ownerId ?? null;
+        }
+        if (!adminId) {
+            logger.warn(
+                'Resolving noExpiry validity from the package creator tenant',
+                {
+                    paymentId: payment.id,
+                    packageId: pkg.id,
+                    packageCreatedBy: pkg.createdBy,
+                },
+            );
+            adminId = pkg.createdBy;
+        }
         if (adminId) {
             const settings = await getAdminSettings(adminId);
             const months = settings.packages.noExpiryValidityMonths;
@@ -3518,11 +3693,90 @@ export class RadiusClient {
         return reply;
     }
 
+    // $(link-login-only) is echoed from the NAS login-page submission, so its
+    // host is attacker-controllable at login-request creation (the creation
+    // route validates too — this is the defense-in-depth copy). The link is
+    // only honored when its URL host is one of the login request's own NAS
+    // identities (configured or default hotspot DNS name, device IP, hotspot
+    // network gateway, WireGuard tunnel IP) or the configured portal host;
+    // anything else falls back to no redirect, the same default as a login
+    // request that carried no link at all. The host set must stay identical
+    // to trustedLoginLinkHosts in routes/hotspot.ts, or links accepted at
+    // creation would be rejected here and the post-payment activation
+    // hand-off would silently lose its redirect.
+    private async isTrustedLoginLink(
+        linkLoginOnly: string,
+        loginRequest: typeof hotspotLoginRequest.$inferSelect,
+    ): Promise<boolean> {
+        let url: URL;
+        try {
+            url = new URL(linkLoginOnly);
+        } catch {
+            return false;
+        }
+        // RouterOS servlet links are plain HTTP(S); reject other schemes so
+        // an empty-host scheme (e.g. javascript:) can never slip through.
+        if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+            return false;
+        }
+        const [nas] = await db
+            .select({
+                ipAddress: nasDevice.ipAddress,
+                hotspotDnsName: nasSetupScript.hotspotDnsName,
+                hotspotNetwork: nasSetupScript.hotspotNetwork,
+                wgClientIp: nasSetupScript.wgClientIp,
+            })
+            .from(nasDevice)
+            .leftJoin(
+                nasSetupScript,
+                eq(nasSetupScript.nasDeviceId, nasDevice.id),
+            )
+            .where(eq(nasDevice.id, loginRequest.nasDeviceId))
+            .limit(1);
+        const allowedHosts = new Set<string>();
+        for (const value of [
+            nas?.hotspotDnsName,
+            DEFAULT_HOTSPOT_DNS_NAME,
+            // inet columns may carry a CIDR prefix; hosts never do.
+            nas?.ipAddress,
+            nas?.hotspotNetwork ? hotspotGatewayOf(nas.hotspotNetwork) : null,
+            nas?.wgClientIp,
+        ]) {
+            if (value)
+                allowedHosts.add(value.toLowerCase().replace(/\/\d+$/, ''));
+        }
+        try {
+            allowedHosts.add(
+                new URL(env.hotspotPortalUrl).hostname.toLowerCase(),
+            );
+        } catch {
+            // A malformed portal URL must not widen the allow-list.
+        }
+        const host = url.hostname.toLowerCase();
+        return host !== '' && allowedHosts.has(host);
+    }
+
     private async buildRedirect(
         activationId: string,
         loginRequest: typeof hotspotLoginRequest.$inferSelect | null,
     ): Promise<ActivationRedirect | null> {
         if (!loginRequest?.linkLoginOnly) return null;
+        if (
+            !(await this.isTrustedLoginLink(
+                loginRequest.linkLoginOnly,
+                loginRequest,
+            ))
+        ) {
+            logger.warn(
+                'Rejected portal redirect to untrusted link-login-only host',
+                {
+                    activationId,
+                    nasDeviceId: loginRequest.nasDeviceId,
+                    linkLoginOnly: loginRequest.linkLoginOnly,
+                },
+            );
+            return null;
+        }
         const username = activationUsername(activationId);
         const password = await this.getProvisionedPassword(username);
         if (!password) return null;

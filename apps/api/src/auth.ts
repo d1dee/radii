@@ -56,7 +56,23 @@ export const auth = betterAuth({
             },
         }),
     ],
-    secret: process.env.BETTER_AUTH_SECRET || 'change-me-in-production',
+    // Per-IP HTTP rate limiting. better-auth only enables it in production by
+    // default (dist/context/create-context.mjs: `enabled ?? isProduction`),
+    // so enable it explicitly. The stock special rule for /sign-in* is
+    // 3/10s; the credential sign-in paths guard a 4-digit PIN (10^4 space),
+    // so hold them to a sustained 10/60s instead. Other paths keep the
+    // defaults (the emailOTP plugin already limits its own routes to 3/60s).
+    // Note: the portal REST routes call auth.api.* server-side and bypass
+    // this limiter — they are protected by the per-account lockout in
+    // lib/authHelpers.ts.
+    rateLimit: {
+        enabled: true,
+        customRules: {
+            '/sign-in/username': { window: 60, max: 10 },
+            '/sign-in/email': { window: 60, max: 10 },
+        },
+    },
+    secret: env.betterAuthSecret,
     baseURL: env.apiUrl,
     trustedOrigins: env.frontendUrls,
 

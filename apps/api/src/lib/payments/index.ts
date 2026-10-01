@@ -13,6 +13,15 @@ const logger = apiLogger.getChild('payments');
 function buildPaymentService(): PaymentService {
     const service = new PaymentService();
 
+    // One-time startup notice: with an empty allowlist any source that knows
+    // a signed callback URL can deliver webhooks (the ?ct= token still
+    // authenticates every delivery).
+    if (env.payments.callbackIpAllowlist.length === 0) {
+        logger.warn(
+            'MPESA_CALLBACK_IP_ALLOWLIST is empty; payment callback IP allowlisting is disabled',
+        );
+    }
+
     const { mpesa } = env;
     // Any M-Pesa variable present means the operator intends to enable it:
     // register strictly, which throws a clear error on incomplete/invalid

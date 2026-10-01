@@ -5,6 +5,7 @@
 
 import { env } from '../../env';
 import { apiLogger } from '../../logging';
+import { cleanupExpiredHotspotCredentials } from '../../routes/hotspot';
 import { RadiusClient } from './client';
 
 const logger = apiLogger.getChild('radius');
@@ -39,7 +40,8 @@ if (!env.radius.url) {
 // sessions in step with their consumed balance and cuts exhausted/expired
 // ones. Bank balance enforcement at login time is handled by the radreply
 // Session-Timeout refresh on every redirect + the radcheck Expiration date;
-// the ticker is what closes the gap DURING live sessions.
+// the ticker is what closes the gap DURING live sessions. The same tick
+// sweeps expired/orphaned one-off HS- hotspot credential radcheck rows.
 const tickerSeconds = Math.max(5, env.radius.bankReconcileSeconds);
 if (!globalRef.__radiusBankTicker) {
     globalRef.__radiusBankTicker = setInterval(() => {
@@ -47,6 +49,7 @@ if (!globalRef.__radiusBankTicker) {
         globalRef.__radiusPolicyReconcile = Promise.all([
             radiusClient.reconcileBankPackages(),
             radiusClient.reconcileFairUsagePackages(),
+            cleanupExpiredHotspotCredentials(),
         ])
             .then(() => undefined)
             .catch((err) =>

@@ -34,6 +34,94 @@ export function portalEmailForPhone(phone: string) {
     return `${normalizePhone(phone)}@hotspot.local`;
 }
 
+// --- Per-account PIN brute-force lockout ------------------------------------
+// better-auth's HTTP rate limiting is per IP, and the portal login runs
+// server-side (auth.api.signInUsername) so it bypasses that limiter entirely.
+// A 4-digit PIN is only a 10^4 space, so consecutive sign-in failures are
+// additionally bounded per account: after LOCKOUT_MAX_FAILURES consecutive
+// failures the normalized phone is locked for LOCKOUT_WINDOW_MS. A locked
+// identifier answers with the exact invalid-credentials shape (no oracle) and
+// the PIN is never logged. Entries expire and are swept periodically, and the
+// Map is hard-capped with oldest-inserted-first eviction, so a flood of
+// random phone numbers cannot grow it without bound.
+
+const LOCKOUT_MAX_FAILURES = 10;
+const LOCKOUT_WINDOW_MS = 15 * 60 * 1000;
+const LOCKOUT_CLEANUP_INTERVAL_MS = 60 * 1000;
+
+// Hard cap on tracked identifiers. Map iteration order is insertion order,
+// so eviction drops the oldest-inserted keys first (same pattern as
+// MAX_TRACKED_KEYS in middleware/rateLimit.ts).
+const LOCKOUT_MAX_TRACKED_KEYS = 10_000;
+
+type LockoutEntry = {
+    failures: number;
+    lockedUntil: number | null;
+    lastFailure: number;
+};
+
+const loginLockouts = new Map<string, LockoutEntry>();
+let lastLockoutCleanup = Date.now();
+
+function sweepLockouts(now: number) {
+    if (now - lastLockoutCleanup < LOCKOUT_CLEANUP_INTERVAL_MS) return;
+    lastLockoutCleanup = now;
+    for (const [key, entry] of loginLockouts) {
+        const expiredLock =
+            entry.lockedUntil !== null && entry.lockedUntil <= now;
+        const staleFailures =
+            entry.lockedUntil === null &&
+            now - entry.lastFailure > LOCKOUT_WINDOW_MS;
+        if (expiredLock || staleFailures) loginLockouts.delete(key);
+    }
+}
+
+function isLoginLocked(key: string): boolean {
+    const now = Date.now();
+    sweepLockouts(now);
+    const entry = loginLockouts.get(key);
+    if (!entry) return false;
+    if (entry.lockedUntil !== null) {
+        if (entry.lockedUntil > now) return true;
+        // Lock expired — the identifier starts fresh.
+        loginLockouts.delete(key);
+        return false;
+    }
+    if (now - entry.lastFailure > LOCKOUT_WINDOW_MS) {
+        // Failure window elapsed without a lock — forget the stale counter.
+        loginLockouts.delete(key);
+    }
+    return false;
+}
+
+function recordLoginFailure(key: string) {
+    const now = Date.now();
+    sweepLockouts(now);
+    const entry = loginLockouts.get(key) ?? {
+        failures: 0,
+        lockedUntil: null,
+        lastFailure: now,
+    };
+    entry.failures += 1;
+    entry.lastFailure = now;
+    if (entry.failures >= LOCKOUT_MAX_FAILURES) {
+        entry.lockedUntil = now + LOCKOUT_WINDOW_MS;
+        entry.failures = 0;
+    }
+    if (!loginLockouts.has(key)) {
+        while (loginLockouts.size >= LOCKOUT_MAX_TRACKED_KEYS) {
+            const oldest = loginLockouts.keys().next().value;
+            if (oldest === undefined) break;
+            loginLockouts.delete(oldest);
+        }
+    }
+    loginLockouts.set(key, entry);
+}
+
+function resetLoginFailures(key: string) {
+    loginLockouts.delete(key);
+}
+
 export function fieldErrorsFromIssues(
     issues: Array<{ path: Array<unknown>; message: string }>,
 ): Record<string, string> {
@@ -64,6 +152,18 @@ export function forwardCookies(
     return res;
 }
 
+// The single invalid-credentials response shape. The per-account lockout
+// returns exactly this too, so a locked identifier is indistinguishable from
+// a wrong PIN.
+function invalidPhoneOrPin(c: AppContext) {
+    return jsonFieldErrors(
+        c,
+        401,
+        { pin: 'Invalid phone number or PIN' },
+        'Invalid phone number or PIN',
+    );
+}
+
 export function respondAuthError(c: AppContext, err: unknown) {
     if (err instanceof APIError) {
         const code = String((err as { code?: string }).code || '').toLowerCase();
@@ -86,12 +186,7 @@ export function respondAuthError(c: AppContext, err: unknown) {
             message.includes('credential') ||
             message.includes('invalid')
         ) {
-            return jsonFieldErrors(
-                c,
-                401,
-                { pin: 'Invalid phone number or PIN' },
-                'Invalid phone number or PIN',
-            );
+            return invalidPhoneOrPin(c);
         }
         return jsonError(
             c,
@@ -180,6 +275,11 @@ export async function loginPhonePin(c: AppContext) {
         );
     }
 
+    const lockKey = normalizePhone(parsed.data.phoneNumber);
+    if (isLoginLocked(lockKey)) {
+        return invalidPhoneOrPin(c);
+    }
+
     try {
         const { headers } = await auth.api.signInUsername({
             body: {
@@ -190,8 +290,15 @@ export async function loginPhonePin(c: AppContext) {
             returnHeaders: true,
         });
 
+        resetLoginFailures(lockKey);
         return forwardCookies(c, headers, { success: true, data: null });
     } catch (err) {
+        // Only credential rejections (better-auth answers UNAUTHORIZED/401
+        // with INVALID_USERNAME_OR_PASSWORD) count toward the lockout —
+        // validation or server errors must not lock an account.
+        if (err instanceof APIError && err.status === 401) {
+            recordLoginFailure(lockKey);
+        }
         return respondAuthError(c, err);
     }
 }

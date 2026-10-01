@@ -51,8 +51,26 @@ export const adminAuth = betterAuth({
         // Every account on this instance is an admin but requireAdmin keeps
         // checking the role so future granular roles (e.g. operator)
         admin({
+            // Self-service admin sign-up stays; signups keep receiving the
+            // 'admin' role that the requireAdmin middleware checks.
             defaultRole: 'admin',
-            adminRoles: ['admin'],
+            // Defense in depth: the plugin's management endpoints are GLOBAL
+            // (any admin could manage any other tenant's admin, and
+            // list-user-sessions even returns raw session tokens), while all
+            // tenant-scoped management lives in the app's own REST routes.
+            // The plugin gates every endpoint through hasPermission()
+            // (dist/plugins/admin/has-permission.mjs), which first checks
+            // `options.adminUserIds.includes(userId)` — `[]` denies that
+            // bypass — then authorizes the caller's role against
+            // `options.roles || defaultRoles` — `{}` leaves no role with any
+            // permission, so every endpoint throws FORBIDDEN for every
+            // account. `adminRoles` must be omitted here: the plugin
+            // validates it against the `roles` keys at startup
+            // (dist/plugins/admin/admin.mjs) and would throw. index.ts
+            // additionally 404s /api/admin/auth/admin/* unless
+            // ALLOW_ADMIN_PLUGIN_ROUTES is exactly 'true'.
+            adminUserIds: [],
+            roles: {},
         }),
         emailOTP({
             overrideDefaultEmailVerification: true,
@@ -78,10 +96,7 @@ export const adminAuth = betterAuth({
             }
         }),
     },
-    secret:
-        process.env.ADMIN_BETTER_AUTH_SECRET ||
-        process.env.BETTER_AUTH_SECRET ||
-        'change-me-in-production',
+    secret: env.adminBetterAuthSecret,
     baseURL: env.apiUrl,
     trustedOrigins: env.adminFrontendUrls,
     advanced: {

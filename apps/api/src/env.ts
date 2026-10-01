@@ -1,6 +1,7 @@
 // Centralized environment access. Validates required variables at startup so
 // the server fails fast with a clear message instead of crashing mid-request.
 
+import { resolve } from 'node:path';
 import { apiLogger } from './logging';
 
 const logger = apiLogger.getChild('config');
@@ -16,8 +17,31 @@ function required(name: string): string {
     return value;
 }
 
+// A required() variable that must additionally be usable as a signing secret:
+// the well-known 'change-me-in-production' placeholder and anything shorter
+// than 32 characters are rejected at startup (fatal, same style as required).
+function requiredSecret(name: string): string {
+    const value = required(name);
+    if (value === 'change-me-in-production' || value.length < 32) {
+        logger.fatal(
+            "Insecure secret: must not be 'change-me-in-production' and must be at least 32 characters",
+            { environmentVariable: name },
+        );
+        process.exit(1);
+    }
+    return value;
+}
+
 export const env = {
     apiUrl: required('API_URL'),
+    // BetterAuth signing secrets. Deliberately independent (no cross-fallback)
+    // so a leak of one never forges sessions on the other instance.
+    betterAuthSecret: requiredSecret('BETTER_AUTH_SECRET'),
+    adminBetterAuthSecret: requiredSecret('ADMIN_BETTER_AUTH_SECRET'),
+    // Escape hatch for the globally scoped better-auth admin-plugin endpoints
+    // (/api/admin/auth/admin/*). They are blocked with a 404 in index.ts
+    // unless this variable is exactly 'true'.
+    allowAdminPluginRoutes: process.env.ALLOW_ADMIN_PLUGIN_ROUTES === 'true',
     adminFrontendUrls: (process.env.ADMIN_FRONTEND_URLS || '')
         .split(',')
         .map((s) => s.trim())
@@ -97,6 +121,29 @@ export const env = {
             10,
         ),
     },
+    // Shared secret authenticating the FreeRADIUS rlm_rest backend
+    // (/api/radius/rest, routes/radiusRest.ts). FreeRADIUS injects it as the
+    // `x-api-key` request header via control:REST-HTTP-Header (FreeRADIUS
+    // 3.x — see docs/radius/rest for the module config and call sites);
+    // requests without a matching key are rejected with 401 before any
+    // authorization verdict, DB write, or CoA/Disconnect packet. REQUIRED,
+    // same strength rules as the BetterAuth secrets.
+    radiusRestApiKey: requiredSecret('RADIUS_REST_API_KEY'),
+    // Per-IP HTTP rate limiting (middleware/rateLimit.ts) — in-memory fixed
+    // window shared by every tier. The auth tier guards the better-auth
+    // endpoints (complementing better-auth's internal limiter), the portal
+    // tier is deliberately generous because NATed hotspot customers share
+    // egress IPs. /api/radius/rest/* and /api/nas/* are exempt (machine
+    // traffic authenticated by shared secret / device token).
+    rateLimit: {
+        windowSeconds: parseInt(
+            process.env.RATE_LIMIT_WINDOW_SECONDS || '60',
+            10,
+        ),
+        defaultMax: parseInt(process.env.RATE_LIMIT_DEFAULT_MAX || '300', 10),
+        authMax: parseInt(process.env.RATE_LIMIT_AUTH_MAX || '20', 10),
+        portalMax: parseInt(process.env.RATE_LIMIT_PORTAL_MAX || '120', 10),
+    },
     // Package defaults. Hotspot cumulative time-bank (noExpiry) packages stay
     // usable for this many months after activation unless the owning admin set
     // their own packages.noExpiryValidityMonths in the console settings.
@@ -120,6 +167,21 @@ export const env = {
             .map((s) => s.trim())
             .filter(Boolean),
     },
+    // Payment-provider callback (webhook) authentication. The HMAC secret
+    // signs the per-transaction ?ct= token appended to every callback URL
+    // handed to a gateway; the callback route verifies it (timing-safe)
+    // before any processing. REQUIRED, same strength rules as the BetterAuth
+    // secrets. The optional IP allowlist (comma-separated IPs / IPv4 CIDRs)
+    // additionally restricts which sources may deliver callbacks; empty =
+    // disabled, logged as a one-time startup warning (see
+    // lib/payments/callbackIp.ts).
+    payments: {
+        callbackHmacSecret: requiredSecret('PAYMENT_CALLBACK_HMAC_SECRET'),
+        callbackIpAllowlist: (process.env.MPESA_CALLBACK_IP_ALLOWLIST || '')
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean),
+    },
     // M-Pesa payment provider credentials. All optional here: when nothing is
     // set the provider simply is not registered; when partially set, the
     // provider constructor validates and fails fast with a clear message.
@@ -135,6 +197,13 @@ export const env = {
         initiatorName: process.env.MPESA_INITIATOR_NAME || '',
         initiatorPassword: process.env.MPESA_INITIATOR_PASSWORD || '',
         certificatePath: process.env.MPESA_CERTIFICATE_PATH || '',
+        // Admin-supplied certificate paths (admin settings
+        // mpesa.certificatePath) are only honored when they resolve inside
+        // this directory (symlink escapes rejected); the operator-level
+        // MPESA_CERTIFICATE_PATH above stays unrestricted (trusted).
+        allowedCertDir:
+            process.env.MPESA_ALLOWED_CERT_DIR ||
+            resolve(process.cwd(), 'certs'),
         transactionType: (process.env.MPESA_TRANSACTION_TYPE ||
             'CustomerPayBillOnline') as
             | 'CustomerPayBillOnline'

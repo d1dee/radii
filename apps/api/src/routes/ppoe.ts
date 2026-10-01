@@ -9,6 +9,7 @@
 import {
     defaultAdminSettings,
     paymentTransactionCodeSchema,
+    zPhoneNumber,
     type PppoeActivation,
 } from '@radii/shared';
 import { and, desc, eq } from 'drizzle-orm';
@@ -37,7 +38,6 @@ import {
     createPayment,
     getOrderPackageForNas,
     getPackagesGroupedByCategory,
-    getPaymentById,
 } from '../lib/packages';
 import { paymentService } from '../lib/payments';
 import {
@@ -52,12 +52,20 @@ import type { AppVariables } from '../types';
 const app = new Hono<{ Variables: AppVariables }>();
 const logger = apiLogger.getChild('radius').getChild('pppoe');
 
+// Guards raw uuid parameters before they reach Postgres (invalid input would
+// otherwise surface as a 500 uuid-cast error).
+const UUID_RE =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 // --- Packages ---------------------------------------------------------------
 
 // Packages offered by the NAS-scoped portal, grouped by category.
 app.get('/packages', async (c) => {
     const nasDeviceId = c.req.query('nas');
     if (!nasDeviceId) return jsonError(c, 400, 'A NAS device is required');
+    if (!UUID_RE.test(nasDeviceId)) {
+        return jsonError(c, 404, 'Unknown NAS device');
+    }
     const [device] = await db
         .select({ id: nasDevice.id })
         .from(nasDevice)
@@ -223,7 +231,9 @@ app.get('/clients', requireAuth, async (c) => {
 // copy into the customer's PPPoE client.
 app.get('/clients/:id/config', requireAuth, async (c) => {
     const accountId = c.req.param('id');
-    if (!accountId) return jsonError(c, 400, 'Missing account id');
+    if (!accountId || !UUID_RE.test(accountId)) {
+        return jsonError(c, 404, 'Unknown PPPoE client');
+    }
 
     const currentUser = c.get('user');
     const client = (await radiusClient.getPppoeClients(currentUser!.id)).find(
@@ -258,7 +268,9 @@ app.get('/clients/:id/config', requireAuth, async (c) => {
 // the new credential takes effect on the next dial. The package stays active.
 app.post('/clients/:id/rotate-password', requireAuth, async (c) => {
     const accountId = c.req.param('id');
-    if (!accountId) return jsonError(c, 400, 'Missing account id');
+    if (!accountId || !UUID_RE.test(accountId)) {
+        return jsonError(c, 404, 'Unknown PPPoE client');
+    }
 
     const currentUser = c.get('user');
     const account = await getPppoeAccountOwnedByCustomer(
@@ -314,6 +326,9 @@ app.get('/status', requireAuth, async (c) => {
     const currentUser = c.get('user');
     const accountId = c.req.query('account');
     if (!accountId) return jsonError(c, 400, 'A PPPoE account is required');
+    if (!UUID_RE.test(accountId)) {
+        return jsonError(c, 404, 'Unknown PPPoE account');
+    }
     if (!(await getPppoeAccountOwnedByCustomer(accountId, currentUser!.id))) {
         return jsonError(c, 404, 'Unknown PPPoE account');
     }
@@ -373,7 +388,7 @@ app.get('/status', requireAuth, async (c) => {
 
 const orderSchema = z.object({
     packageId: z.uuid(),
-    phoneNumber: z.string().min(10).optional(),
+    phoneNumber: zPhoneNumber.optional(),
     // The NAS this portal instance is scoped to (captured from ?nas= in the
     // portal URL). Used for tenant attribution of the purchase; when absent
     // the package's NAS links resolve it.
@@ -519,12 +534,26 @@ app.get('/payment/pending/latest', requireAuth, async (c) => {
 
 app.get('/payment/:id', requireAuth, async (c) => {
     const id = c.req.param('id');
-    if (!id) {
+    if (!id || !UUID_RE.test(id)) {
         return jsonError(c, 404, 'Payment not found');
     }
     const currentUser = c.get('user');
-    const payment = await getPaymentById(id, currentUser!.id);
-    if (!payment || payment.userId !== currentUser!.id) {
+    // Same package-type guard as the hotspot twin: this portal must never
+    // surface (or hand out activation data for) another service's payment.
+    const [paymentResult] = await db
+        .select({ payment: packagePayments })
+        .from(packagePayments)
+        .innerJoin(packages, eq(packagePayments.packageId, packages.id))
+        .where(
+            and(
+                eq(packagePayments.id, id),
+                eq(packagePayments.userId, currentUser!.id),
+                eq(packages.type, 'pppoe'),
+            ),
+        )
+        .limit(1);
+    const payment = paymentResult?.payment;
+    if (!payment) {
         return jsonError(c, 404, 'Payment not found');
     }
     const tenantAdminId = await getAdminIdForNasDevice(c.req.query('nas'));
@@ -646,13 +675,17 @@ app.post('/payment/:id/verify', requireAuth, async (c) => {
 // the package is disconnected.
 app.post('/deauth/:activationId', requireAuth, async (c) => {
     const activationId = c.req.param('activationId');
-    if (!activationId) return jsonError(c, 400, 'Missing activation id');
+    if (!activationId || !UUID_RE.test(activationId)) {
+        return jsonError(c, 404, 'Unknown activation');
+    }
 
     const currentUser = c.get('user');
     const body = (await c.req.json().catch(() => ({}))) as {
         accountId?: string;
     };
-    if (!body.accountId) return jsonError(c, 400, 'Missing account id');
+    if (!body.accountId || !UUID_RE.test(body.accountId)) {
+        return jsonError(c, 404, 'Unknown PPPoE account');
+    }
     const [activation] = await db
         .select({
             activationId: activatedPackages.id,

@@ -29,6 +29,10 @@ export interface PaymentRequest {
     // (/api/payments/callback/:provider). Providers append their own
     // per-event path to it when registering webhooks with the gateway.
     callbackBaseUrl: string;
+    // Random nonce the core stores on the transaction row. Providers must
+    // embed it (HMAC-signed, see ./callbackToken.ts) in the ?ct= token of
+    // every callback URL they register for this payment.
+    callbackNonce?: string | null;
 }
 
 export interface InitiatePaymentResult {
@@ -58,6 +62,10 @@ export interface PaymentStatusResult {
 // URLs without knowing how this service routes its own endpoints.
 export interface VerifyTransactionContext {
     callbackBaseUrl: string;
+    // Random nonce the core stores on the transaction row; providers embed
+    // it (HMAC-signed, see ./callbackToken.ts) in the ?ct= token of the
+    // async-result callback URL they register for this verification.
+    callbackNonce?: string | null;
 }
 
 export interface VerifyTransactionResult {
@@ -68,6 +76,13 @@ export interface VerifyTransactionResult {
     // later callback (e.g. M-Pesa OriginatorConversationID).
     conversationId: string | null;
     message: string;
+    // Amount the gateway reported for the receipt, when a synchronous
+    // result carries it; the core guards completed outcomes with it.
+    amount?: number | null;
+    // Payer phone number the gateway reported (normalized by the provider),
+    // when the result exposes it; the core binds completed outcomes to the
+    // payment's own phone number when both are present.
+    payerPhoneNumber?: string | null;
     // Any extra gateway-reported details (status fields, descriptions...).
     data?: Record<string, unknown>;
 }
@@ -89,6 +104,11 @@ export interface ProviderCallbackResult {
     // Gateway transaction/receipt number reported by the callback, if any.
     transactionId: string | null;
     amount: number | null;
+    // Payer phone number reported by the callback (normalized by the
+    // provider), when the payload exposes it; null otherwise. The core
+    // refuses to complete a payment whose payer differs from the phone
+    // number on the package payment.
+    payerPhoneNumber: string | null;
     // Raw provider event, recorded verbatim in the transaction log.
     payload: Record<string, unknown>;
     message: string;

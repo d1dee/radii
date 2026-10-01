@@ -1,8 +1,21 @@
 import {
     defaultAdminSettings,
     paymentTransactionCodeSchema,
+    zPhoneNumber,
 } from '@radii/shared';
-import { and, desc, eq, isNull, or } from 'drizzle-orm';
+import dayjs from 'dayjs';
+import {
+    and,
+    desc,
+    eq,
+    gt,
+    inArray,
+    isNull,
+    like,
+    notExists,
+    or,
+    sql,
+} from 'drizzle-orm';
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { db } from '../db';
@@ -10,6 +23,7 @@ import {
     activatedPackages,
     hotspotLoginRequest,
     nasDevice,
+    nasSetupScript,
     packagePayments,
     packages,
     radcheck,
@@ -28,18 +42,39 @@ import {
 import { jsonError } from '../lib/error';
 import {
     createPayment,
-    getPackageById,
     getOrderPackageForNas,
     getPackagesGroupedByCategory,
 } from '../lib/packages';
 import { paymentService } from '../lib/payments';
 import { radiusClient, type ActivationRedirect } from '../lib/radius';
+import { hashNasToken, nasTokenMatchesHash } from '../lib/setupScript';
+import { deriveNasPortalSecret } from '../lib/setupScriptTemplate';
 import { apiLogger } from '../logging';
 import { requireAdmin, requireAuth } from '../middleware/auth';
 import type { AppVariables } from '../types';
 
 const app = new Hono<{ Variables: AppVariables }>();
 const logger = apiLogger.getChild('radius').getChild('hotspot');
+
+// Login requests older than this are dead captive-portal hand-offs: /order
+// refuses to claim them, /complete refuses to finish them, and the credential
+// sweep treats their one-off HS- radcheck rows as garbage-collectable once
+// the short credential Expiration has passed.
+export const HOTSPOT_LOGIN_REQUEST_TTL_MS = 24 * 60 * 60 * 1000; // 24h
+
+// Lifetime of a one-off HS- hotspot credential (issued by /complete when the
+// customer has no active package). Enforced at auth time by the radcheck
+// Expiration row written alongside the Cleartext-Password.
+export const HOTSPOT_ONE_OFF_CREDENTIAL_TTL_MS = 12 * 60 * 60 * 1000; // 12h
+
+// Default hotspot servlet DNS name used by the setup script when the admin
+// did not configure one (mirrors generateSetupScript's fallback).
+const DEFAULT_HOTSPOT_DNS_NAME = 'hotspot.radii.lan';
+
+// Guards raw uuid parameters before they reach Postgres (invalid input would
+// otherwise surface as a 500 uuid-cast error).
+const UUID_RE =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // --- Packages ---------------------------------------------------------------
 
@@ -50,6 +85,9 @@ app.get('/packages', async (c) => {
     const loginRequestId = c.req.query('login_request');
     if (!loginRequestId) {
         return jsonError(c, 400, 'Missing login_request');
+    }
+    if (!UUID_RE.test(loginRequestId)) {
+        return jsonError(c, 404, 'Unknown login request');
     }
     const [loginRequest] = await db
         .select({ nasDeviceId: hotspotLoginRequest.nasDeviceId })
@@ -73,7 +111,7 @@ app.get('/packages', async (c) => {
 app.get('/contacts', async (c) => {
     const loginRequestId = c.req.query('login_request');
     let nasDeviceId: string | null = null;
-    if (loginRequestId) {
+    if (loginRequestId && UUID_RE.test(loginRequestId)) {
         const [loginRequest] = await db
             .select({ nasDeviceId: hotspotLoginRequest.nasDeviceId })
             .from(hotspotLoginRequest)
@@ -161,7 +199,9 @@ app.get('/status', requireAuth, async (c) => {
     // Identify the calling device: the portal carries the login-request id in localstorage
     const loginRequestId = c.req.query('login_request');
     let clientMac = '';
-    if (loginRequestId) {
+    // Optional param: an id that is not a uuid is treated as absent rather
+    // than letting the uuid cast surface as a 500.
+    if (loginRequestId && UUID_RE.test(loginRequestId)) {
         const [loginRequest] = await db
             .select({ mac: hotspotLoginRequest.mac })
             .from(hotspotLoginRequest)
@@ -226,7 +266,7 @@ app.get('/status', requireAuth, async (c) => {
 const orderSchema = z.object({
     loginRequestKey: z.uuid().nullable(),
     packageId: z.uuid(),
-    phoneNumber: z.string().min(10).optional(),
+    phoneNumber: zPhoneNumber.optional(),
 });
 
 app.post('/order', requireAuth, async (c) => {
@@ -243,13 +283,19 @@ app.post('/order', requireAuth, async (c) => {
     // back to the customer's most recent login request when the order does
     // not carry the key.
     let nasDeviceId: string | null = null;
+    const freshAfter = new Date(Date.now() - HOTSPOT_LOGIN_REQUEST_TTL_MS);
     const loginRequestId =
         parsed.data.loginRequestKey ??
         (
             await db
                 .select({ id: hotspotLoginRequest.id })
                 .from(hotspotLoginRequest)
-                .where(eq(hotspotLoginRequest.userId, currentUser!.id))
+                .where(
+                    and(
+                        eq(hotspotLoginRequest.userId, currentUser!.id),
+                        gt(hotspotLoginRequest.createdAt, freshAfter),
+                    ),
+                )
                 .orderBy(desc(hotspotLoginRequest.createdAt))
                 .limit(1)
         )[0]?.id ??
@@ -257,13 +303,15 @@ app.post('/order', requireAuth, async (c) => {
     if (loginRequestId) {
         // Fresh captive-portal requests are unclaimed until the customer
         // authenticates. Claim the UUID atomically here, while allowing the
-        // same customer to reuse it and rejecting requests owned by others.
+        // same customer to reuse it and rejecting requests owned by others
+        // or older than the login-request TTL.
         const [lr] = await db
             .update(hotspotLoginRequest)
             .set({ userId: currentUser!.id })
             .where(
                 and(
                     eq(hotspotLoginRequest.id, loginRequestId),
+                    gt(hotspotLoginRequest.createdAt, freshAfter),
                     or(
                         isNull(hotspotLoginRequest.userId),
                         eq(hotspotLoginRequest.userId, currentUser!.id),
@@ -372,7 +420,7 @@ app.get('/payment/pending/latest', requireAuth, async (c) => {
 
 app.get('/payment/:id', requireAuth, async (c) => {
     const id = c.req.param('id');
-    if (!id) {
+    if (!id || !UUID_RE.test(id)) {
         return jsonError(c, 404, 'Payment not found');
     }
     const currentUser = c.get('user');
@@ -449,7 +497,9 @@ app.post('/payment/:id/verify', requireAuth, async (c) => {
 
     const currentUser = c.get('user');
     const loginRequestId = c.req.query('login_request');
-    if (!loginRequestId) {
+    // A malformed id takes the same path as an unknown one: the login request
+    // must exist and be owned by the caller.
+    if (!loginRequestId || !UUID_RE.test(loginRequestId)) {
         return jsonError(c, 400, 'A valid hotspot login request is required');
     }
     const [loginRequest] = await db
@@ -503,7 +553,9 @@ app.post('/payment/:id/verify', requireAuth, async (c) => {
 // the package is disconnected.
 app.post('/deauth/:deviceQuotaId', requireAuth, async (c) => {
     const deviceQuotaId = c.req.param('deviceQuotaId');
-    if (!deviceQuotaId) return jsonError(c, 400, 'Missing device quota id');
+    if (!deviceQuotaId || !UUID_RE.test(deviceQuotaId)) {
+        return jsonError(c, 400, 'Missing device quota id');
+    }
 
     const currentUser = c.get('user');
     const [activation] = await db
@@ -543,11 +595,142 @@ app.post('/deauth/:deviceQuotaId', requireAuth, async (c) => {
 
 // The branded login page served by each NAS auto-submits every variable the
 // RouterOS hotspot servlet exposes at login (client MAC/IP, username, servlet
-// links, original destination, error, ...). This endpoint receives that
-// submission, persists it, and sends the client's browser on to the portal
-// carrying the row id. The portal completes the request after the client
-// authenticates (POST /login-request/:id/complete) and re-submits the issued
-// hotspot credentials to the NAS servlet login page.
+// links, original destination, error, ...), following the MikroTik
+// "External authentication" hotspot customisation flow. This endpoint receives
+// that submission, persists it, and sends the client's browser on to the
+// portal carrying the row id. The portal completes the request after the
+// client authenticates (POST /login-request/:id/complete) and re-submits the
+// issued hotspot credentials to the NAS servlet login page.
+//
+// Presence binding: the submission must carry the per-device portal secret
+// embedded in that NAS's branded login page (deriveNasPortalSecret, verified
+// here against the persisted RADIUS secret in constant time). The login page
+// is only reachable through the NAS hotspot itself, so a valid secret proves
+// the caller actually loaded THIS device's captive portal; remote callers
+// cannot forge login requests for foreign tenants (free-package farming,
+// attribution poisoning) without first attaching to their network.
+
+const LOGIN_REQUEST_EXTRA_KEYS = ['chapId', 'chapChallenge'] as const;
+const LOGIN_REQUEST_EXTRA_MAX_VALUE_LENGTH = 256;
+const LOGIN_REQUEST_EXTRA_MAX_TOTAL_LENGTH = 2048;
+
+const IPV4_RE = /^\d{1,3}(\.\d{1,3}){3}$/;
+const MAC_RE = /^[0-9a-f]{2}([:-][0-9a-f]{2}){5}$/i;
+
+// IPv4 shape plus octet ranges, so a value that passes can never be
+// rejected by the `inet` column on insert.
+function isValidIpv4(ip: string): boolean {
+    return (
+        IPV4_RE.test(ip) && ip.split('.').every((p) => parseInt(p, 10) <= 255)
+    );
+}
+
+// First usable address of a hotspot network CIDR — the router's hotspot
+// gateway, which is the host the servlet puts in $(link-login)/$(link-login-only)
+// when no hotspot DNS name is configured.
+function hotspotGatewayOf(cidr: string | null): string | null {
+    if (!cidr) return null;
+    const [ip, prefixRaw] = cidr.split('/');
+    const prefixLen = parseInt(prefixRaw ?? '', 10);
+    if (!ip || !IPV4_RE.test(ip) || Number.isNaN(prefixLen)) return null;
+    const parts = ip.split('.').map((p) => parseInt(p, 10));
+    if (parts.some((p) => p > 255)) return null;
+    const network =
+        (((parts[0]! << 24) | (parts[1]! << 16) | (parts[2]! << 8) | parts[3]!) >>>
+            0) &
+        ((~0 << (32 - prefixLen)) >>> 0);
+    const gateway = (network + 1) >>> 0;
+    return [
+        (gateway >>> 24) & 0xff,
+        (gateway >>> 16) & 0xff,
+        (gateway >>> 8) & 0xff,
+        gateway & 0xff,
+    ].join('.');
+}
+
+type NasPortalFacts = {
+    ipAddress: string;
+    hotspotDnsName: string | null;
+    hotspotNetwork: string | null;
+    wgClientIp: string | null;
+};
+
+// Hosts the servlet may legitimately use in $(link-login)/$(link-login-only):
+// the hotspot DNS name (configured or the generator default), the device's
+// own addresses, its hotspot gateway and the portal host. Values outside
+// this set are attacker-chosen and must never be stored (they are re-used as
+// redirect/form targets by the portal and the RADIUS client).
+function trustedLoginLinkHosts(nas: NasPortalFacts): Set<string> {
+    const hosts = new Set<string>();
+    for (const value of [
+        nas.hotspotDnsName,
+        DEFAULT_HOTSPOT_DNS_NAME,
+        // inet columns may carry a CIDR prefix; hosts never do.
+        nas.ipAddress.replace(/\/\d+$/, ''),
+        nas.hotspotNetwork ? hotspotGatewayOf(nas.hotspotNetwork) : null,
+        nas.wgClientIp?.replace(/\/\d+$/, ''),
+    ]) {
+        if (value) hosts.add(value.toLowerCase());
+    }
+    try {
+        hosts.add(new URL(env.hotspotPortalUrl).hostname.toLowerCase());
+    } catch {
+        // Unparsable portal URL: skip, the NAS-owned hosts still apply.
+    }
+    return hosts;
+}
+
+// Keeps a servlet link only when it is a plain HTTP(S) URL on a trusted host
+// of this NAS; anything else is stored as null.
+function sanitizeTrustedLink(raw: string, hosts: Set<string>): string | null {
+    if (!raw) return null;
+    let url: URL;
+    try {
+        url = new URL(raw);
+    } catch {
+        return null;
+    }
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+    return hosts.has(url.hostname.toLowerCase()) ? raw : null;
+}
+
+// $(link-orig) is the client's own destination: arbitrary by design, but
+// only http(s) may be stored so it can never resurface as a javascript:/
+// data: redirect target on the portal or the servlet.
+function sanitizeLinkOrig(raw: string): string | null {
+    if (!raw) return null;
+    try {
+        const url = new URL(raw);
+        return url.protocol === 'http:' || url.protocol === 'https:'
+            ? raw
+            : null;
+    } catch {
+        return null;
+    }
+}
+
+// Fallback servlet login URL for the NAS, used by /complete when the stored
+// link-login-only was rejected (or predates host validation) so the portal
+// can still re-submit issued credentials to the router.
+async function canonicalNasLoginUrl(nasDeviceId: string): Promise<string> {
+    const [nas] = await db
+        .select({
+            ipAddress: nasDevice.ipAddress,
+            hotspotDnsName: nasSetupScript.hotspotDnsName,
+            hotspotNetwork: nasSetupScript.hotspotNetwork,
+        })
+        .from(nasDevice)
+        .leftJoin(nasSetupScript, eq(nasSetupScript.nasDeviceId, nasDevice.id))
+        .where(eq(nasDevice.id, nasDeviceId))
+        .limit(1);
+    if (!nas) return '';
+    const host =
+        nas.hotspotDnsName ||
+        hotspotGatewayOf(nas.hotspotNetwork) ||
+        nas.ipAddress.replace(/\/\d+$/, '');
+    return host ? `http://${host}/login` : '';
+}
+
 app.post('/login-request', async (c) => {
     const body = await c.req.parseBody();
     const str = (name: string): string => {
@@ -557,47 +740,89 @@ app.post('/login-request', async (c) => {
 
     const nasDeviceId = str('nas');
     const mac = str('mac');
+    const portalSecret = str('portalSecret');
     if (!nasDeviceId || !mac) {
         return jsonError(c, 400, 'Missing nas or mac');
     }
-    const [device] = await db
-        .select({ id: nasDevice.id })
+    if (!UUID_RE.test(nasDeviceId)) {
+        return jsonError(c, 404, 'Unknown NAS device');
+    }
+    if (!MAC_RE.test(mac)) {
+        return jsonError(c, 400, 'Invalid mac');
+    }
+    const [nas] = await db
+        .select({
+            ipAddress: nasDevice.ipAddress,
+            radiusSecret: nasSetupScript.radiusSecret,
+            hotspotDnsName: nasSetupScript.hotspotDnsName,
+            hotspotNetwork: nasSetupScript.hotspotNetwork,
+            wgClientIp: nasSetupScript.wgClientIp,
+        })
         .from(nasDevice)
+        .leftJoin(nasSetupScript, eq(nasSetupScript.nasDeviceId, nasDevice.id))
         .where(eq(nasDevice.id, nasDeviceId))
         .limit(1);
-    if (!device) {
+    if (!nas) {
         return jsonError(c, 404, 'Unknown NAS device');
     }
 
-    const knownFields = new Set([
-        'nas',
-        'mac',
-        'ip',
-        'username',
-        'linkLogin',
-        'linkLoginOnly',
-        'linkOrig',
-        'error',
-    ]);
-    const extra: Record<string, string> = {};
-    for (const [key, value] of Object.entries(body)) {
-        if (knownFields.has(key)) continue;
-        if (typeof value === 'string' && value.trim()) {
-            extra[key] = value.trim();
-        }
+    // Presence proof: the login page of THIS NAS embeds its derived portal
+    // secret; compare over fixed-length sha256 digests in constant time.
+    // Devices without a generated setup script (no radiusSecret, no branded
+    // page carrying the secret) fail closed.
+    if (
+        !portalSecret ||
+        !nas.radiusSecret ||
+        !nasTokenMatchesHash(
+            portalSecret,
+            hashNasToken(deriveNasPortalSecret(nas.radiusSecret, nasDeviceId)),
+        )
+    ) {
+        return jsonError(
+            c,
+            403,
+            'Invalid portal secret; reload the hotspot login page',
+        );
     }
+
+    const trustedHosts = trustedLoginLinkHosts({
+        ipAddress: nas.ipAddress,
+        hotspotDnsName: nas.hotspotDnsName,
+        hotspotNetwork: nas.hotspotNetwork,
+        wgClientIp: nas.wgClientIp,
+    });
+
+    // Only the servlet CHAP fields are kept: they are the sole `extra` keys
+    // the API reads back (/complete and the RADIUS activation redirect), and
+    // both value and total size are capped so the column cannot be stuffed.
+    const extra: Record<string, string> = {};
+    let extraSize = 0;
+    for (const key of LOGIN_REQUEST_EXTRA_KEYS) {
+        const value = str(key).slice(0, LOGIN_REQUEST_EXTRA_MAX_VALUE_LENGTH);
+        if (!value) continue;
+        if (extraSize + value.length > LOGIN_REQUEST_EXTRA_MAX_TOTAL_LENGTH) {
+            break;
+        }
+        extra[key] = value;
+        extraSize += value.length;
+    }
+
+    const ip = str('ip');
 
     const row = await db
         .insert(hotspotLoginRequest)
         .values({
             nasDeviceId,
             mac,
-            ip: str('ip') || null,
-            username: str('username') || null,
-            linkLogin: str('linkLogin') || null,
-            linkLoginOnly: str('linkLoginOnly') || null,
-            linkOrig: str('linkOrig') || null,
-            error: str('error') || null,
+            ip: ip && isValidIpv4(ip) ? ip : null,
+            username: str('username').slice(0, 256) || null,
+            linkLogin: sanitizeTrustedLink(str('linkLogin'), trustedHosts),
+            linkLoginOnly: sanitizeTrustedLink(
+                str('linkLoginOnly'),
+                trustedHosts,
+            ),
+            linkOrig: sanitizeLinkOrig(str('linkOrig')),
+            error: str('error').slice(0, 512) || null,
             extra: Object.keys(extra).length > 0 ? extra : null,
         })
         .returning();
@@ -610,30 +835,47 @@ app.post('/login-request', async (c) => {
 const HOTSPOT_CREDENTIAL_CHARS =
     'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
 
+// Rejection sampling: bytes >= limit would make the first (256 % n)
+// characters of the alphabet more likely (modulo bias), so they are
+// discarded and redrawn until every character is uniformly probable.
 function randomHotspotPassword(length: number): string {
-    const bytes = new Uint8Array(length);
-    crypto.getRandomValues(bytes);
-    return Array.from(
-        bytes,
-        (b) => HOTSPOT_CREDENTIAL_CHARS[b % HOTSPOT_CREDENTIAL_CHARS.length]!,
-    ).join('');
+    const limit = 256 - (256 % HOTSPOT_CREDENTIAL_CHARS.length);
+    const out: string[] = [];
+    while (out.length < length) {
+        const bytes = new Uint8Array(length * 2);
+        crypto.getRandomValues(bytes);
+        for (const byte of bytes) {
+            if (byte >= limit) continue;
+            out.push(
+                HOTSPOT_CREDENTIAL_CHARS[
+                    byte % HOTSPOT_CREDENTIAL_CHARS.length
+                ]!,
+            );
+            if (out.length === length) break;
+        }
+    }
+    return out.join('');
 }
 
 // Called by the portal once the client referenced by the login request has
 // authenticated. If the user has an active (paid) package activation, its
 // RADIUS credentials are what get sent to the NAS — that login is how the
 // package activates on the router. Otherwise a one-off hotspot credential is
-// issued (radcheck Cleartext-Password entry) so the client can at least reach
-// the portal. Marks the request completed and returns everything the portal
-// needs to re-submit to the NAS servlet login page (external authentication
-// flow, see the MikroTik hotspot customisation docs).
+// issued (radcheck Cleartext-Password entry plus an Expiration entry so it
+// stops authenticating after HOTSPOT_ONE_OFF_CREDENTIAL_TTL_MS) so the
+// client can at least reach the portal. Marks the request completed and
+// returns everything the portal needs to re-submit to the NAS servlet login
+// page (external authentication flow, see the MikroTik hotspot
+// customisation docs).
 //
 // Body may carry { activationId } to connect one specific device quota
 // (the connected-devices screen reconnects an offline activation with it)
 // instead of the most recent active one.
 app.post('/login-request/:id/complete', requireAuth, async (c) => {
     const id = c.req.param('id');
-    if (!id) return jsonError(c, 404, 'Unknown login request');
+    if (!id || !UUID_RE.test(id)) {
+        return jsonError(c, 404, 'Unknown login request');
+    }
     const currentUser = c.get('user');
     if (!currentUser) return jsonError(c, 401, 'Unauthorized');
 
@@ -647,6 +889,16 @@ app.post('/login-request/:id/complete', requireAuth, async (c) => {
     }
     if (loginRequest.userId && loginRequest.userId !== currentUser.id) {
         return jsonError(c, 403, 'Login request already completed');
+    }
+    if (
+        loginRequest.createdAt.getTime() <
+        Date.now() - HOTSPOT_LOGIN_REQUEST_TTL_MS
+    ) {
+        return jsonError(
+            c,
+            410,
+            'This hotspot sign-in session has expired — reconnect to the wifi network to start a new one.',
+        );
     }
 
     const body = (await c.req.json().catch(() => ({}))) as {
@@ -672,46 +924,113 @@ app.post('/login-request/:id/complete', requireAuth, async (c) => {
         );
     }
 
+    // Losing racer guard: the completion UPDATE is conditional (same pattern
+    // as the /order claim), so a concurrent second complete for the same
+    // request cannot re-issue credentials or steal an already-owned row.
+    const claimWhere = and(
+        eq(hotspotLoginRequest.id, id),
+        or(
+            isNull(hotspotLoginRequest.userId),
+            eq(hotspotLoginRequest.userId, currentUser.id),
+        ),
+    );
+
     let username: string;
     let password: string;
     if (active) {
         username = active.username;
         password = active.password;
-        await db
+        const [claimed] = await db
             .update(hotspotLoginRequest)
             .set({
                 status: 'completed',
                 userId: currentUser.id,
                 hotspotUsername: username,
             })
-            .where(eq(hotspotLoginRequest.id, id));
+            .where(claimWhere)
+            .returning({ id: hotspotLoginRequest.id });
+        if (!claimed) {
+            return jsonError(c, 409, 'Login request already completed');
+        }
     } else {
         username = `HS-${id.replace(/-/g, '').slice(0, 10)}`;
         password = randomHotspotPassword(12);
 
-        await db.transaction(async (tx) => {
-            await tx.delete(radcheck).where(eq(radcheck.username, username));
-            await tx.insert(radcheck).values({
-                username,
-                attribute: 'Cleartext-Password',
-                op: ':=',
-                value: password,
-            });
-            await tx
+        const claimed = await db.transaction(async (tx) => {
+            const [row] = await tx
                 .update(hotspotLoginRequest)
                 .set({
                     status: 'completed',
                     userId: currentUser.id,
                     hotspotUsername: username,
                 })
-                .where(eq(hotspotLoginRequest.id, id));
+                .where(claimWhere)
+                .returning({ id: hotspotLoginRequest.id });
+            if (!row) return null;
+            await tx.delete(radcheck).where(eq(radcheck.username, username));
+            await tx.insert(radcheck).values([
+                {
+                    username,
+                    attribute: 'Cleartext-Password',
+                    op: ':=',
+                    value: password,
+                },
+                {
+                    // Same attribute/format the package activations use
+                    // ('DD MMM YYYY HH:mm:ss', FreeRADIUS rlm_expiration):
+                    // the one-off credential stops authenticating after the
+                    // TTL even before the periodic sweep removes the rows.
+                    username,
+                    attribute: 'Expiration',
+                    op: ':=',
+                    value: dayjs(
+                        Date.now() + HOTSPOT_ONE_OFF_CREDENTIAL_TTL_MS,
+                    ).format('DD MMM YYYY HH:mm:ss'),
+                },
+            ]);
+            return row;
         });
+        if (!claimed) {
+            return jsonError(c, 409, 'Login request already completed');
+        }
+    }
+
+    // The stored servlet link is host-validated at creation, but rows written
+    // before validation existed could still carry an untrusted host until
+    // their TTL lapses — re-validate on read with the same helpers, and fall
+    // back to the canonical login URL of the NAS so a rejected/nulled/missing
+    // value can never leave the portal without a submit target.
+    let linkLoginOnly: string | null = null;
+    if (loginRequest.linkLoginOnly) {
+        const [nas] = await db
+            .select({
+                ipAddress: nasDevice.ipAddress,
+                hotspotDnsName: nasSetupScript.hotspotDnsName,
+                hotspotNetwork: nasSetupScript.hotspotNetwork,
+                wgClientIp: nasSetupScript.wgClientIp,
+            })
+            .from(nasDevice)
+            .leftJoin(
+                nasSetupScript,
+                eq(nasSetupScript.nasDeviceId, nasDevice.id),
+            )
+            .where(eq(nasDevice.id, loginRequest.nasDeviceId))
+            .limit(1);
+        if (nas) {
+            linkLoginOnly = sanitizeTrustedLink(
+                loginRequest.linkLoginOnly,
+                trustedLoginLinkHosts(nas),
+            );
+        }
+    }
+    if (!linkLoginOnly) {
+        linkLoginOnly = await canonicalNasLoginUrl(loginRequest.nasDeviceId);
     }
 
     return c.json({
         success: true,
         data: {
-            linkLoginOnly: loginRequest.linkLoginOnly ?? '',
+            linkLoginOnly,
             dst: loginRequest.linkOrig ?? '',
             username,
             password,
@@ -719,11 +1038,56 @@ app.post('/login-request/:id/complete', requireAuth, async (c) => {
             activationId: active?.activationId ?? null,
             // Servlet CHAP challenge captured at login-page time; the portal
             // hashes the password with it when both are present (http-chap).
+            // Whitelisted + length-capped at creation, '' when absent.
             chapId: loginRequest.extra?.chapId ?? '',
             chapChallenge: loginRequest.extra?.chapChallenge ?? '',
         },
     });
 });
+
+// Periodic sweep of the one-off HS- hotspot credentials (registered on the
+// RADIUS reconciler ticker in lib/radius): removes every radcheck row of a
+// username whose Expiration has passed, or whose login request is gone
+// (orphaned rows can no longer be attributed and are never legitimate —
+// issuance and the request update happen in one transaction). Expired-by-TTL
+// login requests land here through their Expiration row, which always
+// pre-dates the request TTL.
+export async function cleanupExpiredHotspotCredentials(): Promise<void> {
+    const deletable = db
+        .select({ username: radcheck.username })
+        .from(radcheck)
+        .where(
+            and(
+                like(radcheck.username, 'HS-%'),
+                or(
+                    and(
+                        eq(radcheck.attribute, 'Expiration'),
+                        sql`${radcheck.value} ~ '^\\d{2} [A-Za-z]{3} \\d{4} \\d{2}:\\d{2}:\\d{2}$'`,
+                        sql`to_timestamp(${radcheck.value}, 'DD Mon YYYY HH24:MI:SS') < now()`,
+                    ),
+                    notExists(
+                        db
+                            .select({ one: sql`1` })
+                            .from(hotspotLoginRequest)
+                            .where(
+                                eq(
+                                    hotspotLoginRequest.hotspotUsername,
+                                    radcheck.username,
+                                ),
+                            ),
+                    ),
+                ),
+            ),
+        );
+    await db
+        .delete(radcheck)
+        .where(
+            and(
+                like(radcheck.username, 'HS-%'),
+                inArray(radcheck.username, deletable),
+            ),
+        );
+}
 
 // --- Admin ------------------------------------------------------------------
 

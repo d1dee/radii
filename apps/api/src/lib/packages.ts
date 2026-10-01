@@ -177,14 +177,23 @@ export async function listAdminPackages(opts: {
     return { total: Number(countRows[0]?.total ?? 0), rows };
 }
 
-export async function getPackageById(id: string, ownerId?: string) {
+// Owner scope for a single-package read: an admin id restricts the lookup to
+// packages that admin created, the literal 'system' selects the
+// unconstrained internal flows. Required — an optional ownerId silently
+// disabled the tenant filter when a caller forgot it.
+export async function getPackageById(
+    id: string,
+    ownerScope: string | 'system',
+) {
     const [row] = await db
         .select()
         .from(packages)
         .where(
             and(
                 eq(packages.id, id),
-                ownerId ? eq(packages.createdBy, ownerId) : undefined,
+                ownerScope === 'system'
+                    ? undefined
+                    : eq(packages.createdBy, ownerScope),
             ),
         )
         .limit(1);

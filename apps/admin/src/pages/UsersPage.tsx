@@ -15,14 +15,25 @@ import {
     Stack,
     Table,
     Text,
+    Textarea,
     TextInput,
     Title,
+    Tooltip,
 } from '@mantine/core';
 import { useDebouncedValue } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
 import { PhoneNumberInput } from '@radii/ui';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { MdAdd, MdCheck, MdContentCopy, MdDelete, MdSearch } from 'react-icons/md';
+import {
+    MdAdd,
+    MdBlock,
+    MdCheck,
+    MdCheckCircle,
+    MdContentCopy,
+    MdEdit,
+    MdFlag,
+    MdSearch,
+} from 'react-icons/md';
 
 import { UserDetailsDrawer } from '@/components/Users/UserDetailsDrawer';
 import {
@@ -32,11 +43,14 @@ import {
 import { TablePagination } from '@/components/TablePagination';
 import {
     getAdminUsers,
-    deleteAdminUser,
+    addUserFlag,
+    banUser,
     getAllNasDevices,
     getPppoeAccount,
     migratePppoeAccountNas,
     provisionPppoeAccount,
+    setUserTag,
+    unbanUser,
     type AdminUserList,
     type AdminUserRow,
     type AdminUserSortKey,
@@ -108,8 +122,6 @@ export default function UsersPage() {
     const [page, setPage] = useState(1);
     const loadRequest = useRef(0);
     const [detailsId, setDetailsId] = useState<string | null>(null);
-    const [deleteTarget, setDeleteTarget] = useState<AdminUserRow | null>(null);
-    const [deleteBusy, setDeleteBusy] = useState(false);
     const [nasDevices, setNasDevices] = useState<NasDeviceRow[]>([]);
     const [provisionOpened, setProvisionOpened] = useState(false);
     const [provisionPhone, setProvisionPhone] = useState('');
@@ -130,6 +142,16 @@ export default function UsersPage() {
     const [regenerated, setRegenerated] =
         useState<ProvisionedPppoeAccount | null>(null);
     const [regenerating, setRegenerating] = useState(false);
+    const [quickUser, setQuickUser] = useState<AdminUserRow | null>(null);
+    const [quickModal, setQuickModal] = useState<'edit' | 'flag' | 'ban' | null>(
+        null,
+    );
+    const [quickBusy, setQuickBusy] = useState(false);
+    const [tagName, setTagName] = useState('');
+    const [tagLocation, setTagLocation] = useState('');
+    const [flagReason, setFlagReason] = useState('');
+    const [flagNote, setFlagNote] = useState('');
+    const [banReason, setBanReason] = useState('');
 
     useEffect(() => {
         void (async () => {
@@ -344,19 +366,72 @@ export default function UsersPage() {
         setProvisionOpened(true);
     }
 
-    async function submitDelete() {
-        if (!deleteTarget || deleteTarget.pendingClaim) return;
-        setDeleteBusy(true);
-        const result = await deleteAdminUser(deleteTarget.id);
-        setDeleteBusy(false);
-        notifyResult(result, 'User deleted');
-        if (!result.success) return;
-        if (detailsId === deleteTarget.id) setDetailsId(null);
-        setDeleteTarget(null);
-        const regularUsersOnPage =
-            data?.users.filter((candidate) => !candidate.pendingClaim).length ?? 0;
-        if (page > 1 && regularUsersOnPage === 1) setPage(page - 1);
-        else await load(page, true);
+    function openQuickAction(
+        user: AdminUserRow,
+        modal: 'edit' | 'flag' | 'ban',
+    ) {
+        setQuickUser(user);
+        setQuickModal(modal);
+        setTagName(user.tag?.name ?? '');
+        setTagLocation(user.tag?.location ?? '');
+        setFlagReason('');
+        setFlagNote('');
+        setBanReason('');
+    }
+
+    function closeQuickAction() {
+        setQuickModal(null);
+        setQuickUser(null);
+    }
+
+    async function submitQuickTag() {
+        if (!quickUser) return;
+        setQuickBusy(true);
+        const res = await setUserTag(quickUser.id, {
+            name: tagName.trim() || null,
+            location: tagLocation.trim() || null,
+        });
+        setQuickBusy(false);
+        notifyResult(res, 'Customer tag saved');
+        if (!res.success) return;
+        closeQuickAction();
+        void load(page, true);
+    }
+
+    async function submitQuickFlag() {
+        if (!quickUser || !flagReason.trim()) return;
+        setQuickBusy(true);
+        const res = await addUserFlag(quickUser.id, {
+            reason: flagReason.trim(),
+            note: flagNote.trim() || undefined,
+        });
+        setQuickBusy(false);
+        notifyResult(res, 'Flag added');
+        if (!res.success) return;
+        closeQuickAction();
+        void load(page, true);
+    }
+
+    async function submitQuickBan() {
+        if (!quickUser) return;
+        setQuickBusy(true);
+        const res = await banUser(quickUser.id, {
+            reason: banReason.trim() || undefined,
+        });
+        setQuickBusy(false);
+        notifyResult(res, 'User banned');
+        if (!res.success) return;
+        closeQuickAction();
+        void load(page, true);
+    }
+
+    async function submitQuickUnban(user: AdminUserRow) {
+        setQuickBusy(true);
+        const res = await unbanUser(user.id);
+        setQuickBusy(false);
+        notifyResult(res, 'User unbanned');
+        if (!res.success) return;
+        void load(page, true);
     }
 
     async function submitProvision(event: React.FormEvent<HTMLFormElement>) {
@@ -653,19 +728,70 @@ export default function UsersPage() {
                                             </Text>
                                         </Table.Td>
                                         <Table.Td>
-                                            <Group justify='flex-end'>
+                                            <Group
+                                                justify='flex-end'
+                                                gap={4}
+                                                wrap='nowrap'
+                                            >
                                                 {!u.pendingClaim ? (
-                                                    <ActionIcon
-                                                        variant='light'
-                                                        color='red'
-                                                        aria-label={`Delete ${u.tag?.name || u.name}`}
-                                                        onClick={(event) => {
-                                                            event.stopPropagation();
-                                                            setDeleteTarget(u);
-                                                        }}
-                                                    >
-                                                        <MdDelete size={16} />
-                                                    </ActionIcon>
+                                                    <>
+                                                        <Tooltip label='Edit name / location'>
+                                                            <ActionIcon
+                                                                variant='light'
+                                                                color='gray'
+                                                                aria-label={`Edit ${u.tag?.name || u.name}`}
+                                                                onClick={(event) => {
+                                                                    event.stopPropagation();
+                                                                    openQuickAction(u, 'edit');
+                                                                }}
+                                                            >
+                                                                <MdEdit size={16} />
+                                                            </ActionIcon>
+                                                        </Tooltip>
+                                                        <Tooltip label='Flag user'>
+                                                            <ActionIcon
+                                                                variant='light'
+                                                                color='orange'
+                                                                aria-label={`Flag ${u.tag?.name || u.name}`}
+                                                                onClick={(event) => {
+                                                                    event.stopPropagation();
+                                                                    openQuickAction(u, 'flag');
+                                                                }}
+                                                            >
+                                                                <MdFlag size={16} />
+                                                            </ActionIcon>
+                                                        </Tooltip>
+                                                        {u.banned ? (
+                                                            <Tooltip label='Unban user'>
+                                                                <ActionIcon
+                                                                    variant='light'
+                                                                    color='green'
+                                                                    aria-label={`Unban ${u.tag?.name || u.name}`}
+                                                                    disabled={quickBusy}
+                                                                    onClick={(event) => {
+                                                                        event.stopPropagation();
+                                                                        void submitQuickUnban(u);
+                                                                    }}
+                                                                >
+                                                                    <MdCheckCircle size={16} />
+                                                                </ActionIcon>
+                                                            </Tooltip>
+                                                        ) : (
+                                                            <Tooltip label='Ban user'>
+                                                                <ActionIcon
+                                                                    variant='light'
+                                                                    color='red'
+                                                                    aria-label={`Ban ${u.tag?.name || u.name}`}
+                                                                    onClick={(event) => {
+                                                                        event.stopPropagation();
+                                                                        openQuickAction(u, 'ban');
+                                                                    }}
+                                                                >
+                                                                    <MdBlock size={16} />
+                                                                </ActionIcon>
+                                                            </Tooltip>
+                                                        )}
+                                                    </>
                                                 ) : null}
                                             </Group>
                                         </Table.Td>
@@ -688,43 +814,6 @@ export default function UsersPage() {
                 userId={detailsId}
                 onClose={() => setDetailsId(null)}
             />
-
-            <Modal
-                opened={deleteTarget !== null}
-                onClose={() => setDeleteTarget(null)}
-                title='Delete user'
-                centered
-                closeOnClickOutside={!deleteBusy}
-                closeOnEscape={!deleteBusy}
-                withCloseButton={!deleteBusy}
-            >
-                <Stack gap='md'>
-                    <Text size='sm'>
-                        Delete{' '}
-                        <Text span fw={600}>
-                            {deleteTarget?.tag?.name || deleteTarget?.name}
-                        </Text>{' '}
-                        permanently?
-                    </Text>
-                    <Text size='sm' c='dimmed'>
-                        This removes the customer sign-in account. Shared customers and users
-                        with payment, activation, or PPPoE history cannot be deleted; ban them
-                        instead.
-                    </Text>
-                    <Group justify='flex-end'>
-                        <Button
-                            variant='default'
-                            onClick={() => setDeleteTarget(null)}
-                            disabled={deleteBusy}
-                        >
-                            Cancel
-                        </Button>
-                        <Button color='red' loading={deleteBusy} onClick={submitDelete}>
-                            Delete user
-                        </Button>
-                    </Group>
-                </Stack>
-            </Modal>
 
             <Modal
                 opened={provisionOpened}
@@ -949,6 +1038,106 @@ export default function UsersPage() {
                         <Loader />
                     </Center>
                 )}
+            </Modal>
+
+            <Modal
+                opened={quickModal === 'edit'}
+                onClose={closeQuickAction}
+                title='Customer name / location'
+                centered
+            >
+                <Stack>
+                    <Text size='sm' c='dimmed'>
+                        Private labels only visible to you. The customer's
+                        phone-number identity is unchanged; both fields are
+                        optional and can be updated later.
+                    </Text>
+                    <TextInput
+                        label='Name'
+                        placeholder='e.g. Jane Mwangi'
+                        value={tagName}
+                        onChange={(e) => setTagName(e.currentTarget.value)}
+                        maxLength={80}
+                    />
+                    <TextInput
+                        label='Location'
+                        placeholder='e.g. Riverside Apartments, House 4B'
+                        value={tagLocation}
+                        onChange={(e) => setTagLocation(e.currentTarget.value)}
+                        maxLength={120}
+                    />
+                    <Button
+                        onClick={() => void submitQuickTag()}
+                        loading={quickBusy}
+                    >
+                        Save tag
+                    </Button>
+                </Stack>
+            </Modal>
+
+            <Modal
+                opened={quickModal === 'flag'}
+                onClose={closeQuickAction}
+                title='Flag user'
+                centered
+            >
+                <Stack>
+                    <TextInput
+                        label='Reason'
+                        placeholder='e.g. payment dispute, abuse, suspicious activity'
+                        value={flagReason}
+                        onChange={(e) => setFlagReason(e.currentTarget.value)}
+                        required
+                    />
+                    <Textarea
+                        label='Note (optional)'
+                        placeholder='Extra context for other admins'
+                        value={flagNote}
+                        onChange={(e) => setFlagNote(e.currentTarget.value)}
+                        rows={3}
+                    />
+                    <Button
+                        onClick={() => void submitQuickFlag()}
+                        disabled={!flagReason.trim()}
+                        loading={quickBusy}
+                    >
+                        Add flag
+                    </Button>
+                </Stack>
+            </Modal>
+
+            <Modal
+                opened={quickModal === 'ban'}
+                onClose={closeQuickAction}
+                title='Ban user'
+                centered
+            >
+                <Stack>
+                    <Text size='sm'>
+                        Ban{' '}
+                        <Text span fw={600}>
+                            {quickUser?.tag?.name || quickUser?.name}
+                        </Text>
+                        ?
+                    </Text>
+                    <Text size='sm' c='dimmed'>
+                        Banned users cannot log in to the portals until
+                        unbanned.
+                    </Text>
+                    <Textarea
+                        label='Reason (optional)'
+                        value={banReason}
+                        onChange={(e) => setBanReason(e.currentTarget.value)}
+                        rows={2}
+                    />
+                    <Button
+                        color='red'
+                        onClick={() => void submitQuickBan()}
+                        loading={quickBusy}
+                    >
+                        Ban user
+                    </Button>
+                </Stack>
             </Modal>
         </Stack>
     );

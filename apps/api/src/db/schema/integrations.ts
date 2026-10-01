@@ -151,9 +151,32 @@ export const nasSetupScript = pgTable(
         wgPsk: text('wg_psk').notNull(),
         // RADIUS shared secret registered in the FreeRADIUS `nas` table.
         radiusSecret: text('radius_secret').notNull(),
-        // One-shot token embedded in the script, required by the device
-        // report endpoint.
-        registrationToken: text('registration_token').notNull(),
+        // One-shot bootstrap token, stored as sha256 hex — the plaintext is
+        // shown to the admin exactly once (in the generate response) and is
+        // never persisted. Grants GET /api/nas/:id/script (downloads the
+        // rendered script, which contains the RADIUS secret / WG PSK) and
+        // POST /api/nas/:id/report. The stored `script` keeps a literal
+        // {{BOOTSTRAP_TOKEN}} placeholder that the /script route substitutes
+        // with the presented (hash-verified) token at serve time.
+        // Null = consumed: nulled atomically by the first successful report,
+        // so secret re-download and key re-registration are impossible until
+        // an admin regenerates the script (which mints a fresh token).
+        bootstrapTokenHash: text('bootstrap_token_hash'),
+        // Expiry for the bootstrap capability (BOOTSTRAP_TOKEN_TTL_MS after
+        // generation); /script and /report reject expired tokens.
+        bootstrapExpiresAt: timestamp('bootstrap_expires_at', {
+            withTimezone: true,
+            mode: 'date',
+        }),
+        // Long-lived page token, stored as sha256 hex. Derived from the
+        // bootstrap token (sha256 of a fixed prefix + bootstrap token), so
+        // the /script route can embed it without storing plaintext. Grants
+        // ONLY GET /api/nas/:id/hotspot/:page, which serves the branded
+        // hotspot HTML (no secrets — the same pages the router serves to
+        // every captive-portal client). Not consumed by the report, because
+        // the script downloads the pages after reporting; survives so a
+        // re-run of an already-downloaded script can repair missing pages.
+        pageTokenHash: text('page_token_hash'),
         // When the device reported its WireGuard key.
         wgKeyReportedAt: timestamp('wg_key_reported_at', {
             withTimezone: true,
@@ -217,8 +240,9 @@ export const hotspotLoginRequest = pgTable(
         linkOrig: text('link_orig'),
         // Error message carried over from a previous failed login attempt.
         error: text('error'),
-        // Everything else the NAS login page reports (hostname,
-        // server-address, interface, trial, ...).
+        // Everything else the NAS login page reports, whitelisted at
+        // creation to the servlet fields the API actually reads back
+        // (chapId/chapChallenge) with per-value and total size caps.
         extra: jsonb('extra').$type<Record<string, string>>(),
         status: text('status', { enum: ['pending', 'completed'] })
             .default('pending')
@@ -244,6 +268,11 @@ export const hotspotLoginRequest = pgTable(
         index('hotspot_login_request_status_idx').on(table.status),
         // Tenant scoping: which customers interacted with an admin's devices.
         index('hotspot_login_request_user_id_idx').on(table.userId),
+        // One-off HS- credential lifecycle: the cleanup sweep resolves
+        // radcheck usernames back to their login request through this.
+        index('hotspot_login_request_hotspot_username_idx').on(
+            table.hotspotUsername,
+        ),
     ],
 );
 

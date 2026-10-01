@@ -1,7 +1,31 @@
 // RouterOS setup-script template. Every {{PLACEHOLDER}} is substituted with a
 // device-specific value by renderMikrotikSetupScript().
 
+import { createHash } from 'node:crypto';
+
 const ROS_CHUNK_SIZE = 700;
+
+// Per-device portal secret embedded in the branded login page and required by
+// POST /api/hotspot/login-request. Derived deterministically from the device's
+// RADIUS secret (persisted in nas_setup_script), so the API can recompute and
+// verify it without extra storage, and it rotates whenever the setup script is
+// regenerated. The login page is public to any client attached to the hotspot,
+// so the secret is a page-viewer-scoped capability: it proves the caller
+// actually loaded THIS NAS's captive-portal page (L2 presence), which stops
+// remote callers from forging login requests for foreign tenants.
+const PORTAL_SECRET_PREFIX = 'radii-nas-portal-secret:';
+
+export function deriveNasPortalSecret(
+    radiusSecret: string,
+    nasDeviceId: string,
+): string {
+    if (!radiusSecret || !nasDeviceId) {
+        throw new Error('deriveNasPortalSecret requires radiusSecret and nasDeviceId');
+    }
+    return createHash('sha256')
+        .update(`${PORTAL_SECRET_PREFIX}${radiusSecret}:${nasDeviceId}`)
+        .digest('hex');
+}
 
 function escapeHtml(value: string): string {
     return value
@@ -12,13 +36,55 @@ function escapeHtml(value: string): string {
         .replace(/'/g, '&#39;');
 }
 
-export function rosStringLines(varName: string, value: string): string {
-    const escaped = value
+export function escapeRosQuoted(value: string): string {
+    return value
         .replace(/\\/g, '\\\\')
         .replace(/"/g, '\\"')
         .replace(/\r/g, '')
         .replace(/\n/g, '\\n')
         .replace(/\$\(/g, '\\$(');
+}
+
+// Values interpolated into `#` comment headers cannot be escaped (a comment
+// runs to the end of the line), so they are sanitized to a safe charset
+// instead: printable ASCII only, without `"` or `\`, and with CR/LF collapsed
+// to spaces so a value can never start a new script line.
+export function sanitizeRosComment(value: string): string {
+    return value
+        .replace(/[\r\n]+/g, ' ')
+        .replace(/[^\x20-\x7e]/g, '')
+        .replace(/["\\]/g, '')
+        .slice(0, 64);
+}
+
+// Placeholders intentionally left unresolved in the stored script: they are
+// substituted with the live tokens by the /script route at serve time, so
+// token plaintext is never persisted.
+export const SCRIPT_TOKEN_PLACEHOLDERS = [
+    '{{BOOTSTRAP_TOKEN}}',
+    '{{PAGE_TOKEN}}',
+];
+
+// Admin- or device-controlled values interpolated into RouterOS `#` comment
+// headers and double-quoted string literals respectively. Every variable in
+// these sets is escaped/sanitized during substitution so an attacker-chosen
+// value can never break out of its comment or string context and inject
+// RouterOS commands.
+const ROS_COMMENT_VARS = new Set([
+    'NAS_NAME',
+    'NAS_MODEL',
+    'NAS_SERIAL',
+    'NAS_LOCATION',
+]);
+const ROS_QUOTED_VARS = new Set([
+    'NAS_IDENTITY',
+    'HOTSPOT_INTERFACE',
+    'HOTSPOT_DNS_NAME',
+    'PPP_INTERFACE',
+]);
+
+export function rosStringLines(varName: string, value: string): string {
+    const escaped = escapeRosQuoted(value);
 
     const lines: string[] = [`:local ${varName} "";`];
     let chunk = '';
@@ -81,13 +147,18 @@ function buildHotspotPages(
     brand: string,
     apiBaseUrl: string,
     nasId: string,
+    portalSecret: string,
 ): Record<string, string> {
     const b = escapeHtml(brand);
-    // External captive portal: instead of authenticating on the NAS itself,
-    // the login page auto-submits every variable the hotspot servlet exposes
-    // at login to the radii API, which stores the request and sends the
-    // client to the portal. After authenticating there, the portal posts
-    // issued credentials back to the NAS login page. No auto-submit when an
+    // External captive portal (MikroTik "External authentication" flow):
+    // instead of authenticating on the NAS itself, the login page
+    // auto-submits every variable the hotspot servlet exposes at login to
+    // the radii API, which stores the request and sends the client to the
+    // portal. After authenticating there, the portal posts issued
+    // credentials back to the NAS login page. The hidden portalSecret field
+    // is the per-device capability derived by deriveNasPortalSecret(); the
+    // API rejects submissions without it, binding a login request to the
+    // NAS whose page the client actually loaded. No auto-submit when an
     // error is carried over (failed external login) so the client is not
     // bounced between portal and NAS in a loop.
     const login = pageShell(
@@ -102,6 +173,7 @@ $(endif)
 
 <form name='redirect' action='${apiBaseUrl}/api/hotspot/login-request' method='post'>
 <input type='hidden' name='nas' value='${nasId}'>
+<input type='hidden' name='portalSecret' value='${portalSecret}'>
 <input type='hidden' name='mac' value='$(mac)'>
 <input type='hidden' name='ip' value='$(ip)'>
 <input type='hidden' name='username' value='$(username)'>
@@ -499,7 +571,7 @@ $radiiLog "WireGuard firewall access rules configured";
         url="{{NAS_REPORT_URL}}" \
         http-method=post \
         output=none \
-        http-data=("nasId={{NAS_ID}}" ."&token={{REGISTRATION_TOKEN}}" ."&publicKey=" . $encKey ."&model=" . $encModel ."&serialNumber=" . $encSerial ."&firmwareVersion=" . $encVersion ."&boardName=" . $encBoard . "&architecture=" . $encArch);
+        http-data=("nasId={{NAS_ID}}" ."&token={{BOOTSTRAP_TOKEN}}" ."&publicKey=" . $encKey ."&model=" . $encModel ."&serialNumber=" . $encSerial ."&firmwareVersion=" . $encVersion ."&boardName=" . $encBoard . "&architecture=" . $encArch);
 
     $radiiLog "Device facts and WireGuard public key reported";
 } on-error={
@@ -1216,7 +1288,7 @@ $radiiLog ("Expired PPPoE payment access configured for " . $pppPortalHost);
 # ---------------------------------------------------------------------
 
 :local hsBaseUrl "{{API_BASE_URL}}/api/nas/{{NAS_ID}}/hotspot";
-:local hsToken "{{REGISTRATION_TOKEN}}";
+:local hsToken "{{PAGE_TOKEN}}";
 :local encHsToken "";
 
 :do {
@@ -1307,6 +1379,7 @@ export function renderMikrotikSetupScript(
         vars.BRAND_NAME,
         vars.API_BASE_URL,
         vars.NAS_ID,
+        deriveNasPortalSecret(vars.RADIUS_SECRET, vars.NAS_ID),
     );
     let out = TEMPLATE.split('{{IP_LOCKDOWN_SECTION}}').join(
         options?.ipLockdown === false
@@ -1314,10 +1387,25 @@ export function renderMikrotikSetupScript(
             : IP_LOCKDOWN_SECTION,
     );
     for (const [key, value] of Object.entries(vars)) {
-        out = out.split(`{{${key}}}`).join(value);
+        // Route admin/device-controlled strings through the matching escaper
+        // for their interpolation context so a crafted value can never break
+        // out of a RouterOS comment or quoted string literal and inject
+        // commands. Values that are already server-generated secrets/IDs are
+        // interpolated verbatim.
+        const safe = ROS_COMMENT_VARS.has(key)
+            ? sanitizeRosComment(value)
+            : ROS_QUOTED_VARS.has(key)
+              ? escapeRosQuoted(value)
+              : value;
+        out = out.split(`{{${key}}}`).join(safe);
     }
-    const leftover = out.match(/\{\{[A-Z0-9_]+\}\}/g);
-    if (leftover) {
+    // BOOTSTRAP_TOKEN / PAGE_TOKEN are intentionally left as placeholders in
+    // the stored script; the /script route substitutes the live tokens at
+    // serve time so token plaintext is never persisted.
+    const leftover = out
+        .match(/\{\{[A-Z0-9_]+\}\}/g)
+        ?.filter((m) => !SCRIPT_TOKEN_PLACEHOLDERS.includes(m));
+    if (leftover && leftover.length > 0) {
         throw new Error(
             `Unresolved setup-script variables: ${Array.from(new Set(leftover)).join(', ')}`,
         );
