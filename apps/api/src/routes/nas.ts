@@ -5,6 +5,7 @@ import { nasSetupScript } from '../db/schema';
 import { jsonError } from '../lib/error';
 import {
     applyNasReport,
+    deriveNasPageToken,
     getSetupScriptForNasDevice,
     hashNasToken,
     nasTokenMatchesHash,
@@ -100,7 +101,10 @@ app.post('/:id/report', async (c) => {
     // is rejected, and never reaches applyNasReport/upsertPeer.
     const consumed = await db
         .update(nasSetupScript)
-        .set({ bootstrapTokenHash: null })
+        .set({
+            bootstrapTokenHash: null,
+            pageTokenHash: hashNasToken(deriveNasPageToken(token)),
+        })
         .where(
             and(
                 eq(nasSetupScript.id, script.id),

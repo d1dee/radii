@@ -36,7 +36,7 @@ import {
     generateNasSetupScript,
     deleteNasDevice,
     getNasDevices,
-    getNasSetupScript,
+    getNasBootstrapScript,
     type GenerateSetupScriptInput,
     type NasDeviceRow,
     type NasDeviceSortKey,
@@ -116,6 +116,7 @@ export default function NasDevicesPage() {
     const [scriptLoading, setScriptLoading] = useState(false);
     const [scriptBusy, setScriptBusy] = useState(false);
     const [scriptError, setScriptError] = useState<string | null>(null);
+    const scriptRequest = useRef(0);
 
     const form = useForm<GenerateSetupScriptInput>({
         initialValues: {
@@ -222,20 +223,27 @@ export default function NasDevicesPage() {
     };
 
     const openScriptModal = async (device: NasDeviceRow) => {
+        const requestId = ++scriptRequest.current;
         setScriptDevice(device);
         setScriptRow(null);
         setScriptError(null);
         prefillForm(null, device);
         setScriptLoading(true);
-        const result = await getNasSetupScript(device.id);
+        const result = await getNasBootstrapScript(device.id);
+        if (requestId !== scriptRequest.current) return;
         setScriptLoading(false);
-        if (result.success && result.data) {
+        if (!result.success) {
+            setScriptError(result.message);
+            return;
+        }
+        if (result.data) {
             setScriptRow(result.data);
             prefillForm(result.data, device);
         }
     };
 
     const closeScriptModal = () => {
+        ++scriptRequest.current;
         setScriptDevice(null);
         setScriptRow(null);
         setScriptError(null);

@@ -61,6 +61,7 @@ import {
 } from '../lib/pppoeAccounts';
 import {
     generateSetupScript,
+    getNasBootstrapScript,
     getSetupScriptForNasDevice,
     SetupScriptConfigError,
 } from '../lib/setupScript';
@@ -530,10 +531,7 @@ app.post('/nas-devices/:id/setup-script', requireAdmin, async (c) => {
 
     try {
         const row = await generateSetupScript(device, parsed.data);
-        // generateSetupScript already replaced `script` with the one-time
-        // bootstrap one-liner (buildBootstrapScript) and attached the
-        // plaintext bootstrapToken (one-time reveal, never persisted) —
-        // both are kept; all secret row fields are filtered out.
+        // Return the bootstrap command, not the stored rendered script.
         return c.json(
             {
                 success: true,
@@ -552,6 +550,17 @@ app.post('/nas-devices/:id/setup-script', requireAdmin, async (c) => {
     }
 });
 
+// Opening the setup modal renews only a consumed/expired bootstrap capability.
+app.post('/nas-devices/:id/setup-script/bootstrap', requireAdmin, async (c) => {
+    const device = await getNasDeviceById(
+        c.req.param('id'), c.get('adminSession').userId,
+    );
+    if (!device) return jsonError(c, 404, 'NAS device not found');
+    const row = await getNasBootstrapScript(device.id);
+    c.header('Cache-Control', 'no-store');
+    return c.json({ success: true, data: row ? publicSetupScriptFields(row) : null });
+});
+
 // Fetch the stored generated script for this device.
 app.get('/nas-devices/:id/setup-script', requireAdmin, async (c) => {
     const id = c.req.param('id');
@@ -565,13 +574,8 @@ app.get('/nas-devices/:id/setup-script', requireAdmin, async (c) => {
         return jsonError(c, 404, 'No setup script generated yet');
     }
 
-    // The bootstrap token is one-shot and stored only as a hash, so the
-    // paste-into-router bootstrap one-liner is revealed exactly once — in the
-    // generate/regenerate (POST) response. Here we return the stored rendered
-    // script for review; it keeps {{BOOTSTRAP_TOKEN}} / {{PAGE_TOKEN}}
-    // placeholders (live tokens are substituted only when the router fetches
-    // it via the guarded /api/nas/:id/script endpoint). To (re)provision a
-    // device, regenerate the script.
+    // Read-only metadata/review endpoint. The modal uses POST /bootstrap to
+    // obtain a usable bootstrap command without regenerating device secrets.
     return c.json({ success: true, data: publicSetupScriptFields(row) });
 });
 

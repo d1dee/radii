@@ -151,16 +151,16 @@ export const nasSetupScript = pgTable(
         wgPsk: text('wg_psk').notNull(),
         // RADIUS shared secret registered in the FreeRADIUS `nas` table.
         radiusSecret: text('radius_secret').notNull(),
-        // One-shot bootstrap token, stored as sha256 hex — the plaintext is
-        // shown to the admin exactly once (in the generate response) and is
-        // never persisted. Grants GET /api/nas/:id/script (downloads the
+        // One-shot bootstrap token, stored as sha256 hex; plaintext is never
+        // persisted. The server derives it for the admin setup modal and
+        // renews it when consumed or expired. Grants GET /api/nas/:id/script (downloads the
         // rendered script, which contains the RADIUS secret / WG PSK) and
         // POST /api/nas/:id/report. The stored `script` keeps a literal
         // {{BOOTSTRAP_TOKEN}} placeholder that the /script route substitutes
         // with the presented (hash-verified) token at serve time.
         // Null = consumed: nulled atomically by the first successful report,
         // so secret re-download and key re-registration are impossible until
-        // an admin regenerates the script (which mints a fresh token).
+        // an admin opens the setup modal (which mints a fresh token).
         bootstrapTokenHash: text('bootstrap_token_hash'),
         // Expiry for the bootstrap capability (BOOTSTRAP_TOKEN_TTL_MS after
         // generation); /script and /report reject expired tokens.

@@ -1,6 +1,6 @@
 import type { GenerateSetupScriptInput } from '@radii/shared';
 import { desc, eq } from 'drizzle-orm';
-import { createHash, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { db } from '../db';
 import { nas, nasDevice, nasSetupScript } from '../db/schema';
 import { env } from '../env';
@@ -44,6 +44,25 @@ function randomToken(length: number): string {
 
 function sha256Hex(value: string): string {
     return createHash('sha256').update(value).digest('hex');
+}
+
+// Recoverable by the server without storing plaintext; device credentials
+// alone cannot derive the capability. The expiry changes on each rotation.
+function deriveBootstrapToken(
+    deviceId: string,
+    radiusSecret: string,
+    expiresAt: Date,
+): string {
+    return createHmac('sha256', env.adminBetterAuthSecret)
+        .update(
+            JSON.stringify([
+                'radii-nas-bootstrap-v1',
+                deviceId,
+                radiusSecret,
+                expiresAt.toISOString(),
+            ]),
+        )
+        .digest('hex');
 }
 
 // Tokens are stored only as sha256 hex digests; comparisons run over the
@@ -314,13 +333,13 @@ export async function generateSetupScript(
 
     const radiusSecret = randomToken(24);
     const wgPsk = randomBase64(32);
-    // The bootstrap token is shown to the admin exactly once (in the response
-    // below); only its hash is persisted, along with the derived page-token
-    // hash and the bootstrap expiry.
-    const bootstrapToken = randomToken(32);
+    // Only token hashes and the expiry are persisted.
+    const bootstrapExpiresAt = new Date(Date.now() + BOOTSTRAP_TOKEN_TTL_MS);
+    const bootstrapToken = deriveBootstrapToken(
+        device.id, radiusSecret, bootstrapExpiresAt,
+    );
     const bootstrapTokenHash = hashNasToken(bootstrapToken);
     const pageTokenHash = hashNasToken(deriveNasPageToken(bootstrapToken));
-    const bootstrapExpiresAt = new Date(Date.now() + BOOTSTRAP_TOKEN_TTL_MS);
     const wgServerPublicKey = env.wgServerPublicKey.trim();
     const reportUrl = `${env.apiUrl}/api/nas/${device.id}/report`;
 
@@ -496,11 +515,59 @@ export async function generateSetupScript(
 
     return {
         ...row,
-        // Return the plaintext bootstrap token only here (one-time reveal);
-        // it is never persisted and cannot be retrieved again afterwards.
+        // The capability is returned to the admin, never persisted in plaintext.
         bootstrapToken,
         script: buildBootstrapScript(device.id, bootstrapToken, env.apiUrl),
     };
+}
+
+export async function getNasBootstrapScript(nasDeviceId: string) {
+    return db.transaction(async (tx) => {
+        const [existing] = await tx
+            .select()
+            .from(nasSetupScript)
+            .where(eq(nasSetupScript.nasDeviceId, nasDeviceId))
+            .limit(1)
+            .for('update');
+        if (!existing) return null;
+
+        let row = existing;
+        let token = existing.bootstrapExpiresAt
+            ? deriveBootstrapToken(
+                nasDeviceId, existing.radiusSecret, existing.bootstrapExpiresAt,
+            )
+            : '';
+        if (
+            !existing.bootstrapExpiresAt ||
+            existing.bootstrapExpiresAt.getTime() <= Date.now() ||
+            !existing.bootstrapTokenHash ||
+            !nasTokenMatchesHash(token, existing.bootstrapTokenHash)
+        ) {
+            // Legacy random tokens cannot be recovered and are rotated once.
+            const expiresAt = new Date(Math.max(
+                Date.now() + BOOTSTRAP_TOKEN_TTL_MS,
+                (existing.bootstrapExpiresAt?.getTime() ?? 0) + 1,
+            ));
+            token = deriveBootstrapToken(
+                nasDeviceId, existing.radiusSecret, expiresAt,
+            );
+            const [updated] = await tx
+                .update(nasSetupScript)
+                .set({
+                    bootstrapTokenHash: hashNasToken(token),
+                    bootstrapExpiresAt: expiresAt,
+                })
+                .where(eq(nasSetupScript.id, existing.id))
+                .returning();
+            row = updated!;
+        }
+        // Do not alter credentials, peer state, or the installed portal's page
+        // token. The page token switches only when the router reports again.
+        return {
+            ...row,
+            script: buildBootstrapScript(nasDeviceId, token, env.apiUrl),
+        };
+    });
 }
 
 export async function getSetupScriptForNasDevice(nasDeviceId: string) {

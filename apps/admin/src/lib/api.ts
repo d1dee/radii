@@ -1331,6 +1331,14 @@ export function getNasSetupScript(deviceId: string) {
     );
 }
 
+export function getNasBootstrapScript(deviceId: string) {
+    return request<NasSetupScriptRow | null>(
+        `/admin/nas-devices/${deviceId}/setup-script/bootstrap`,
+        {},
+        { method: 'POST' },
+    );
+}
+
 export function generateNasSetupScript(
     deviceId: string,
     input?: GenerateSetupScriptInput,
