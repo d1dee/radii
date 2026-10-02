@@ -125,11 +125,20 @@ export default function ForgotPasswordPage() {
     const isRequest = step === 'request';
 
     return (
-        <Center mih='100vh' p='md'>
-            <Card withBorder shadow='md' radius='md' p='xl' w={420} maw='100%'>
+        <Center mih='100dvh' p='md'>
+            <Card
+                withBorder
+                shadow='sm'
+                radius='md'
+                p={{ base: 'md', sm: 'xl' }}
+                w='100%'
+                maw={420}
+            >
                 <Stack gap='lg'>
                     <Stack gap={4}>
-                        <Title order={2}>Reset password</Title>
+                        <Title order={2} size='h3'>
+                            Reset password
+                        </Title>
                         <Text size='sm' c='dimmed'>
                             {isRequest
                                 ? 'Enter your admin email and we will send you a 6-digit reset code.'
@@ -142,6 +151,8 @@ export default function ForgotPasswordPage() {
                             <TextInput
                                 label='Email'
                                 type='email'
+                                inputMode='email'
+                                autoCapitalize='none'
                                 autoComplete='username'
                                 required
                                 disabled={!isRequest}
@@ -156,6 +167,9 @@ export default function ForgotPasswordPage() {
                                                 Reset code
                                             </Text>
                                             <PinInput
+                                                size='sm'
+                                                gap={6}
+                                                inputMode='numeric'
                                                 length={6}
                                                 oneTimeCode
                                                 ariaLabel='6-digit reset code'
@@ -167,16 +181,31 @@ export default function ForgotPasswordPage() {
                                                     )
                                                 }
                                                 error={!!form.errors.otp}
+                                                getInputProps={() => ({
+                                                    'aria-describedby': form
+                                                        .errors.otp
+                                                        ? 'reset-code-error'
+                                                        : undefined,
+                                                })}
                                             />
                                         </Stack>
                                     </Group>
                                     {form.errors.otp ? (
-                                        <Text size='xs' c='red'>
+                                        <Text
+                                            id='reset-code-error'
+                                            size='xs'
+                                            c='red'
+                                            role='alert'
+                                        >
                                             {form.errors.otp}
                                         </Text>
                                     ) : null}
                                     <PasswordInput
                                         label='New password'
+                                        visibilityToggleButtonProps={{
+                                            'aria-label':
+                                                'Toggle new password visibility',
+                                        }}
                                         autoComplete='new-password'
                                         required
                                         description='At least 8 characters, combining 2 of: lowercase, uppercase, numbers, symbols'
@@ -184,9 +213,15 @@ export default function ForgotPasswordPage() {
                                     />
                                     <PasswordInput
                                         label='Confirm new password'
+                                        visibilityToggleButtonProps={{
+                                            'aria-label':
+                                                'Toggle confirm password visibility',
+                                        }}
                                         autoComplete='new-password'
                                         required
-                                        {...form.getInputProps('confirmPassword')}
+                                        {...form.getInputProps(
+                                            'confirmPassword',
+                                        )}
                                     />
                                 </>
                             ) : null}
@@ -201,7 +236,9 @@ export default function ForgotPasswordPage() {
                                         : undefined
                                 }
                             >
-                                {isRequest ? 'Send reset code' : 'Reset password'}
+                                {isRequest
+                                    ? 'Send reset code'
+                                    : 'Reset password'}
                             </Button>
                         </Stack>
                     </form>

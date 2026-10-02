@@ -149,7 +149,16 @@ export function SessionDetailsDrawer({
             onClose={onClose}
             position='right'
             size='xl'
-            title={<Title order={4}>Session details</Title>}
+            styles={{
+                body: { overflowWrap: 'anywhere' },
+                title: { minWidth: 0, flex: 1 },
+                close: { flexShrink: 0 },
+            }}
+            title={
+                <Title component='span' order={4}>
+                    Session details
+                </Title>
+            }
         >
             {error ? (
                 <Text c='red'>{error}</Text>
@@ -281,7 +290,9 @@ export function SessionDetailsDrawer({
 
                     <SimpleGrid cols={{ base: 2, sm: 4 }}>
                         <LinkedCard label='Duration'>
-                            <Text fw={700}>{formatSeconds(session.seconds)}</Text>
+                            <Text fw={700}>
+                                {formatSeconds(session.seconds)}
+                            </Text>
                         </LinkedCard>
                         <LinkedCard label='Total data'>
                             <Text fw={700}>
@@ -353,7 +364,8 @@ export function SessionDetailsDrawer({
                                         Last used:{' '}
                                         {detail.serviceAccount.lastUsedAt
                                             ? formatDateTime(
-                                                  detail.serviceAccount.lastUsedAt,
+                                                  detail.serviceAccount
+                                                      .lastUsedAt,
                                               )
                                             : 'Never'}
                                     </Text>
@@ -434,7 +446,8 @@ export function SessionDetailsDrawer({
                                     {formatDateTime(
                                         detail.activation.activatedAt,
                                     )}{' '}
-                                    to {formatDateTime(detail.activation.expireAt)}
+                                    to{' '}
+                                    {formatDateTime(detail.activation.expireAt)}
                                 </Text>
                             </Group>
                             <SimpleGrid cols={{ base: 1, sm: 3 }} mt='sm'>
@@ -516,7 +529,8 @@ export function SessionDetailsDrawer({
                                                                     size='sm'
                                                                     fw={600}
                                                                 >
-                                                                    Session consumed{' '}
+                                                                    Session
+                                                                    consumed{' '}
                                                                     {formatSeconds(
                                                                         usage.seconds,
                                                                     )}
@@ -598,7 +612,8 @@ export function SessionDetailsDrawer({
                                                             >
                                                                 {
                                                                     EVENT_LABELS[
-                                                                        event.type
+                                                                        event
+                                                                            .type
                                                                     ]
                                                                 }
                                                             </Text>
@@ -607,7 +622,8 @@ export function SessionDetailsDrawer({
                                                             size='xs'
                                                             c='dimmed'
                                                         >
-                                                            {event.actor.label} ·{' '}
+                                                            {event.actor.label}{' '}
+                                                            ·{' '}
                                                             {event.source.replaceAll(
                                                                 '_',
                                                                 ' ',
@@ -621,8 +637,11 @@ export function SessionDetailsDrawer({
                                                                 {previousExpiry
                                                                     ? `${formatDateTime(previousExpiry)} → `
                                                                     : ''}
-                                                                {formatDateTime(expiry)}
-                                                                {remaining !== null
+                                                                {formatDateTime(
+                                                                    expiry,
+                                                                )}
+                                                                {remaining !==
+                                                                null
                                                                     ? ` · Balance set to ${formatSeconds(remaining)}`
                                                                     : ''}
                                                             </Text>
@@ -631,8 +650,11 @@ export function SessionDetailsDrawer({
                                                             'session_timeout_adjusted' &&
                                                         timeout !== null ? (
                                                             <Text size='xs'>
-                                                                Session timeout set to{' '}
-                                                                {formatSeconds(timeout)}
+                                                                Session timeout
+                                                                set to{' '}
+                                                                {formatSeconds(
+                                                                    timeout,
+                                                                )}
                                                             </Text>
                                                         ) : null}
                                                     </Stack>

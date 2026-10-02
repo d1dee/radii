@@ -2,6 +2,7 @@ import '@mantine/core/styles.css';
 import '@mantine/notifications/styles.css';
 import '@mantine/dates/styles.css';
 import '@mantine/charts/styles.css';
+import './admin.css';
 
 import { Center, Loader, MantineProvider } from '@mantine/core';
 import { Notifications } from '@mantine/notifications';
@@ -11,6 +12,7 @@ import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import { RequireAdmin } from '@/components/Auth/RequireAdmin';
 import { AppLayout } from '@/components/Layout/AppLayout';
 import { SettingsProvider } from '@/lib/settings';
+import { adminCssVariables, adminTheme } from './theme';
 
 const DashboardPage = lazy(() => import('@/pages/DashboardPage'));
 const NasDeviceFormPage = lazy(() => import('@/pages/NasDeviceFormPage'));
@@ -31,7 +33,11 @@ const VerifyEmailPage = lazy(() => import('@/pages/auth/VerifyEmailPage'));
 
 export default function App() {
     return (
-        <MantineProvider defaultColorScheme='auto'>
+        <MantineProvider
+            theme={adminTheme}
+            cssVariablesResolver={adminCssVariables}
+            defaultColorScheme='auto'
+        >
             <Notifications />
             <BrowserRouter>
                 <Suspense
@@ -90,11 +96,15 @@ export default function App() {
                                                 />
                                                 <Route
                                                     path='/packages/add'
-                                                    element={<PackageFormPage />}
+                                                    element={
+                                                        <PackageFormPage />
+                                                    }
                                                 />
                                                 <Route
                                                     path='/packages/:id/edit'
-                                                    element={<PackageFormPage />}
+                                                    element={
+                                                        <PackageFormPage />
+                                                    }
                                                 />
                                                 <Route
                                                     path='/nas-devices'
@@ -102,11 +112,15 @@ export default function App() {
                                                 />
                                                 <Route
                                                     path='/nas-devices/add'
-                                                    element={<NasDeviceFormPage />}
+                                                    element={
+                                                        <NasDeviceFormPage />
+                                                    }
                                                 />
                                                 <Route
                                                     path='/nas-devices/:id/edit'
-                                                    element={<NasDeviceFormPage />}
+                                                    element={
+                                                        <NasDeviceFormPage />
+                                                    }
                                                 />
                                                 <Route
                                                     path='/settings'

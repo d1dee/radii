@@ -21,11 +21,7 @@ import {
     type AdminPaymentEvent,
     type PackagePaymentStatus,
 } from '@/lib/api';
-import {
-    formatDateTime,
-    formatMoney,
-    formatPaymentAmount,
-} from '@/lib/format';
+import { formatDateTime, formatMoney, formatPaymentAmount } from '@/lib/format';
 
 const STATUS_BADGE: Record<
     PackagePaymentStatus,
@@ -167,7 +163,16 @@ export function PaymentDetailsDrawer({
             onClose={onClose}
             position='right'
             size='xl'
-            title={<Title order={4}>Payment details</Title>}
+            styles={{
+                body: { overflowWrap: 'anywhere' },
+                title: { minWidth: 0, flex: 1 },
+                close: { flexShrink: 0 },
+            }}
+            title={
+                <Title component='span' order={4}>
+                    Payment details
+                </Title>
+            }
         >
             {error ? (
                 <Text c='red'>{error}</Text>

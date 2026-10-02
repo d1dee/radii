@@ -22,7 +22,7 @@ import {
 import { schemaResolver, useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
 import { createPackageSchema } from '@shared/index';
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useId, useState, type ReactNode } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 
 import {
@@ -89,16 +89,32 @@ function MeasurementInput({
     onChange: (value: number) => void;
     onBlur?: () => void;
 }) {
+    const inputId = useId();
     const [unitValue, setUnitValue] = useState(
         () => bestMeasurementUnit(baseValue, units).value,
     );
     const unit = units.find(({ value }) => value === unitValue) ?? units[0];
 
     return (
-        <Input.Wrapper label={label} description={description} error={error}>
+        <Input.Wrapper
+            id={inputId}
+            label={label}
+            description={description}
+            error={error}
+        >
             <Group gap='xs' wrap='nowrap'>
                 <NumberInput
+                    id={inputId}
                     aria-label={label}
+                    aria-describedby={
+                        [
+                            description ? `${inputId}-description` : '',
+                            error ? `${inputId}-error` : '',
+                        ]
+                            .filter(Boolean)
+                            .join(' ') || undefined
+                    }
+                    aria-invalid={!!error}
                     min={0}
                     step={1}
                     value={baseValue / unit.multiplier}
@@ -110,7 +126,7 @@ function MeasurementInput({
                                 : 0;
                         onChange(Math.round(numericValue * unit.multiplier));
                     }}
-                    style={{ flex: 1 }}
+                    style={{ flex: 1, minWidth: 0 }}
                 />
                 <Select
                     aria-label={`${label} unit`}
@@ -121,6 +137,7 @@ function MeasurementInput({
                     value={unitValue}
                     allowDeselect={false}
                     w={110}
+                    style={{ flexShrink: 0 }}
                     onChange={(value) => value && setUnitValue(value)}
                 />
             </Group>
@@ -357,9 +374,9 @@ export default function PackageFormPage() {
 
     return (
         <Container size='xl' mx={0} px={0}>
-            <Card padding='lg' radius='md'>
+            <Card p={{ base: 'md', sm: 'lg' }} radius='md'>
                 <Stack gap={4} mb='md'>
-                    <Title order={2}>
+                    <Title order={2} size='h3'>
                         {isEdit ? 'Edit Package' : 'Add Package'}
                     </Title>
                     <Text size='sm' c='dimmed'>
@@ -378,7 +395,7 @@ export default function PackageFormPage() {
                             {...form.getInputProps('title')}
                         />
                         <Grid>
-                            <Grid.Col span={6}>
+                            <Grid.Col span={{ base: 12, sm: 6 }}>
                                 <Select
                                     label='Type'
                                     description='Hotspot for captive portal, PPPoE for dial-up'
@@ -402,7 +419,7 @@ export default function PackageFormPage() {
                                     }}
                                 />
                             </Grid.Col>
-                            <Grid.Col span={6}>
+                            <Grid.Col span={{ base: 12, sm: 6 }}>
                                 <TextInput
                                     label='Category'
                                     placeholder='e.g. Daily, Weekly'
@@ -413,8 +430,9 @@ export default function PackageFormPage() {
                             </Grid.Col>
                         </Grid>
                         <Grid>
-                            <Grid.Col span={6}>
+                            <Grid.Col span={{ base: 12, sm: 6 }}>
                                 <Input.Wrapper
+                                    id='package-session-length'
                                     label='Session Length'
                                     description={
                                         !isPppoe && noExpiry
@@ -429,9 +447,19 @@ export default function PackageFormPage() {
                                 >
                                     <Group gap='xs' wrap='nowrap'>
                                         <NumberInput
+                                            id='package-session-length'
+                                            aria-label='Session length'
+                                            aria-describedby={
+                                                form.errors.sessionLength
+                                                    ? 'package-session-length-description package-session-length-error'
+                                                    : 'package-session-length-description'
+                                            }
+                                            aria-invalid={
+                                                !!form.errors.sessionLength
+                                            }
                                             min={1}
                                             step={1}
-                                            style={{ flex: 1 }}
+                                            style={{ flex: 1, minWidth: 0 }}
                                             value={lengthValue}
                                             onChange={(v) =>
                                                 setSessionLength(
@@ -451,6 +479,7 @@ export default function PackageFormPage() {
                                             value={lengthUnit}
                                             allowDeselect={false}
                                             w={130}
+                                            style={{ flexShrink: 0 }}
                                             onChange={(v) =>
                                                 v &&
                                                 setSessionLength(
@@ -462,7 +491,7 @@ export default function PackageFormPage() {
                                     </Group>
                                 </Input.Wrapper>
                             </Grid.Col>
-                            <Grid.Col span={6}>
+                            <Grid.Col span={{ base: 12, sm: 6 }}>
                                 <NumberInput
                                     label='Price'
                                     placeholder='Enter price'
@@ -473,7 +502,7 @@ export default function PackageFormPage() {
                             </Grid.Col>
                         </Grid>
                         <Grid>
-                            <Grid.Col span={6}>
+                            <Grid.Col span={{ base: 12, sm: 6 }}>
                                 <NumberInput
                                     label='Max Devices'
                                     placeholder='Enter max devices'
@@ -482,7 +511,7 @@ export default function PackageFormPage() {
                                     {...form.getInputProps('maxDevices')}
                                 />
                             </Grid.Col>
-                            <Grid.Col span={6}>
+                            <Grid.Col span={{ base: 12, sm: 6 }}>
                                 <MultiSelect
                                     label='NAS Devices'
                                     description='Devices this package is available on'
@@ -505,7 +534,7 @@ export default function PackageFormPage() {
                             </Grid.Col>
                         </Grid>
                         <Grid>
-                            <Grid.Col span={6}>
+                            <Grid.Col span={{ base: 12, sm: 6 }}>
                                 <MeasurementInput
                                     label='Upload Rate'
                                     description='0 = unlimited'
@@ -520,7 +549,7 @@ export default function PackageFormPage() {
                                     }
                                 />
                             </Grid.Col>
-                            <Grid.Col span={6}>
+                            <Grid.Col span={{ base: 12, sm: 6 }}>
                                 <MeasurementInput
                                     label='Download Rate'
                                     description='0 = unlimited'
@@ -528,16 +557,20 @@ export default function PackageFormPage() {
                                     units={RATE_UNITS}
                                     error={form.errors.downloadRate}
                                     onBlur={
-                                        form.getInputProps('downloadRate').onBlur
+                                        form.getInputProps('downloadRate')
+                                            .onBlur
                                     }
                                     onChange={(value) =>
-                                        form.setFieldValue('downloadRate', value)
+                                        form.setFieldValue(
+                                            'downloadRate',
+                                            value,
+                                        )
                                     }
                                 />
                             </Grid.Col>
                         </Grid>
                         <Grid>
-                            <Grid.Col span={6}>
+                            <Grid.Col span={{ base: 12, sm: 6 }}>
                                 <MeasurementInput
                                     label='Upload Quota'
                                     description='0 = unlimited'
@@ -552,7 +585,7 @@ export default function PackageFormPage() {
                                     }
                                 />
                             </Grid.Col>
-                            <Grid.Col span={6}>
+                            <Grid.Col span={{ base: 12, sm: 6 }}>
                                 <MeasurementInput
                                     label='Download Quota'
                                     description='0 = unlimited'
@@ -560,10 +593,14 @@ export default function PackageFormPage() {
                                     units={DATA_UNITS}
                                     error={form.errors.downloadQuota}
                                     onBlur={
-                                        form.getInputProps('downloadQuota').onBlur
+                                        form.getInputProps('downloadQuota')
+                                            .onBlur
                                     }
                                     onChange={(value) =>
-                                        form.setFieldValue('downloadQuota', value)
+                                        form.setFieldValue(
+                                            'downloadQuota',
+                                            value,
+                                        )
                                     }
                                 />
                             </Grid.Col>
@@ -614,7 +651,7 @@ export default function PackageFormPage() {
                                                     .fairUsageWindowUnit ===
                                                 'session'
                                             }
-                                            style={{ flex: 1 }}
+                                            style={{ flex: 1, minWidth: 0 }}
                                             {...form.getInputProps(
                                                 'fairUsageWindowValue',
                                             )}
@@ -641,6 +678,7 @@ export default function PackageFormPage() {
                                             ]}
                                             allowDeselect={false}
                                             w={130}
+                                            style={{ flexShrink: 0 }}
                                             {...form.getInputProps(
                                                 'fairUsageWindowUnit',
                                             )}
@@ -681,7 +719,9 @@ export default function PackageFormPage() {
                                 <MeasurementInput
                                     label='Throttled Download Rate'
                                     description='Applied after the allowance is reached'
-                                    baseValue={form.values.fairUsageDownloadRate}
+                                    baseValue={
+                                        form.values.fairUsageDownloadRate
+                                    }
                                     units={RATE_UNITS}
                                     error={form.errors.fairUsageDownloadRate}
                                     onBlur={
@@ -817,11 +857,16 @@ export default function PackageFormPage() {
                         <Group justify='flex-end'>
                             <Button
                                 variant='default'
+                                w={{ base: '100%', sm: 'auto' }}
                                 onClick={() => navigate('/packages')}
                             >
                                 Cancel
                             </Button>
-                            <Button type='submit' loading={loading}>
+                            <Button
+                                type='submit'
+                                loading={loading}
+                                w={{ base: '100%', sm: 'auto' }}
+                            >
                                 {isEdit ? 'Save Changes' : 'Create Package'}
                             </Button>
                         </Group>
@@ -861,6 +906,7 @@ export default function PackageFormPage() {
                     <Group justify='flex-end'>
                         <Button
                             variant='default'
+                            w={{ base: '100%', sm: 'auto' }}
                             disabled={loading}
                             onClick={() => setPendingSubmit(null)}
                         >
@@ -868,6 +914,7 @@ export default function PackageFormPage() {
                         </Button>
                         <Button
                             loading={loading}
+                            w={{ base: '100%', sm: 'auto' }}
                             onClick={() =>
                                 pendingSubmit &&
                                 void submitPackage(pendingSubmit)

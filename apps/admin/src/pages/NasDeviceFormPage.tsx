@@ -130,9 +130,9 @@ export default function NasDeviceFormPage() {
 
     return (
         <Container size='xl' mx={0} px={0}>
-            <Card padding='lg' radius='md'>
+            <Card p={{ base: 'md', sm: 'lg' }} radius='md'>
                 <Stack gap={4} mb='md'>
-                    <Title order={2}>
+                    <Title order={2} size='h3'>
                         {isEdit ? 'Edit NAS Device' : 'Set Up NAS Device'}
                     </Title>
                     <Text size='sm' c='dimmed'>
@@ -145,7 +145,7 @@ export default function NasDeviceFormPage() {
                 <form onSubmit={form.onSubmit(handleSubmit)}>
                     <Stack gap='md'>
                         <Grid>
-                            <Grid.Col span={6}>
+                            <Grid.Col span={{ base: 12, sm: 6 }}>
                                 <TextInput
                                     label='Name'
                                     placeholder='e.g. Site A Router'
@@ -154,7 +154,7 @@ export default function NasDeviceFormPage() {
                                     {...form.getInputProps('name')}
                                 />
                             </Grid.Col>
-                            <Grid.Col span={6}>
+                            <Grid.Col span={{ base: 12, sm: 6 }}>
                                 <Select
                                     label='Operating System'
                                     placeholder='Pick OS'
@@ -166,7 +166,7 @@ export default function NasDeviceFormPage() {
                             </Grid.Col>
                         </Grid>
                         <Grid>
-                            <Grid.Col span={6}>
+                            <Grid.Col span={{ base: 12, sm: 6 }}>
                                 <TextInput
                                     label='IP Address'
                                     placeholder='e.g. 10.0.0.1'
@@ -175,7 +175,7 @@ export default function NasDeviceFormPage() {
                                     {...form.getInputProps('ipAddress')}
                                 />
                             </Grid.Col>
-                            <Grid.Col span={6}>
+                            <Grid.Col span={{ base: 12, sm: 6 }}>
                                 <TextInput
                                     label='MAC Address'
                                     placeholder='e.g. AA:BB:CC:DD:EE:FF'
@@ -185,7 +185,7 @@ export default function NasDeviceFormPage() {
                             </Grid.Col>
                         </Grid>
                         <Grid>
-                            <Grid.Col span={6}>
+                            <Grid.Col span={{ base: 12, sm: 6 }}>
                                 <TextInput
                                     label='Model'
                                     placeholder='e.g. hAP ac2'
@@ -193,7 +193,7 @@ export default function NasDeviceFormPage() {
                                     {...form.getInputProps('model')}
                                 />
                             </Grid.Col>
-                            <Grid.Col span={6}>
+                            <Grid.Col span={{ base: 12, sm: 6 }}>
                                 <TextInput
                                     label='Serial Number'
                                     placeholder='Device serial number'
@@ -203,7 +203,7 @@ export default function NasDeviceFormPage() {
                             </Grid.Col>
                         </Grid>
                         <Grid>
-                            <Grid.Col span={6}>
+                            <Grid.Col span={{ base: 12, sm: 6 }}>
                                 <TextInput
                                     label='Firmware Version'
                                     placeholder='e.g. 7.16.2'
@@ -211,7 +211,7 @@ export default function NasDeviceFormPage() {
                                     {...form.getInputProps('firmwareVersion')}
                                 />
                             </Grid.Col>
-                            <Grid.Col span={6}>
+                            <Grid.Col span={{ base: 12, sm: 6 }}>
                                 <TextInput
                                     label='Location'
                                     placeholder='e.g. Rooftop cabinet, Site A'
@@ -221,7 +221,7 @@ export default function NasDeviceFormPage() {
                             </Grid.Col>
                         </Grid>
                         <Grid>
-                            <Grid.Col span={6}>
+                            <Grid.Col span={{ base: 12, sm: 6 }}>
                                 <Select
                                     label='Status'
                                     data={nasDeviceStatusOptions}
@@ -234,11 +234,16 @@ export default function NasDeviceFormPage() {
                         <Group justify='flex-end'>
                             <Button
                                 variant='default'
+                                w={{ base: '100%', sm: 'auto' }}
                                 onClick={() => navigate('/nas-devices')}
                             >
                                 Cancel
                             </Button>
-                            <Button type='submit' loading={loading}>
+                            <Button
+                                type='submit'
+                                loading={loading}
+                                w={{ base: '100%', sm: 'auto' }}
+                            >
                                 {isEdit ? 'Save Changes' : 'Create NAS Device'}
                             </Button>
                         </Group>

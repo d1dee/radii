@@ -101,7 +101,9 @@ export default function SettingsPage() {
         <Container size='xl' mx={0} px={0}>
             <Stack gap='md'>
                 <Stack gap={4}>
-                    <Title order={2}>Settings</Title>
+                    <Title order={2} size='h3'>
+                        Settings
+                    </Title>
                     <Text c='dimmed' size='sm'>
                         Manage your console preferences and the customer portal
                         experience for your network. Payments fall back to the
@@ -111,7 +113,7 @@ export default function SettingsPage() {
                 </Stack>
 
                 <Tabs defaultValue='appearance'>
-                    <Tabs.List>
+                    <Tabs.List grow>
                         <Tabs.Tab
                             value='appearance'
                             leftSection={<MdPalette size={16} />}
@@ -239,6 +241,9 @@ function AppearanceSection() {
                                     Time format
                                 </Text>
                                 <SegmentedControl
+                                    fullWidth
+                                    aria-label='Time format'
+                                    styles={{ label: { whiteSpace: 'normal' } }}
                                     data={[
                                         {
                                             label: '24-hour (14:30)',
@@ -294,7 +299,11 @@ function AppearanceSection() {
                     </Alert>
                     <Divider />
                     <Group justify='flex-end'>
-                        <Button type='submit' loading={saving}>
+                        <Button
+                            type='submit'
+                            loading={saving}
+                            w={{ base: '100%', sm: 'auto' }}
+                        >
                             Save Appearance
                         </Button>
                     </Group>
@@ -374,6 +383,8 @@ function DashboardSection() {
                             Default dashboard range
                         </Text>
                         <SegmentedControl
+                            fullWidth
+                            aria-label='Default dashboard range'
                             data={[
                                 { label: '7 days', value: '7' },
                                 { label: '30 days', value: '30' },
@@ -388,6 +399,8 @@ function DashboardSection() {
                             Table page size
                         </Text>
                         <SegmentedControl
+                            fullWidth
+                            aria-label='Table page size'
                             data={['10', '25', '50', '100']}
                             {...form.getInputProps('perPage')}
                         />
@@ -395,7 +408,11 @@ function DashboardSection() {
 
                     <Divider />
                     <Group justify='flex-end'>
-                        <Button type='submit' loading={saving}>
+                        <Button
+                            type='submit'
+                            loading={saving}
+                            w={{ base: '100%', sm: 'auto' }}
+                        >
                             Save Defaults
                         </Button>
                     </Group>
@@ -465,7 +482,11 @@ function ContactsSection() {
                     </Alert>
                     <Divider />
                     <Group justify='flex-end'>
-                        <Button type='submit' loading={saving}>
+                        <Button
+                            type='submit'
+                            loading={saving}
+                            w={{ base: '100%', sm: 'auto' }}
+                        >
                             Save Contacts
                         </Button>
                     </Group>
@@ -543,7 +564,11 @@ function PackagesSection() {
                     </Alert>
                     <Divider />
                     <Group justify='flex-end'>
-                        <Button type='submit' loading={saving}>
+                        <Button
+                            type='submit'
+                            loading={saving}
+                            w={{ base: '100%', sm: 'auto' }}
+                        >
                             Save Package Settings
                         </Button>
                     </Group>
@@ -593,12 +618,17 @@ function PppoeSection() {
                         <Text size='sm'>
                             Enable this only when customers need password
                             self-service. Anyone with portal access could copy
-                            the credential and use it to connect to your network.
+                            the credential and use it to connect to your
+                            network.
                         </Text>
                     </Alert>
                     <Divider />
                     <Group justify='flex-end'>
-                        <Button type='submit' loading={saving}>
+                        <Button
+                            type='submit'
+                            loading={saving}
+                            w={{ base: '100%', sm: 'auto' }}
+                        >
                             Save PPPoE Settings
                         </Button>
                     </Group>
@@ -659,6 +689,8 @@ function MpesaSection() {
                                             Environment
                                         </Text>
                                         <SegmentedControl
+                                            fullWidth
+                                            aria-label='M-Pesa environment'
                                             data={[
                                                 {
                                                     label: 'Production',
@@ -801,7 +833,11 @@ function MpesaSection() {
                     )}
                     <Divider />
                     <Group justify='flex-end'>
-                        <Button type='submit' loading={saving}>
+                        <Button
+                            type='submit'
+                            loading={saving}
+                            w={{ base: '100%', sm: 'auto' }}
+                        >
                             Save M-Pesa Settings
                         </Button>
                     </Group>

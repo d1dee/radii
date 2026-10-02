@@ -43,21 +43,6 @@ const STATUS_BADGE: Record<
     failed: { color: 'red', label: 'Failed' },
 };
 
-const NAS_BADGE_COLOR = [
-    'red',
-    'pink',
-    'grape',
-    'violet',
-    'indigo',
-    'blue',
-    'cyan',
-    'green',
-    'lime',
-    'yellow',
-    'orange',
-    'teal',
-];
-
 function StatCard({
     label,
     value,
@@ -179,7 +164,16 @@ export function PackageDetailsDrawer({
             onClose={onClose}
             position='right'
             size='xl'
-            title={<Title order={4}>{pkg?.title ?? 'Package details'}</Title>}
+            styles={{
+                body: { overflowWrap: 'anywhere' },
+                title: { minWidth: 0, flex: 1 },
+                close: { flexShrink: 0 },
+            }}
+            title={
+                <Title component='span' order={4}>
+                    {pkg?.title ?? 'Package details'}
+                </Title>
+            }
         >
             {error ? (
                 <Text c='red'>{error}</Text>
@@ -203,13 +197,13 @@ export function PackageDetailsDrawer({
                     </Group>
 
                     <Grid>
-                        <Grid.Col span={6}>
+                        <Grid.Col span={{ base: 12, sm: 6 }}>
                             <DetailItem
                                 label='Price'
                                 value={formatPackagePrice(pkg.price)}
                             />
                         </Grid.Col>
-                        <Grid.Col span={6}>
+                        <Grid.Col span={{ base: 12, sm: 6 }}>
                             <DetailItem
                                 label='Session Length'
                                 value={
@@ -219,25 +213,25 @@ export function PackageDetailsDrawer({
                                 }
                             />
                         </Grid.Col>
-                        <Grid.Col span={6}>
+                        <Grid.Col span={{ base: 12, sm: 6 }}>
                             <DetailItem
                                 label='Max Devices'
                                 value={pkg.maxDevices}
                             />
                         </Grid.Col>
-                        <Grid.Col span={6}>
+                        <Grid.Col span={{ base: 12, sm: 6 }}>
                             <DetailItem
                                 label='Rate Up/Down'
                                 value={`${formatPackageRate(pkg.uploadRate)} / ${formatPackageRate(pkg.downloadRate)}`}
                             />
                         </Grid.Col>
-                        <Grid.Col span={6}>
+                        <Grid.Col span={{ base: 12, sm: 6 }}>
                             <DetailItem
                                 label='Quota Up/Down'
                                 value={`${formatPackageQuota(pkg.uploadQuota)} / ${formatPackageQuota(pkg.downloadQuota)}`}
                             />
                         </Grid.Col>
-                        <Grid.Col span={6}>
+                        <Grid.Col span={{ base: 12, sm: 6 }}>
                             <DetailItem
                                 label='Fair Usage'
                                 value={
@@ -247,7 +241,7 @@ export function PackageDetailsDrawer({
                                 }
                             />
                         </Grid.Col>
-                        <Grid.Col span={6}>
+                        <Grid.Col span={{ base: 12, sm: 6 }}>
                             <DetailItem
                                 label='FUP Rate Up/Down'
                                 value={
@@ -257,7 +251,7 @@ export function PackageDetailsDrawer({
                                 }
                             />
                         </Grid.Col>
-                        <Grid.Col span={6}>
+                        <Grid.Col span={{ base: 12, sm: 6 }}>
                             <DetailItem
                                 label='Burst Rate Up/Down'
                                 value={
@@ -267,7 +261,7 @@ export function PackageDetailsDrawer({
                                 }
                             />
                         </Grid.Col>
-                        <Grid.Col span={6}>
+                        <Grid.Col span={{ base: 12, sm: 6 }}>
                             <DetailItem
                                 label='Burst Period'
                                 value={
@@ -277,7 +271,7 @@ export function PackageDetailsDrawer({
                                 }
                             />
                         </Grid.Col>
-                        <Grid.Col span={6}>
+                        <Grid.Col span={{ base: 12, sm: 6 }}>
                             <DetailItem
                                 label='Created'
                                 value={formatDate(pkg.createdAt)}
@@ -303,13 +297,10 @@ export function PackageDetailsDrawer({
                                     <Group>
                                         {pkg.nasDeviceIds.map((id) => (
                                             <Badge
-                                                color={
-                                                    NAS_BADGE_COLOR[
-                                                        Math.floor(
-                                                            Math.random() * 10,
-                                                        )
-                                                    ]
-                                                }
+                                                key={id}
+                                                color='gray'
+                                                variant='light'
+                                                maw='100%'
                                             >
                                                 {nasDeviceNames[id] ?? id}
                                             </Badge>
@@ -336,48 +327,48 @@ export function PackageDetailsDrawer({
                     <Divider label='Analytics' labelPosition='left' />
 
                     <Grid>
-                        <Grid.Col span={4}>
+                        <Grid.Col span={{ base: 12, xs: 6, sm: 4 }}>
                             <StatCard
                                 label='Purchases'
                                 value={analytics.payments.paid}
                                 sub={`${analytics.payments.total} total attempts`}
                             />
                         </Grid.Col>
-                        <Grid.Col span={4}>
+                        <Grid.Col span={{ base: 12, xs: 6, sm: 4 }}>
                             <StatCard
                                 label='Revenue'
                                 value={`Ksh ${analytics.payments.revenue.toLocaleString()}`}
                                 sub='from paid purchases'
                             />
                         </Grid.Col>
-                        <Grid.Col span={4}>
+                        <Grid.Col span={{ base: 12, xs: 6, sm: 4 }}>
                             <StatCard
                                 label='Pending'
                                 value={analytics.payments.pending}
                                 sub='awaiting confirmation'
                             />
                         </Grid.Col>
-                        <Grid.Col span={4}>
+                        <Grid.Col span={{ base: 12, xs: 6, sm: 4 }}>
                             <StatCard
                                 label='Failed / Cancelled'
                                 value={analytics.payments.failed}
                                 sub='failed payment attempts'
                             />
                         </Grid.Col>
-                        <Grid.Col span={4}>
+                        <Grid.Col span={{ base: 12, xs: 6, sm: 4 }}>
                             <StatCard
                                 label='Unique Buyers'
                                 value={analytics.buyers.unique}
                             />
                         </Grid.Col>
-                        <Grid.Col span={4}>
+                        <Grid.Col span={{ base: 12, xs: 6, sm: 4 }}>
                             <StatCard
                                 label='Repeat Buys'
                                 value={analytics.buyers.repeat}
                                 sub={`${repeatRate}% repeat rate`}
                             />
                         </Grid.Col>
-                        <Grid.Col span={4}>
+                        <Grid.Col span={{ base: 12, xs: 6, sm: 4 }}>
                             <StatCard
                                 label='Activations'
                                 value={analytics.activations.total}
@@ -391,54 +382,66 @@ export function PackageDetailsDrawer({
                     {analytics.recentPayments.payments.length === 0 ? (
                         <Text c='dimmed'>No payments yet.</Text>
                     ) : (
-                        <Table striped stickyHeader>
-                            <Table.Thead>
-                                <Table.Tr>
-                                    <Table.Th>#</Table.Th>
-                                    <Table.Th>Phone</Table.Th>
-                                    <Table.Th>Amount</Table.Th>
-                                    <Table.Th>Status</Table.Th>
-                                    <Table.Th>Date</Table.Th>
-                                </Table.Tr>
-                            </Table.Thead>
-                            <Table.Tbody>
-                                {analytics.recentPayments.payments.map(
-                                    (p, i) => (
-                                        <Table.Tr key={p.id}>
-                                            <Table.Td>
-                                                {(paymentsPage - 1) * perPage +
-                                                    i +
-                                                    1}
-                                            </Table.Td>
-                                            <Table.Td>{p.phoneNumber}</Table.Td>
-                                            <Table.Td>
-                                                {formatPaymentAmount(p.amount)}
-                                            </Table.Td>
-                                            <Table.Td>
-                                                <Badge
-                                                    size='sm'
-                                                    color={
-                                                        STATUS_BADGE[p.status]
-                                                            .color
-                                                    }
-                                                    variant='light'
-                                                >
-                                                    {
-                                                        STATUS_BADGE[p.status]
-                                                            .label
-                                                    }
-                                                </Badge>
-                                            </Table.Td>
-                                            <Table.Td>
-                                                {new Date(
-                                                    p.createdAt,
-                                                ).toLocaleString()}
-                                            </Table.Td>
-                                        </Table.Tr>
-                                    ),
-                                )}
-                            </Table.Tbody>
-                        </Table>
+                        <Table.ScrollContainer
+                            minWidth={560}
+                            aria-label='Package recent payments'
+                        >
+                            <Table striped stickyHeader>
+                                <Table.Thead>
+                                    <Table.Tr>
+                                        <Table.Th>#</Table.Th>
+                                        <Table.Th>Phone</Table.Th>
+                                        <Table.Th>Amount</Table.Th>
+                                        <Table.Th>Status</Table.Th>
+                                        <Table.Th>Date</Table.Th>
+                                    </Table.Tr>
+                                </Table.Thead>
+                                <Table.Tbody>
+                                    {analytics.recentPayments.payments.map(
+                                        (p, i) => (
+                                            <Table.Tr key={p.id}>
+                                                <Table.Td>
+                                                    {(paymentsPage - 1) *
+                                                        perPage +
+                                                        i +
+                                                        1}
+                                                </Table.Td>
+                                                <Table.Td>
+                                                    {p.phoneNumber}
+                                                </Table.Td>
+                                                <Table.Td>
+                                                    {formatPaymentAmount(
+                                                        p.amount,
+                                                    )}
+                                                </Table.Td>
+                                                <Table.Td>
+                                                    <Badge
+                                                        size='sm'
+                                                        color={
+                                                            STATUS_BADGE[
+                                                                p.status
+                                                            ].color
+                                                        }
+                                                        variant='light'
+                                                    >
+                                                        {
+                                                            STATUS_BADGE[
+                                                                p.status
+                                                            ].label
+                                                        }
+                                                    </Badge>
+                                                </Table.Td>
+                                                <Table.Td>
+                                                    {new Date(
+                                                        p.createdAt,
+                                                    ).toLocaleString()}
+                                                </Table.Td>
+                                            </Table.Tr>
+                                        ),
+                                    )}
+                                </Table.Tbody>
+                            </Table>
+                        </Table.ScrollContainer>
                     )}
                     <TablePagination
                         page={paymentsPage}

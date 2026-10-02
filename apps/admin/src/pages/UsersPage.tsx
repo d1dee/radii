@@ -19,6 +19,7 @@ import {
     TextInput,
     Title,
     Tooltip,
+    UnstyledButton,
 } from '@mantine/core';
 import { useDebouncedValue } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
@@ -35,16 +36,17 @@ import {
     MdSearch,
 } from 'react-icons/md';
 
-import { UserDetailsDrawer } from '@/components/Users/UserDetailsDrawer';
 import {
     SortableTableHeader,
     type SortDirection,
 } from '@/components/SortableTableHeader';
+import { TableFilters } from '@/components/TableFilters';
 import { TablePagination } from '@/components/TablePagination';
+import { UserDetailsDrawer } from '@/components/Users/UserDetailsDrawer';
 import {
-    getAdminUsers,
     addUserFlag,
     banUser,
+    getAdminUsers,
     getAllNasDevices,
     getPppoeAccount,
     migratePppoeAccountNas,
@@ -63,8 +65,8 @@ import { useAutoRefresh } from '@/lib/autoRefresh';
 import { warnBackgroundFailure } from '@/lib/clientError';
 import { dayjs } from '@/lib/dayjs';
 import { formatDate, formatMoney } from '@/lib/format';
-import { useAdminSettings } from '@/lib/settings';
 import { notifyResult } from '@/lib/notify';
+import { useAdminSettings } from '@/lib/settings';
 
 type TypeFilter = 'all' | PackageType;
 
@@ -74,7 +76,12 @@ function SummaryCard({ label, value }: { label: string; value: string }) {
             <Text size='xs' c='dimmed'>
                 {label}
             </Text>
-            <Text size='xl' fw={700} mt={2}>
+            <Text
+                size='lg'
+                fw={700}
+                mt={2}
+                style={{ overflowWrap: 'anywhere' }}
+            >
                 {value}
             </Text>
         </Card>
@@ -143,9 +150,9 @@ export default function UsersPage() {
         useState<ProvisionedPppoeAccount | null>(null);
     const [regenerating, setRegenerating] = useState(false);
     const [quickUser, setQuickUser] = useState<AdminUserRow | null>(null);
-    const [quickModal, setQuickModal] = useState<'edit' | 'flag' | 'ban' | null>(
-        null,
-    );
+    const [quickModal, setQuickModal] = useState<
+        'edit' | 'flag' | 'ban' | null
+    >(null);
     const [quickBusy, setQuickBusy] = useState(false);
     const [tagName, setTagName] = useState('');
     const [tagLocation, setTagLocation] = useState('');
@@ -163,7 +170,9 @@ export default function UsersPage() {
 
     const nasOptions = nasDevices.map((device) => ({
         value: device.id,
-        label: device.location ? `${device.name} · ${device.location}` : device.name,
+        label: device.location
+            ? `${device.name} · ${device.location}`
+            : device.name,
     }));
 
     useEffect(() => {
@@ -471,7 +480,7 @@ export default function UsersPage() {
 
     return (
         <Stack gap='md'>
-            <Group justify='space-between'>
+            <Group justify='space-between' wrap='nowrap'>
                 <Stack gap={4}>
                     <Title order={3}>Users</Title>
                     <Text size='sm' c='dimmed'>
@@ -479,14 +488,22 @@ export default function UsersPage() {
                         and activation history.
                     </Text>
                 </Stack>
-                <Group>
-                    <Text c='dimmed' size='sm'>
-                        {data ? `${data.total} customer(s)` : ''}
-                    </Text>
-                    <Button leftSection={<MdAdd />} onClick={openProvision}>
-                        Provision PPPoE
-                    </Button>
-                </Group>
+                <Button
+                    leftSection={<MdAdd />}
+                    onClick={openProvision}
+                    visibleFrom='md'
+                >
+                    Provision PPPoE
+                </Button>
+                <Button
+                    leftSection={<MdAdd />}
+                    onClick={openProvision}
+                    hiddenFrom='md'
+                    size='xs'
+                    w='150'
+                >
+                    PPPoE
+                </Button>
             </Group>
 
             {!loading && !error && data && (
@@ -510,15 +527,21 @@ export default function UsersPage() {
                 </SimpleGrid>
             )}
 
-            <Group wrap='wrap'>
-                <TextInput
-                    placeholder='Search name, phone or email'
-                    leftSection={<MdSearch />}
-                    value={search}
-                    onChange={(e) => setSearch(e.currentTarget.value)}
-                    style={{ flex: 1, minWidth: 220 }}
-                />
+            <TableFilters
+                search={
+                    <TextInput
+                        aria-label='Search users'
+                        placeholder='Search name, phone or email'
+                        leftSection={<MdSearch />}
+                        value={search}
+                        onChange={(e) => setSearch(e.currentTarget.value)}
+                        w={{ base: '100%', sm: 'auto' }}
+                        style={{ flex: '1 1 220px', minWidth: 0 }}
+                    />
+                }
+            >
                 <SegmentedControl
+                    aria-label='Filter users by service type'
                     value={typeFilter}
                     onChange={(v) => setTypeFilter(v as TypeFilter)}
                     data={[
@@ -532,7 +555,7 @@ export default function UsersPage() {
                     checked={flaggedOnly}
                     onChange={(e) => setFlaggedOnly(e.currentTarget.checked)}
                 />
-            </Group>
+            </TableFilters>
 
             {loading ? (
                 <Center py='xl'>
@@ -546,19 +569,23 @@ export default function UsersPage() {
                 </Text>
             ) : (
                 <>
-                    <Table.ScrollContainer minWidth={900}>
+                    <Table.ScrollContainer
+                        minWidth={900}
+                        aria-label='Users table'
+                    >
                         <Table striped highlightOnHover stickyHeader>
                             <Table.Thead>
                                 <Table.Tr>
                                     <Table.Th>#</Table.Th>
                                     <SortableTableHeader
                                         label='User'
+                                        width={240}
                                         sortKey='name'
                                         sortBy={sortBy}
                                         sortDirection={sortDirection}
                                         onSort={handleSort}
                                     />
-                                    <Table.Th>Status</Table.Th>
+                                    <Table.Th miw={120}>Status</Table.Th>
                                     <SortableTableHeader
                                         label='Lifetime spend'
                                         sortKey='revenue'
@@ -608,7 +635,8 @@ export default function UsersPage() {
                                         key={u.id}
                                         onClick={
                                             u.pendingClaim
-                                                ? () => setDetailsAccountId(u.id)
+                                                ? () =>
+                                                      setDetailsAccountId(u.id)
                                                 : () => setDetailsId(u.id)
                                         }
                                         style={{ cursor: 'pointer' }}
@@ -616,10 +644,14 @@ export default function UsersPage() {
                                         <Table.Td>
                                             {(page - 1) * perPage + i + 1}
                                         </Table.Td>
-                                        <Table.Td>
-                                            <Text fw={500}>
+                                        <Table.Td className='admin-table-identity'>
+                                            <UnstyledButton
+                                                fw={500}
+                                                fz='sm'
+                                                aria-label={`View details for ${u.tag?.name || u.name}`}
+                                            >
                                                 {u.tag?.name || u.name}
-                                            </Text>
+                                            </UnstyledButton>
                                             <Text size='xs' c='dimmed'>
                                                 {u.phoneNumber}
                                                 {u.tag?.location
@@ -627,7 +659,11 @@ export default function UsersPage() {
                                                     : ''}
                                             </Text>
                                             {u.pendingClaim && u.pppoe ? (
-                                                <Text size='xs' c='dimmed' ff='monospace'>
+                                                <Text
+                                                    size='xs'
+                                                    c='dimmed'
+                                                    ff='monospace'
+                                                >
                                                     {u.pppoe.username}
                                                 </Text>
                                             ) : null}
@@ -692,7 +728,7 @@ export default function UsersPage() {
                                                 ) : null}
                                             </Group>
                                         </Table.Td>
-                                        <Table.Td>
+                                        <Table.Td className='admin-table-value'>
                                             {formatMoney(u.payments.revenue)}
                                         </Table.Td>
                                         <Table.Td>
@@ -740,12 +776,19 @@ export default function UsersPage() {
                                                                 variant='light'
                                                                 color='gray'
                                                                 aria-label={`Edit ${u.tag?.name || u.name}`}
-                                                                onClick={(event) => {
+                                                                onClick={(
+                                                                    event,
+                                                                ) => {
                                                                     event.stopPropagation();
-                                                                    openQuickAction(u, 'edit');
+                                                                    openQuickAction(
+                                                                        u,
+                                                                        'edit',
+                                                                    );
                                                                 }}
                                                             >
-                                                                <MdEdit size={16} />
+                                                                <MdEdit
+                                                                    size={16}
+                                                                />
                                                             </ActionIcon>
                                                         </Tooltip>
                                                         <Tooltip label='Flag user'>
@@ -753,12 +796,19 @@ export default function UsersPage() {
                                                                 variant='light'
                                                                 color='orange'
                                                                 aria-label={`Flag ${u.tag?.name || u.name}`}
-                                                                onClick={(event) => {
+                                                                onClick={(
+                                                                    event,
+                                                                ) => {
                                                                     event.stopPropagation();
-                                                                    openQuickAction(u, 'flag');
+                                                                    openQuickAction(
+                                                                        u,
+                                                                        'flag',
+                                                                    );
                                                                 }}
                                                             >
-                                                                <MdFlag size={16} />
+                                                                <MdFlag
+                                                                    size={16}
+                                                                />
                                                             </ActionIcon>
                                                         </Tooltip>
                                                         {u.banned ? (
@@ -767,13 +817,23 @@ export default function UsersPage() {
                                                                     variant='light'
                                                                     color='green'
                                                                     aria-label={`Unban ${u.tag?.name || u.name}`}
-                                                                    disabled={quickBusy}
-                                                                    onClick={(event) => {
+                                                                    disabled={
+                                                                        quickBusy
+                                                                    }
+                                                                    onClick={(
+                                                                        event,
+                                                                    ) => {
                                                                         event.stopPropagation();
-                                                                        void submitQuickUnban(u);
+                                                                        void submitQuickUnban(
+                                                                            u,
+                                                                        );
                                                                     }}
                                                                 >
-                                                                    <MdCheckCircle size={16} />
+                                                                    <MdCheckCircle
+                                                                        size={
+                                                                            16
+                                                                        }
+                                                                    />
                                                                 </ActionIcon>
                                                             </Tooltip>
                                                         ) : (
@@ -782,12 +842,21 @@ export default function UsersPage() {
                                                                     variant='light'
                                                                     color='red'
                                                                     aria-label={`Ban ${u.tag?.name || u.name}`}
-                                                                    onClick={(event) => {
+                                                                    onClick={(
+                                                                        event,
+                                                                    ) => {
                                                                         event.stopPropagation();
-                                                                        openQuickAction(u, 'ban');
+                                                                        openQuickAction(
+                                                                            u,
+                                                                            'ban',
+                                                                        );
                                                                     }}
                                                                 >
-                                                                    <MdBlock size={16} />
+                                                                    <MdBlock
+                                                                        size={
+                                                                            16
+                                                                        }
+                                                                    />
                                                                 </ActionIcon>
                                                             </Tooltip>
                                                         )}
@@ -849,15 +918,10 @@ export default function UsersPage() {
                             />
                         ) : null}
                         <Group justify='flex-end' mt='sm'>
-                            <Button
-                                variant='default'
-                                onClick={openProvision}
-                            >
+                            <Button variant='default' onClick={openProvision}>
                                 Provision another
                             </Button>
-                            <Button
-                                onClick={() => setProvisionOpened(false)}
-                            >
+                            <Button onClick={() => setProvisionOpened(false)}>
                                 Done
                             </Button>
                         </Group>
@@ -959,16 +1023,17 @@ export default function UsersPage() {
                         </Group>
                         {accountDetails.customer ? (
                             <Text size='sm' c='dimmed'>
-                                Linked to customer {accountDetails.customer.name}{' '}
-                                ({accountDetails.phoneNumber}).
+                                Linked to customer{' '}
+                                {accountDetails.customer.name} (
+                                {accountDetails.phoneNumber}).
                             </Text>
                         ) : (
                             <Text size='sm' c='dimmed'>
                                 Not claimed yet. The customer registers with{' '}
                                 {accountDetails.phoneNumber} and the one-time
-                                claim code to link these credentials. Their first
-                                PPPoE session bonds the account to the network it
-                                dials through.
+                                claim code to link these credentials. Their
+                                first PPPoE session bonds the account to the
+                                network it dials through.
                             </Text>
                         )}
                         <CredentialField

@@ -83,11 +83,20 @@ export default function LoginPage() {
     }
 
     return (
-        <Center mih='100vh' p='md'>
-            <Card withBorder shadow='md' radius='md' p='xl' w={420} maw='100%'>
+        <Center mih='100dvh' p='md'>
+            <Card
+                withBorder
+                shadow='sm'
+                radius='md'
+                p={{ base: 'md', sm: 'xl' }}
+                w='100%'
+                maw={420}
+            >
                 <Stack gap='lg'>
                     <Stack gap={4}>
-                        <Title order={2}>Radii Admin</Title>
+                        <Title order={2} size='h3'>
+                            Radii Admin
+                        </Title>
                         <Text size='sm' c='dimmed'>
                             Sign in to the admin console
                         </Text>
@@ -98,6 +107,8 @@ export default function LoginPage() {
                             <TextInput
                                 label='Email'
                                 type='email'
+                                inputMode='email'
+                                autoCapitalize='none'
                                 autoComplete='username'
                                 required
                                 {...form.getInputProps('email')}
@@ -105,6 +116,9 @@ export default function LoginPage() {
                             <PasswordInput
                                 label='Password'
                                 autoComplete='current-password'
+                                visibilityToggleButtonProps={{
+                                    'aria-label': 'Toggle password visibility',
+                                }}
                                 required
                                 {...form.getInputProps('password')}
                             />

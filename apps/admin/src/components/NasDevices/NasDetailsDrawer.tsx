@@ -172,7 +172,16 @@ export function NasDetailsDrawer({
             onClose={onClose}
             position='right'
             size='xl'
-            title={<Title order={4}>{device?.name ?? 'NAS details'}</Title>}
+            styles={{
+                body: { overflowWrap: 'anywhere' },
+                title: { minWidth: 0, flex: 1 },
+                close: { flexShrink: 0 },
+            }}
+            title={
+                <Title component='span' order={4}>
+                    {device?.name ?? 'NAS details'}
+                </Title>
+            }
         >
             {error ? (
                 <Text c='red'>{error}</Text>
@@ -195,7 +204,7 @@ export function NasDetailsDrawer({
                     </Group>
 
                     <Grid>
-                        <Grid.Col span={6}>
+                        <Grid.Col span={{ base: 12, sm: 6 }}>
                             <DetailItem
                                 label='IP Address'
                                 value={
@@ -212,37 +221,37 @@ export function NasDetailsDrawer({
                                 }
                             />
                         </Grid.Col>
-                        <Grid.Col span={6}>
+                        <Grid.Col span={{ base: 12, sm: 6 }}>
                             <DetailItem
                                 label='MAC Address'
                                 value={device.macAddress ?? '—'}
                             />
                         </Grid.Col>
-                        <Grid.Col span={6}>
+                        <Grid.Col span={{ base: 12, sm: 6 }}>
                             <DetailItem
                                 label='Model'
                                 value={device.model ?? '—'}
                             />
                         </Grid.Col>
-                        <Grid.Col span={6}>
+                        <Grid.Col span={{ base: 12, sm: 6 }}>
                             <DetailItem
                                 label='Serial Number'
                                 value={device.serialNumber ?? '—'}
                             />
                         </Grid.Col>
-                        <Grid.Col span={6}>
+                        <Grid.Col span={{ base: 12, sm: 6 }}>
                             <DetailItem
                                 label='Firmware'
                                 value={device.firmwareVersion ?? '—'}
                             />
                         </Grid.Col>
-                        <Grid.Col span={6}>
+                        <Grid.Col span={{ base: 12, sm: 6 }}>
                             <DetailItem
                                 label='Location'
                                 value={device.location ?? '—'}
                             />
                         </Grid.Col>
-                        <Grid.Col span={6}>
+                        <Grid.Col span={{ base: 12, sm: 6 }}>
                             <DetailItem
                                 label='Created'
                                 value={formatDate(device.createdAt)}
@@ -277,13 +286,13 @@ export function NasDetailsDrawer({
 
                     {device.wgClientIp || device.wgPublicKey ? (
                         <Grid>
-                            <Grid.Col span={6}>
+                            <Grid.Col span={{ base: 12, sm: 6 }}>
                                 <DetailItem
                                     label='Tunnel IP'
                                     value={device.wgClientIp ?? '—'}
                                 />
                             </Grid.Col>
-                            <Grid.Col span={6}>
+                            <Grid.Col span={{ base: 12, sm: 6 }}>
                                 <DetailItem
                                     label='Key reported'
                                     value={
@@ -335,6 +344,7 @@ export function NasDetailsDrawer({
                             {linkedPackages.map((pkg) => (
                                 <Badge
                                     key={pkg.id}
+                                    maw='100%'
                                     variant='light'
                                     color={pkg.isActive ? undefined : 'gray'}
                                 >
@@ -348,55 +358,55 @@ export function NasDetailsDrawer({
                     <Divider label='Analytics' labelPosition='left' />
 
                     <Grid>
-                        <Grid.Col span={4}>
+                        <Grid.Col span={{ base: 12, xs: 6, sm: 4 }}>
                             <StatCard
                                 label='Purchases'
                                 value={analytics.payments.paid}
                                 sub={`${analytics.payments.total} total attempts`}
                             />
                         </Grid.Col>
-                        <Grid.Col span={4}>
+                        <Grid.Col span={{ base: 12, xs: 6, sm: 4 }}>
                             <StatCard
                                 label='Revenue'
                                 value={`Ksh ${analytics.payments.revenue.toLocaleString()}`}
                                 sub='from paid purchases'
                             />
                         </Grid.Col>
-                        <Grid.Col span={4}>
+                        <Grid.Col span={{ base: 12, xs: 6, sm: 4 }}>
                             <StatCard
                                 label='Pending'
                                 value={analytics.payments.pending}
                                 sub='awaiting confirmation'
                             />
                         </Grid.Col>
-                        <Grid.Col span={4}>
+                        <Grid.Col span={{ base: 12, xs: 6, sm: 4 }}>
                             <StatCard
                                 label='Failed / Cancelled'
                                 value={analytics.payments.failed}
                                 sub='failed payment attempts'
                             />
                         </Grid.Col>
-                        <Grid.Col span={4}>
+                        <Grid.Col span={{ base: 12, xs: 6, sm: 4 }}>
                             <StatCard
                                 label='Unique Buyers'
                                 value={analytics.buyers.unique}
                             />
                         </Grid.Col>
-                        <Grid.Col span={4}>
+                        <Grid.Col span={{ base: 12, xs: 6, sm: 4 }}>
                             <StatCard
                                 label='Repeat Buys'
                                 value={analytics.buyers.repeat}
                                 sub={`${repeatRate}% repeat rate`}
                             />
                         </Grid.Col>
-                        <Grid.Col span={4}>
+                        <Grid.Col span={{ base: 12, xs: 6, sm: 4 }}>
                             <StatCard
                                 label='Activations'
                                 value={analytics.activations.total}
                                 sub={`${analytics.activations.active} currently active`}
                             />
                         </Grid.Col>
-                        <Grid.Col span={4}>
+                        <Grid.Col span={{ base: 12, xs: 6, sm: 4 }}>
                             <StatCard
                                 label='RADIUS Sessions'
                                 value={analytics.sessions.total}
@@ -410,58 +420,70 @@ export function NasDetailsDrawer({
                     {analytics.recentPayments.payments.length === 0 ? (
                         <Text c='dimmed'>No payments yet.</Text>
                     ) : (
-                        <Table striped stickyHeader>
-                            <Table.Thead>
-                                <Table.Tr>
-                                    <Table.Th>#</Table.Th>
-                                    <Table.Th>Phone</Table.Th>
-                                    <Table.Th>Package</Table.Th>
-                                    <Table.Th>Amount</Table.Th>
-                                    <Table.Th>Status</Table.Th>
-                                    <Table.Th>Date</Table.Th>
-                                </Table.Tr>
-                            </Table.Thead>
-                            <Table.Tbody>
-                                {analytics.recentPayments.payments.map(
-                                    (p, i) => (
-                                        <Table.Tr key={p.id}>
-                                            <Table.Td>
-                                                {(paymentsPage - 1) * perPage +
-                                                    i +
-                                                    1}
-                                            </Table.Td>
-                                            <Table.Td>{p.phoneNumber}</Table.Td>
-                                            <Table.Td>
-                                                {p.packageTitle}
-                                            </Table.Td>
-                                            <Table.Td>
-                                                {formatPaymentAmount(p.amount)}
-                                            </Table.Td>
-                                            <Table.Td>
-                                                <Badge
-                                                    size='sm'
-                                                    color={
-                                                        STATUS_BADGE[p.status]
-                                                            .color
-                                                    }
-                                                    variant='light'
-                                                >
-                                                    {
-                                                        STATUS_BADGE[p.status]
-                                                            .label
-                                                    }
-                                                </Badge>
-                                            </Table.Td>
-                                            <Table.Td>
-                                                {new Date(
-                                                    p.createdAt,
-                                                ).toLocaleString()}
-                                            </Table.Td>
-                                        </Table.Tr>
-                                    ),
-                                )}
-                            </Table.Tbody>
-                        </Table>
+                        <Table.ScrollContainer
+                            minWidth={720}
+                            aria-label='NAS recent payments'
+                        >
+                            <Table striped stickyHeader>
+                                <Table.Thead>
+                                    <Table.Tr>
+                                        <Table.Th>#</Table.Th>
+                                        <Table.Th>Phone</Table.Th>
+                                        <Table.Th>Package</Table.Th>
+                                        <Table.Th>Amount</Table.Th>
+                                        <Table.Th>Status</Table.Th>
+                                        <Table.Th>Date</Table.Th>
+                                    </Table.Tr>
+                                </Table.Thead>
+                                <Table.Tbody>
+                                    {analytics.recentPayments.payments.map(
+                                        (p, i) => (
+                                            <Table.Tr key={p.id}>
+                                                <Table.Td>
+                                                    {(paymentsPage - 1) *
+                                                        perPage +
+                                                        i +
+                                                        1}
+                                                </Table.Td>
+                                                <Table.Td>
+                                                    {p.phoneNumber}
+                                                </Table.Td>
+                                                <Table.Td>
+                                                    {p.packageTitle}
+                                                </Table.Td>
+                                                <Table.Td>
+                                                    {formatPaymentAmount(
+                                                        p.amount,
+                                                    )}
+                                                </Table.Td>
+                                                <Table.Td>
+                                                    <Badge
+                                                        size='sm'
+                                                        color={
+                                                            STATUS_BADGE[
+                                                                p.status
+                                                            ].color
+                                                        }
+                                                        variant='light'
+                                                    >
+                                                        {
+                                                            STATUS_BADGE[
+                                                                p.status
+                                                            ].label
+                                                        }
+                                                    </Badge>
+                                                </Table.Td>
+                                                <Table.Td>
+                                                    {new Date(
+                                                        p.createdAt,
+                                                    ).toLocaleString()}
+                                                </Table.Td>
+                                            </Table.Tr>
+                                        ),
+                                    )}
+                                </Table.Tbody>
+                            </Table>
+                        </Table.ScrollContainer>
                     )}
                     <TablePagination
                         page={paymentsPage}

@@ -14,6 +14,7 @@ import {
     Text,
     TextInput,
     Title,
+    UnstyledButton,
 } from '@mantine/core';
 import { useDebouncedValue } from '@mantine/hooks';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -26,6 +27,7 @@ import {
     type SortDirection,
 } from '@/components/SortableTableHeader';
 import { TablePagination } from '@/components/TablePagination';
+import { TableFilters } from '@/components/TableFilters';
 import {
     deleteAdminPackage,
     getAdminPackages,
@@ -58,7 +60,12 @@ function SummaryCard({
             <Text size='xs' c='dimmed'>
                 {label}
             </Text>
-            <Text size='xl' fw={700} mt={2}>
+            <Text
+                size='lg'
+                fw={700}
+                mt={2}
+                style={{ overflowWrap: 'anywhere' }}
+            >
                 {value}
             </Text>
             {sub ? (
@@ -209,15 +216,21 @@ export default function PackagesPage() {
                     </SimpleGrid>
                 )}
 
-                <Group wrap='wrap'>
-                    <TextInput
-                        placeholder='Search title, category or description'
-                        leftSection={<MdSearch />}
-                        value={search}
-                        onChange={(e) => setSearch(e.currentTarget.value)}
-                        style={{ flex: 1, minWidth: 220 }}
-                    />
+                <TableFilters
+                    search={
+                        <TextInput
+                            aria-label='Search packages'
+                            placeholder='Search title, category or description'
+                            leftSection={<MdSearch />}
+                            value={search}
+                            onChange={(e) => setSearch(e.currentTarget.value)}
+                            w={{ base: '100%', sm: 'auto' }}
+                            style={{ flex: '1 1 220px', minWidth: 0 }}
+                        />
+                    }
+                >
                     <Select
+                        aria-label='Filter packages by type'
                         placeholder='Type'
                         clearable
                         value={typeFilter}
@@ -226,9 +239,10 @@ export default function PackagesPage() {
                             { value: 'hotspot', label: 'Hotspot' },
                             { value: 'pppoe', label: 'PPPoE' },
                         ]}
-                        w={140}
+                        w={{ base: '100%', sm: 140 }}
                     />
                     <Select
+                        aria-label='Filter packages by status'
                         placeholder='Status'
                         clearable
                         value={status}
@@ -237,9 +251,9 @@ export default function PackagesPage() {
                             { value: 'active', label: 'Active' },
                             { value: 'inactive', label: 'Inactive' },
                         ]}
-                        w={140}
+                        w={{ base: '100%', sm: 140 }}
                     />
-                </Group>
+                </TableFilters>
 
                 {loading ? (
                     <Center py='xl'>
@@ -254,13 +268,17 @@ export default function PackagesPage() {
                             : 'No packages yet.'}
                     </Text>
                 ) : (
-                    <Table.ScrollContainer minWidth={980}>
+                    <Table.ScrollContainer
+                        minWidth={980}
+                        aria-label='Packages table'
+                    >
                         <Table striped highlightOnHover stickyHeader>
                             <Table.Thead>
                                 <Table.Tr>
                                     <Table.Th>#</Table.Th>
                                     <SortableTableHeader
                                         label='Title'
+                                        width={240}
                                         sortKey='title'
                                         sortBy={sortBy}
                                         sortDirection={sortDirection}
@@ -295,11 +313,12 @@ export default function PackagesPage() {
                                         sortDirection={sortDirection}
                                         onSort={handleSort}
                                     />
-                                    <Table.Th>Rate Up/Down</Table.Th>
-                                    <Table.Th>Quota Up/Down</Table.Th>
+                                    <Table.Th>Rate up/down</Table.Th>
+                                    <Table.Th>Quota up/down</Table.Th>
                                     <Table.Th>Expiry</Table.Th>
                                     <SortableTableHeader
                                         label='Status'
+                                        width={100}
                                         sortKey='isActive'
                                         sortBy={sortBy}
                                         sortDirection={sortDirection}
@@ -318,8 +337,17 @@ export default function PackagesPage() {
                                         <Table.Td>
                                             {(page - 1) * perPage + i + 1}
                                         </Table.Td>
-                                        <Table.Td fw={500}>
-                                            {pkg.title}
+                                        <Table.Td
+                                            fw={500}
+                                            className='admin-table-identity'
+                                        >
+                                            <UnstyledButton
+                                                fz='sm'
+                                                fw={500}
+                                                aria-label={`View details for ${pkg.title}`}
+                                            >
+                                                {pkg.title}
+                                            </UnstyledButton>
                                         </Table.Td>
                                         <Table.Td>
                                             <Badge
@@ -336,7 +364,7 @@ export default function PackagesPage() {
                                             </Badge>
                                         </Table.Td>
                                         <Table.Td>{pkg.category}</Table.Td>
-                                        <Table.Td>
+                                        <Table.Td className='admin-table-value'>
                                             {formatPackagePrice(pkg.price)}
                                         </Table.Td>
                                         <Table.Td>
@@ -346,9 +374,7 @@ export default function PackagesPage() {
                                         </Table.Td>
                                         <Table.Td>{pkg.maxDevices}</Table.Td>
                                         <Table.Td>
-                                            {formatPackageRate(
-                                                pkg.uploadRate,
-                                            )}{' '}
+                                            {formatPackageRate(pkg.uploadRate)}{' '}
                                             /{' '}
                                             {formatPackageRate(
                                                 pkg.downloadRate,
@@ -383,7 +409,11 @@ export default function PackagesPage() {
                                             </Badge>
                                         </Table.Td>
                                         <Table.Td>
-                                            <Group justify='flex-end' gap='xs'>
+                                            <Group
+                                                justify='flex-end'
+                                                gap='xs'
+                                                wrap='nowrap'
+                                            >
                                                 <ActionIcon
                                                     variant='light'
                                                     aria-label={`Edit ${pkg.title}`}

@@ -530,8 +530,13 @@ export function UserDetailsDrawer({
             onClose={onClose}
             position='right'
             size='xl'
+            styles={{
+                body: { overflowWrap: 'anywhere' },
+                title: { minWidth: 0, flex: 1 },
+                close: { flexShrink: 0 },
+            }}
             title={
-                <Title order={4}>
+                <Title component='span' order={4}>
                     {detail?.tag?.name ||
                         detail?.name ||
                         detail?.phoneNumber ||
@@ -703,7 +708,7 @@ export function UserDetailsDrawer({
                         <Tabs.Panel value='valuation' pt='md'>
                             <Stack gap='md'>
                                 <Grid>
-                                    <Grid.Col span={4}>
+                                    <Grid.Col span={{ base: 12, xs: 6, sm: 4 }}>
                                         <StatCard
                                             label='Lifetime spend'
                                             value={formatMoney(
@@ -712,21 +717,21 @@ export function UserDetailsDrawer({
                                             sub={`avg ${formatMoney(avgPerPurchase)} per purchase`}
                                         />
                                     </Grid.Col>
-                                    <Grid.Col span={4}>
+                                    <Grid.Col span={{ base: 12, xs: 6, sm: 4 }}>
                                         <StatCard
                                             label='Paid purchases'
                                             value={detail.payments.paid}
                                             sub={`${detail.payments.pending} pending · ${detail.payments.failed} failed`}
                                         />
                                     </Grid.Col>
-                                    <Grid.Col span={4}>
+                                    <Grid.Col span={{ base: 12, xs: 6, sm: 4 }}>
                                         <StatCard
                                             label='Active activations'
                                             value={detail.activations.active}
                                             sub={`${detail.activations.hotspot} hotspot · ${detail.activations.pppoe} pppoe${detail.activations.underFup > 0 ? ` · ${detail.activations.underFup} under FUP` : ''}`}
                                         />
                                     </Grid.Col>
-                                    <Grid.Col span={4}>
+                                    <Grid.Col span={{ base: 12, xs: 6, sm: 4 }}>
                                         <StatCard
                                             label='First purchase'
                                             value={
@@ -739,7 +744,7 @@ export function UserDetailsDrawer({
                                             }
                                         />
                                     </Grid.Col>
-                                    <Grid.Col span={4}>
+                                    <Grid.Col span={{ base: 12, xs: 6, sm: 4 }}>
                                         <StatCard
                                             label='Last payment'
                                             value={
@@ -752,7 +757,7 @@ export function UserDetailsDrawer({
                                             }
                                         />
                                     </Grid.Col>
-                                    <Grid.Col span={4}>
+                                    <Grid.Col span={{ base: 12, xs: 6, sm: 4 }}>
                                         <StatCard
                                             label='Data used'
                                             value={formatBytes(
@@ -761,13 +766,13 @@ export function UserDetailsDrawer({
                                             sub={`${detail.usage.sessions} sessions · ${formatSeconds(detail.usage.seconds)} online`}
                                         />
                                     </Grid.Col>
-                                    <Grid.Col span={6}>
+                                    <Grid.Col span={{ base: 12, sm: 6 }}>
                                         <StatCard
                                             label='Registered'
                                             value={formatDate(detail.createdAt)}
                                         />
                                     </Grid.Col>
-                                    <Grid.Col span={6}>
+                                    <Grid.Col span={{ base: 12, sm: 6 }}>
                                         <StatCard
                                             label='Last seen'
                                             value={
@@ -860,297 +865,333 @@ export function UserDetailsDrawer({
                                     No package activations yet.
                                 </Text>
                             ) : (
-                                <Table striped stickyHeader>
-                                    <Table.Thead>
-                                        <Table.Tr>
-                                            <Table.Th>#</Table.Th>
-                                            <Table.Th w={100}>Package</Table.Th>
-                                            <Table.Th w={130}>Status</Table.Th>
-                                            <Table.Th>Usage</Table.Th>
-                                            <Table.Th>Expires</Table.Th>
-                                            <Table.Th ta='right'>
-                                                Actions
-                                            </Table.Th>
-                                        </Table.Tr>
-                                    </Table.Thead>
-                                    <Table.Tbody>
-                                        {activations.map((a, i) => (
-                                            <Table.Tr key={a.activationId}>
-                                                <Table.Td>
-                                                    {(activationsPage - 1) *
-                                                        perPage +
-                                                        i +
-                                                        1}
-                                                </Table.Td>
-                                                <Table.Td>
-                                                    <Text size='sm' fw={500}>
-                                                        {a.packageTitle}
-                                                    </Text>
-                                                    <Text size='xs' c='dimmed'>
-                                                        {a.packageType} ●{' '}
-                                                        {a.username}
-                                                    </Text>
-                                                </Table.Td>
-                                                <Table.Td>
-                                                    <Group gap={4}>
-                                                        {a.online ? (
-                                                            <Badge
-                                                                color='green'
-                                                                variant='light'
-                                                                size='sm'
-                                                            >
-                                                                Online
-                                                            </Badge>
-                                                        ) : null}
-                                                        <Badge
-                                                            color={
-                                                                a.deactivated
-                                                                    ? 'red'
-                                                                    : a.expired
-                                                                      ? 'gray'
-                                                                      : 'blue'
-                                                            }
-                                                            variant='light'
+                                <Table.ScrollContainer
+                                    minWidth={780}
+                                    aria-label='User activations'
+                                >
+                                    <Table striped stickyHeader>
+                                        <Table.Thead>
+                                            <Table.Tr>
+                                                <Table.Th>#</Table.Th>
+                                                <Table.Th w={180}>
+                                                    Package
+                                                </Table.Th>
+                                                <Table.Th w={130}>
+                                                    Status
+                                                </Table.Th>
+                                                <Table.Th>Usage</Table.Th>
+                                                <Table.Th>Expires</Table.Th>
+                                                <Table.Th ta='right'>
+                                                    Actions
+                                                </Table.Th>
+                                            </Table.Tr>
+                                        </Table.Thead>
+                                        <Table.Tbody>
+                                            {activations.map((a, i) => (
+                                                <Table.Tr key={a.activationId}>
+                                                    <Table.Td>
+                                                        {(activationsPage - 1) *
+                                                            perPage +
+                                                            i +
+                                                            1}
+                                                    </Table.Td>
+                                                    <Table.Td>
+                                                        <Text
                                                             size='sm'
+                                                            fw={500}
                                                         >
-                                                            {a.deactivated
-                                                                ? 'Deactivated'
-                                                                : a.expired
-                                                                  ? 'Expired'
-                                                                  : 'Active'}
-                                                        </Badge>
-                                                        {a.fairUsage
-                                                            ?.throttled ? (
+                                                            {a.packageTitle}
+                                                        </Text>
+                                                        <Text
+                                                            size='xs'
+                                                            c='dimmed'
+                                                        >
+                                                            {a.packageType} ●{' '}
+                                                            {a.username}
+                                                        </Text>
+                                                    </Table.Td>
+                                                    <Table.Td>
+                                                        <Group gap={4}>
+                                                            {a.online ? (
+                                                                <Badge
+                                                                    color='green'
+                                                                    variant='light'
+                                                                    size='sm'
+                                                                >
+                                                                    Online
+                                                                </Badge>
+                                                            ) : null}
                                                             <Badge
-                                                                color='orange'
-                                                                variant='filled'
-                                                                size='sm'
-                                                            >
-                                                                Under FUP
-                                                            </Badge>
-                                                        ) : a.fairUsage ? (
-                                                            <Badge
-                                                                color='cyan'
+                                                                color={
+                                                                    a.deactivated
+                                                                        ? 'red'
+                                                                        : a.expired
+                                                                          ? 'gray'
+                                                                          : 'blue'
+                                                                }
                                                                 variant='light'
                                                                 size='sm'
                                                             >
-                                                                FUP monitored
+                                                                {a.deactivated
+                                                                    ? 'Deactivated'
+                                                                    : a.expired
+                                                                      ? 'Expired'
+                                                                      : 'Active'}
                                                             </Badge>
-                                                        ) : null}
-                                                    </Group>
-                                                </Table.Td>
-                                                <Table.Td>
-                                                    <Text size='xs'>
-                                                        {formatSeconds(
-                                                            a.usedSeconds,
-                                                        )}{' '}
-                                                        /{' '}
-                                                        {formatSeconds(
-                                                            a.sessionLimitSeconds,
-                                                        )}
-                                                    </Text>
-                                                    <Text size='xs' c='dimmed'>
-                                                        {formatSeconds(
-                                                            a.remainingSeconds ??
-                                                                0,
-                                                        )}{' '}
-                                                        remaining ●{' '}
-                                                        {formatBytes(
-                                                            a.octetsUsed,
-                                                        )}{' '}
-                                                        {a.octetsLimit
-                                                            ? ` / ${formatBytes(a.octetsLimit)}`
-                                                            : ''}
-                                                    </Text>{' '}
-                                                    {a.fairUsage ? (
-                                                        <Stack gap={3} mt={5}>
-                                                            <Progress
-                                                                value={Math.min(
-                                                                    100,
-                                                                    (a.fairUsage
-                                                                        .usedBytes /
-                                                                        a
-                                                                            .fairUsage
-                                                                            .limitBytes) *
-                                                                        100,
-                                                                )}
-                                                                color={
-                                                                    a.fairUsage
-                                                                        .throttled
-                                                                        ? 'orange'
-                                                                        : 'cyan'
-                                                                }
-                                                                size='sm'
-                                                            />
-                                                            <Text
-                                                                size='xs'
-                                                                c={
-                                                                    a.fairUsage
-                                                                        .throttled
-                                                                        ? 'orange'
-                                                                        : 'dimmed'
-                                                                }
-                                                                fw={
-                                                                    a.fairUsage
-                                                                        .throttled
-                                                                        ? 600
-                                                                        : 400
-                                                                }
-                                                            >
-                                                                {formatBytes(
-                                                                    a.fairUsage
-                                                                        .usedBytes,
-                                                                )}{' '}
-                                                                /{' '}
-                                                                {formatBytes(
-                                                                    a.fairUsage
-                                                                        .limitBytes,
-                                                                )}{' '}
-                                                                in{' '}
-                                                                {a.fairUsage
-                                                                    .windowUnit ===
-                                                                'session'
-                                                                    ? 'this session'
-                                                                    : `${a.fairUsage.windowValue} ${a.fairUsage.windowUnit}`}
-                                                            </Text>
                                                             {a.fairUsage
-                                                                .throttled ? (
-                                                                <Text
-                                                                    size='xs'
-                                                                    c='dimmed'
+                                                                ?.throttled ? (
+                                                                <Badge
+                                                                    color='orange'
+                                                                    variant='filled'
+                                                                    size='sm'
                                                                 >
-                                                                    Throttled to{' '}
-                                                                    {formatPackageRate(
+                                                                    Under FUP
+                                                                </Badge>
+                                                            ) : a.fairUsage ? (
+                                                                <Badge
+                                                                    color='cyan'
+                                                                    variant='light'
+                                                                    size='sm'
+                                                                >
+                                                                    FUP
+                                                                    monitored
+                                                                </Badge>
+                                                            ) : null}
+                                                        </Group>
+                                                    </Table.Td>
+                                                    <Table.Td>
+                                                        <Text size='xs'>
+                                                            {formatSeconds(
+                                                                a.usedSeconds,
+                                                            )}{' '}
+                                                            /{' '}
+                                                            {formatSeconds(
+                                                                a.sessionLimitSeconds,
+                                                            )}
+                                                        </Text>
+                                                        <Text
+                                                            size='xs'
+                                                            c='dimmed'
+                                                        >
+                                                            {formatSeconds(
+                                                                a.remainingSeconds ??
+                                                                    0,
+                                                            )}{' '}
+                                                            remaining ●{' '}
+                                                            {formatBytes(
+                                                                a.octetsUsed,
+                                                            )}{' '}
+                                                            {a.octetsLimit
+                                                                ? ` / ${formatBytes(a.octetsLimit)}`
+                                                                : ''}
+                                                        </Text>{' '}
+                                                        {a.fairUsage ? (
+                                                            <Stack
+                                                                gap={3}
+                                                                mt={5}
+                                                            >
+                                                                <Progress
+                                                                    aria-label={`Fair usage for ${a.packageTitle}`}
+                                                                    value={Math.min(
+                                                                        100,
+                                                                        (a
+                                                                            .fairUsage
+                                                                            .usedBytes /
+                                                                            a
+                                                                                .fairUsage
+                                                                                .limitBytes) *
+                                                                            100,
+                                                                    )}
+                                                                    color={
                                                                         a
                                                                             .fairUsage
-                                                                            .uploadRate,
-                                                                    )}{' '}
-                                                                    /{' '}
-                                                                    {formatPackageRate(
-                                                                        a
-                                                                            .fairUsage
-                                                                            .downloadRate,
-                                                                    )}{' '}
-                                                                    up/down
-                                                                </Text>
-                                                            ) : (
+                                                                            .throttled
+                                                                            ? 'orange'
+                                                                            : 'cyan'
+                                                                    }
+                                                                    size='sm'
+                                                                />
                                                                 <Text
                                                                     size='xs'
-                                                                    c='dimmed'
+                                                                    c={
+                                                                        a
+                                                                            .fairUsage
+                                                                            .throttled
+                                                                            ? 'orange'
+                                                                            : 'dimmed'
+                                                                    }
+                                                                    fw={
+                                                                        a
+                                                                            .fairUsage
+                                                                            .throttled
+                                                                            ? 600
+                                                                            : 400
+                                                                    }
                                                                 >
                                                                     {formatBytes(
                                                                         a
                                                                             .fairUsage
-                                                                            .remainingBytes,
+                                                                            .usedBytes,
                                                                     )}{' '}
-                                                                    remaining
+                                                                    /{' '}
+                                                                    {formatBytes(
+                                                                        a
+                                                                            .fairUsage
+                                                                            .limitBytes,
+                                                                    )}{' '}
+                                                                    in{' '}
+                                                                    {a.fairUsage
+                                                                        .windowUnit ===
+                                                                    'session'
+                                                                        ? 'this session'
+                                                                        : `${a.fairUsage.windowValue} ${a.fairUsage.windowUnit}`}
                                                                 </Text>
-                                                            )}
-                                                        </Stack>
-                                                    ) : null}
-                                                </Table.Td>
-                                                <Table.Td>
-                                                    <Text size='xs'>
-                                                        {formatDateTime(
-                                                            a.expireAt,
-                                                        )}
-                                                    </Text>
-                                                    <Text size='xs' c='dimmed'>
-                                                        {a.deactivatedAt
-                                                            ? `Deactivated ${dayjs(a.deactivatedAt).fromNow()}`
-                                                            : `Activated ${dayjs(a.activatedAt).fromNow()}`}
-                                                    </Text>
-                                                </Table.Td>
-                                                <Table.Td>
-                                                    <Group
-                                                        justify='flex-end'
-                                                        gap={4}
-                                                    >
-                                                        {a.deactivated ? (
-                                                            <Tooltip label='Reactivate with current limits'>
-                                                                <ActionIcon
-                                                                    variant='light'
-                                                                    color='green'
-                                                                    aria-label='Activate'
-                                                                    loading={
-                                                                        busy
-                                                                    }
-                                                                    onClick={() =>
-                                                                        void doActivate(
-                                                                            a.activationId,
-                                                                        )
-                                                                    }
-                                                                >
-                                                                    <MdPowerSettingsNew
-                                                                        size={
-                                                                            16
-                                                                        }
-                                                                    />
-                                                                </ActionIcon>
-                                                            </Tooltip>
-                                                        ) : !a.expired ? (
-                                                            <Tooltip label='Deactivate'>
-                                                                <ActionIcon
-                                                                    variant='light'
-                                                                    color='red'
-                                                                    aria-label='Deactivate'
-                                                                    onClick={() =>
-                                                                        setConfirmDeactivate(
-                                                                            a.activationId,
-                                                                        )
-                                                                    }
-                                                                >
-                                                                    <MdBlock
-                                                                        size={
-                                                                            16
-                                                                        }
-                                                                    />
-                                                                </ActionIcon>
-                                                            </Tooltip>
+                                                                {a.fairUsage
+                                                                    .throttled ? (
+                                                                    <Text
+                                                                        size='xs'
+                                                                        c='dimmed'
+                                                                    >
+                                                                        Throttled
+                                                                        to{' '}
+                                                                        {formatPackageRate(
+                                                                            a
+                                                                                .fairUsage
+                                                                                .uploadRate,
+                                                                        )}{' '}
+                                                                        /{' '}
+                                                                        {formatPackageRate(
+                                                                            a
+                                                                                .fairUsage
+                                                                                .downloadRate,
+                                                                        )}{' '}
+                                                                        up/down
+                                                                    </Text>
+                                                                ) : (
+                                                                    <Text
+                                                                        size='xs'
+                                                                        c='dimmed'
+                                                                    >
+                                                                        {formatBytes(
+                                                                            a
+                                                                                .fairUsage
+                                                                                .remainingBytes,
+                                                                        )}{' '}
+                                                                        remaining
+                                                                    </Text>
+                                                                )}
+                                                            </Stack>
                                                         ) : null}
-                                                        <Tooltip label='Edit expiry and time remaining'>
-                                                            <ActionIcon
-                                                                variant='light'
-                                                                aria-label='Edit activation limits'
-                                                                onClick={() => {
-                                                                    setExpiryEdit(
-                                                                        {
-                                                                            activationId:
+                                                    </Table.Td>
+                                                    <Table.Td>
+                                                        <Text size='xs'>
+                                                            {formatDateTime(
+                                                                a.expireAt,
+                                                            )}
+                                                        </Text>
+                                                        <Text
+                                                            size='xs'
+                                                            c='dimmed'
+                                                        >
+                                                            {a.deactivatedAt
+                                                                ? `Deactivated ${dayjs(a.deactivatedAt).fromNow()}`
+                                                                : `Activated ${dayjs(a.activatedAt).fromNow()}`}
+                                                        </Text>
+                                                    </Table.Td>
+                                                    <Table.Td>
+                                                        <Group
+                                                            justify='flex-end'
+                                                            gap={4}
+                                                            wrap='nowrap'
+                                                        >
+                                                            {a.deactivated ? (
+                                                                <Tooltip label='Reactivate with current limits'>
+                                                                    <ActionIcon
+                                                                        variant='light'
+                                                                        color='green'
+                                                                        aria-label='Activate'
+                                                                        loading={
+                                                                            busy
+                                                                        }
+                                                                        onClick={() =>
+                                                                            void doActivate(
                                                                                 a.activationId,
-                                                                            current:
-                                                                                new Date(
-                                                                                    a.expireAt,
-                                                                                ),
-                                                                            currentRemainingSeconds:
-                                                                                a.remainingSeconds ??
-                                                                                0,
-                                                                        },
-                                                                    );
-                                                                    setExpiryValue(
-                                                                        new Date(
-                                                                            a.expireAt,
-                                                                        ),
-                                                                    );
-                                                                    setRemainingMinutes(
-                                                                        Math.ceil(
-                                                                            (a.remainingSeconds ??
-                                                                                0) /
-                                                                                60,
-                                                                        ),
-                                                                    );
-                                                                }}
-                                                            >
-                                                                <MdEdit
-                                                                    size={16}
-                                                                />
-                                                            </ActionIcon>
-                                                        </Tooltip>
-                                                    </Group>
-                                                </Table.Td>
-                                            </Table.Tr>
-                                        ))}
-                                    </Table.Tbody>
-                                </Table>
+                                                                            )
+                                                                        }
+                                                                    >
+                                                                        <MdPowerSettingsNew
+                                                                            size={
+                                                                                16
+                                                                            }
+                                                                        />
+                                                                    </ActionIcon>
+                                                                </Tooltip>
+                                                            ) : !a.expired ? (
+                                                                <Tooltip label='Deactivate'>
+                                                                    <ActionIcon
+                                                                        variant='light'
+                                                                        color='red'
+                                                                        aria-label='Deactivate'
+                                                                        onClick={() =>
+                                                                            setConfirmDeactivate(
+                                                                                a.activationId,
+                                                                            )
+                                                                        }
+                                                                    >
+                                                                        <MdBlock
+                                                                            size={
+                                                                                16
+                                                                            }
+                                                                        />
+                                                                    </ActionIcon>
+                                                                </Tooltip>
+                                                            ) : null}
+                                                            <Tooltip label='Edit expiry and time remaining'>
+                                                                <ActionIcon
+                                                                    variant='light'
+                                                                    aria-label='Edit activation limits'
+                                                                    onClick={() => {
+                                                                        setExpiryEdit(
+                                                                            {
+                                                                                activationId:
+                                                                                    a.activationId,
+                                                                                current:
+                                                                                    new Date(
+                                                                                        a.expireAt,
+                                                                                    ),
+                                                                                currentRemainingSeconds:
+                                                                                    a.remainingSeconds ??
+                                                                                    0,
+                                                                            },
+                                                                        );
+                                                                        setExpiryValue(
+                                                                            new Date(
+                                                                                a.expireAt,
+                                                                            ),
+                                                                        );
+                                                                        setRemainingMinutes(
+                                                                            Math.ceil(
+                                                                                (a.remainingSeconds ??
+                                                                                    0) /
+                                                                                    60,
+                                                                            ),
+                                                                        );
+                                                                    }}
+                                                                >
+                                                                    <MdEdit
+                                                                        size={
+                                                                            16
+                                                                        }
+                                                                    />
+                                                                </ActionIcon>
+                                                            </Tooltip>
+                                                        </Group>
+                                                    </Table.Td>
+                                                </Table.Tr>
+                                            ))}
+                                        </Table.Tbody>
+                                    </Table>
+                                </Table.ScrollContainer>
                             )}
                             <TablePagination
                                 page={activationsPage}
@@ -1172,72 +1213,85 @@ export function UserDetailsDrawer({
                                     No payments yet.
                                 </Text>
                             ) : (
-                                <Table striped stickyHeader>
-                                    <Table.Thead>
-                                        <Table.Tr>
-                                            <Table.Th>#</Table.Th>
-                                            <Table.Th>Date</Table.Th>
-                                            <Table.Th>Package</Table.Th>
-                                            <Table.Th>Amount</Table.Th>
-                                            <Table.Th>Status</Table.Th>
-                                            <Table.Th>Reference</Table.Th>
-                                        </Table.Tr>
-                                    </Table.Thead>
-                                    <Table.Tbody>
-                                        {payments.map((p, i) => (
-                                            <Table.Tr key={p.id}>
-                                                <Table.Td>
-                                                    {(paymentsPage - 1) *
-                                                        perPage +
-                                                        i +
-                                                        1}
-                                                </Table.Td>
-                                                <Table.Td>
-                                                    <Text size='xs'>
-                                                        {formatDateTime(
-                                                            p.createdAt,
-                                                        )}
-                                                    </Text>
-                                                </Table.Td>
-                                                <Table.Td>
-                                                    <Text size='sm'>
-                                                        {p.packageTitle}
-                                                    </Text>
-                                                    <Text size='xs' c='dimmed'>
-                                                        {p.packageType}
-                                                    </Text>
-                                                </Table.Td>
-                                                <Table.Td>
-                                                    {formatPaymentAmount(
-                                                        p.amount,
-                                                    )}
-                                                </Table.Td>
-                                                <Table.Td>
-                                                    <Badge
-                                                        size='sm'
-                                                        variant='light'
-                                                        color={
-                                                            PAYMENT_BADGE[
-                                                                p.status
-                                                            ]?.color ?? 'gray'
-                                                        }
-                                                    >
-                                                        {PAYMENT_BADGE[p.status]
-                                                            ?.label ?? p.status}
-                                                    </Badge>
-                                                </Table.Td>
-                                                <Table.Td>
-                                                    <PaymentRefCell
-                                                        provider={p.provider}
-                                                        providerTransactionId={
-                                                            p.providerTransactionId
-                                                        }
-                                                    />
-                                                </Table.Td>
+                                <Table.ScrollContainer
+                                    minWidth={680}
+                                    aria-label='User payments'
+                                >
+                                    <Table striped stickyHeader>
+                                        <Table.Thead>
+                                            <Table.Tr>
+                                                <Table.Th>#</Table.Th>
+                                                <Table.Th>Date</Table.Th>
+                                                <Table.Th>Package</Table.Th>
+                                                <Table.Th>Amount</Table.Th>
+                                                <Table.Th>Status</Table.Th>
+                                                <Table.Th>Reference</Table.Th>
                                             </Table.Tr>
-                                        ))}
-                                    </Table.Tbody>
-                                </Table>
+                                        </Table.Thead>
+                                        <Table.Tbody>
+                                            {payments.map((p, i) => (
+                                                <Table.Tr key={p.id}>
+                                                    <Table.Td>
+                                                        {(paymentsPage - 1) *
+                                                            perPage +
+                                                            i +
+                                                            1}
+                                                    </Table.Td>
+                                                    <Table.Td>
+                                                        <Text size='xs'>
+                                                            {formatDateTime(
+                                                                p.createdAt,
+                                                            )}
+                                                        </Text>
+                                                    </Table.Td>
+                                                    <Table.Td>
+                                                        <Text size='sm'>
+                                                            {p.packageTitle}
+                                                        </Text>
+                                                        <Text
+                                                            size='xs'
+                                                            c='dimmed'
+                                                        >
+                                                            {p.packageType}
+                                                        </Text>
+                                                    </Table.Td>
+                                                    <Table.Td>
+                                                        {formatPaymentAmount(
+                                                            p.amount,
+                                                        )}
+                                                    </Table.Td>
+                                                    <Table.Td>
+                                                        <Badge
+                                                            size='sm'
+                                                            variant='light'
+                                                            color={
+                                                                PAYMENT_BADGE[
+                                                                    p.status
+                                                                ]?.color ??
+                                                                'gray'
+                                                            }
+                                                        >
+                                                            {PAYMENT_BADGE[
+                                                                p.status
+                                                            ]?.label ??
+                                                                p.status}
+                                                        </Badge>
+                                                    </Table.Td>
+                                                    <Table.Td>
+                                                        <PaymentRefCell
+                                                            provider={
+                                                                p.provider
+                                                            }
+                                                            providerTransactionId={
+                                                                p.providerTransactionId
+                                                            }
+                                                        />
+                                                    </Table.Td>
+                                                </Table.Tr>
+                                            ))}
+                                        </Table.Tbody>
+                                    </Table>
+                                </Table.ScrollContainer>
                             )}
                             <TablePagination
                                 page={paymentsPage}

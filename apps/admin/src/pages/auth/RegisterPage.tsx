@@ -85,11 +85,20 @@ export default function RegisterPage() {
     }
 
     return (
-        <Center mih='100vh' p='md'>
-            <Card withBorder shadow='md' radius='md' p='xl' w={420} maw='100%'>
+        <Center mih='100dvh' p='md'>
+            <Card
+                withBorder
+                shadow='sm'
+                radius='md'
+                p={{ base: 'md', sm: 'xl' }}
+                w='100%'
+                maw={420}
+            >
                 <Stack gap='lg'>
                     <Stack gap={4}>
-                        <Title order={2}>Create admin account</Title>
+                        <Title order={2} size='h3'>
+                            Create admin account
+                        </Title>
                         <Text size='sm' c='dimmed'>
                             Administrators manage NAS devices, packages,
                             customers and payments.
@@ -107,12 +116,17 @@ export default function RegisterPage() {
                             <TextInput
                                 label='Email'
                                 type='email'
+                                inputMode='email'
+                                autoCapitalize='none'
                                 autoComplete='username'
                                 required
                                 {...form.getInputProps('email')}
                             />
                             <PasswordInput
                                 label='Password'
+                                visibilityToggleButtonProps={{
+                                    'aria-label': 'Toggle password visibility',
+                                }}
                                 autoComplete='new-password'
                                 required
                                 description='At least 8 characters, combining 2 of: lowercase, uppercase, numbers, symbols'
@@ -120,6 +134,10 @@ export default function RegisterPage() {
                             />
                             <PasswordInput
                                 label='Confirm password'
+                                visibilityToggleButtonProps={{
+                                    'aria-label':
+                                        'Toggle confirm password visibility',
+                                }}
                                 autoComplete='new-password'
                                 required
                                 {...form.getInputProps('confirmPassword')}

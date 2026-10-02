@@ -18,6 +18,7 @@ import {
     Text,
     TextInput,
     Title,
+    UnstyledButton,
 } from '@mantine/core';
 import { schemaResolver, useForm } from '@mantine/form';
 import { useDebouncedValue } from '@mantine/hooks';
@@ -32,6 +33,7 @@ import {
     type SortDirection,
 } from '@/components/SortableTableHeader';
 import { TablePagination } from '@/components/TablePagination';
+import { TableFilters } from '@/components/TableFilters';
 import {
     generateNasSetupScript,
     deleteNasDevice,
@@ -77,7 +79,12 @@ function SummaryCard({
             <Text size='xs' c='dimmed'>
                 {label}
             </Text>
-            <Text size='xl' fw={700} mt={2}>
+            <Text
+                size='lg'
+                fw={700}
+                mt={2}
+                style={{ overflowWrap: 'anywhere' }}
+            >
                 {value}
             </Text>
             {sub ? (
@@ -161,26 +168,12 @@ export default function NasDevicesPage() {
             setTotal(result.data?.total ?? 0);
             setOnlineTotal(result.data?.onlineTotal ?? 0);
         },
-        [
-            debouncedSearch,
-            status,
-            connection,
-            sortBy,
-            sortDirection,
-            perPage,
-        ],
+        [debouncedSearch, status, connection, sortBy, sortDirection, perPage],
     );
 
     useEffect(() => {
         setPage(1);
-    }, [
-        debouncedSearch,
-        status,
-        connection,
-        sortBy,
-        sortDirection,
-        perPage,
-    ]);
+    }, [debouncedSearch, status, connection, sortBy, sortDirection, perPage]);
 
     const handleSort = (key: NasDeviceSortKey, direction: SortDirection) => {
         setSortBy(key);
@@ -292,7 +285,10 @@ export default function NasDevicesPage() {
 
     const handleCopyScript = () => {
         if (!scriptRow) return;
-        void copyToClipboard(scriptRow.script, 'Setup script copied to clipboard');
+        void copyToClipboard(
+            scriptRow.script,
+            'Setup script copied to clipboard',
+        );
     };
 
     const handleDelete = async () => {
@@ -358,23 +354,30 @@ export default function NasDevicesPage() {
                 </SimpleGrid>
             )}
 
-            <Group wrap='wrap'>
-                <TextInput
-                    placeholder='Search name, IP, model, serial or location'
-                    leftSection={<MdSearch />}
-                    value={search}
-                    onChange={(e) => setSearch(e.currentTarget.value)}
-                    style={{ flex: 1, minWidth: 220 }}
-                />
+            <TableFilters
+                search={
+                    <TextInput
+                        aria-label='Search NAS devices'
+                        placeholder='Search name, IP, model, serial or location'
+                        leftSection={<MdSearch />}
+                        value={search}
+                        onChange={(e) => setSearch(e.currentTarget.value)}
+                        w={{ base: '100%', sm: 'auto' }}
+                        style={{ flex: '1 1 220px', minWidth: 0 }}
+                    />
+                }
+            >
                 <Select
+                    aria-label='Filter NAS devices by status'
                     placeholder='Status'
                     clearable
                     value={status}
                     onChange={setStatus}
                     data={nasDeviceStatusOptions}
-                    w={160}
+                    w={{ base: '100%', sm: 160 }}
                 />
                 <Select
+                    aria-label='Filter NAS devices by connection'
                     placeholder='Connection'
                     clearable
                     value={connection}
@@ -383,9 +386,9 @@ export default function NasDevicesPage() {
                         { value: 'online', label: 'Online' },
                         { value: 'offline', label: 'Offline' },
                     ]}
-                    w={160}
+                    w={{ base: '100%', sm: 160 }}
                 />
-            </Group>
+            </TableFilters>
 
             {loading ? (
                 <Center py='xl'>
@@ -400,20 +403,24 @@ export default function NasDevicesPage() {
                         : 'No NAS devices yet. Add one to get started.'}
                 </Text>
             ) : (
-                <Table.ScrollContainer minWidth={1080}>
+                <Table.ScrollContainer
+                    minWidth={1200}
+                    aria-label='NAS devices table'
+                >
                     <Table striped highlightOnHover stickyHeader>
                         <Table.Thead>
                             <Table.Tr>
                                 <Table.Th>#</Table.Th>
                                 <SortableTableHeader
                                     label='Name'
+                                    width={240}
                                     sortKey='name'
                                     sortBy={sortBy}
                                     sortDirection={sortDirection}
                                     onSort={handleSort}
                                 />
                                 <SortableTableHeader
-                                    label='IP Address'
+                                    label='IP address'
                                     sortKey='ipAddress'
                                     sortBy={sortBy}
                                     sortDirection={sortDirection}
@@ -428,7 +435,7 @@ export default function NasDevicesPage() {
                                     onSort={handleSort}
                                 />
                                 <SortableTableHeader
-                                    label='Serial Number'
+                                    label='Serial'
                                     sortKey='serialNumber'
                                     sortBy={sortBy}
                                     sortDirection={sortDirection}
@@ -450,6 +457,7 @@ export default function NasDevicesPage() {
                                 />
                                 <SortableTableHeader
                                     label='Connection'
+                                    width={100}
                                     sortKey='online'
                                     sortBy={sortBy}
                                     sortDirection={sortDirection}
@@ -465,6 +473,7 @@ export default function NasDevicesPage() {
                                 />
                                 <SortableTableHeader
                                     label='Status'
+                                    width={100}
                                     sortKey='status'
                                     sortBy={sortBy}
                                     sortDirection={sortDirection}
@@ -483,7 +492,18 @@ export default function NasDevicesPage() {
                                     <Table.Td>
                                         {(page - 1) * perPage + i + 1}
                                     </Table.Td>
-                                    <Table.Td fw={500}>{device.name}</Table.Td>
+                                    <Table.Td
+                                        fw={500}
+                                        className='admin-table-identity'
+                                    >
+                                        <UnstyledButton
+                                            fz='sm'
+                                            fw={500}
+                                            aria-label={`View details for ${device.name}`}
+                                        >
+                                            {device.name}
+                                        </UnstyledButton>
+                                    </Table.Td>
                                     <Table.Td>
                                         <Stack gap={0}>
                                             <Text size='sm'>
@@ -542,7 +562,11 @@ export default function NasDevicesPage() {
                                         </Badge>
                                     </Table.Td>
                                     <Table.Td>
-                                        <Group justify='flex-end' gap='xs'>
+                                        <Group
+                                            justify='flex-end'
+                                            gap='xs'
+                                            wrap='nowrap'
+                                        >
                                             <ActionIcon
                                                 variant='light'
                                                 aria-label={`Setup script for ${device.name}`}
@@ -635,11 +659,17 @@ export default function NasDevicesPage() {
                         {scriptError && <Text c='red'>{scriptError}</Text>}
                         <Card withBorder radius='md' padding='md'>
                             <Stack gap='sm'>
-                                <Group justify='space-between' align='flex-start'>
+                                <Group
+                                    justify='space-between'
+                                    align='flex-start'
+                                >
                                     <div>
-                                        <Text fw={600}>1. Enable device mode</Text>
+                                        <Text fw={600}>
+                                            1. Enable device mode
+                                        </Text>
                                         <Text size='sm' c='dimmed'>
-                                            Paste this command into the router console first.
+                                            Paste this command into the router
+                                            console first.
                                         </Text>
                                     </div>
                                     <Button
@@ -656,23 +686,33 @@ export default function NasDevicesPage() {
                                     </Button>
                                 </Group>
                                 <Code block>{DEVICE_MODE_COMMAND}</Code>
-                                <Alert color='yellow' title='Physical confirmation required'>
-                                    Within 5 minutes, briefly press the router's reset or mode
-                                    button, or power it off and back on. The router will reboot.
-                                    Reconnect to its console before continuing to Step 2.
+                                <Alert
+                                    color='yellow'
+                                    title='Physical confirmation required'
+                                >
+                                    Within 5 minutes, briefly press the router's
+                                    reset or mode button, or power it off and
+                                    back on. The router will reboot. Reconnect
+                                    to its console before continuing to Step 2.
                                 </Alert>
                             </Stack>
                         </Card>
 
                         <Card withBorder radius='md' padding='md'>
                             <Stack gap='sm'>
-                                <Group justify='space-between' align='flex-start'>
+                                <Group
+                                    justify='space-between'
+                                    align='flex-start'
+                                >
                                     <div>
-                                        <Text fw={600}>2. Run the setup script</Text>
+                                        <Text fw={600}>
+                                            2. Run the setup script
+                                        </Text>
                                         <Text size='sm' c='dimmed'>
-                                            After the router has rebooted, paste this command into
-                                            the router console. It downloads and runs the setup
-                                            script automatically.
+                                            After the router has rebooted, paste
+                                            this command into the router
+                                            console. It downloads and runs the
+                                            setup script automatically.
                                         </Text>
                                     </div>
                                     <Button
@@ -776,11 +816,16 @@ export default function NasDevicesPage() {
             >
                 <Stack gap='md'>
                     <Text size='sm'>
-                        Delete <Text span fw={600}>{deleteTarget?.name}</Text> permanently?
+                        Delete{' '}
+                        <Text span fw={600}>
+                            {deleteTarget?.name}
+                        </Text>{' '}
+                        permanently?
                     </Text>
                     <Text size='sm' c='dimmed'>
-                        Its setup configuration will be removed. Devices linked to packages,
-                        PPPoE accounts, customers, or payment history cannot be deleted.
+                        Its setup configuration will be removed. Devices linked
+                        to packages, PPPoE accounts, customers, or payment
+                        history cannot be deleted.
                     </Text>
                     <Group justify='flex-end'>
                         <Button
@@ -790,7 +835,11 @@ export default function NasDevicesPage() {
                         >
                             Cancel
                         </Button>
-                        <Button color='red' loading={deleteBusy} onClick={handleDelete}>
+                        <Button
+                            color='red'
+                            loading={deleteBusy}
+                            onClick={handleDelete}
+                        >
                             Delete device
                         </Button>
                     </Group>

@@ -2,13 +2,11 @@ import { AreaChart, BarChart, DonutChart } from '@mantine/charts';
 import {
     ActionIcon,
     Badge,
-    Button,
     Card,
     Center,
     Grid,
     Group,
     Loader,
-    Paper,
     SegmentedControl,
     SimpleGrid,
     Skeleton,
@@ -18,27 +16,16 @@ import {
     Title,
     Tooltip,
 } from '@mantine/core';
-import { DateInput } from '@mantine/dates';
-import { notifications } from '@mantine/notifications';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import {
-    MdBarChart,
-    MdPeople,
-    MdReceiptLong,
-    MdRefresh,
-    MdRouter,
-    MdStorage,
-    MdWifiTethering,
-} from 'react-icons/md';
-import { Link } from 'react-router-dom';
+import { MdRefresh } from 'react-icons/md';
 
+import { TablePagination } from '@/components/TablePagination';
 import {
     getAdminReports,
     getRadiusSummary,
     type AdminReports,
     type NetworkUsage,
 } from '@/lib/api';
-import { TablePagination } from '@/components/TablePagination';
 import { useAutoRefresh } from '@/lib/autoRefresh';
 import { warnBackgroundFailure } from '@/lib/clientError';
 import { dayjs } from '@/lib/dayjs';
@@ -75,11 +62,16 @@ function StatCard({
     sub?: string;
 }) {
     return (
-        <Card withBorder padding='md' radius='md'>
+        <Card withBorder padding='md' radius='md' miw={0}>
             <Text size='xs' c='dimmed'>
                 {label}
             </Text>
-            <Text size='xl' fw={700} mt={2}>
+            <Text
+                size='lg'
+                fw={700}
+                mt={2}
+                style={{ overflowWrap: 'anywhere' }}
+            >
                 {value}
             </Text>
             {sub ? (
@@ -91,15 +83,6 @@ function StatCard({
     );
 }
 
-const quickLinks = [
-    { to: '/users', label: 'Users', icon: MdPeople },
-    { to: '/packages', label: 'Packages', icon: MdRouter },
-    { to: '/sessions', label: 'Live Sessions', icon: MdWifiTethering },
-    { to: '/payments', label: 'Payments', icon: MdReceiptLong },
-    { to: '/nas-devices', label: 'NAS Devices', icon: MdStorage },
-    { to: '/reports', label: 'Full Reports', icon: MdBarChart },
-];
-
 export default function DashboardPage() {
     const { settings, loaded } = useAdminSettings();
     const [reports, setReports] = useState<AdminReports | null>(null);
@@ -109,6 +92,7 @@ export default function DashboardPage() {
     const [preset, setPreset] = useState('30d');
     const [from, setFrom] = useState<Date>(() => presetRange(30).from);
     const [to, setTo] = useState<Date>(() => presetRange(30).to);
+
     const [topUsersPage, setTopUsersPage] = useState(1);
     const topUsersPerPage = 6;
     const reportsRequest = useRef(0);
@@ -131,12 +115,14 @@ export default function DashboardPage() {
             if (requestId !== reportsRequest.current) return;
             if (!silent) setLoading(false);
             if (!res.success) {
-                if (silent) warnBackgroundFailure('refresh dashboard reports', res);
+                if (silent)
+                    warnBackgroundFailure('refresh dashboard reports', res);
                 else setError(res.message || 'Failed to load dashboard data');
                 return;
             }
             if (!res.data) {
-                if (silent) warnBackgroundFailure('refresh dashboard reports', res);
+                if (silent)
+                    warnBackgroundFailure('refresh dashboard reports', res);
                 else setError('Failed to load dashboard data');
                 return;
             }
@@ -162,6 +148,7 @@ export default function DashboardPage() {
         const range = presetRange(days);
         setFrom(range.from);
         setTo(range.to);
+
         void loadReports(range.from, range.to);
     }, [loaded, settings, loadReports]);
 
@@ -191,19 +178,8 @@ export default function DashboardPage() {
         const range = presetRange(found.days);
         setFrom(range.from);
         setTo(range.to);
-        void loadReports(range.from, range.to);
-    };
 
-    const apply = () => {
-        if (from.getTime() > to.getTime()) {
-            notifications.show({ color: 'red', message: 'Invalid date range' });
-            return;
-        }
-        setPreset('');
-        setTopUsersPage(1);
-        const rangeTo = dayjs(to).endOf('day').toDate();
-        setTo(rangeTo);
-        void loadReports(dayjs(from).startOf('day').toDate(), rangeTo);
+        void loadReports(range.from, range.to);
     };
 
     const statusBreakdown = reports
@@ -233,7 +209,7 @@ export default function DashboardPage() {
     }));
 
     return (
-        <Stack gap='md'>
+        <Stack gap='md' miw={0}>
             <Group justify='space-between' wrap='wrap'>
                 <Stack gap={4}>
                     <Title order={3}>Dashboard</Title>
@@ -242,25 +218,18 @@ export default function DashboardPage() {
                         selected date range.
                     </Text>
                 </Stack>
-                <Group wrap='wrap'>
+                <Group
+                    gap='sm'
+                    align='flex-end'
+                    w={{ base: '100%', md: 'auto' }}
+                >
                     <SegmentedControl
+                        aria-label='Date range preset'
+                        w={{ base: '100%', sm: 'auto' }}
                         value={preset}
                         onChange={applyPreset}
                         data={rangePresets.map((p) => p.label)}
                     />
-                    <DateInput
-                        value={from}
-                        onChange={(v) => v && setFrom(new Date(v))}
-                        placeholder='From'
-                        w={130}
-                    />
-                    <DateInput
-                        value={to}
-                        onChange={(v) => v && setTo(new Date(v))}
-                        placeholder='To'
-                        w={130}
-                    />
-                    <Button onClick={apply}>Apply</Button>
                 </Group>
             </Group>
 
@@ -277,6 +246,8 @@ export default function DashboardPage() {
                     </Group>
                     <Tooltip label='Refresh now'>
                         <ActionIcon
+                            aria-label='Refresh live network'
+                            size='lg'
                             variant='subtle'
                             onClick={() => void loadUsage()}
                         >
@@ -321,28 +292,6 @@ export default function DashboardPage() {
                     </SimpleGrid>
                 )}
             </Card>
-
-            {/* Quick access */}
-            <SimpleGrid cols={{ base: 2, sm: 3, lg: 6 }}>
-                {quickLinks.map((link) => (
-                    <Paper
-                        key={link.to}
-                        component={Link}
-                        to={link.to}
-                        withBorder
-                        radius='md'
-                        p='md'
-                        style={{ textDecoration: 'none' }}
-                    >
-                        <Group gap='sm'>
-                            <link.icon size={20} />
-                            <Text size='sm' fw={500}>
-                                {link.label}
-                            </Text>
-                        </Group>
-                    </Paper>
-                ))}
-            </SimpleGrid>
 
             {error ? (
                 <Text c='red'>{error}</Text>
@@ -490,49 +439,72 @@ export default function DashboardPage() {
                                         No paid purchases in this range.
                                     </Text>
                                 ) : (
-                                    <Table striped verticalSpacing={6} stickyHeader>
-                                        <Table.Thead>
-                                            <Table.Tr>
-                                                <Table.Th>#</Table.Th>
-                                                <Table.Th>Customer</Table.Th>
-                                                <Table.Th ta='right'>Spent</Table.Th>
-                                            </Table.Tr>
-                                        </Table.Thead>
-                                        <Table.Tbody>
-                                            {reports.topUsers.items.map((u, i) => (
-                                                    <Table.Tr key={u.userId}>
-                                                        <Table.Td w={30}>
-                                                            {(topUsersPage - 1) * topUsersPerPage + i + 1}
-                                                        </Table.Td>
-                                                        <Table.Td>
-                                                            <Text size='sm'>
-                                                                {u.userName}
-                                                            </Text>
-                                                            <Text
-                                                                size='xs'
-                                                                c='dimmed'
-                                                            >
-                                                                {u.phoneNumber}
-                                                            </Text>
-                                                        </Table.Td>
-                                                        <Table.Td ta='right'>
-                                                            <Text size='sm'>
-                                                                {formatMoney(
-                                                                    u.revenue,
-                                                                )}
-                                                            </Text>
-                                                            <Text
-                                                                size='xs'
-                                                                c='dimmed'
-                                                            >
-                                                                {u.paid}{' '}
-                                                                purchases
-                                                            </Text>
-                                                        </Table.Td>
-                                                    </Table.Tr>
-                                                ))}
-                                        </Table.Tbody>
-                                    </Table>
+                                    <Table.ScrollContainer
+                                        minWidth={380}
+                                        aria-label='Top customers table'
+                                    >
+                                        <Table
+                                            striped
+                                            verticalSpacing='xs'
+                                            stickyHeader
+                                        >
+                                            <Table.Thead>
+                                                <Table.Tr>
+                                                    <Table.Th>#</Table.Th>
+                                                    <Table.Th>
+                                                        Customer
+                                                    </Table.Th>
+                                                    <Table.Th ta='right'>
+                                                        Spent
+                                                    </Table.Th>
+                                                </Table.Tr>
+                                            </Table.Thead>
+                                            <Table.Tbody>
+                                                {reports.topUsers.items.map(
+                                                    (u, i) => (
+                                                        <Table.Tr
+                                                            key={u.userId}
+                                                        >
+                                                            <Table.Td w={30}>
+                                                                {(topUsersPage -
+                                                                    1) *
+                                                                    topUsersPerPage +
+                                                                    i +
+                                                                    1}
+                                                            </Table.Td>
+                                                            <Table.Td>
+                                                                <Text size='sm'>
+                                                                    {u.userName}
+                                                                </Text>
+                                                                <Text
+                                                                    size='xs'
+                                                                    c='dimmed'
+                                                                >
+                                                                    {
+                                                                        u.phoneNumber
+                                                                    }
+                                                                </Text>
+                                                            </Table.Td>
+                                                            <Table.Td ta='right'>
+                                                                <Text size='sm'>
+                                                                    {formatMoney(
+                                                                        u.revenue,
+                                                                    )}
+                                                                </Text>
+                                                                <Text
+                                                                    size='xs'
+                                                                    c='dimmed'
+                                                                >
+                                                                    {u.paid}{' '}
+                                                                    purchases
+                                                                </Text>
+                                                            </Table.Td>
+                                                        </Table.Tr>
+                                                    ),
+                                                )}
+                                            </Table.Tbody>
+                                        </Table>
+                                    </Table.ScrollContainer>
                                 )}
                                 <TablePagination
                                     page={topUsersPage}

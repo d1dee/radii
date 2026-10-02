@@ -3,7 +3,6 @@ import {
     Badge,
     Card,
     Center,
-    Group,
     Loader,
     Select,
     SimpleGrid,
@@ -12,12 +11,13 @@ import {
     Text,
     TextInput,
     Title,
+    UnstyledButton,
 } from '@mantine/core';
-import { DateInput } from '@mantine/dates';
+import { DatePickerInput } from '@mantine/dates';
 import { useDebouncedValue } from '@mantine/hooks';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
 import { MdClose, MdSearch } from 'react-icons/md';
+import { useSearchParams } from 'react-router-dom';
 
 import { PaymentDetailsDrawer } from '@/components/Payments/PaymentDetailsDrawer';
 import { PaymentRefCell } from '@/components/Payments/PaymentRefCell';
@@ -26,6 +26,7 @@ import {
     type SortDirection,
 } from '@/components/SortableTableHeader';
 import { TablePagination } from '@/components/TablePagination';
+import { TableFilters } from '@/components/TableFilters';
 import {
     getAdminPayments,
     type AdminPaymentList,
@@ -54,7 +55,12 @@ function SummaryCard({ label, value }: { label: string; value: string }) {
             <Text size='xs' c='dimmed'>
                 {label}
             </Text>
-            <Text size='xl' fw={700} mt={2}>
+            <Text
+                size='lg'
+                fw={700}
+                mt={2}
+                style={{ overflowWrap: 'anywhere' }}
+            >
                 {value}
             </Text>
         </Card>
@@ -84,6 +90,10 @@ export default function PaymentsPage() {
     const [debouncedSearch] = useDebouncedValue(search, 300);
     const [from, setFrom] = useState<Date | null>(null);
     const [to, setTo] = useState<Date | null>(null);
+    const [dateRange, setDateRange] = useState<[string | null, string | null]>([
+        null,
+        null,
+    ]);
     const [page, setPage] = useState(1);
     const [sortBy, setSortBy] = useState<PaymentSortKey>('createdAt');
     const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
@@ -165,7 +175,7 @@ export default function PaymentsPage() {
     return (
         <>
             <Stack pb='md' gap={4}>
-                <Title order={3}>Payment Log</Title>
+                <Title order={3}>Payments</Title>
                 <Text size='sm' c='dimmed'>
                     Every package purchase across your NAS devices — filter by
                     status, customer or date range.
@@ -173,7 +183,7 @@ export default function PaymentsPage() {
             </Stack>
             <Stack pb='md'>
                 {data && (
-                    <SimpleGrid cols={{ base: 2, lg: 4 }}>
+                    <SimpleGrid cols={{ base: 4 }}>
                         <SummaryCard
                             label='Revenue (filtered)'
                             value={formatMoney(data.summary.revenue)}
@@ -193,15 +203,21 @@ export default function PaymentsPage() {
                     </SimpleGrid>
                 )}
 
-                <Group wrap='wrap'>
-                    <TextInput
-                        placeholder='Search phone, name, package or receipt code'
-                        leftSection={<MdSearch />}
-                        value={search}
-                        onChange={(e) => setSearch(e.currentTarget.value)}
-                        style={{ flex: 1, minWidth: 220 }}
-                    />
+                <TableFilters
+                    search={
+                        <TextInput
+                            aria-label='Search payments'
+                            placeholder='Search phone, name, package or receipt code'
+                            leftSection={<MdSearch />}
+                            value={search}
+                            onChange={(e) => setSearch(e.currentTarget.value)}
+                            w={{ base: '100%', sm: 'auto' }}
+                            style={{ flex: '1 1 220px', minWidth: 0 }}
+                        />
+                    }
+                >
                     <Select
+                        aria-label='Filter payments by status'
                         placeholder='Status'
                         clearable
                         value={status}
@@ -211,9 +227,10 @@ export default function PaymentsPage() {
                             { value: 'pending', label: 'Pending' },
                             { value: 'failed', label: 'Failed' },
                         ]}
-                        w={140}
+                        w={{ base: '100%', sm: 140 }}
                     />
                     <Select
+                        aria-label='Filter payments by package type'
                         placeholder='Package type'
                         clearable
                         value={packageType}
@@ -222,7 +239,7 @@ export default function PaymentsPage() {
                             { value: 'hotspot', label: 'Hotspot' },
                             { value: 'pppoe', label: 'PPPoE' },
                         ]}
-                        w={150}
+                        w={{ base: '100%', sm: 150 }}
                     />
                     {pppoeAccountId && (
                         <Badge
@@ -243,21 +260,32 @@ export default function PaymentsPage() {
                             PPPoE account
                         </Badge>
                     )}
-                    <DateInput
-                        placeholder='Date From'
-                        value={from}
-                        onChange={(v) => setFrom(v ? new Date(v) : null)}
+                    <DatePickerInput
+                        type='range'
+                        allowSingleDateInRange
+                        aria-label='Payments date range'
+                        placeholder='Date range'
+                        value={dateRange}
+                        onChange={(range) => {
+                            setDateRange(range);
+                            if (range[0] && range[1]) {
+                                setFrom(
+                                    dayjs(range[0]).startOf('day').toDate(),
+                                );
+                                setTo(dayjs(range[1]).endOf('day').toDate());
+                            } else if (!range[0] && !range[1]) {
+                                setFrom(null);
+                                setTo(null);
+                            }
+                        }}
+                        valueFormat='DD MMM YYYY'
                         clearable
-                        w={150}
+                        clearButtonProps={{
+                            'aria-label': 'Clear payments date range',
+                        }}
+                        w={{ base: '100%', sm: 300 }}
                     />
-                    <DateInput
-                        placeholder='Date To'
-                        value={to}
-                        onChange={(v) => setTo(v ? new Date(v) : null)}
-                        clearable
-                        w={150}
-                    />
-                </Group>
+                </TableFilters>
             </Stack>
             {loading ? (
                 <Center py='xl'>
@@ -271,7 +299,10 @@ export default function PaymentsPage() {
                 </Text>
             ) : (
                 <>
-                    <Table.ScrollContainer minWidth='md' pb='md'>
+                    <Table.ScrollContainer
+                        minWidth={900}
+                        aria-label='Payments table'
+                    >
                         <Table withRowBorders highlightOnHover stickyHeader>
                             <Table.Thead>
                                 <Table.Tr>
@@ -286,6 +317,7 @@ export default function PaymentsPage() {
                                     />
                                     <SortableTableHeader
                                         label='Customer'
+                                        width={240}
                                         sortKey='customer'
                                         sortBy={sortBy}
                                         sortDirection={sortDirection}
@@ -293,6 +325,7 @@ export default function PaymentsPage() {
                                     />
                                     <SortableTableHeader
                                         label='Package'
+                                        width={220}
                                         sortKey='package'
                                         sortBy={sortBy}
                                         sortDirection={sortDirection}
@@ -308,6 +341,7 @@ export default function PaymentsPage() {
                                     />
                                     <SortableTableHeader
                                         label='Status'
+                                        width={100}
                                         sortKey='status'
                                         sortBy={sortBy}
                                         sortDirection={sortDirection}
@@ -331,15 +365,19 @@ export default function PaymentsPage() {
                                                 {formatDateTime(p.createdAt)}
                                             </Text>
                                         </Table.Td>
-                                        <Table.Td>
-                                            <Text size='sm' fw={500}>
+                                        <Table.Td className='admin-table-identity'>
+                                            <UnstyledButton
+                                                fz='sm'
+                                                fw={500}
+                                                aria-label={`View payment details for ${p.userName || p.phoneNumber} on ${formatDateTime(p.createdAt)}`}
+                                            >
                                                 {p.userName ?? '—'}
-                                            </Text>
+                                            </UnstyledButton>
                                             <Text size='xs' c='dimmed'>
                                                 {p.phoneNumber}
                                             </Text>
                                         </Table.Td>
-                                        <Table.Td>
+                                        <Table.Td className='admin-table-identity'>
                                             <Text size='sm'>
                                                 {p.packageTitle ?? '—'}
                                             </Text>
@@ -347,7 +385,7 @@ export default function PaymentsPage() {
                                                 {p.packageType ?? ''}
                                             </Text>
                                         </Table.Td>
-                                        <Table.Td>
+                                        <Table.Td className='admin-table-value'>
                                             {formatMoney(p.amount)}
                                         </Table.Td>
                                         <Table.Td>

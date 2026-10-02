@@ -1,0 +1,196 @@
+:root {
+    --admin-canvas: #f5f7fa;
+    --admin-surface: #ffffff;
+    --admin-rule: #e1e6ed;
+    --admin-table-header: #eef2f6;
+    color-scheme: light;
+}
+
+:root[data-mantine-color-scheme='dark'] {
+    --admin-canvas: #1a1b1e;
+    --admin-surface: #242528;
+    --admin-rule: #373a40;
+    --admin-table-header: #2c2e33;
+    color-scheme: dark;
+}
+
+body {
+    background: var(--admin-canvas);
+}
+
+.admin-shell .mantine-AppShell-header,
+.admin-shell .mantine-AppShell-navbar {
+    background: var(--admin-surface);
+    border-color: var(--admin-rule);
+}
+
+.admin-main {
+    min-width: 0;
+    background: var(--admin-canvas);
+}
+
+.admin-main > * {
+    flex-shrink: 0;
+    min-width: 0;
+}
+
+.admin-main .mantine-Grid-col,
+.admin-main .mantine-SimpleGrid-root > *,
+.admin-main .mantine-Group-root > .mantine-Stack-root {
+    min-width: 0;
+}
+
+.admin-main .mantine-Card-root,
+.admin-main .mantine-Paper-root {
+    background: var(--admin-surface);
+    border-color: var(--admin-rule);
+}
+
+.admin-nav-link {
+    border-radius: var(--mantine-radius-sm);
+    min-height: 42px;
+    font-weight: 500;
+}
+
+.admin-dialog-title {
+    font-weight: 600;
+    font-size: var(--mantine-font-size-md);
+}
+
+.admin-table-scroll {
+    max-width: 100%;
+    min-width: 0;
+    border: 1px solid var(--admin-rule);
+    border-radius: var(--mantine-radius-sm);
+    background: var(--admin-surface);
+    scrollbar-width: thin;
+}
+
+.admin-table-heading {
+    background: var(--admin-table-header);
+    font-size: var(--mantine-font-size-sm);
+    font-weight: 600;
+    white-space: nowrap;
+    vertical-align: middle;
+}
+
+.admin-table-cell {
+    vertical-align: middle;
+    font-size: var(--mantine-font-size-sm);
+    overflow-wrap: break-word;
+}
+
+.admin-table-heading:first-child,
+.admin-table-cell:first-child {
+    width: 44px;
+    white-space: nowrap;
+}
+
+.admin-table-identity {
+    min-width: 220px;
+    width: 240px;
+    overflow-wrap: anywhere;
+}
+
+.admin-table-identity > .mantine-UnstyledButton-root {
+    text-align: start;
+    line-height: 1.45;
+}
+
+.admin-table-value {
+    white-space: nowrap;
+}
+
+.admin-table-cell .mantine-Badge-root {
+    flex-shrink: 0;
+    min-width: max-content;
+}
+
+.admin-table-scroll .mantine-Table-table {
+    margin-bottom: 0;
+}
+
+.admin-table-scroll:focus-visible,
+.admin-shell :is(button, a):focus-visible {
+    outline: 2px solid var(--mantine-color-blue-6);
+    outline-offset: 2px;
+}
+
+.admin-skip-link {
+    position: fixed;
+    top: -100px;
+    left: 16px;
+    z-index: 400;
+    padding: 8px 12px;
+    background: var(--admin-surface);
+    color: var(--mantine-color-text);
+    border: 1px solid var(--admin-rule);
+    border-radius: var(--mantine-radius-sm);
+}
+
+.admin-skip-link:focus {
+    top: 8px;
+}
+
+.admin-account-button {
+    border-radius: var(--mantine-radius-sm);
+    padding: 4px;
+    max-width: 45%;
+}
+
+.admin-account-button:hover {
+    background: var(--mantine-color-default-hover);
+}
+
+.admin-pagination {
+    width: 100%;
+    max-width: 420px;
+    min-width: 0;
+}
+
+.admin-filter-search {
+    flex: 1 1 220px;
+    min-width: 0;
+}
+
+.admin-filter-options {
+    display: contents;
+}
+
+@media (max-width: 47.99em) {
+    .admin-filter-search {
+        flex: 1 1 0;
+    }
+
+    .admin-filter-options {
+        display: none;
+        flex-basis: 100%;
+        min-width: 0;
+    }
+
+    .admin-filter-options[data-open] {
+        display: flex;
+    }
+
+    .admin-main .mantine-Card-root {
+        padding: var(--mantine-spacing-sm);
+    }
+
+    .admin-table-heading,
+    .admin-table-cell {
+        padding: 10px;
+    }
+
+    .admin-pagination {
+        max-width: none;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .admin-shell *,
+    .admin-shell *::before,
+    .admin-shell *::after {
+        transition-duration: 0s !important;
+        animation-duration: 0s !important;
+    }
+}

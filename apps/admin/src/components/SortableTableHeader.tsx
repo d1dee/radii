@@ -5,6 +5,7 @@ export type SortDirection = 'asc' | 'desc';
 
 export function SortableTableHeader<SortKey extends string>({
     label,
+    width,
     sortKey,
     sortBy,
     sortDirection,
@@ -12,6 +13,7 @@ export function SortableTableHeader<SortKey extends string>({
     initialDirection = 'asc',
 }: {
     label: string;
+    width?: number;
     sortKey: SortKey;
     sortBy: SortKey | null;
     sortDirection: SortDirection;
@@ -32,6 +34,7 @@ export function SortableTableHeader<SortKey extends string>({
 
     return (
         <Table.Th
+            style={width ? { width, minWidth: width } : undefined}
             aria-sort={
                 active
                     ? sortDirection === 'asc'
@@ -47,7 +50,7 @@ export function SortableTableHeader<SortKey extends string>({
                 style={{ width: '100%' }}
             >
                 <Group gap={4} wrap='nowrap'>
-                    <Text span size='sm' fw={700} inherit>
+                    <Text span size='sm' fw={600} inherit>
                         {label}
                     </Text>
                     <Icon

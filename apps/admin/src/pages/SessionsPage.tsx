@@ -16,10 +16,11 @@ import {
     TextInput,
     Title,
     Tooltip,
+    UnstyledButton,
 } from '@mantine/core';
 import { useDebouncedValue } from '@mantine/hooks';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { MdDelete, MdEdit, MdRefresh, MdSearch } from 'react-icons/md';
+import { MdDelete, MdEdit, MdSearch } from 'react-icons/md';
 import { useSearchParams } from 'react-router-dom';
 
 import { SessionDetailsDrawer } from '@/components/Sessions/SessionDetailsDrawer';
@@ -27,6 +28,7 @@ import {
     SortableTableHeader,
     type SortDirection,
 } from '@/components/SortableTableHeader';
+import { TableFilters } from '@/components/TableFilters';
 import { TablePagination } from '@/components/TablePagination';
 import {
     disconnectSession,
@@ -44,7 +46,6 @@ import {
     formatDayTime,
     formatSeconds,
     formatSpeed,
-    formatTime,
 } from '@/lib/format';
 import { notifyResult } from '@/lib/notify';
 import { useAdminSettings } from '@/lib/settings';
@@ -55,7 +56,12 @@ function SummaryCard({ label, value }: { label: string; value: string }) {
             <Text size='xs' c='dimmed'>
                 {label}
             </Text>
-            <Text size='xl' fw={700} mt={2}>
+            <Text
+                size='lg'
+                fw={700}
+                mt={2}
+                style={{ overflowWrap: 'anywhere' }}
+            >
                 {value}
             </Text>
         </Card>
@@ -73,7 +79,6 @@ export default function SessionsPage() {
     const [page, setPage] = useState(1);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
-    const [lastLoaded, setLastLoaded] = useState<Date | null>(null);
     const [detailsId, setDetailsId] = useState<string | null>(null);
 
     const [search, setSearch] = useState(searchParams.get('q') ?? '');
@@ -121,7 +126,6 @@ export default function SessionsPage() {
             setError(null);
             setSessions(res.data?.sessions ?? []);
             setTotal(res.data?.total ?? 0);
-            setLastLoaded(new Date());
         },
         [
             debouncedSearch,
@@ -207,25 +211,10 @@ export default function SessionsPage() {
                         RADIUS accounting history and currently connected users.
                     </Text>
                 </Stack>
-                <Group>
-                    {lastLoaded && (
-                        <Text size='xs' c='dimmed'>
-                            Updated {formatTime(lastLoaded, true)}
-                        </Text>
-                    )}
-                    <Button
-                        size='xs'
-                        variant='light'
-                        leftSection={<MdRefresh size={14} />}
-                        onClick={() => void load(page)}
-                    >
-                        Refresh
-                    </Button>
-                </Group>
             </Group>
 
             {!loading && !error && (
-                <SimpleGrid cols={{ base: 2, lg: 4 }}>
+                <SimpleGrid cols={{ base: 4 }}>
                     <SummaryCard
                         label='Sessions (filtered)'
                         value={String(total)}
@@ -245,15 +234,21 @@ export default function SessionsPage() {
                 </SimpleGrid>
             )}
 
-            <Group wrap='wrap'>
-                <TextInput
-                    placeholder='Search username, MAC or IP'
-                    leftSection={<MdSearch />}
-                    value={search}
-                    onChange={(e) => setSearch(e.currentTarget.value)}
-                    style={{ flex: 1, minWidth: 220 }}
-                />
+            <TableFilters
+                search={
+                    <TextInput
+                        aria-label='Search sessions'
+                        placeholder='Search username, MAC or IP'
+                        leftSection={<MdSearch />}
+                        value={search}
+                        onChange={(e) => setSearch(e.currentTarget.value)}
+                        w={{ base: '100%', sm: 'auto' }}
+                        style={{ flex: '1 1 220px', minWidth: 0 }}
+                    />
+                }
+            >
                 <Select
+                    aria-label='Filter sessions by status'
                     placeholder='Status'
                     clearable
                     value={sessionStatus}
@@ -262,9 +257,10 @@ export default function SessionsPage() {
                         { value: 'live', label: 'Live' },
                         { value: 'ended', label: 'Ended' },
                     ]}
-                    w={140}
+                    w={{ base: '100%', sm: 140 }}
                 />
                 <Select
+                    aria-label='Filter sessions by type'
                     placeholder='Type'
                     clearable
                     value={sessionType}
@@ -275,17 +271,9 @@ export default function SessionsPage() {
                         { value: 'hotspot', label: 'Hotspot' },
                         { value: 'pppoe', label: 'PPPoE' },
                     ]}
-                    w={140}
+                    w={{ base: '100%', sm: 140 }}
                 />
-                <Badge variant='light' size='lg'>
-                    {total}{' '}
-                    {sessionStatus === 'live'
-                        ? 'live'
-                        : sessionStatus === 'ended'
-                          ? 'ended'
-                          : 'sessions'}
-                </Badge>
-            </Group>
+            </TableFilters>
 
             {loading ? (
                 <Center py='xl'>
@@ -298,13 +286,17 @@ export default function SessionsPage() {
                     No sessions match.
                 </Text>
             ) : (
-                <Table.ScrollContainer minWidth={1200}>
+                <Table.ScrollContainer
+                    minWidth={1200}
+                    aria-label='Sessions table'
+                >
                     <Table striped highlightOnHover stickyHeader>
                         <Table.Thead>
                             <Table.Tr>
                                 <Table.Th>#</Table.Th>
                                 <SortableTableHeader
                                     label='User'
+                                    width={240}
                                     sortKey='username'
                                     sortBy={sortBy}
                                     sortDirection={sortDirection}
@@ -313,6 +305,7 @@ export default function SessionsPage() {
                                 <Table.Th>Client</Table.Th>
                                 <SortableTableHeader
                                     label='NAS'
+                                    width={220}
                                     sortKey='nasIpAddress'
                                     sortBy={sortBy}
                                     sortDirection={sortDirection}
@@ -320,6 +313,7 @@ export default function SessionsPage() {
                                 />
                                 <SortableTableHeader
                                     label='Status'
+                                    width={100}
                                     sortKey='live'
                                     sortBy={sortBy}
                                     sortDirection={sortDirection}
@@ -371,11 +365,15 @@ export default function SessionsPage() {
                                     <Table.Td>
                                         {(page - 1) * perPage + i + 1}
                                     </Table.Td>
-                                    <Table.Td>
+                                    <Table.Td className='admin-table-identity'>
                                         <Group gap={6} wrap='nowrap'>
-                                            <Text size='sm' fw={500}>
+                                            <UnstyledButton
+                                                fz='sm'
+                                                fw={500}
+                                                aria-label={`View session details for ${s.username || s.acctSessionId}`}
+                                            >
                                                 {s.username || '—'}
-                                            </Text>
+                                            </UnstyledButton>
                                             <Badge
                                                 variant='light'
                                                 size='xs'
@@ -402,7 +400,7 @@ export default function SessionsPage() {
                                             {s.callingStationId ?? ''}
                                         </Text>
                                     </Table.Td>
-                                    <Table.Td>
+                                    <Table.Td className='admin-table-identity'>
                                         <Text size='sm'>
                                             {s.nasName ?? '—'}
                                         </Text>
@@ -452,7 +450,11 @@ export default function SessionsPage() {
                                     </Table.Td>
                                     <Table.Td>
                                         {s.live ? (
-                                            <Group justify='flex-end' gap={4}>
+                                            <Group
+                                                justify='flex-end'
+                                                gap={4}
+                                                wrap='nowrap'
+                                            >
                                                 <Tooltip label='Edit remaining time'>
                                                     <ActionIcon
                                                         variant='light'

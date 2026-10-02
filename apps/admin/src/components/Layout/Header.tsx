@@ -1,5 +1,5 @@
 import {
-    ActionIcon,
+    Burger,
     Avatar,
     Group,
     Menu,
@@ -8,17 +8,18 @@ import {
     UnstyledButton,
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { MdLogout, MdMenu, MdSettings } from 'react-icons/md';
+import { MdLogout, MdSettings } from 'react-icons/md';
 import { useNavigate } from 'react-router-dom';
 
 import { authClient, useSession } from '@/lib/auth';
 import { reportClientError } from '@/lib/clientError';
 
 interface HeaderProps {
+    opened: boolean;
     onMenuClick: () => void;
 }
 
-export function Header({ onMenuClick }: HeaderProps) {
+export function Header({ opened, onMenuClick }: HeaderProps) {
     const { data: session } = useSession();
     const navigate = useNavigate();
 
@@ -57,24 +58,42 @@ export function Header({ onMenuClick }: HeaderProps) {
     }
 
     return (
-        <Group h='100%' px='md' justify='space-between'>
-            <Group>
-                <ActionIcon variant='subtle' onClick={onMenuClick} hiddenFrom='md'>
-                    <MdMenu size={20} />
-                </ActionIcon>
-                <Text fw={700} size='lg'>
+        <Group
+            h='100%'
+            px={{ base: 'sm', sm: 'lg' }}
+            justify='space-between'
+            wrap='nowrap'
+        >
+            <Group gap='sm' wrap='nowrap'>
+                <Burger
+                    opened={opened}
+                    onClick={onMenuClick}
+                    hiddenFrom='md'
+                    size='sm'
+                    aria-label={opened ? 'Close navigation' : 'Open navigation'}
+                    aria-expanded={opened}
+                    aria-controls='admin-navigation'
+                />
+                <Text fw={700} size='md' style={{ whiteSpace: 'nowrap' }}>
                     Radii Admin
                 </Text>
             </Group>
 
             <Menu shadow='md' width={220} position='bottom-end' withinPortal>
                 <Menu.Target>
-                    <UnstyledButton>
-                        <Group gap='xs'>
+                    <UnstyledButton
+                        className='admin-account-button'
+                        aria-label='Admin account menu'
+                    >
+                        <Group gap='xs' wrap='nowrap'>
                             <Avatar color='blue' radius='xl' size='md'>
                                 {initials}
                             </Avatar>
-                            <Stack gap={0} visibleFrom='sm'>
+                            <Stack
+                                gap={0}
+                                visibleFrom='sm'
+                                style={{ minWidth: 0 }}
+                            >
                                 <Text size='sm' fw={500} lineClamp={1}>
                                     {name}
                                 </Text>

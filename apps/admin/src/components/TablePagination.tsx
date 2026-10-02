@@ -26,6 +26,16 @@ export function TablePagination({
                 {total.toLocaleString()}
             </Text>
             <Pagination
+                className='admin-pagination'
+                layout='responsive'
+                aria-label='Table pagination'
+                getControlProps={(control) => ({
+                    'aria-label': `${control[0].toUpperCase()}${control.slice(1)} page`,
+                })}
+                getItemProps={(item) => ({
+                    'aria-label': `Page ${item}`,
+                    'aria-current': item === page ? 'page' : undefined,
+                })}
                 value={page}
                 onChange={onChange}
                 total={totalPages}
@@ -33,8 +43,8 @@ export function TablePagination({
                 withEdges
                 siblings={1}
                 boundaries={1}
-                size='sm'
-                style={{ flexShrink: 0 }}
+                size='md'
+                gap={4}
             />
         </Group>
     );

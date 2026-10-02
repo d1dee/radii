@@ -7,19 +7,18 @@ import {
     Grid,
     Group,
     Loader,
-    ScrollAreaAutosize,
     SimpleGrid,
     Stack,
     Table,
     Text,
     Title,
 } from '@mantine/core';
-import { DateInput } from '@mantine/dates';
+import { DatePickerInput } from '@mantine/dates';
 import { notifications } from '@mantine/notifications';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { getAdminReports, type AdminReports } from '@/lib/api';
 import { TablePagination } from '@/components/TablePagination';
+import { getAdminReports, type AdminReports } from '@/lib/api';
 import { useAutoRefresh } from '@/lib/autoRefresh';
 import { warnBackgroundFailure } from '@/lib/clientError';
 import { dayjs } from '@/lib/dayjs';
@@ -36,11 +35,16 @@ function SummaryCard({
     sub?: string;
 }) {
     return (
-        <Card withBorder padding='md' radius='md'>
+        <Card withBorder padding='md' radius='md' miw={0}>
             <Text size='xs' c='dimmed'>
                 {label}
             </Text>
-            <Text size='xl' fw={700} mt={2}>
+            <Text
+                size='lg'
+                fw={700}
+                mt={2}
+                style={{ overflowWrap: 'anywhere' }}
+            >
                 {value}
             </Text>
             {sub ? (
@@ -61,6 +65,10 @@ export default function ReportsPage() {
         dayjs().subtract(30, 'day').startOf('day').toDate(),
     );
     const [to, setTo] = useState<Date>(dayjs().endOf('day').toDate());
+    const [dateRange, setDateRange] = useState<[string | null, string | null]>([
+        dayjs(from).format('YYYY-MM-DD'),
+        dayjs(to).format('YYYY-MM-DD'),
+    ]);
     const [topPackagesPage, setTopPackagesPage] = useState(1);
     const [topUsersPage, setTopUsersPage] = useState(1);
     const [heavyUsersPage, setHeavyUsersPage] = useState(1);
@@ -122,6 +130,10 @@ export default function ReportsPage() {
         const rangeTo = dayjs().endOf('day').toDate();
         setFrom(rangeFrom);
         setTo(rangeTo);
+        setDateRange([
+            dayjs(rangeFrom).format('YYYY-MM-DD'),
+            dayjs(rangeTo).format('YYYY-MM-DD'),
+        ]);
         void load(rangeFrom, rangeTo);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [loaded]);
@@ -133,7 +145,10 @@ export default function ReportsPage() {
     useAutoRefresh(autoRefreshData, loaded);
 
     const apply = () => {
-        if (from.getTime() > to.getTime()) {
+        if (!dateRange[0] || !dateRange[1]) return;
+        const rangeFrom = dayjs(dateRange[0]).startOf('day').toDate();
+        const rangeTo = dayjs(dateRange[1]).endOf('day').toDate();
+        if (rangeFrom.getTime() > rangeTo.getTime()) {
             notifications.show({ color: 'red', message: 'Invalid date range' });
             return;
         }
@@ -145,9 +160,9 @@ export default function ReportsPage() {
         setTopPackagesPage(1);
         setTopUsersPage(1);
         setHeavyUsersPage(1);
-        const rangeTo = dayjs(to).endOf('day').toDate();
+        setFrom(rangeFrom);
         setTo(rangeTo);
-        void load(from, rangeTo, firstPages);
+        void load(rangeFrom, rangeTo, firstPages);
     };
 
     useEffect(() => {
@@ -187,20 +202,27 @@ export default function ReportsPage() {
                         consumers for a date range.
                     </Text>
                 </Stack>
-                <Group>
-                    <DateInput
-                        label='From'
-                        value={from}
-                        onChange={(v) => v && setFrom(new Date(v))}
-                        w={150}
+                <Group
+                    gap='sm'
+                    align='flex-end'
+                    w={{ base: '100%', sm: 'auto' }}
+                    wrap='nowrap'
+                >
+                    <DatePickerInput
+                        type='range'
+                        allowSingleDateInRange
+                        label='Date range'
+                        placeholder='Select date range'
+                        value={dateRange}
+                        onChange={setDateRange}
+                        valueFormat='DD MMM YYYY'
+                        w='100%'
                     />
-                    <DateInput
-                        label='To'
-                        value={to}
-                        onChange={(v) => v && setTo(new Date(v))}
-                        w={150}
-                    />
-                    <Button onClick={apply} mt='lg'>
+                    <Button
+                        onClick={apply}
+                        disabled={!dateRange[0] || !dateRange[1]}
+                        w='200'
+                    >
                         Apply
                     </Button>
                 </Group>
@@ -244,100 +266,101 @@ export default function ReportsPage() {
                             }
                         />
                     </SimpleGrid>
-                    <ScrollAreaAutosize>
-                        <Stack>
-                            <Grid>
-                                <Grid.Col span={{ base: 12, lg: 8 }}>
-                                    <Card withBorder padding='md' h='100%'>
-                                        <Text fw={600} mb='sm'>
-                                            Daily revenue
+                    <Stack gap='md' miw={0}>
+                        <Grid>
+                            <Grid.Col span={{ base: 12, lg: 8 }}>
+                                <Card withBorder padding='md' h='100%'>
+                                    <Text fw={600} mb='sm'>
+                                        Daily revenue
+                                    </Text>
+                                    {reports.daily.length === 0 ? (
+                                        <Text size='sm' c='dimmed'>
+                                            No payments in this range.
                                         </Text>
-                                        {reports.daily.length === 0 ? (
-                                            <Text size='sm' c='dimmed'>
-                                                No payments in this range.
-                                            </Text>
-                                        ) : (
-                                            <AreaChart
-                                                h='100%'
-                                                data={reports.daily}
-                                                dataKey='day'
-                                                series={[
-                                                    {
-                                                        name: 'revenue',
-                                                        color: 'teal.6',
-                                                        label: 'Revenue',
-                                                    },
-                                                ]}
-                                                curveType='monotone'
-                                                withDots={false}
-                                                yAxisProps={{ width: 60 }}
+                                    ) : (
+                                        <AreaChart
+                                            h={280}
+                                            data={reports.daily}
+                                            dataKey='day'
+                                            series={[
+                                                {
+                                                    name: 'revenue',
+                                                    color: 'teal.6',
+                                                    label: 'Revenue',
+                                                },
+                                            ]}
+                                            curveType='monotone'
+                                            withDots={false}
+                                            yAxisProps={{ width: 60 }}
+                                        />
+                                    )}
+                                </Card>
+                            </Grid.Col>
+                            <Grid.Col span={{ base: 12, lg: 4 }}>
+                                <Card withBorder padding='md' h='100%'>
+                                    <Text fw={600} mb='sm'>
+                                        Payments by status
+                                    </Text>
+                                    {statusBreakdown.every(
+                                        (s) => s.value === 0,
+                                    ) ? (
+                                        <Text size='sm' c='dimmed'>
+                                            No payments in this range.
+                                        </Text>
+                                    ) : (
+                                        <Center>
+                                            <DonutChart
+                                                data={statusBreakdown}
+                                                size={220}
+                                                thickness={28}
+                                                withLabelsLine={false}
+                                                chartLabel={String(
+                                                    statusBreakdown.reduce(
+                                                        (sum, s) =>
+                                                            sum + s.value,
+                                                        0,
+                                                    ),
+                                                )}
                                             />
-                                        )}
-                                    </Card>
-                                </Grid.Col>
-                                <Grid.Col span={{ base: 12, lg: 4 }}>
-                                    <Card withBorder padding='md' h='100%'>
-                                        <Text fw={600} mb='sm'>
-                                            Payments by status
+                                        </Center>
+                                    )}
+                                    <Group justify='center' gap='md' mt='sm'>
+                                        {statusBreakdown.map((s) => (
+                                            <Group key={s.name} gap={4}>
+                                                <Badge
+                                                    size='xs'
+                                                    color={s.color}
+                                                    variant='filled'
+                                                >
+                                                    {s.value}
+                                                </Badge>
+                                                <Text size='xs'>{s.name}</Text>
+                                            </Group>
+                                        ))}
+                                    </Group>
+                                </Card>
+                            </Grid.Col>
+                        </Grid>
+                        <Grid>
+                            <Grid.Col span={{ base: 12, lg: 6 }}>
+                                <Card withBorder padding='md' h='100%'>
+                                    <Text fw={600} mb='sm'>
+                                        Top packages by revenue
+                                    </Text>
+                                    {reports.topPackages.items.length === 0 ? (
+                                        <Text size='sm' c='dimmed'>
+                                            No paid purchases in this range.
                                         </Text>
-                                        {statusBreakdown.every(
-                                            (s) => s.value === 0,
-                                        ) ? (
-                                            <Text size='sm' c='dimmed'>
-                                                No payments in this range.
-                                            </Text>
-                                        ) : (
-                                            <Center>
-                                                <DonutChart
-                                                    data={statusBreakdown}
-                                                    size={280}
-                                                    thickness={28}
-                                                    withLabelsLine={false}
-                                                    chartLabel={String(
-                                                        statusBreakdown.reduce(
-                                                            (sum, s) =>
-                                                                sum + s.value,
-                                                            0,
-                                                        ),
-                                                    )}
-                                                />
-                                            </Center>
-                                        )}
-                                        <Group
-                                            justify='center'
-                                            gap='md'
-                                            mt='sm'
+                                    ) : (
+                                        <Table.ScrollContainer
+                                            minWidth={560}
+                                            aria-label='Top packages table'
                                         >
-                                            {statusBreakdown.map((s) => (
-                                                <Group key={s.name} gap={4}>
-                                                    <Badge
-                                                        size='xs'
-                                                        color={s.color}
-                                                        variant='filled'
-                                                    >
-                                                        {s.value}
-                                                    </Badge>
-                                                    <Text size='xs'>
-                                                        {s.name}
-                                                    </Text>
-                                                </Group>
-                                            ))}
-                                        </Group>
-                                    </Card>
-                                </Grid.Col>
-                            </Grid>
-                            <Grid>
-                                <Grid.Col span={{ base: 12, lg: 6 }}>
-                                    <Card withBorder padding='md' h='100%'>
-                                        <Text fw={600} mb='sm'>
-                                            Top packages by revenue
-                                        </Text>
-                                        {reports.topPackages.items.length === 0 ? (
-                                            <Text size='sm' c='dimmed'>
-                                                No paid purchases in this range.
-                                            </Text>
-                                        ) : (
-                                            <Table striped h='100%' stickyHeader>
+                                            <Table
+                                                striped
+                                                verticalSpacing='xs'
+                                                stickyHeader
+                                            >
                                                 <Table.Thead>
                                                     <Table.Tr>
                                                         <Table.Th>#</Table.Th>
@@ -364,7 +387,11 @@ export default function ReportsPage() {
                                                                 }
                                                             >
                                                                 <Table.Td>
-                                                                    {(topPackagesPage - 1) * perPage + i + 1}
+                                                                    {(topPackagesPage -
+                                                                        1) *
+                                                                        perPage +
+                                                                        i +
+                                                                        1}
                                                                 </Table.Td>
                                                                 <Table.Td>
                                                                     {p.title}
@@ -390,27 +417,36 @@ export default function ReportsPage() {
                                                     )}
                                                 </Table.Tbody>
                                             </Table>
-                                        )}
-                                        <TablePagination
-                                            page={topPackagesPage}
-                                            perPage={perPage}
-                                            total={reports.topPackages.total}
-                                            onChange={setTopPackagesPage}
-                                            loading={loading}
-                                        />
-                                    </Card>
-                                </Grid.Col>
-                                <Grid.Col span={{ base: 12, lg: 6 }}>
-                                    <Card withBorder padding='md' h='100%'>
-                                        <Text fw={600} mb='sm'>
-                                            Top customers by spend
+                                        </Table.ScrollContainer>
+                                    )}
+                                    <TablePagination
+                                        page={topPackagesPage}
+                                        perPage={perPage}
+                                        total={reports.topPackages.total}
+                                        onChange={setTopPackagesPage}
+                                        loading={loading}
+                                    />
+                                </Card>
+                            </Grid.Col>
+                            <Grid.Col span={{ base: 12, lg: 6 }}>
+                                <Card withBorder padding='md' h='100%'>
+                                    <Text fw={600} mb='sm'>
+                                        Top customers by spend
+                                    </Text>
+                                    {reports.topUsers.items.length === 0 ? (
+                                        <Text size='sm' c='dimmed'>
+                                            No paid purchases in this range.
                                         </Text>
-                                        {reports.topUsers.items.length === 0 ? (
-                                            <Text size='sm' c='dimmed'>
-                                                No paid purchases in this range.
-                                            </Text>
-                                        ) : (
-                                            <Table striped stickyHeader>
+                                    ) : (
+                                        <Table.ScrollContainer
+                                            minWidth={500}
+                                            aria-label='Top customers table'
+                                        >
+                                            <Table
+                                                striped
+                                                verticalSpacing='xs'
+                                                stickyHeader
+                                            >
                                                 <Table.Thead>
                                                     <Table.Tr>
                                                         <Table.Th>#</Table.Th>
@@ -432,7 +468,11 @@ export default function ReportsPage() {
                                                                 key={u.userId}
                                                             >
                                                                 <Table.Td>
-                                                                    {(topUsersPage - 1) * perPage + i + 1}
+                                                                    {(topUsersPage -
+                                                                        1) *
+                                                                        perPage +
+                                                                        i +
+                                                                        1}
                                                                 </Table.Td>
                                                                 <Table.Td>
                                                                     <Text size='sm'>
@@ -462,28 +502,36 @@ export default function ReportsPage() {
                                                     )}
                                                 </Table.Tbody>
                                             </Table>
-                                        )}
-                                        <TablePagination
-                                            page={topUsersPage}
-                                            perPage={perPage}
-                                            total={reports.topUsers.total}
-                                            onChange={setTopUsersPage}
-                                            loading={loading}
-                                        />
-                                    </Card>
-                                </Grid.Col>
-                                <Grid.Col span={12}>
-                                    <Card withBorder padding='md'>
-                                        <Text fw={600} mb='sm'>
-                                            Heaviest consumers (RADIUS
-                                            accounting)
+                                        </Table.ScrollContainer>
+                                    )}
+                                    <TablePagination
+                                        page={topUsersPage}
+                                        perPage={perPage}
+                                        total={reports.topUsers.total}
+                                        onChange={setTopUsersPage}
+                                        loading={loading}
+                                    />
+                                </Card>
+                            </Grid.Col>
+                            <Grid.Col span={12}>
+                                <Card withBorder padding='md'>
+                                    <Text fw={600} mb='sm'>
+                                        Heaviest consumers (RADIUS accounting)
+                                    </Text>
+                                    {reports.heavyUsers.items.length === 0 ? (
+                                        <Text size='sm' c='dimmed'>
+                                            No sessions in this range.
                                         </Text>
-                                        {reports.heavyUsers.items.length === 0 ? (
-                                            <Text size='sm' c='dimmed'>
-                                                No sessions in this range.
-                                            </Text>
-                                        ) : (
-                                            <Table striped stickyHeader>
+                                    ) : (
+                                        <Table.ScrollContainer
+                                            minWidth={640}
+                                            aria-label='Heaviest consumers table'
+                                        >
+                                            <Table
+                                                striped
+                                                verticalSpacing='xs'
+                                                stickyHeader
+                                            >
                                                 <Table.Thead>
                                                     <Table.Tr>
                                                         <Table.Th>#</Table.Th>
@@ -508,7 +556,11 @@ export default function ReportsPage() {
                                                                 key={u.username}
                                                             >
                                                                 <Table.Td>
-                                                                    {(heavyUsersPage - 1) * perPage + i + 1}
+                                                                    {(heavyUsersPage -
+                                                                        1) *
+                                                                        perPage +
+                                                                        i +
+                                                                        1}
                                                                 </Table.Td>
                                                                 <Table.Td>
                                                                     {u.username ||
@@ -532,19 +584,19 @@ export default function ReportsPage() {
                                                     )}
                                                 </Table.Tbody>
                                             </Table>
-                                        )}
-                                        <TablePagination
-                                            page={heavyUsersPage}
-                                            perPage={perPage}
-                                            total={reports.heavyUsers.total}
-                                            onChange={setHeavyUsersPage}
-                                            loading={loading}
-                                        />
-                                    </Card>
-                                </Grid.Col>
-                            </Grid>
-                        </Stack>
-                    </ScrollAreaAutosize>
+                                        </Table.ScrollContainer>
+                                    )}
+                                    <TablePagination
+                                        page={heavyUsersPage}
+                                        perPage={perPage}
+                                        total={reports.heavyUsers.total}
+                                        onChange={setHeavyUsersPage}
+                                        loading={loading}
+                                    />
+                                </Card>
+                            </Grid.Col>
+                        </Grid>
+                    </Stack>
                 </>
             )}
         </>
