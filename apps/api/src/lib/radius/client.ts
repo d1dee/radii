@@ -295,8 +295,8 @@ export interface RadiusConfig {
     dmPort: number;
     timeoutMs: number;
     retries: number;
-    // Cumulative time-bank (noExpiry) packages: Acct-Interim-Interval pushed
-    // to the NAS so bank accounting stays fresh between reconciles.
+    // Acct-Interim-Interval pushed to the NAS for live usage and time-bank
+    // accounting updates.
     bankInterimSeconds: number;
 }
 
@@ -2683,13 +2683,6 @@ export class RadiusClient {
     ): Promise<{ total: number; sessions: AdminSessionInfo[] }> {
         if (nasIpAddresses.length === 0) return { total: 0, sessions: [] };
         const q = opts.q ? `%${opts.q}%` : undefined;
-        // True when the accounting username is a stable PPPoE dialer account;
-        // every other session dialed through the hotspot.
-        const pppoeFlag = sql<boolean>`exists (
-            select 1
-            from ${pppoeServiceAccounts} psa
-            where psa.username = ${radacct.username}
-        )`;
         // NAS name resolved from the direct IP or the WireGuard tunnel address.
         const nasName = sql<string | null>`(
             select matched.name
@@ -2706,6 +2699,8 @@ export class RadiusClient {
             .select({ id: pppoeServiceAccounts.id })
             .from(pppoeServiceAccounts)
             .where(eq(pppoeServiceAccounts.username, radacct.username));
+        // Keep the subquery's outer username qualified in single-table selects.
+        const pppoeFlag = exists(pppoeAccountMatch);
         const where = and(
             isNotNull(radacct.acctstarttime),
             inArray(radacct.nasipaddress, nasIpAddresses),
@@ -3663,9 +3658,9 @@ export class RadiusClient {
     // shared-users), Mikrotik-Rate-Limit (first value = client upload /
     // router rx, 'k'/'M' units), Mikrotik-Total-Limit (+Gigawords above
     // 4 GiB) for the byte quota, and the Class cookie for accounting
-    // correlation. Bank (noExpiry) packages additionally request a short
-    // Acct-Interim-Interval so the cumulative-time counters in radacct stay
-    // fresh; their Session-Timeout is the remaining bank balance and is
+    // correlation. Every package requests Acct-Interim-Interval so live usage
+    // counters stay fresh when the hotspot profile uses "received".
+    // Bank packages' Session-Timeout is the remaining bank balance and is
     // re-synced at every login and by the bank reconciler.
     private sessionReplyAttributes(
         activationId: string,
@@ -3677,14 +3672,11 @@ export class RadiusClient {
             { attribute: 'Session-Timeout', value: sessionSeconds },
             { attribute: 'Port-Limit', value: pkg.maxDevices },
             { attribute: 'Class', value: activationId },
-        ];
-
-        if (pkg.noExpiry || pkg.fairUsageLimit > 0) {
-            attrs.push({
+            {
                 attribute: 'Acct-Interim-Interval',
                 value: this.config.bankInterimSeconds,
-            });
-        }
+            },
+        ];
 
         if (
             pkg.uploadRate > 0 ||
