@@ -176,7 +176,7 @@ export type PackageRow = {
     burstUploadThreshold: number;
     burstDownloadThreshold: number;
     burstTime: number;
-    // NAS devices the package is restricted to; empty means all devices.
+    // NAS devices the package is available on; empty means hidden.
     nasDeviceIds: string[];
     isActive: boolean;
     createdAt: string;
@@ -449,10 +449,10 @@ export function updateNasDevice(id: string, body: CreateNasDeviceInput) {
     });
 }
 
-export function deleteNasDevice(id: string) {
-    return request<{ message?: string }>(
+export function deleteNasDevice(id: string, confirmationName: string) {
+    return request<{ accountsClosed: number; sessionsDisconnected: number }>(
         `/admin/nas-devices/${id}`,
-        undefined,
+        { warningAcknowledged: true, confirmationName },
         { method: 'DELETE' },
     );
 }

@@ -111,6 +111,8 @@ export default function NasDevicesPage() {
     const [detailsId, setDetailsId] = useState<string | null>(null);
     const [deleteTarget, setDeleteTarget] = useState<NasDeviceRow | null>(null);
     const [deleteBusy, setDeleteBusy] = useState(false);
+    const [deleteStep, setDeleteStep] = useState<'warning' | 'confirm'>('warning');
+    const [deleteName, setDeleteName] = useState('');
 
     const [search, setSearch] = useState('');
     const [debouncedSearch] = useDebouncedValue(search, 300);
@@ -294,9 +296,16 @@ export default function NasDevicesPage() {
     };
 
     const handleDelete = async () => {
-        if (!deleteTarget) return;
+        if (
+            !deleteTarget ||
+            deleteBusy ||
+            deleteStep !== 'confirm' ||
+            deleteName !== deleteTarget.name
+        ) {
+            return;
+        }
         setDeleteBusy(true);
-        const result = await deleteNasDevice(deleteTarget.id);
+        const result = await deleteNasDevice(deleteTarget.id, deleteName);
         setDeleteBusy(false);
         notifyResult(result, 'NAS device deleted');
         if (!result.success) return;
@@ -600,6 +609,8 @@ export default function NasDevicesPage() {
                                                 aria-label={`Delete ${device.name}`}
                                                 onClick={(e) => {
                                                     e.stopPropagation();
+                                                    setDeleteStep('warning');
+                                                    setDeleteName('');
                                                     setDeleteTarget(device);
                                                 }}
                                             >
@@ -812,8 +823,14 @@ export default function NasDevicesPage() {
 
             <Modal
                 opened={deleteTarget !== null}
-                onClose={() => setDeleteTarget(null)}
-                title='Delete NAS device'
+                onClose={() => {
+                    if (!deleteBusy) setDeleteTarget(null);
+                }}
+                title={
+                    deleteStep === 'warning'
+                        ? 'Delete NAS device: step 1 of 2'
+                        : 'Confirm deletion: step 2 of 2'
+                }
                 centered
                 closeOnClickOutside={!deleteBusy}
                 closeOnEscape={!deleteBusy}
@@ -827,11 +844,37 @@ export default function NasDevicesPage() {
                         </Text>{' '}
                         permanently?
                     </Text>
+                    <Alert
+                        color='red'
+                        title='Warning: service will be interrupted'
+                    >
+                        All linked PPPoE accounts will be closed and detached from
+                        this NAS. Live PPPoE sessions will be disconnected where
+                        the router is reachable. Customer records, PPPoE accounts,
+                        and payment history will be retained.
+                    </Alert>
                     <Text size='sm' c='dimmed'>
-                        Its setup configuration will be removed. Devices linked
-                        to packages, PPPoE accounts, customers, or payment
-                        history cannot be deleted.
+                        The NAS, its setup configuration, package links, and
+                        hotspot login requests will be removed. Payments will no
+                        longer be linked to this NAS. Packages losing their last
+                        NAS link will be hidden until explicitly linked to
+                        another NAS device.
+                        This deletion cannot be undone and does not reset the
+                        physical router.
                     </Text>
+                    {deleteStep === 'confirm' ? (
+                        <TextInput
+                            label='Type the NAS name to confirm'
+                            description={deleteTarget?.name}
+                            value={deleteName}
+                            onChange={(event) =>
+                                setDeleteName(event.currentTarget.value)
+                            }
+                            disabled={deleteBusy}
+                            autoComplete='off'
+                            data-autofocus
+                        />
+                    ) : null}
                     <Group justify='flex-end'>
                         <Button
                             variant='default'
@@ -840,13 +883,26 @@ export default function NasDevicesPage() {
                         >
                             Cancel
                         </Button>
-                        <Button
-                            color='red'
-                            loading={deleteBusy}
-                            onClick={handleDelete}
-                        >
-                            Delete device
-                        </Button>
+                        {deleteStep === 'warning' ? (
+                            <Button
+                                color='red'
+                                onClick={() => setDeleteStep('confirm')}
+                            >
+                                I understand, continue
+                            </Button>
+                        ) : (
+                            <Button
+                                color='red'
+                                loading={deleteBusy}
+                                disabled={
+                                    !deleteTarget ||
+                                    deleteName !== deleteTarget.name
+                                }
+                                onClick={handleDelete}
+                            >
+                                Delete device permanently
+                            </Button>
+                        )}
                     </Group>
                 </Stack>
             </Modal>

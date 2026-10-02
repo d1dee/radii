@@ -12,12 +12,9 @@ import {
 } from 'drizzle-orm';
 import { db } from '../db';
 import {
-    hotspotLoginRequest,
     nas,
     nasDevice,
     nasSetupScript,
-    packageNasDevice,
-    packagePayments,
     pppoeServiceAccounts,
     radacct,
 } from '../db/schema';
@@ -190,53 +187,47 @@ export async function updateNasDevice(
 
 export type DeleteNasDeviceResult =
     | { status: 'not_found' }
-    | { status: 'in_use'; reason: 'packages' | 'customers' | 'pppoe' }
-    | { status: 'deleted'; wgPublicKey: string | null };
+    | { status: 'confirmation_mismatch' }
+    | {
+          status: 'deleted';
+          wgPublicKey: string | null;
+          accountsClosed: number;
+          disconnectSessions: () => Promise<number>;
+      };
 
 export async function deleteNasDevice(
     id: string,
     ownerId: string,
+    confirmationName: string,
+    prepareDisconnect: (usernames: string[]) => Promise<() => Promise<number>>,
 ): Promise<DeleteNasDeviceResult> {
     return db.transaction(async (tx) => {
         const [device] = await tx
-            .select({ id: nasDevice.id })
+            .select({ id: nasDevice.id, name: nasDevice.name })
             .from(nasDevice)
             .where(and(eq(nasDevice.ownerId, ownerId), eq(nasDevice.id, id)))
-            .limit(1);
+            .limit(1)
+            .for('update');
         if (!device) return { status: 'not_found' };
+        if (confirmationName !== device.name) {
+            return { status: 'confirmation_mismatch' };
+        }
 
-        const [packageLink, payment, login, pppoeAccount] = await Promise.all([
-            tx
-                .select({ id: packageNasDevice.packageId })
-                .from(packageNasDevice)
-                .where(eq(packageNasDevice.nasDeviceId, id))
-                .limit(1),
-            tx
-                .select({ id: packagePayments.id })
-                .from(packagePayments)
-                .where(eq(packagePayments.nasDeviceId, id))
-                .limit(1),
-            tx
-                .select({ id: hotspotLoginRequest.id })
-                .from(hotspotLoginRequest)
-                .where(eq(hotspotLoginRequest.nasDeviceId, id))
-                .limit(1),
-            tx
-                .select({ id: pppoeServiceAccounts.id })
-                .from(pppoeServiceAccounts)
-                .where(eq(pppoeServiceAccounts.nasDeviceId, id))
-                .limit(1),
-        ]);
-
-        if (pppoeAccount.length > 0) {
-            return { status: 'in_use', reason: 'pppoe' };
-        }
-        if (payment.length > 0 || login.length > 0) {
-            return { status: 'in_use', reason: 'customers' };
-        }
-        if (packageLink.length > 0) {
-            return { status: 'in_use', reason: 'packages' };
-        }
+        // Keep account/payment history, but reject future dials and release the
+        // NAS foreign key. Deletion and account closure commit atomically.
+        const accounts = await tx
+            .update(pppoeServiceAccounts)
+            .set({ status: 'closed', nasDeviceId: null, claimCodeHash: null })
+            .where(
+                and(
+                    eq(pppoeServiceAccounts.nasDeviceId, id),
+                    eq(pppoeServiceAccounts.tenantAdminId, ownerId),
+                ),
+            )
+            .returning({ username: pppoeServiceAccounts.username });
+        const disconnectSessions = await prepareDisconnect(
+            accounts.map((account) => account.username),
+        );
 
         const [setup] = await tx
             .select({
@@ -253,6 +244,13 @@ export async function deleteNasDevice(
             .delete(nasDevice)
             .where(and(eq(nasDevice.ownerId, ownerId), eq(nasDevice.id, id)));
 
-        return { status: 'deleted', wgPublicKey: setup?.wgPublicKey ?? null };
+        // Existing FKs detach payments and remove package links, hotspot login
+        // requests, and setup configuration without deleting financial history.
+        return {
+            status: 'deleted',
+            wgPublicKey: setup?.wgPublicKey ?? null,
+            accountsClosed: accounts.length,
+            disconnectSessions,
+        };
     });
 }

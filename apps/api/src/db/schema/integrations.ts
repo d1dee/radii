@@ -67,7 +67,7 @@ export const nasDeviceRelations = relations(nasDevice, ({ one }) => ({
 }));
 
 // Many-to-many link between packages and NAS devices. A package with no rows
-// here is available on all NAS devices.
+// here is hidden; availability requires an explicit NAS link.
 export const packageNasDevice = pgTable(
     'package_nas_device',
     {

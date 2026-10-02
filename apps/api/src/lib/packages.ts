@@ -36,13 +36,13 @@ export type AdminPackageSortBy =
     | 'isActive';
 
 // Only packages explicitly linked to the given NAS device are returned; a
-// package without any link rows never shows up. Pass nasDeviceId=null to list
-// packages of the type without a NAS restriction (the PPPoE portal has no
-// captive-portal redirect that carries a device id).
+// package without any link rows never shows up. Without a selected NAS, no
+// packages are available.
 export async function getPackagesGroupedByCategory(
     nasDeviceId: string | null,
     type: PackageType = 'hotspot',
 ): Promise<Array<[string, Package[]]>> {
+    if (!nasDeviceId) return [];
     const rows = await db
         .select()
         .from(packages)
@@ -50,25 +50,17 @@ export async function getPackagesGroupedByCategory(
             and(
                 eq(packages.isActive, true),
                 eq(packages.type, type),
-                nasDeviceId
-                    ? exists(
-                          db
-                              .select()
-                              .from(packageNasDevice)
-                              .where(
-                                  and(
-                                      eq(
-                                          packageNasDevice.packageId,
-                                          packages.id,
-                                      ),
-                                      eq(
-                                          packageNasDevice.nasDeviceId,
-                                          nasDeviceId,
-                                      ),
-                                  ),
-                              ),
-                      )
-                    : undefined,
+                exists(
+                    db
+                        .select()
+                        .from(packageNasDevice)
+                        .where(
+                            and(
+                                eq(packageNasDevice.packageId, packages.id),
+                                eq(packageNasDevice.nasDeviceId, nasDeviceId),
+                            ),
+                        ),
+                ),
             ),
         )
         .orderBy(packages.category, asc(packages.title));
@@ -230,8 +222,8 @@ export async function getOrderPackageForNas(
     return row;
 }
 
-// An empty nasDeviceIds list means the package is available on all NAS
-// devices (no join rows are stored).
+// A package is available only on explicitly linked NAS devices. Without
+// join rows it remains hidden from customer portals.
 export async function createPackage(
     data: InsertPackage,
     nasDeviceIds: string[],
@@ -324,7 +316,7 @@ export async function getNasDeviceIdsForPackage(
 }
 
 // Returns a map of package id -> linked NAS device ids for the given
-// packages; packages absent from the map have no restriction.
+// packages; packages absent from the map have no NAS links and are hidden.
 export async function getNasDeviceIdsByPackage(
     packageIds: string[],
 ): Promise<Record<string, string[]>> {

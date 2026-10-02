@@ -621,23 +621,39 @@ app.put('/nas-devices/:id', requireAdmin, async (c) => {
 app.delete('/nas-devices/:id', requireAdmin, async (c) => {
     const id = c.req.param('id');
     if (!id) return jsonError(c, 404, 'NAS device not found');
+    const parsed = z
+        .object({
+            warningAcknowledged: z.literal(true),
+            confirmationName: z.string().min(1),
+        })
+        .safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) {
+        return jsonError(
+            c,
+            400,
+            'Acknowledge the deletion warning and type the NAS name to confirm',
+        );
+    }
+    const adminId = c.get('adminSession').userId;
     try {
         const result = await deleteNasDevice(
             id,
-            c.get('adminSession').userId,
+            adminId,
+            parsed.data.confirmationName,
+            (usernames) =>
+                radiusClient.preparePppoeDisconnects(usernames, adminId),
         );
         if (result.status === 'not_found') {
             return jsonError(c, 404, 'NAS device not found');
         }
-        if (result.status === 'in_use') {
-            const message =
-                result.reason === 'pppoe'
-                    ? 'Move or remove this NAS device’s PPPoE accounts before deleting it'
-                    : result.reason === 'packages'
-                      ? 'Remove this NAS device from its packages before deleting it'
-                      : 'This NAS device has customer or payment history and cannot be deleted';
-            return jsonError(c, 409, message);
+        if (result.status === 'confirmation_mismatch') {
+            return jsonError(
+                c,
+                400,
+                'The confirmation name does not match the current NAS device name',
+            );
         }
+        const sessionsDisconnected = await result.disconnectSessions();
         if (result.wgPublicKey && wgManagementEnabled()) {
             try {
                 await removePeer(result.wgPublicKey);
@@ -648,7 +664,11 @@ app.delete('/nas-devices/:id', requireAdmin, async (c) => {
                 });
             }
         }
-        return c.json({ success: true, message: 'NAS device deleted' });
+        return c.json({
+            success: true,
+            message: 'NAS device deleted; linked PPPoE accounts closed and detached',
+            data: { accountsClosed: result.accountsClosed, sessionsDisconnected },
+        });
     } catch (e) {
         if (isForeignKeyViolation(e)) {
             return jsonError(

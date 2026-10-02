@@ -1188,6 +1188,74 @@ export class RadiusClient {
         return disconnected;
     }
 
+    // Capture routing/secret data before NAS deletion; send only after account
+    // closure commits, while the WireGuard peer is still available.
+    async preparePppoeDisconnects(
+        usernames: string[],
+        adminId: string,
+    ): Promise<() => Promise<number>> {
+        const prepared: {
+            username: string;
+            session: SessionInfo;
+            target: { host: string; port: number; secret: string };
+        }[] = [];
+        const addresses = usernames.length
+            ? [...(await getAdminNasAddresses(adminId))]
+            : [];
+        if (addresses.length) {
+            const rows = await db
+                .select()
+                .from(radacct)
+                .where(
+                    and(
+                        inArray(radacct.username, usernames),
+                        inArray(radacct.nasipaddress, addresses),
+                        isNull(radacct.acctstoptime),
+                        isNotNull(radacct.acctstarttime),
+                    ),
+                );
+            for (const row of rows) {
+                const session = this.sessionInfoFromRow(row);
+                try {
+                    const target = await this.nasTargetForSession(
+                        session,
+                        adminId,
+                    );
+                    prepared.push({ username: row.username, session, target });
+                } catch (error) {
+                    logger.error(
+                        'Failed to prepare deleted NAS session disconnect',
+                        { nasIpAddress: session.nasIpAddress, error },
+                    );
+                }
+            }
+        }
+        return async () => {
+            let disconnected = 0;
+            for (const { username, session, target } of prepared) {
+                try {
+                    if (
+                        await this.terminateSessionAtNas(
+                            username,
+                            session,
+                            adminId,
+                            target,
+                        )
+                    ) {
+                        await this.closeSessionRecord(session);
+                        disconnected += 1;
+                    }
+                } catch (error) {
+                    logger.error('Deleted NAS session disconnect failed', {
+                        nasIpAddress: session.nasIpAddress,
+                        error,
+                    });
+                }
+            }
+            return disconnected;
+        };
+    }
+
     // Admin migration: re-point an account at another NAS device owned by the
     // same admin tenant and cut its live sessions so the customer re-dials
     // through the new router.
@@ -4009,8 +4077,10 @@ export class RadiusClient {
         username: string,
         session: SessionInfo,
         adminId?: string,
+        preparedTarget?: { host: string; port: number; secret: string },
     ): Promise<boolean> {
-        const target = await this.nasTargetForSession(session, adminId);
+        const target =
+            preparedTarget ?? await this.nasTargetForSession(session, adminId);
         const attrs = this.sessionCoaIdentity(username, session);
         if (session.callingStationId) {
             attrs.push({
