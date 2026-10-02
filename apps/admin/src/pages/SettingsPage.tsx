@@ -1,5 +1,6 @@
 import {
     Alert,
+    Box,
     Button,
     Card,
     Center,
@@ -8,13 +9,13 @@ import {
     Grid,
     Group,
     Loader,
+    Modal,
     NumberInput,
     PasswordInput,
     SegmentedControl,
     Select,
     Stack,
     Switch,
-    Tabs,
     Text,
     TextInput,
     Title,
@@ -26,20 +27,50 @@ import {
     adminMpesaSettingsSchema,
     type AdminSettings,
 } from '@shared/index';
-import { useState } from 'react';
 import {
-    MdContacts,
-    MdDashboard,
-    MdInventory2,
-    MdPalette,
-    MdPayment,
-    MdVpnKey,
-} from 'react-icons/md';
+    createContext,
+    useCallback,
+    useContext,
+    useEffect,
+    useState,
+} from 'react';
+import {
+    useBeforeUnload,
+    useBlocker,
+    useLocation,
+    useNavigate,
+} from 'react-router-dom';
 
 import { previewDateTime } from '@/lib/format';
 import { useAdminSettings } from '@/lib/settings';
 import { PageLayout } from '@/components/Layout/PageLayout';
 import { TbInfoTriangle } from 'react-icons/tb';
+import { settingsCategories } from '@/lib/settingsCategories';
+
+const SettingsDraftContext = createContext<
+    (category: string, dirty: boolean, saving: boolean) => void
+>(() => {});
+
+function useSettingsDraft(category: string, dirty: boolean, saving: boolean) {
+    const setDirty = useContext(SettingsDraftContext);
+    useEffect(() => {
+        setDirty(category, dirty, saving);
+    }, [category, dirty, saving, setDirty]);
+}
+
+const sections = {
+    appearance: AppearanceSection,
+    dashboard: DashboardSection,
+    mpesa: MpesaSection,
+    contacts: ContactsSection,
+    packages: PackagesSection,
+    pppoe: PppoeSection,
+};
+
+function isSettingsPath(pathname: string) {
+    return pathname === '/settings' || pathname.startsWith('/settings/');
+}
+
 // Curated IANA zone list covering the operator's likely locales; searchable,
 // with Africa/Nairobi (server default) first.
 const TIMEZONE_OPTIONS = [
@@ -85,18 +116,68 @@ const DATE_FORMAT_OPTIONS = [
 
 export default function SettingsPage() {
     const { loaded } = useAdminSettings();
+    const location = useLocation();
+    const navigate = useNavigate();
+    const matchedCategory = settingsCategories.find(
+        (item) => location.pathname === `/settings/${item.id}`,
+    );
+    const category = matchedCategory ?? settingsCategories[0];
+    const [drafts, setDrafts] = useState<
+        Record<string, { dirty: boolean; saving: boolean }>
+    >({});
+    const setDirty = useCallback((id: string, dirty: boolean, saving: boolean) => {
+        setDrafts((current) =>
+            current[id]?.dirty === dirty && current[id]?.saving === saving
+                ? current
+                : { ...current, [id]: { dirty, saving } },
+        );
+    }, []);
+    const hasDrafts = Object.values(drafts).some((draft) => draft.dirty);
+    // Saves replace the full document, so prevent overlapping saves or edits.
+    const isSaving = Object.values(drafts).some((draft) => draft.saving);
+    const blocker = useBlocker(
+        ({ nextLocation }) => hasDrafts && !isSettingsPath(nextLocation.pathname),
+    );
+    useBeforeUnload(
+        useCallback((event) => {
+            if (hasDrafts) {
+                event.preventDefault();
+                event.returnValue = '';
+            }
+        }, [hasDrafts]),
+    );
+
+    useEffect(() => {
+        if (!matchedCategory) navigate('/settings/appearance', { replace: true });
+    }, [matchedCategory, navigate]);
+
+    useEffect(() => {
+        document.querySelector('.admin-page-viewport')?.scrollTo({ top: 0 });
+    }, [category.id]);
+
     const header = (
         <Container size='xl' mx={0} px={0} w='100%'>
             <Stack gap={4}>
                 <Title order={2} size='h3'>
-                    Settings
+                    Settings / {category.label}
                 </Title>
                 <Text c='dimmed' size='sm'>
-                    Manage your console preferences and the customer portal
-                    experience for your network. Payments fall back to the
-                    server-wide M-Pesa configuration when you have not set your
-                    own credentials.
+                    {category.description}
                 </Text>
+                <Select
+                    hiddenFrom='md'
+                    mt='xs'
+                    aria-label='Settings category'
+                    value={category.id}
+                    allowDeselect={false}
+                    data={settingsCategories.map((item) => ({
+                        value: item.id,
+                        label: item.label,
+                    }))}
+                    onChange={(value) => {
+                        if (value) navigate(`/settings/${value}`);
+                    }}
+                />
             </Stack>
         </Container>
     );
@@ -118,68 +199,60 @@ export default function SettingsPage() {
     return (
         <PageLayout header={header} label='Settings'>
             <Container size='xl' mx={0} px={0} w='100%'>
-                <Stack gap='md'>
-                    <Tabs defaultValue='appearance'>
-                        <Tabs.List grow>
-                            <Tabs.Tab
-                                value='appearance'
-                                leftSection={<MdPalette size={16} />}
+                <SettingsDraftContext.Provider value={setDirty}>
+                    {/* Keep drafts in memory, including credentials, only while settings is open. */}
+                    {settingsCategories.map((item) => {
+                        const Section = sections[item.id];
+                        return (
+                            <Box
+                                component='fieldset'
+                                key={item.id}
+                                disabled={isSaving}
+                                display={category.id === item.id ? 'block' : 'none'}
+                                m={0}
+                                p={0}
+                                style={{ border: 0, minWidth: 0 }}
                             >
-                                Appearance
-                            </Tabs.Tab>
-                            <Tabs.Tab
-                                value='dashboard'
-                                leftSection={<MdDashboard size={16} />}
-                            >
-                                Dashboard
-                            </Tabs.Tab>
-                            <Tabs.Tab
-                                value='mpesa'
-                                leftSection={<MdPayment size={16} />}
-                            >
-                                M-Pesa
-                            </Tabs.Tab>
-                            <Tabs.Tab
-                                value='contacts'
-                                leftSection={<MdContacts size={16} />}
-                            >
-                                Contacts
-                            </Tabs.Tab>
-                            <Tabs.Tab
-                                value='packages'
-                                leftSection={<MdInventory2 size={16} />}
-                            >
-                                Packages
-                            </Tabs.Tab>
-                            <Tabs.Tab
-                                value='pppoe'
-                                leftSection={<MdVpnKey size={16} />}
-                            >
-                                PPPoE
-                            </Tabs.Tab>
-                        </Tabs.List>
-
-                        <Tabs.Panel value='appearance' pt='lg'>
-                            <AppearanceSection />
-                        </Tabs.Panel>
-                        <Tabs.Panel value='dashboard' pt='lg'>
-                            <DashboardSection />
-                        </Tabs.Panel>
-                        <Tabs.Panel value='mpesa' pt='lg'>
-                            <MpesaSection />
-                        </Tabs.Panel>
-                        <Tabs.Panel value='contacts' pt='lg'>
-                            <ContactsSection />
-                        </Tabs.Panel>
-                        <Tabs.Panel value='packages' pt='lg'>
-                            <PackagesSection />
-                        </Tabs.Panel>
-                        <Tabs.Panel value='pppoe' pt='lg'>
-                            <PppoeSection />
-                        </Tabs.Panel>
-                    </Tabs>
-                </Stack>
+                                <Card padding='md' radius='md' withBorder>
+                                    <Section />
+                                </Card>
+                            </Box>
+                        );
+                    })}
+                </SettingsDraftContext.Provider>
             </Container>
+            <Modal
+                opened={blocker.state === 'blocked'}
+                onClose={() => {
+                    if (blocker.state === 'blocked') blocker.reset();
+                }}
+                title='Discard unsaved settings?'
+                centered
+            >
+                <Text size='sm'>
+                    You have unsaved changes. Switching categories keeps your
+                    drafts, but leaving settings discards them.
+                </Text>
+                <Group justify='flex-end' mt='lg'>
+                    <Button
+                        variant='default'
+                        data-autofocus
+                        onClick={() => {
+                            if (blocker.state === 'blocked') blocker.reset();
+                        }}
+                    >
+                        Keep editing
+                    </Button>
+                    <Button
+                        color='red'
+                        onClick={() => {
+                            if (blocker.state === 'blocked') blocker.proceed();
+                        }}
+                    >
+                        Discard and leave
+                    </Button>
+                </Group>
+            </Modal>
         </PageLayout>
     );
 }
@@ -219,6 +292,7 @@ function AppearanceSection() {
     const form = useForm<AdminSettings['appearance']>({
         initialValues: settings.appearance,
     });
+    useSettingsDraft('appearance', form.isDirty(), saving);
 
     const values = form.values;
     const sample = new Date();
@@ -226,6 +300,7 @@ function AppearanceSection() {
     const handleSubmit = async (next: AdminSettings['appearance']) => {
         setSaving(true);
         const res = await saveSettings({ ...settings, appearance: next });
+        if (res.success) form.resetDirty(next);
         setSaving(false);
         notifySaved(
             'Appearance saved',
@@ -347,6 +422,8 @@ function DashboardSection() {
         },
     });
 
+    useSettingsDraft('dashboard', form.isDirty(), saving);
+
     const handleSubmit = async (values: DashboardForm) => {
         setSaving(true);
         const res = await saveSettings({
@@ -361,6 +438,7 @@ function DashboardSection() {
                 perPage: Number(values.perPage) as 10 | 25 | 50 | 100,
             },
         });
+        if (res.success) form.resetDirty(values);
         setSaving(false);
         notifySaved(
             'Dashboard defaults saved',
@@ -442,10 +520,12 @@ function ContactsSection() {
         initialValues: settings.contacts,
         validate: schemaResolver(adminContactsSettingsSchema),
     });
+    useSettingsDraft('contacts', form.isDirty(), saving);
 
     const handleSubmit = async (values: ContactsFormValues) => {
         setSaving(true);
         const res = await saveSettings({ ...settings, contacts: values });
+        if (res.success) form.resetDirty(values);
         setSaving(false);
         notifySaved(
             'Contacts saved',
@@ -527,6 +607,8 @@ function PackagesSection() {
         },
     });
 
+    useSettingsDraft('packages', form.isDirty(), saving);
+
     const handleSubmit = async (values: PackagesForm) => {
         setSaving(true);
         const res = await saveSettings({
@@ -538,6 +620,7 @@ function PackagesSection() {
                         : values.noExpiryValidityMonths,
             },
         });
+        if (res.success) form.resetDirty(values);
         setSaving(false);
         notifySaved(
             'Package settings saved',
@@ -550,7 +633,7 @@ function PackagesSection() {
         <>
             <SectionHeader
                 title='Packages'
-                description='Defaults applied to the hotspot and PPPoE packages you sell.'
+                description='Validity defaults for the hotspot time-bank packages you sell.'
             />
             <form onSubmit={form.onSubmit(handleSubmit)}>
                 <Stack gap='md' maw='40em'>
@@ -595,10 +678,12 @@ function PppoeSection() {
     const form = useForm<AdminSettings['pppoe']>({
         initialValues: settings.pppoe,
     });
+    useSettingsDraft('pppoe', form.isDirty(), saving);
 
     const handleSubmit = async (values: AdminSettings['pppoe']) => {
         setSaving(true);
         const res = await saveSettings({ ...settings, pppoe: values });
+        if (res.success) form.resetDirty(values);
         setSaving(false);
         notifySaved(
             'PPPoE settings saved',
@@ -658,10 +743,12 @@ function MpesaSection() {
         initialValues: settings.mpesa,
         validate: schemaResolver(adminMpesaSettingsSchema),
     });
+    useSettingsDraft('mpesa', form.isDirty(), saving);
 
     const handleSubmit = async (values: MpesaFormValues) => {
         setSaving(true);
         const res = await saveSettings({ ...settings, mpesa: values });
+        if (res.success) form.resetDirty(values);
         setSaving(false);
         notifySaved(
             'M-Pesa settings saved',
@@ -681,6 +768,7 @@ function MpesaSection() {
             />
             <form onSubmit={form.onSubmit(handleSubmit)}>
                 <Stack gap='md'>
+                    <Divider label='Payment Setup' labelPosition='left' />
                     <Switch
                         label='Use my own M-Pesa credentials'
                         description='When off, the server-wide M-Pesa configuration is used for your payments.'
@@ -736,6 +824,7 @@ function MpesaSection() {
                                     />
                                 </Grid.Col>
                             </Grid>
+                            <Divider label='Credentials' labelPosition='left' />
                             <Grid>
                                 <Grid.Col span={{ base: 12, sm: 6 }}>
                                     <TextInput
