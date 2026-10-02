@@ -1,8 +1,6 @@
 import {
     Anchor,
     Button,
-    Card,
-    Center,
     Divider,
     PasswordInput,
     Stack,
@@ -18,6 +16,7 @@ import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 
 import { authClient, useSession } from '@/lib/auth';
 import { reportClientError } from '@/lib/clientError';
+import { AuthPageLayout } from '@/components/Layout/AuthPageLayout';
 
 export default function LoginPage() {
     const navigate = useNavigate();
@@ -83,68 +82,60 @@ export default function LoginPage() {
     }
 
     return (
-        <Center mih='100dvh' p='md'>
-            <Card
-                withBorder
-                shadow='sm'
-                radius='md'
-                p={{ base: 'md', sm: 'xl' }}
-                w='100%'
-                maw={420}
-            >
-                <Stack gap='lg'>
-                    <Stack gap={4}>
-                        <Title order={2} size='h3'>
-                            Radii Admin
-                        </Title>
-                        <Text size='sm' c='dimmed'>
-                            Sign in to the admin console
-                        </Text>
-                    </Stack>
-
-                    <form onSubmit={form.onSubmit(onSubmit)}>
-                        <Stack gap='md'>
-                            <TextInput
-                                label='Email'
-                                type='email'
-                                inputMode='email'
-                                autoCapitalize='none'
-                                autoComplete='username'
-                                required
-                                {...form.getInputProps('email')}
-                            />
-                            <PasswordInput
-                                label='Password'
-                                autoComplete='current-password'
-                                visibilityToggleButtonProps={{
-                                    'aria-label': 'Toggle password visibility',
-                                }}
-                                required
-                                {...form.getInputProps('password')}
-                            />
-                            <Anchor
-                                component={Link}
-                                to='/forgot-password'
-                                size='sm'
-                                ta='right'
-                            >
-                                Forgot password?
-                            </Anchor>
-                            <Button type='submit' fullWidth loading={loading}>
-                                Sign in
-                            </Button>
-                        </Stack>
-                    </form>
-
-                    <Divider label='or' labelPosition='center' />
-                    <Text size='sm' ta='center'>
-                        No admin account yet?{' '}
-                        <Anchor component={Link} to='/register' size='sm'>
-                            Create one
-                        </Anchor>
+        <AuthPageLayout
+            label='Sign in'
+            header={
+                <Stack gap={4}>
+                    <Title order={2} size='h3'>
+                        Radii Admin
+                    </Title>
+                    <Text size='sm' c='dimmed'>
+                        Sign in to the admin console
                     </Text>
                 </Stack>
-            </Card>
-        </Center>
+            }
+        >
+            <form onSubmit={form.onSubmit(onSubmit)}>
+                <Stack gap='md'>
+                    <TextInput
+                        label='Email'
+                        type='email'
+                        inputMode='email'
+                        autoCapitalize='none'
+                        autoComplete='username'
+                        required
+                        {...form.getInputProps('email')}
+                    />
+                    <PasswordInput
+                        label='Password'
+                        autoComplete='current-password'
+                        visibilityToggleButtonProps={{
+                            'aria-label': 'Toggle password visibility',
+                        }}
+                        required
+                        {...form.getInputProps('password')}
+                    />
+                    <Anchor
+                        component={Link}
+                        to='/forgot-password'
+                        size='sm'
+                        ta='right'
+                    >
+                        Forgot password?
+                    </Anchor>
+                    <Button type='submit' fullWidth loading={loading}>
+                        Sign in
+                    </Button>
+                </Stack>
+            </form>
+
+            <Divider label='or' labelPosition='center' />
+            <Text size='sm' ta='center'>
+                No admin account yet?{' '}
+                <Anchor component={Link} to='/register' size='sm'>
+                    Create one
+                </Anchor>
+            </Text>
+        </AuthPageLayout>
     );
 }

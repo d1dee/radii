@@ -19,6 +19,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { MdClose, MdSearch } from 'react-icons/md';
 import { useSearchParams } from 'react-router-dom';
 
+import { PageLayout } from '@/components/Layout/PageLayout';
+import { PageTableScrollContainer } from '@/components/PageTableScrollContainer';
 import { PaymentDetailsDrawer } from '@/components/Payments/PaymentDetailsDrawer';
 import { PaymentRefCell } from '@/components/Payments/PaymentRefCell';
 import {
@@ -173,14 +175,18 @@ export default function PaymentsPage() {
     useAutoRefresh(() => void load(page, true), loaded);
 
     return (
-        <>
-            <Stack pb='md' gap={4}>
-                <Title order={3}>Payments</Title>
-                <Text size='sm' c='dimmed'>
-                    Every package purchase across your NAS devices — filter by
-                    status, customer or date range.
-                </Text>
-            </Stack>
+        <PageLayout
+            label='Payments page content'
+            header={
+                <Stack gap={4}>
+                    <Title order={3}>Payments</Title>
+                    <Text size='sm' c='dimmed'>
+                        Every package purchase across your NAS devices — filter
+                        by status, customer or date range.
+                    </Text>
+                </Stack>
+            }
+        >
             <Stack pb='md'>
                 {data && (
                     <SimpleGrid cols={{ base: 4 }}>
@@ -299,7 +305,7 @@ export default function PaymentsPage() {
                 </Text>
             ) : (
                 <>
-                    <Table.ScrollContainer
+                    <PageTableScrollContainer
                         minWidth={900}
                         aria-label='Payments table'
                     >
@@ -413,7 +419,7 @@ export default function PaymentsPage() {
                                 ))}
                             </Table.Tbody>
                         </Table>
-                    </Table.ScrollContainer>
+                    </PageTableScrollContainer>
                 </>
             )}
             {data ? (
@@ -429,6 +435,6 @@ export default function PaymentsPage() {
                 paymentId={detailsId}
                 onClose={() => setDetailsId(null)}
             />
-        </>
+        </PageLayout>
     );
 }

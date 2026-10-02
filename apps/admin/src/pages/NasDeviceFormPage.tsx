@@ -25,6 +25,7 @@ import {
     type CreateNasDeviceInput,
 } from '@/lib/api';
 import { nasDeviceOsOptions, nasDeviceStatusOptions } from '@/lib/nas';
+import { PageLayout } from '@/components/Layout/PageLayout';
 
 export default function NasDeviceFormPage() {
     const navigate = useNavigate();
@@ -106,150 +107,164 @@ export default function NasDeviceFormPage() {
         navigate('/nas-devices');
     };
 
+    const header = (
+        <Container size='xl' mx={0} px={0} w='100%'>
+            <Stack gap={4}>
+                <Title order={2} size='h3'>
+                    {isEdit ? 'Edit NAS Device' : 'Set Up NAS Device'}
+                </Title>
+                <Text size='sm' c='dimmed'>
+                    Register the router first, then generate its setup script
+                    from the NAS Devices page. Model, serial and firmware are
+                    filled in automatically when the script runs.
+                </Text>
+            </Stack>
+        </Container>
+    );
+
     if (fetching) {
         return (
-            <Container size='xl' mx={0} px={0}>
-                <Card padding='lg' radius='md'>
-                    <Center py='xl'>
-                        <Loader />
-                    </Center>
-                </Card>
-            </Container>
+            <PageLayout header={header} label='NAS device form'>
+                <Container size='xl' mx={0} px={0} w='100%'>
+                    <Card padding='lg' radius='md'>
+                        <Center py='xl'>
+                            <Loader />
+                        </Center>
+                    </Card>
+                </Container>
+            </PageLayout>
         );
     }
 
     if (fetchError) {
         return (
-            <Container size='xl' mx={0} px={0}>
-                <Card padding='lg' radius='md'>
-                    <Text c='red'>{fetchError}</Text>
-                </Card>
-            </Container>
+            <PageLayout header={header} label='NAS device form'>
+                <Container size='xl' mx={0} px={0} w='100%'>
+                    <Card padding='lg' radius='md'>
+                        <Text c='red'>{fetchError}</Text>
+                    </Card>
+                </Container>
+            </PageLayout>
         );
     }
 
     return (
-        <Container size='xl' mx={0} px={0}>
-            <Card p={{ base: 'md', sm: 'lg' }} radius='md'>
-                <Stack gap={4} mb='md'>
-                    <Title order={2} size='h3'>
-                        {isEdit ? 'Edit NAS Device' : 'Set Up NAS Device'}
-                    </Title>
-                    <Text size='sm' c='dimmed'>
-                        Register the router first, then generate its setup
-                        script from the NAS Devices page. Model, serial and
-                        firmware are filled in automatically when the script
-                        runs.
-                    </Text>
-                </Stack>
-                <form onSubmit={form.onSubmit(handleSubmit)}>
-                    <Stack gap='md'>
-                        <Grid>
-                            <Grid.Col span={{ base: 12, sm: 6 }}>
-                                <TextInput
-                                    label='Name'
-                                    placeholder='e.g. Site A Router'
-                                    description='A unique label used to identify this device'
-                                    required
-                                    {...form.getInputProps('name')}
-                                />
-                            </Grid.Col>
-                            <Grid.Col span={{ base: 12, sm: 6 }}>
-                                <Select
-                                    label='Operating System'
-                                    placeholder='Pick OS'
-                                    data={nasDeviceOsOptions}
-                                    allowDeselect={false}
-                                    description='Device platform; more coming soon'
-                                    {...form.getInputProps('os')}
-                                />
-                            </Grid.Col>
-                        </Grid>
-                        <Grid>
-                            <Grid.Col span={{ base: 12, sm: 6 }}>
-                                <TextInput
-                                    label='IP Address'
-                                    placeholder='e.g. 10.0.0.1'
-                                    description='IPv4 or IPv6 address for identifying the device.'
-                                    required
-                                    {...form.getInputProps('ipAddress')}
-                                />
-                            </Grid.Col>
-                            <Grid.Col span={{ base: 12, sm: 6 }}>
-                                <TextInput
-                                    label='MAC Address'
-                                    placeholder='e.g. AA:BB:CC:DD:EE:FF'
-                                    description='Optional hardware address of the device'
-                                    {...form.getInputProps('macAddress')}
-                                />
-                            </Grid.Col>
-                        </Grid>
-                        <Grid>
-                            <Grid.Col span={{ base: 12, sm: 6 }}>
-                                <TextInput
-                                    label='Model'
-                                    placeholder='e.g. hAP ac2'
-                                    description='Auto-detected when the setup script runs'
-                                    {...form.getInputProps('model')}
-                                />
-                            </Grid.Col>
-                            <Grid.Col span={{ base: 12, sm: 6 }}>
-                                <TextInput
-                                    label='Serial Number'
-                                    placeholder='Device serial number'
-                                    description='Auto-detected when the setup script runs'
-                                    {...form.getInputProps('serialNumber')}
-                                />
-                            </Grid.Col>
-                        </Grid>
-                        <Grid>
-                            <Grid.Col span={{ base: 12, sm: 6 }}>
-                                <TextInput
-                                    label='Firmware Version'
-                                    placeholder='e.g. 7.16.2'
-                                    description='Auto-detected when the setup script runs'
-                                    {...form.getInputProps('firmwareVersion')}
-                                />
-                            </Grid.Col>
-                            <Grid.Col span={{ base: 12, sm: 6 }}>
-                                <TextInput
-                                    label='Location'
-                                    placeholder='e.g. Rooftop cabinet, Site A'
-                                    description='Optional physical location of the device'
-                                    {...form.getInputProps('location')}
-                                />
-                            </Grid.Col>
-                        </Grid>
-                        <Grid>
-                            <Grid.Col span={{ base: 12, sm: 6 }}>
-                                <Select
-                                    label='Status'
-                                    data={nasDeviceStatusOptions}
-                                    allowDeselect={false}
-                                    description='Current operational state of the device'
-                                    {...form.getInputProps('status')}
-                                />
-                            </Grid.Col>
-                        </Grid>
-                        <Group justify='flex-end'>
-                            <Button
-                                variant='default'
-                                w={{ base: '100%', sm: 'auto' }}
-                                onClick={() => navigate('/nas-devices')}
-                            >
-                                Cancel
-                            </Button>
-                            <Button
-                                type='submit'
-                                loading={loading}
-                                w={{ base: '100%', sm: 'auto' }}
-                            >
-                                {isEdit ? 'Save Changes' : 'Create NAS Device'}
-                            </Button>
-                        </Group>
-                    </Stack>
-                </form>
-            </Card>
-        </Container>
+        <PageLayout header={header} label='NAS device form'>
+            <Container size='xl' mx={0} px={0} w='100%'>
+                <Card p={{ base: 'md', sm: 'lg' }} radius='md'>
+                    <form onSubmit={form.onSubmit(handleSubmit)}>
+                        <Stack gap='md'>
+                            <Grid>
+                                <Grid.Col span={{ base: 12, sm: 6 }}>
+                                    <TextInput
+                                        label='Name'
+                                        placeholder='e.g. Site A Router'
+                                        description='A unique label used to identify this device'
+                                        required
+                                        {...form.getInputProps('name')}
+                                    />
+                                </Grid.Col>
+                                <Grid.Col span={{ base: 12, sm: 6 }}>
+                                    <Select
+                                        label='Operating System'
+                                        placeholder='Pick OS'
+                                        data={nasDeviceOsOptions}
+                                        allowDeselect={false}
+                                        description='Device platform; more coming soon'
+                                        {...form.getInputProps('os')}
+                                    />
+                                </Grid.Col>
+                            </Grid>
+                            <Grid>
+                                <Grid.Col span={{ base: 12, sm: 6 }}>
+                                    <TextInput
+                                        label='IP Address'
+                                        placeholder='e.g. 10.0.0.1'
+                                        description='IPv4 or IPv6 address for identifying the device.'
+                                        required
+                                        {...form.getInputProps('ipAddress')}
+                                    />
+                                </Grid.Col>
+                                <Grid.Col span={{ base: 12, sm: 6 }}>
+                                    <TextInput
+                                        label='MAC Address'
+                                        placeholder='e.g. AA:BB:CC:DD:EE:FF'
+                                        description='Optional hardware address of the device'
+                                        {...form.getInputProps('macAddress')}
+                                    />
+                                </Grid.Col>
+                            </Grid>
+                            <Grid>
+                                <Grid.Col span={{ base: 12, sm: 6 }}>
+                                    <TextInput
+                                        label='Model'
+                                        placeholder='e.g. hAP ac2'
+                                        description='Auto-detected when the setup script runs'
+                                        {...form.getInputProps('model')}
+                                    />
+                                </Grid.Col>
+                                <Grid.Col span={{ base: 12, sm: 6 }}>
+                                    <TextInput
+                                        label='Serial Number'
+                                        placeholder='Device serial number'
+                                        description='Auto-detected when the setup script runs'
+                                        {...form.getInputProps('serialNumber')}
+                                    />
+                                </Grid.Col>
+                            </Grid>
+                            <Grid>
+                                <Grid.Col span={{ base: 12, sm: 6 }}>
+                                    <TextInput
+                                        label='Firmware Version'
+                                        placeholder='e.g. 7.16.2'
+                                        description='Auto-detected when the setup script runs'
+                                        {...form.getInputProps(
+                                            'firmwareVersion',
+                                        )}
+                                    />
+                                </Grid.Col>
+                                <Grid.Col span={{ base: 12, sm: 6 }}>
+                                    <TextInput
+                                        label='Location'
+                                        placeholder='e.g. Rooftop cabinet, Site A'
+                                        description='Optional physical location of the device'
+                                        {...form.getInputProps('location')}
+                                    />
+                                </Grid.Col>
+                            </Grid>
+                            <Grid>
+                                <Grid.Col span={{ base: 12, sm: 6 }}>
+                                    <Select
+                                        label='Status'
+                                        data={nasDeviceStatusOptions}
+                                        allowDeselect={false}
+                                        description='Current operational state of the device'
+                                        {...form.getInputProps('status')}
+                                    />
+                                </Grid.Col>
+                            </Grid>
+                            <Group justify='flex-end'>
+                                <Button
+                                    variant='default'
+                                    w={{ base: '100%', sm: 'auto' }}
+                                    onClick={() => navigate('/nas-devices')}
+                                >
+                                    Cancel
+                                </Button>
+                                <Button
+                                    type='submit'
+                                    loading={loading}
+                                    w={{ base: '100%', sm: 'auto' }}
+                                >
+                                    {isEdit
+                                        ? 'Save Changes'
+                                        : 'Create NAS Device'}
+                                </Button>
+                            </Group>
+                        </Stack>
+                    </form>
+                </Card>
+            </Container>
+        </PageLayout>
     );
 }

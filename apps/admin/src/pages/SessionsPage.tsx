@@ -23,6 +23,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MdDelete, MdEdit, MdSearch } from 'react-icons/md';
 import { useSearchParams } from 'react-router-dom';
 
+import { PageLayout } from '@/components/Layout/PageLayout';
+import { PageTableScrollContainer } from '@/components/PageTableScrollContainer';
 import { SessionDetailsDrawer } from '@/components/Sessions/SessionDetailsDrawer';
 import {
     SortableTableHeader,
@@ -203,16 +205,20 @@ export default function SessionsPage() {
     };
 
     return (
-        <Stack gap='md'>
-            <Group justify='space-between'>
-                <Stack gap={4}>
-                    <Title order={3}>Sessions</Title>
-                    <Text size='sm' c='dimmed'>
-                        RADIUS accounting history and currently connected users.
-                    </Text>
-                </Stack>
-            </Group>
-
+        <PageLayout
+            label='Sessions page content'
+            header={
+                <Group justify='space-between'>
+                    <Stack gap={4}>
+                        <Title order={3}>Sessions</Title>
+                        <Text size='sm' c='dimmed'>
+                            RADIUS accounting history and currently connected
+                            users.
+                        </Text>
+                    </Stack>
+                </Group>
+            }
+        >
             {!loading && !error && (
                 <SimpleGrid cols={{ base: 4 }}>
                     <SummaryCard
@@ -286,7 +292,7 @@ export default function SessionsPage() {
                     No sessions match.
                 </Text>
             ) : (
-                <Table.ScrollContainer
+                <PageTableScrollContainer
                     minWidth={1200}
                     aria-label='Sessions table'
                 >
@@ -494,7 +500,7 @@ export default function SessionsPage() {
                             ))}
                         </Table.Tbody>
                     </Table>
-                </Table.ScrollContainer>
+                </PageTableScrollContainer>
             )}
 
             <TablePagination
@@ -578,6 +584,6 @@ export default function SessionsPage() {
                     </Button>
                 </Stack>
             </Modal>
-        </Stack>
+        </PageLayout>
     );
 }

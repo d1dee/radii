@@ -36,6 +36,8 @@ import {
     MdSearch,
 } from 'react-icons/md';
 
+import { PageLayout } from '@/components/Layout/PageLayout';
+import { PageTableScrollContainer } from '@/components/PageTableScrollContainer';
 import {
     SortableTableHeader,
     type SortDirection,
@@ -479,33 +481,36 @@ export default function UsersPage() {
     }
 
     return (
-        <Stack gap='md'>
-            <Group justify='space-between' wrap='nowrap'>
-                <Stack gap={4}>
-                    <Title order={3}>Users</Title>
-                    <Text size='sm' c='dimmed'>
-                        Customers registered through your portals, with spend
-                        and activation history.
-                    </Text>
-                </Stack>
-                <Button
-                    leftSection={<MdAdd />}
-                    onClick={openProvision}
-                    visibleFrom='md'
-                >
-                    Provision PPPoE
-                </Button>
-                <Button
-                    leftSection={<MdAdd />}
-                    onClick={openProvision}
-                    hiddenFrom='md'
-                    size='xs'
-                    w='150'
-                >
-                    PPPoE
-                </Button>
-            </Group>
-
+        <PageLayout
+            label='Users page content'
+            header={
+                <Group justify='space-between' wrap='nowrap'>
+                    <Stack gap={4}>
+                        <Title order={3}>Users</Title>
+                        <Text size='sm' c='dimmed'>
+                            Customers registered through your portals, with
+                            spend and activation history.
+                        </Text>
+                    </Stack>
+                    <Button
+                        leftSection={<MdAdd />}
+                        onClick={openProvision}
+                        visibleFrom='md'
+                    >
+                        Provision PPPoE
+                    </Button>
+                    <Button
+                        leftSection={<MdAdd />}
+                        onClick={openProvision}
+                        hiddenFrom='md'
+                        size='xs'
+                        w='150'
+                    >
+                        PPPoE
+                    </Button>
+                </Group>
+            }
+        >
             {!loading && !error && data && (
                 <SimpleGrid cols={{ base: 2, lg: 4 }}>
                     <SummaryCard
@@ -569,7 +574,7 @@ export default function UsersPage() {
                 </Text>
             ) : (
                 <>
-                    <Table.ScrollContainer
+                    <PageTableScrollContainer
                         minWidth={900}
                         aria-label='Users table'
                     >
@@ -868,7 +873,7 @@ export default function UsersPage() {
                                 ))}
                             </Table.Tbody>
                         </Table>
-                    </Table.ScrollContainer>
+                    </PageTableScrollContainer>
                     <TablePagination
                         page={page}
                         perPage={perPage}
@@ -1204,6 +1209,6 @@ export default function UsersPage() {
                     </Button>
                 </Stack>
             </Modal>
-        </Stack>
+        </PageLayout>
     );
 }

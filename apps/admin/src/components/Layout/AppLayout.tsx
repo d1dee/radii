@@ -48,10 +48,11 @@ export function AppLayout({ children }: AppLayoutProps) {
                 id='admin-content'
                 tabIndex={-1}
                 className='admin-main'
-                mih='100dvh'
+                h='100dvh'
                 style={{
                     display: 'flex',
                     flexDirection: 'column',
+                    overflow: 'hidden',
                 }}
             >
                 {children}

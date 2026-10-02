@@ -38,6 +38,7 @@ import {
 
 import { previewDateTime } from '@/lib/format';
 import { useAdminSettings } from '@/lib/settings';
+import { PageLayout } from '@/components/Layout/PageLayout';
 import { TbInfoTriangle } from 'react-icons/tb';
 // Curated IANA zone list covering the operator's likely locales; searchable,
 // with Africa/Nairobi (server default) first.
@@ -84,95 +85,102 @@ const DATE_FORMAT_OPTIONS = [
 
 export default function SettingsPage() {
     const { loaded } = useAdminSettings();
+    const header = (
+        <Container size='xl' mx={0} px={0} w='100%'>
+            <Stack gap={4}>
+                <Title order={2} size='h3'>
+                    Settings
+                </Title>
+                <Text c='dimmed' size='sm'>
+                    Manage your console preferences and the customer portal
+                    experience for your network. Payments fall back to the
+                    server-wide M-Pesa configuration when you have not set your
+                    own credentials.
+                </Text>
+            </Stack>
+        </Container>
+    );
 
     if (!loaded) {
         return (
-            <Container size='xl' mx={0} px={0}>
-                <Card padding='lg' radius='md'>
-                    <Center py='xl'>
-                        <Loader />
-                    </Center>
-                </Card>
-            </Container>
+            <PageLayout header={header} label='Settings'>
+                <Container size='xl' mx={0} px={0} w='100%'>
+                    <Card padding='lg' radius='md'>
+                        <Center py='xl'>
+                            <Loader />
+                        </Center>
+                    </Card>
+                </Container>
+            </PageLayout>
         );
     }
 
     return (
-        <Container size='xl' mx={0} px={0}>
-            <Stack gap='md'>
-                <Stack gap={4}>
-                    <Title order={2} size='h3'>
-                        Settings
-                    </Title>
-                    <Text c='dimmed' size='sm'>
-                        Manage your console preferences and the customer portal
-                        experience for your network. Payments fall back to the
-                        server-wide M-Pesa configuration when you have not set
-                        your own credentials.
-                    </Text>
+        <PageLayout header={header} label='Settings'>
+            <Container size='xl' mx={0} px={0} w='100%'>
+                <Stack gap='md'>
+                    <Tabs defaultValue='appearance'>
+                        <Tabs.List grow>
+                            <Tabs.Tab
+                                value='appearance'
+                                leftSection={<MdPalette size={16} />}
+                            >
+                                Appearance
+                            </Tabs.Tab>
+                            <Tabs.Tab
+                                value='dashboard'
+                                leftSection={<MdDashboard size={16} />}
+                            >
+                                Dashboard
+                            </Tabs.Tab>
+                            <Tabs.Tab
+                                value='mpesa'
+                                leftSection={<MdPayment size={16} />}
+                            >
+                                M-Pesa
+                            </Tabs.Tab>
+                            <Tabs.Tab
+                                value='contacts'
+                                leftSection={<MdContacts size={16} />}
+                            >
+                                Contacts
+                            </Tabs.Tab>
+                            <Tabs.Tab
+                                value='packages'
+                                leftSection={<MdInventory2 size={16} />}
+                            >
+                                Packages
+                            </Tabs.Tab>
+                            <Tabs.Tab
+                                value='pppoe'
+                                leftSection={<MdVpnKey size={16} />}
+                            >
+                                PPPoE
+                            </Tabs.Tab>
+                        </Tabs.List>
+
+                        <Tabs.Panel value='appearance' pt='lg'>
+                            <AppearanceSection />
+                        </Tabs.Panel>
+                        <Tabs.Panel value='dashboard' pt='lg'>
+                            <DashboardSection />
+                        </Tabs.Panel>
+                        <Tabs.Panel value='mpesa' pt='lg'>
+                            <MpesaSection />
+                        </Tabs.Panel>
+                        <Tabs.Panel value='contacts' pt='lg'>
+                            <ContactsSection />
+                        </Tabs.Panel>
+                        <Tabs.Panel value='packages' pt='lg'>
+                            <PackagesSection />
+                        </Tabs.Panel>
+                        <Tabs.Panel value='pppoe' pt='lg'>
+                            <PppoeSection />
+                        </Tabs.Panel>
+                    </Tabs>
                 </Stack>
-
-                <Tabs defaultValue='appearance'>
-                    <Tabs.List grow>
-                        <Tabs.Tab
-                            value='appearance'
-                            leftSection={<MdPalette size={16} />}
-                        >
-                            Appearance
-                        </Tabs.Tab>
-                        <Tabs.Tab
-                            value='dashboard'
-                            leftSection={<MdDashboard size={16} />}
-                        >
-                            Dashboard
-                        </Tabs.Tab>
-                        <Tabs.Tab
-                            value='mpesa'
-                            leftSection={<MdPayment size={16} />}
-                        >
-                            M-Pesa
-                        </Tabs.Tab>
-                        <Tabs.Tab
-                            value='contacts'
-                            leftSection={<MdContacts size={16} />}
-                        >
-                            Contacts
-                        </Tabs.Tab>
-                        <Tabs.Tab
-                            value='packages'
-                            leftSection={<MdInventory2 size={16} />}
-                        >
-                            Packages
-                        </Tabs.Tab>
-                        <Tabs.Tab
-                            value='pppoe'
-                            leftSection={<MdVpnKey size={16} />}
-                        >
-                            PPPoE
-                        </Tabs.Tab>
-                    </Tabs.List>
-
-                    <Tabs.Panel value='appearance' pt='lg'>
-                        <AppearanceSection />
-                    </Tabs.Panel>
-                    <Tabs.Panel value='dashboard' pt='lg'>
-                        <DashboardSection />
-                    </Tabs.Panel>
-                    <Tabs.Panel value='mpesa' pt='lg'>
-                        <MpesaSection />
-                    </Tabs.Panel>
-                    <Tabs.Panel value='contacts' pt='lg'>
-                        <ContactsSection />
-                    </Tabs.Panel>
-                    <Tabs.Panel value='packages' pt='lg'>
-                        <PackagesSection />
-                    </Tabs.Panel>
-                    <Tabs.Panel value='pppoe' pt='lg'>
-                        <PppoeSection />
-                    </Tabs.Panel>
-                </Tabs>
-            </Stack>
-        </Container>
+            </Container>
+        </PageLayout>
     );
 }
 

@@ -17,6 +17,8 @@ import { DatePickerInput } from '@mantine/dates';
 import { notifications } from '@mantine/notifications';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { PageLayout } from '@/components/Layout/PageLayout';
+import { PageTableScrollContainer } from '@/components/PageTableScrollContainer';
 import { TablePagination } from '@/components/TablePagination';
 import { getAdminReports, type AdminReports } from '@/lib/api';
 import { useAutoRefresh } from '@/lib/autoRefresh';
@@ -193,41 +195,44 @@ export default function ReportsPage() {
         : [];
 
     return (
-        <>
-            <Group justify='space-between' wrap='wrap' mb='md'>
-                <Stack gap={4}>
-                    <Title order={3}>Reports</Title>
-                    <Text size='sm' c='dimmed'>
-                        Revenue, top packages, customers and heaviest network
-                        consumers for a date range.
-                    </Text>
-                </Stack>
-                <Group
-                    gap='sm'
-                    align='flex-end'
-                    w={{ base: '100%', sm: 'auto' }}
-                    wrap='nowrap'
-                >
-                    <DatePickerInput
-                        type='range'
-                        allowSingleDateInRange
-                        label='Date range'
-                        placeholder='Select date range'
-                        value={dateRange}
-                        onChange={setDateRange}
-                        valueFormat='DD MMM YYYY'
-                        w='100%'
-                    />
-                    <Button
-                        onClick={apply}
-                        disabled={!dateRange[0] || !dateRange[1]}
-                        w='200'
+        <PageLayout
+            label='Reports page content'
+            header={
+                <Group justify='space-between' wrap='wrap'>
+                    <Stack gap={4}>
+                        <Title order={3}>Reports</Title>
+                        <Text size='sm' c='dimmed'>
+                            Revenue, top packages, customers and heaviest
+                            network consumers for a date range.
+                        </Text>
+                    </Stack>
+                    <Group
+                        gap='sm'
+                        align='flex-end'
+                        w={{ base: '100%', sm: 'auto' }}
+                        wrap='nowrap'
                     >
-                        Apply
-                    </Button>
+                        <DatePickerInput
+                            type='range'
+                            allowSingleDateInRange
+                            label='Date range'
+                            placeholder='Select date range'
+                            value={dateRange}
+                            onChange={setDateRange}
+                            valueFormat='DD MMM YYYY'
+                            w='100%'
+                        />
+                        <Button
+                            onClick={apply}
+                            disabled={!dateRange[0] || !dateRange[1]}
+                            w='200'
+                        >
+                            Apply
+                        </Button>
+                    </Group>
                 </Group>
-            </Group>
-
+            }
+        >
             {loading ? (
                 <Center py='xl'>
                     <Loader />
@@ -352,7 +357,7 @@ export default function ReportsPage() {
                                             No paid purchases in this range.
                                         </Text>
                                     ) : (
-                                        <Table.ScrollContainer
+                                        <PageTableScrollContainer
                                             minWidth={560}
                                             aria-label='Top packages table'
                                         >
@@ -417,7 +422,7 @@ export default function ReportsPage() {
                                                     )}
                                                 </Table.Tbody>
                                             </Table>
-                                        </Table.ScrollContainer>
+                                        </PageTableScrollContainer>
                                     )}
                                     <TablePagination
                                         page={topPackagesPage}
@@ -438,7 +443,7 @@ export default function ReportsPage() {
                                             No paid purchases in this range.
                                         </Text>
                                     ) : (
-                                        <Table.ScrollContainer
+                                        <PageTableScrollContainer
                                             minWidth={500}
                                             aria-label='Top customers table'
                                         >
@@ -502,7 +507,7 @@ export default function ReportsPage() {
                                                     )}
                                                 </Table.Tbody>
                                             </Table>
-                                        </Table.ScrollContainer>
+                                        </PageTableScrollContainer>
                                     )}
                                     <TablePagination
                                         page={topUsersPage}
@@ -523,7 +528,7 @@ export default function ReportsPage() {
                                             No sessions in this range.
                                         </Text>
                                     ) : (
-                                        <Table.ScrollContainer
+                                        <PageTableScrollContainer
                                             minWidth={640}
                                             aria-label='Heaviest consumers table'
                                         >
@@ -584,7 +589,7 @@ export default function ReportsPage() {
                                                     )}
                                                 </Table.Tbody>
                                             </Table>
-                                        </Table.ScrollContainer>
+                                        </PageTableScrollContainer>
                                     )}
                                     <TablePagination
                                         page={heavyUsersPage}
@@ -599,6 +604,6 @@ export default function ReportsPage() {
                     </Stack>
                 </>
             )}
-        </>
+        </PageLayout>
     );
 }

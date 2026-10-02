@@ -36,6 +36,7 @@ import {
     type PackageType,
 } from '@/lib/api';
 import { warnBackgroundFailure } from '@/lib/clientError';
+import { PageLayout } from '@/components/Layout/PageLayout';
 
 const ALL_NAS_VALUE = 'all';
 
@@ -350,581 +351,619 @@ export default function PackageFormPage() {
         void submitPackage(values);
     };
 
+    const header = (
+        <Container size='xl' mx={0} px={0} w='100%'>
+            <Stack gap={4}>
+                <Title order={2} size='h3'>
+                    {isEdit ? 'Edit Package' : 'Add Package'}
+                </Title>
+                <Text size='sm' c='dimmed'>
+                    Packages are only available on the NAS devices you link
+                    below. Choose convenient units for rates and quotas; use 0
+                    for unlimited.
+                </Text>
+            </Stack>
+        </Container>
+    );
+
     if (fetching) {
         return (
-            <Container size='xl' mx={0} px={0}>
-                <Card padding='lg' radius='md'>
-                    <Center py='xl'>
-                        <Loader />
-                    </Center>
-                </Card>
-            </Container>
+            <PageLayout header={header} label='Package form'>
+                <Container size='xl' mx={0} px={0} w='100%'>
+                    <Card padding='lg' radius='md'>
+                        <Center py='xl'>
+                            <Loader />
+                        </Center>
+                    </Card>
+                </Container>
+            </PageLayout>
         );
     }
 
     if (fetchError) {
         return (
-            <Container size='xl' mx={0} px={0}>
-                <Card padding='lg' radius='md'>
-                    <Text c='red'>{fetchError}</Text>
-                </Card>
-            </Container>
+            <PageLayout header={header} label='Package form'>
+                <Container size='xl' mx={0} px={0} w='100%'>
+                    <Card padding='lg' radius='md'>
+                        <Text c='red'>{fetchError}</Text>
+                    </Card>
+                </Container>
+            </PageLayout>
         );
     }
 
     return (
-        <Container size='xl' mx={0} px={0}>
-            <Card p={{ base: 'md', sm: 'lg' }} radius='md'>
-                <Stack gap={4} mb='md'>
-                    <Title order={2} size='h3'>
-                        {isEdit ? 'Edit Package' : 'Add Package'}
-                    </Title>
-                    <Text size='sm' c='dimmed'>
-                        Packages are only available on the NAS devices you link
-                        below. Choose convenient units for rates and quotas; use
-                        0 for unlimited.
-                    </Text>
-                </Stack>
-                <form onSubmit={form.onSubmit(handleSubmit)}>
-                    <Stack gap='md'>
-                        <TextInput
-                            label='Title'
-                            placeholder='Enter package title'
-                            description='Shown to customers on the portal'
-                            required
-                            {...form.getInputProps('title')}
-                        />
-                        <Grid>
-                            <Grid.Col span={{ base: 12, sm: 6 }}>
-                                <Select
-                                    label='Type'
-                                    description='Hotspot for captive portal, PPPoE for dial-up'
-                                    data={[
-                                        { value: 'hotspot', label: 'Hotspot' },
-                                        { value: 'pppoe', label: 'PPPoE' },
-                                    ]}
-                                    allowDeselect={false}
-                                    {...form.getInputProps('type')}
-                                    onChange={(value) => {
-                                        form.setFieldValue(
-                                            'type',
-                                            (value as PackageType) ?? 'hotspot',
-                                        );
-                                        if (value === 'pppoe') {
-                                            form.setFieldValue(
-                                                'noExpiry',
-                                                false,
-                                            );
-                                        }
-                                    }}
-                                />
-                            </Grid.Col>
-                            <Grid.Col span={{ base: 12, sm: 6 }}>
-                                <TextInput
-                                    label='Category'
-                                    placeholder='e.g. Daily, Weekly'
-                                    description='Groups packages on the portal listing'
-                                    required
-                                    {...form.getInputProps('category')}
-                                />
-                            </Grid.Col>
-                        </Grid>
-                        <Grid>
-                            <Grid.Col span={{ base: 12, sm: 6 }}>
-                                <Input.Wrapper
-                                    id='package-session-length'
-                                    label='Session Length'
-                                    description={
-                                        !isPppoe && noExpiry
-                                            ? 'Time bank the client consumes across sessions'
-                                            : 'How long each activation stays valid'
-                                    }
-                                    error={
-                                        form.errors.sessionLength
-                                            ? 'Enter a valid session length'
-                                            : undefined
-                                    }
-                                >
-                                    <Group gap='xs' wrap='nowrap'>
-                                        <NumberInput
-                                            id='package-session-length'
-                                            aria-label='Session length'
-                                            aria-describedby={
-                                                form.errors.sessionLength
-                                                    ? 'package-session-length-description package-session-length-error'
-                                                    : 'package-session-length-description'
-                                            }
-                                            aria-invalid={
-                                                !!form.errors.sessionLength
-                                            }
-                                            min={1}
-                                            step={1}
-                                            style={{ flex: 1, minWidth: 0 }}
-                                            value={lengthValue}
-                                            onChange={(v) =>
-                                                setSessionLength(
-                                                    Number(v) || 0,
-                                                    lengthUnit,
-                                                )
-                                            }
-                                        />
-                                        <Select
-                                            aria-label='Session length unit'
-                                            data={LENGTH_UNITS.map(
-                                                ({ value, label }) => ({
-                                                    value,
-                                                    label,
-                                                }),
-                                            )}
-                                            value={lengthUnit}
-                                            allowDeselect={false}
-                                            w={130}
-                                            style={{ flexShrink: 0 }}
-                                            onChange={(v) =>
-                                                v &&
-                                                setSessionLength(
-                                                    lengthValue,
-                                                    v as LengthUnit,
-                                                )
-                                            }
-                                        />
-                                    </Group>
-                                </Input.Wrapper>
-                            </Grid.Col>
-                            <Grid.Col span={{ base: 12, sm: 6 }}>
-                                <NumberInput
-                                    label='Price'
-                                    placeholder='Enter price'
-                                    description='Minimum paid amount is Ksh 1; use 0 for a free package'
-                                    min={0}
-                                    {...form.getInputProps('price')}
-                                />
-                            </Grid.Col>
-                        </Grid>
-                        <Grid>
-                            <Grid.Col span={{ base: 12, sm: 6 }}>
-                                <NumberInput
-                                    label='Max Devices'
-                                    placeholder='Enter max devices'
-                                    description='How many client devices may share one activation'
-                                    min={1}
-                                    {...form.getInputProps('maxDevices')}
-                                />
-                            </Grid.Col>
-                            <Grid.Col span={{ base: 12, sm: 6 }}>
-                                <MultiSelect
-                                    label='NAS Devices'
-                                    description='Devices this package is available on'
-                                    placeholder='Select NAS devices'
-                                    searchable
-                                    required
-                                    data={[
-                                        {
-                                            value: ALL_NAS_VALUE,
-                                            label: 'All NAS devices',
-                                        },
-                                        ...nasDevices.map((d) => ({
-                                            value: d.id,
-                                            label: d.name,
-                                        })),
-                                    ]}
-                                    {...form.getInputProps('nasDeviceIds')}
-                                    onChange={handleNasDevicesChange}
-                                />
-                            </Grid.Col>
-                        </Grid>
-                        <Grid>
-                            <Grid.Col span={{ base: 12, sm: 6 }}>
-                                <MeasurementInput
-                                    label='Upload Rate'
-                                    description='0 = unlimited'
-                                    baseValue={form.values.uploadRate}
-                                    units={RATE_UNITS}
-                                    error={form.errors.uploadRate}
-                                    onBlur={
-                                        form.getInputProps('uploadRate').onBlur
-                                    }
-                                    onChange={(value) =>
-                                        form.setFieldValue('uploadRate', value)
-                                    }
-                                />
-                            </Grid.Col>
-                            <Grid.Col span={{ base: 12, sm: 6 }}>
-                                <MeasurementInput
-                                    label='Download Rate'
-                                    description='0 = unlimited'
-                                    baseValue={form.values.downloadRate}
-                                    units={RATE_UNITS}
-                                    error={form.errors.downloadRate}
-                                    onBlur={
-                                        form.getInputProps('downloadRate')
-                                            .onBlur
-                                    }
-                                    onChange={(value) =>
-                                        form.setFieldValue(
-                                            'downloadRate',
-                                            value,
-                                        )
-                                    }
-                                />
-                            </Grid.Col>
-                        </Grid>
-                        <Grid>
-                            <Grid.Col span={{ base: 12, sm: 6 }}>
-                                <MeasurementInput
-                                    label='Upload Quota'
-                                    description='0 = unlimited'
-                                    baseValue={form.values.uploadQuota}
-                                    units={DATA_UNITS}
-                                    error={form.errors.uploadQuota}
-                                    onBlur={
-                                        form.getInputProps('uploadQuota').onBlur
-                                    }
-                                    onChange={(value) =>
-                                        form.setFieldValue('uploadQuota', value)
-                                    }
-                                />
-                            </Grid.Col>
-                            <Grid.Col span={{ base: 12, sm: 6 }}>
-                                <MeasurementInput
-                                    label='Download Quota'
-                                    description='0 = unlimited'
-                                    baseValue={form.values.downloadQuota}
-                                    units={DATA_UNITS}
-                                    error={form.errors.downloadQuota}
-                                    onBlur={
-                                        form.getInputProps('downloadQuota')
-                                            .onBlur
-                                    }
-                                    onChange={(value) =>
-                                        form.setFieldValue(
-                                            'downloadQuota',
-                                            value,
-                                        )
-                                    }
-                                />
-                            </Grid.Col>
-                        </Grid>
-                        <Divider
-                            label='Fair usage policy'
-                            labelPosition='left'
-                        />
-                        <Text size='sm' c='dimmed'>
-                            Track combined upload and download usage in a
-                            recurring window. Once the allowance is reached,
-                            active sessions are switched to the throttled rates
-                            with RADIUS CoA. Set the allowance to 0 to disable
-                            fair usage.
-                        </Text>
-                        <Grid>
-                            <Grid.Col span={{ base: 12, sm: 6 }}>
-                                <MeasurementInput
-                                    label='Fair Usage Allowance'
-                                    description='Combined upload and download data'
-                                    baseValue={form.values.fairUsageLimit}
-                                    units={DATA_UNITS}
-                                    error={form.errors.fairUsageLimit}
-                                    onBlur={
-                                        form.getInputProps('fairUsageLimit')
-                                            .onBlur
-                                    }
-                                    onChange={(value) =>
-                                        form.setFieldValue(
-                                            'fairUsageLimit',
-                                            value,
-                                        )
-                                    }
-                                />
-                            </Grid.Col>
-                            <Grid.Col span={{ base: 12, sm: 6 }}>
-                                <Input.Wrapper
-                                    label='Calculation Window'
-                                    description='Session, or recurring time from activation'
-                                >
-                                    <Group gap='xs' wrap='nowrap'>
-                                        <NumberInput
-                                            aria-label='Fair usage window value'
-                                            min={1}
-                                            step={1}
-                                            disabled={
-                                                form.values
-                                                    .fairUsageWindowUnit ===
-                                                'session'
-                                            }
-                                            style={{ flex: 1, minWidth: 0 }}
-                                            {...form.getInputProps(
-                                                'fairUsageWindowValue',
-                                            )}
-                                        />
-                                        <Select
-                                            aria-label='Fair usage window unit'
-                                            data={[
-                                                {
-                                                    value: 'session',
-                                                    label: 'Session',
-                                                },
-                                                {
-                                                    value: 'days',
-                                                    label: 'Days',
-                                                },
-                                                {
-                                                    value: 'weeks',
-                                                    label: 'Weeks',
-                                                },
-                                                {
-                                                    value: 'months',
-                                                    label: 'Months',
-                                                },
-                                            ]}
-                                            allowDeselect={false}
-                                            w={130}
-                                            style={{ flexShrink: 0 }}
-                                            {...form.getInputProps(
-                                                'fairUsageWindowUnit',
-                                            )}
-                                            onChange={(value) =>
-                                                form.setFieldValue(
-                                                    'fairUsageWindowUnit',
-                                                    (value as FairUsageWindowUnit) ??
-                                                        'session',
-                                                )
-                                            }
-                                        />
-                                    </Group>
-                                </Input.Wrapper>
-                            </Grid.Col>
-                        </Grid>
-                        <Grid>
-                            <Grid.Col span={{ base: 12, sm: 6 }}>
-                                <MeasurementInput
-                                    label='Throttled Upload Rate'
-                                    description='Applied after the allowance is reached'
-                                    baseValue={form.values.fairUsageUploadRate}
-                                    units={RATE_UNITS}
-                                    error={form.errors.fairUsageUploadRate}
-                                    onBlur={
-                                        form.getInputProps(
-                                            'fairUsageUploadRate',
-                                        ).onBlur
-                                    }
-                                    onChange={(value) =>
-                                        form.setFieldValue(
-                                            'fairUsageUploadRate',
-                                            value,
-                                        )
-                                    }
-                                />
-                            </Grid.Col>
-                            <Grid.Col span={{ base: 12, sm: 6 }}>
-                                <MeasurementInput
-                                    label='Throttled Download Rate'
-                                    description='Applied after the allowance is reached'
-                                    baseValue={
-                                        form.values.fairUsageDownloadRate
-                                    }
-                                    units={RATE_UNITS}
-                                    error={form.errors.fairUsageDownloadRate}
-                                    onBlur={
-                                        form.getInputProps(
-                                            'fairUsageDownloadRate',
-                                        ).onBlur
-                                    }
-                                    onChange={(value) =>
-                                        form.setFieldValue(
-                                            'fairUsageDownloadRate',
-                                            value,
-                                        )
-                                    }
-                                />
-                            </Grid.Col>
-                        </Grid>
-                        <Divider label='Burst limits' labelPosition='left' />
-                        <Text size='sm' c='dimmed'>
-                            RouterOS permits the burst rates while average
-                            traffic remains below the thresholds during the
-                            burst period. Leave every burst value at 0 to
-                            disable bursting.
-                        </Text>
-                        <Grid>
-                            <Grid.Col span={{ base: 12, sm: 6 }}>
-                                <MeasurementInput
-                                    label='Burst Upload Rate'
-                                    baseValue={form.values.burstUploadRate}
-                                    units={RATE_UNITS}
-                                    error={form.errors.burstUploadRate}
-                                    onBlur={
-                                        form.getInputProps('burstUploadRate')
-                                            .onBlur
-                                    }
-                                    onChange={(value) =>
-                                        form.setFieldValue(
-                                            'burstUploadRate',
-                                            value,
-                                        )
-                                    }
-                                />
-                            </Grid.Col>
-                            <Grid.Col span={{ base: 12, sm: 6 }}>
-                                <MeasurementInput
-                                    label='Burst Download Rate'
-                                    baseValue={form.values.burstDownloadRate}
-                                    units={RATE_UNITS}
-                                    error={form.errors.burstDownloadRate}
-                                    onBlur={
-                                        form.getInputProps('burstDownloadRate')
-                                            .onBlur
-                                    }
-                                    onChange={(value) =>
-                                        form.setFieldValue(
-                                            'burstDownloadRate',
-                                            value,
-                                        )
-                                    }
-                                />
-                            </Grid.Col>
-                        </Grid>
-                        <Grid>
-                            <Grid.Col span={{ base: 12, sm: 6 }}>
-                                <MeasurementInput
-                                    label='Burst Upload Threshold'
-                                    baseValue={form.values.burstUploadThreshold}
-                                    units={RATE_UNITS}
-                                    error={form.errors.burstUploadThreshold}
-                                    onBlur={
-                                        form.getInputProps(
-                                            'burstUploadThreshold',
-                                        ).onBlur
-                                    }
-                                    onChange={(value) =>
-                                        form.setFieldValue(
-                                            'burstUploadThreshold',
-                                            value,
-                                        )
-                                    }
-                                />
-                            </Grid.Col>
-                            <Grid.Col span={{ base: 12, sm: 6 }}>
-                                <MeasurementInput
-                                    label='Burst Download Threshold'
-                                    baseValue={
-                                        form.values.burstDownloadThreshold
-                                    }
-                                    units={RATE_UNITS}
-                                    error={form.errors.burstDownloadThreshold}
-                                    onBlur={
-                                        form.getInputProps(
-                                            'burstDownloadThreshold',
-                                        ).onBlur
-                                    }
-                                    onChange={(value) =>
-                                        form.setFieldValue(
-                                            'burstDownloadThreshold',
-                                            value,
-                                        )
-                                    }
-                                />
-                            </Grid.Col>
-                        </Grid>
-                        <NumberInput
-                            label='Burst Period (seconds)'
-                            description='RouterOS averaging period for both directions'
-                            min={0}
-                            {...form.getInputProps('burstTime')}
-                        />
-                        <Textarea
-                            label='Description'
-                            placeholder='Optional'
-                            description='Marketing copy shown on the portal'
-                            rows={2}
-                            {...form.getInputProps('description')}
-                        />
-                        <Textarea
-                            label='Note'
-                            placeholder='Optional'
-                            description='Internal note, not visible to customers'
-                            rows={2}
-                            {...form.getInputProps('note')}
-                        />
-                        {!isPppoe && (
-                            <Switch
-                                label='No Expiry'
-                                description='Cumulative time package: the session length becomes a time bank the client consumes across sessions. The bank must be used within the validity window set under Settings → Packages.'
-                                {...form.getInputProps('noExpiry', {
-                                    type: 'checkbox',
-                                })}
+        <PageLayout header={header} label='Package form'>
+            <Container size='xl' mx={0} px={0} w='100%'>
+                <Card p={{ base: 'md', sm: 'lg' }} radius='md'>
+                    <form onSubmit={form.onSubmit(handleSubmit)}>
+                        <Stack gap='md'>
+                            <TextInput
+                                label='Title'
+                                placeholder='Enter package title'
+                                description='Shown to customers on the portal'
+                                required
+                                {...form.getInputProps('title')}
                             />
+                            <Grid>
+                                <Grid.Col span={{ base: 12, sm: 6 }}>
+                                    <Select
+                                        label='Type'
+                                        description='Hotspot for captive portal, PPPoE for dial-up'
+                                        data={[
+                                            {
+                                                value: 'hotspot',
+                                                label: 'Hotspot',
+                                            },
+                                            { value: 'pppoe', label: 'PPPoE' },
+                                        ]}
+                                        allowDeselect={false}
+                                        {...form.getInputProps('type')}
+                                        onChange={(value) => {
+                                            form.setFieldValue(
+                                                'type',
+                                                (value as PackageType) ??
+                                                    'hotspot',
+                                            );
+                                            if (value === 'pppoe') {
+                                                form.setFieldValue(
+                                                    'noExpiry',
+                                                    false,
+                                                );
+                                            }
+                                        }}
+                                    />
+                                </Grid.Col>
+                                <Grid.Col span={{ base: 12, sm: 6 }}>
+                                    <TextInput
+                                        label='Category'
+                                        placeholder='e.g. Daily, Weekly'
+                                        description='Groups packages on the portal listing'
+                                        required
+                                        {...form.getInputProps('category')}
+                                    />
+                                </Grid.Col>
+                            </Grid>
+                            <Grid>
+                                <Grid.Col span={{ base: 12, sm: 6 }}>
+                                    <Input.Wrapper
+                                        id='package-session-length'
+                                        label='Session Length'
+                                        description={
+                                            !isPppoe && noExpiry
+                                                ? 'Time bank the client consumes across sessions'
+                                                : 'How long each activation stays valid'
+                                        }
+                                        error={
+                                            form.errors.sessionLength
+                                                ? 'Enter a valid session length'
+                                                : undefined
+                                        }
+                                    >
+                                        <Group gap='xs' wrap='nowrap'>
+                                            <NumberInput
+                                                id='package-session-length'
+                                                aria-label='Session length'
+                                                aria-describedby={
+                                                    form.errors.sessionLength
+                                                        ? 'package-session-length-description package-session-length-error'
+                                                        : 'package-session-length-description'
+                                                }
+                                                aria-invalid={
+                                                    !!form.errors.sessionLength
+                                                }
+                                                min={1}
+                                                step={1}
+                                                style={{ flex: 1, minWidth: 0 }}
+                                                value={lengthValue}
+                                                onChange={(v) =>
+                                                    setSessionLength(
+                                                        Number(v) || 0,
+                                                        lengthUnit,
+                                                    )
+                                                }
+                                            />
+                                            <Select
+                                                aria-label='Session length unit'
+                                                data={LENGTH_UNITS.map(
+                                                    ({ value, label }) => ({
+                                                        value,
+                                                        label,
+                                                    }),
+                                                )}
+                                                value={lengthUnit}
+                                                allowDeselect={false}
+                                                w={130}
+                                                style={{ flexShrink: 0 }}
+                                                onChange={(v) =>
+                                                    v &&
+                                                    setSessionLength(
+                                                        lengthValue,
+                                                        v as LengthUnit,
+                                                    )
+                                                }
+                                            />
+                                        </Group>
+                                    </Input.Wrapper>
+                                </Grid.Col>
+                                <Grid.Col span={{ base: 12, sm: 6 }}>
+                                    <NumberInput
+                                        label='Price'
+                                        placeholder='Enter price'
+                                        description='Minimum paid amount is Ksh 1; use 0 for a free package'
+                                        min={0}
+                                        {...form.getInputProps('price')}
+                                    />
+                                </Grid.Col>
+                            </Grid>
+                            <Grid>
+                                <Grid.Col span={{ base: 12, sm: 6 }}>
+                                    <NumberInput
+                                        label='Max Devices'
+                                        placeholder='Enter max devices'
+                                        description='How many client devices may share one activation'
+                                        min={1}
+                                        {...form.getInputProps('maxDevices')}
+                                    />
+                                </Grid.Col>
+                                <Grid.Col span={{ base: 12, sm: 6 }}>
+                                    <MultiSelect
+                                        label='NAS Devices'
+                                        description='Devices this package is available on'
+                                        placeholder='Select NAS devices'
+                                        searchable
+                                        required
+                                        data={[
+                                            {
+                                                value: ALL_NAS_VALUE,
+                                                label: 'All NAS devices',
+                                            },
+                                            ...nasDevices.map((d) => ({
+                                                value: d.id,
+                                                label: d.name,
+                                            })),
+                                        ]}
+                                        {...form.getInputProps('nasDeviceIds')}
+                                        onChange={handleNasDevicesChange}
+                                    />
+                                </Grid.Col>
+                            </Grid>
+                            <Grid>
+                                <Grid.Col span={{ base: 12, sm: 6 }}>
+                                    <MeasurementInput
+                                        label='Upload Rate'
+                                        description='0 = unlimited'
+                                        baseValue={form.values.uploadRate}
+                                        units={RATE_UNITS}
+                                        error={form.errors.uploadRate}
+                                        onBlur={
+                                            form.getInputProps('uploadRate')
+                                                .onBlur
+                                        }
+                                        onChange={(value) =>
+                                            form.setFieldValue(
+                                                'uploadRate',
+                                                value,
+                                            )
+                                        }
+                                    />
+                                </Grid.Col>
+                                <Grid.Col span={{ base: 12, sm: 6 }}>
+                                    <MeasurementInput
+                                        label='Download Rate'
+                                        description='0 = unlimited'
+                                        baseValue={form.values.downloadRate}
+                                        units={RATE_UNITS}
+                                        error={form.errors.downloadRate}
+                                        onBlur={
+                                            form.getInputProps('downloadRate')
+                                                .onBlur
+                                        }
+                                        onChange={(value) =>
+                                            form.setFieldValue(
+                                                'downloadRate',
+                                                value,
+                                            )
+                                        }
+                                    />
+                                </Grid.Col>
+                            </Grid>
+                            <Grid>
+                                <Grid.Col span={{ base: 12, sm: 6 }}>
+                                    <MeasurementInput
+                                        label='Upload Quota'
+                                        description='0 = unlimited'
+                                        baseValue={form.values.uploadQuota}
+                                        units={DATA_UNITS}
+                                        error={form.errors.uploadQuota}
+                                        onBlur={
+                                            form.getInputProps('uploadQuota')
+                                                .onBlur
+                                        }
+                                        onChange={(value) =>
+                                            form.setFieldValue(
+                                                'uploadQuota',
+                                                value,
+                                            )
+                                        }
+                                    />
+                                </Grid.Col>
+                                <Grid.Col span={{ base: 12, sm: 6 }}>
+                                    <MeasurementInput
+                                        label='Download Quota'
+                                        description='0 = unlimited'
+                                        baseValue={form.values.downloadQuota}
+                                        units={DATA_UNITS}
+                                        error={form.errors.downloadQuota}
+                                        onBlur={
+                                            form.getInputProps('downloadQuota')
+                                                .onBlur
+                                        }
+                                        onChange={(value) =>
+                                            form.setFieldValue(
+                                                'downloadQuota',
+                                                value,
+                                            )
+                                        }
+                                    />
+                                </Grid.Col>
+                            </Grid>
+                            <Divider
+                                label='Fair usage policy'
+                                labelPosition='left'
+                            />
+                            <Text size='sm' c='dimmed'>
+                                Track combined upload and download usage in a
+                                recurring window. Once the allowance is reached,
+                                active sessions are switched to the throttled
+                                rates with RADIUS CoA. Set the allowance to 0 to
+                                disable fair usage.
+                            </Text>
+                            <Grid>
+                                <Grid.Col span={{ base: 12, sm: 6 }}>
+                                    <MeasurementInput
+                                        label='Fair Usage Allowance'
+                                        description='Combined upload and download data'
+                                        baseValue={form.values.fairUsageLimit}
+                                        units={DATA_UNITS}
+                                        error={form.errors.fairUsageLimit}
+                                        onBlur={
+                                            form.getInputProps('fairUsageLimit')
+                                                .onBlur
+                                        }
+                                        onChange={(value) =>
+                                            form.setFieldValue(
+                                                'fairUsageLimit',
+                                                value,
+                                            )
+                                        }
+                                    />
+                                </Grid.Col>
+                                <Grid.Col span={{ base: 12, sm: 6 }}>
+                                    <Input.Wrapper
+                                        label='Calculation Window'
+                                        description='Session, or recurring time from activation'
+                                    >
+                                        <Group gap='xs' wrap='nowrap'>
+                                            <NumberInput
+                                                aria-label='Fair usage window value'
+                                                min={1}
+                                                step={1}
+                                                disabled={
+                                                    form.values
+                                                        .fairUsageWindowUnit ===
+                                                    'session'
+                                                }
+                                                style={{ flex: 1, minWidth: 0 }}
+                                                {...form.getInputProps(
+                                                    'fairUsageWindowValue',
+                                                )}
+                                            />
+                                            <Select
+                                                aria-label='Fair usage window unit'
+                                                data={[
+                                                    {
+                                                        value: 'session',
+                                                        label: 'Session',
+                                                    },
+                                                    {
+                                                        value: 'days',
+                                                        label: 'Days',
+                                                    },
+                                                    {
+                                                        value: 'weeks',
+                                                        label: 'Weeks',
+                                                    },
+                                                    {
+                                                        value: 'months',
+                                                        label: 'Months',
+                                                    },
+                                                ]}
+                                                allowDeselect={false}
+                                                w={130}
+                                                style={{ flexShrink: 0 }}
+                                                {...form.getInputProps(
+                                                    'fairUsageWindowUnit',
+                                                )}
+                                                onChange={(value) =>
+                                                    form.setFieldValue(
+                                                        'fairUsageWindowUnit',
+                                                        (value as FairUsageWindowUnit) ??
+                                                            'session',
+                                                    )
+                                                }
+                                            />
+                                        </Group>
+                                    </Input.Wrapper>
+                                </Grid.Col>
+                            </Grid>
+                            <Grid>
+                                <Grid.Col span={{ base: 12, sm: 6 }}>
+                                    <MeasurementInput
+                                        label='Throttled Upload Rate'
+                                        description='Applied after the allowance is reached'
+                                        baseValue={
+                                            form.values.fairUsageUploadRate
+                                        }
+                                        units={RATE_UNITS}
+                                        error={form.errors.fairUsageUploadRate}
+                                        onBlur={
+                                            form.getInputProps(
+                                                'fairUsageUploadRate',
+                                            ).onBlur
+                                        }
+                                        onChange={(value) =>
+                                            form.setFieldValue(
+                                                'fairUsageUploadRate',
+                                                value,
+                                            )
+                                        }
+                                    />
+                                </Grid.Col>
+                                <Grid.Col span={{ base: 12, sm: 6 }}>
+                                    <MeasurementInput
+                                        label='Throttled Download Rate'
+                                        description='Applied after the allowance is reached'
+                                        baseValue={
+                                            form.values.fairUsageDownloadRate
+                                        }
+                                        units={RATE_UNITS}
+                                        error={
+                                            form.errors.fairUsageDownloadRate
+                                        }
+                                        onBlur={
+                                            form.getInputProps(
+                                                'fairUsageDownloadRate',
+                                            ).onBlur
+                                        }
+                                        onChange={(value) =>
+                                            form.setFieldValue(
+                                                'fairUsageDownloadRate',
+                                                value,
+                                            )
+                                        }
+                                    />
+                                </Grid.Col>
+                            </Grid>
+                            <Divider
+                                label='Burst limits'
+                                labelPosition='left'
+                            />
+                            <Text size='sm' c='dimmed'>
+                                RouterOS permits the burst rates while average
+                                traffic remains below the thresholds during the
+                                burst period. Leave every burst value at 0 to
+                                disable bursting.
+                            </Text>
+                            <Grid>
+                                <Grid.Col span={{ base: 12, sm: 6 }}>
+                                    <MeasurementInput
+                                        label='Burst Upload Rate'
+                                        baseValue={form.values.burstUploadRate}
+                                        units={RATE_UNITS}
+                                        error={form.errors.burstUploadRate}
+                                        onBlur={
+                                            form.getInputProps(
+                                                'burstUploadRate',
+                                            ).onBlur
+                                        }
+                                        onChange={(value) =>
+                                            form.setFieldValue(
+                                                'burstUploadRate',
+                                                value,
+                                            )
+                                        }
+                                    />
+                                </Grid.Col>
+                                <Grid.Col span={{ base: 12, sm: 6 }}>
+                                    <MeasurementInput
+                                        label='Burst Download Rate'
+                                        baseValue={
+                                            form.values.burstDownloadRate
+                                        }
+                                        units={RATE_UNITS}
+                                        error={form.errors.burstDownloadRate}
+                                        onBlur={
+                                            form.getInputProps(
+                                                'burstDownloadRate',
+                                            ).onBlur
+                                        }
+                                        onChange={(value) =>
+                                            form.setFieldValue(
+                                                'burstDownloadRate',
+                                                value,
+                                            )
+                                        }
+                                    />
+                                </Grid.Col>
+                            </Grid>
+                            <Grid>
+                                <Grid.Col span={{ base: 12, sm: 6 }}>
+                                    <MeasurementInput
+                                        label='Burst Upload Threshold'
+                                        baseValue={
+                                            form.values.burstUploadThreshold
+                                        }
+                                        units={RATE_UNITS}
+                                        error={form.errors.burstUploadThreshold}
+                                        onBlur={
+                                            form.getInputProps(
+                                                'burstUploadThreshold',
+                                            ).onBlur
+                                        }
+                                        onChange={(value) =>
+                                            form.setFieldValue(
+                                                'burstUploadThreshold',
+                                                value,
+                                            )
+                                        }
+                                    />
+                                </Grid.Col>
+                                <Grid.Col span={{ base: 12, sm: 6 }}>
+                                    <MeasurementInput
+                                        label='Burst Download Threshold'
+                                        baseValue={
+                                            form.values.burstDownloadThreshold
+                                        }
+                                        units={RATE_UNITS}
+                                        error={
+                                            form.errors.burstDownloadThreshold
+                                        }
+                                        onBlur={
+                                            form.getInputProps(
+                                                'burstDownloadThreshold',
+                                            ).onBlur
+                                        }
+                                        onChange={(value) =>
+                                            form.setFieldValue(
+                                                'burstDownloadThreshold',
+                                                value,
+                                            )
+                                        }
+                                    />
+                                </Grid.Col>
+                            </Grid>
+                            <NumberInput
+                                label='Burst Period (seconds)'
+                                description='RouterOS averaging period for both directions'
+                                min={0}
+                                {...form.getInputProps('burstTime')}
+                            />
+                            <Textarea
+                                label='Description'
+                                placeholder='Optional'
+                                description='Marketing copy shown on the portal'
+                                rows={2}
+                                {...form.getInputProps('description')}
+                            />
+                            <Textarea
+                                label='Note'
+                                placeholder='Optional'
+                                description='Internal note, not visible to customers'
+                                rows={2}
+                                {...form.getInputProps('note')}
+                            />
+                            {!isPppoe && (
+                                <Switch
+                                    label='No Expiry'
+                                    description='Cumulative time package: the session length becomes a time bank the client consumes across sessions. The bank must be used within the validity window set under Settings → Packages.'
+                                    {...form.getInputProps('noExpiry', {
+                                        type: 'checkbox',
+                                    })}
+                                />
+                            )}
+                            <Group justify='flex-end'>
+                                <Button
+                                    variant='default'
+                                    w={{ base: '100%', sm: 'auto' }}
+                                    onClick={() => navigate('/packages')}
+                                >
+                                    Cancel
+                                </Button>
+                                <Button
+                                    type='submit'
+                                    loading={loading}
+                                    w={{ base: '100%', sm: 'auto' }}
+                                >
+                                    {isEdit ? 'Save Changes' : 'Create Package'}
+                                </Button>
+                            </Group>
+                        </Stack>
+                    </form>
+                </Card>
+                <Modal
+                    opened={pendingSubmit !== null}
+                    onClose={() => setPendingSubmit(null)}
+                    title='Confirm zero package values'
+                    centered
+                    closeOnClickOutside={!loading}
+                    closeOnEscape={!loading}
+                    withCloseButton={!loading}
+                >
+                    <Stack>
+                        <Text size='sm'>
+                            Review these settings before saving. Zero values
+                            have special behavior:
+                        </Text>
+                        {pendingSubmit?.price === 0 && (
+                            <Text size='sm'>
+                                Price is 0: customers can activate this package
+                                for free without using the payment processor.
+                            </Text>
+                        )}
+                        {pendingSubmit?.uploadRate === 0 && (
+                            <Text size='sm'>
+                                Upload rate is 0: upload speed is unlimited.
+                            </Text>
+                        )}
+                        {pendingSubmit?.downloadRate === 0 && (
+                            <Text size='sm'>
+                                Download rate is 0: download speed is unlimited.
+                            </Text>
                         )}
                         <Group justify='flex-end'>
                             <Button
                                 variant='default'
                                 w={{ base: '100%', sm: 'auto' }}
-                                onClick={() => navigate('/packages')}
+                                disabled={loading}
+                                onClick={() => setPendingSubmit(null)}
                             >
                                 Cancel
                             </Button>
                             <Button
-                                type='submit'
                                 loading={loading}
                                 w={{ base: '100%', sm: 'auto' }}
+                                onClick={() =>
+                                    pendingSubmit &&
+                                    void submitPackage(pendingSubmit)
+                                }
                             >
                                 {isEdit ? 'Save Changes' : 'Create Package'}
                             </Button>
                         </Group>
                     </Stack>
-                </form>
-            </Card>
-            <Modal
-                opened={pendingSubmit !== null}
-                onClose={() => setPendingSubmit(null)}
-                title='Confirm zero package values'
-                centered
-                closeOnClickOutside={!loading}
-                closeOnEscape={!loading}
-                withCloseButton={!loading}
-            >
-                <Stack>
-                    <Text size='sm'>
-                        Review these settings before saving. Zero values have
-                        special behavior:
-                    </Text>
-                    {pendingSubmit?.price === 0 && (
-                        <Text size='sm'>
-                            Price is 0: customers can activate this package for
-                            free without using the payment processor.
-                        </Text>
-                    )}
-                    {pendingSubmit?.uploadRate === 0 && (
-                        <Text size='sm'>
-                            Upload rate is 0: upload speed is unlimited.
-                        </Text>
-                    )}
-                    {pendingSubmit?.downloadRate === 0 && (
-                        <Text size='sm'>
-                            Download rate is 0: download speed is unlimited.
-                        </Text>
-                    )}
-                    <Group justify='flex-end'>
-                        <Button
-                            variant='default'
-                            w={{ base: '100%', sm: 'auto' }}
-                            disabled={loading}
-                            onClick={() => setPendingSubmit(null)}
-                        >
-                            Cancel
-                        </Button>
-                        <Button
-                            loading={loading}
-                            w={{ base: '100%', sm: 'auto' }}
-                            onClick={() =>
-                                pendingSubmit &&
-                                void submitPackage(pendingSubmit)
-                            }
-                        >
-                            {isEdit ? 'Save Changes' : 'Create Package'}
-                        </Button>
-                    </Group>
-                </Stack>
-            </Modal>
-        </Container>
+                </Modal>
+            </Container>
+        </PageLayout>
     );
 }

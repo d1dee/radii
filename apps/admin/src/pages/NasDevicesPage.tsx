@@ -27,6 +27,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MdAdd, MdDelete, MdEdit, MdSearch, MdTerminal } from 'react-icons/md';
 import { useNavigate } from 'react-router-dom';
 
+import { PageLayout } from '@/components/Layout/PageLayout';
+import { PageTableScrollContainer } from '@/components/PageTableScrollContainer';
 import { NasDetailsDrawer } from '@/components/NasDevices/NasDetailsDrawer';
 import {
     SortableTableHeader,
@@ -305,33 +307,36 @@ export default function NasDevicesPage() {
     };
 
     return (
-        <Stack gap='md'>
-            <Group justify='space-between'>
-                <Stack gap={4}>
-                    <Group gap='sm'>
-                        <Title order={3}>NAS Devices</Title>
-                        {!loading && !error ? (
-                            <Badge
-                                color={onlineTotal > 0 ? 'green' : 'gray'}
-                                variant='light'
-                            >
-                                {onlineTotal} / {total} NAS connected
-                            </Badge>
-                        ) : null}
-                    </Group>
-                    <Text size='sm' c='dimmed'>
-                        Routers that authenticate customers against RADIUS and
-                        serve your packages.
-                    </Text>
-                </Stack>
-                <Button
-                    leftSection={<MdAdd />}
-                    onClick={() => navigate('/nas-devices/add')}
-                >
-                    Add NAS Device
-                </Button>
-            </Group>
-
+        <PageLayout
+            label='NAS devices page content'
+            header={
+                <Group justify='space-between'>
+                    <Stack gap={4}>
+                        <Group gap='sm'>
+                            <Title order={3}>NAS Devices</Title>
+                            {!loading && !error ? (
+                                <Badge
+                                    color={onlineTotal > 0 ? 'green' : 'gray'}
+                                    variant='light'
+                                >
+                                    {onlineTotal} / {total} NAS connected
+                                </Badge>
+                            ) : null}
+                        </Group>
+                        <Text size='sm' c='dimmed'>
+                            Routers that authenticate customers against RADIUS
+                            and serve your packages.
+                        </Text>
+                    </Stack>
+                    <Button
+                        leftSection={<MdAdd />}
+                        onClick={() => navigate('/nas-devices/add')}
+                    >
+                        Add NAS Device
+                    </Button>
+                </Group>
+            }
+        >
             {!loading && !error && devices.length > 0 && (
                 <SimpleGrid cols={{ base: 2, lg: 4 }}>
                     <SummaryCard
@@ -403,7 +408,7 @@ export default function NasDevicesPage() {
                         : 'No NAS devices yet. Add one to get started.'}
                 </Text>
             ) : (
-                <Table.ScrollContainer
+                <PageTableScrollContainer
                     minWidth={1200}
                     aria-label='NAS devices table'
                 >
@@ -606,7 +611,7 @@ export default function NasDevicesPage() {
                             ))}
                         </Table.Tbody>
                     </Table>
-                </Table.ScrollContainer>
+                </PageTableScrollContainer>
             )}
 
             <TablePagination
@@ -845,6 +850,6 @@ export default function NasDevicesPage() {
                     </Group>
                 </Stack>
             </Modal>
-        </Stack>
+        </PageLayout>
     );
 }

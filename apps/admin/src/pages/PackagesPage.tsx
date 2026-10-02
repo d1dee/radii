@@ -21,6 +21,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MdAdd, MdDelete, MdEdit, MdSearch } from 'react-icons/md';
 import { useNavigate } from 'react-router-dom';
 
+import { PageLayout } from '@/components/Layout/PageLayout';
+import { PageTableScrollContainer } from '@/components/PageTableScrollContainer';
 import { PackageDetailsDrawer } from '@/components/Packages/PackageDetailsDrawer';
 import {
     SortableTableHeader,
@@ -173,27 +175,30 @@ export default function PackagesPage() {
     };
 
     return (
-        <Stack gap='md'>
-            <Group justify='space-between'>
-                <Stack gap={4}>
-                    <Title order={3}>Packages</Title>
-                    <Text size='sm' c='dimmed'>
-                        Internet plans sold through your hotspot and PPPoE NAS
-                        devices.
-                    </Text>
-                </Stack>
-                <Button
-                    leftSection={<MdAdd />}
-                    onClick={() =>
-                        navigate(
-                            `/packages/add?type=${typeFilter ?? 'hotspot'}`,
-                        )
-                    }
-                >
-                    Add Package
-                </Button>
-            </Group>
-
+        <PageLayout
+            label='Packages page content'
+            header={
+                <Group justify='space-between'>
+                    <Stack gap={4}>
+                        <Title order={3}>Packages</Title>
+                        <Text size='sm' c='dimmed'>
+                            Internet plans sold through your hotspot and PPPoE
+                            NAS devices.
+                        </Text>
+                    </Stack>
+                    <Button
+                        leftSection={<MdAdd />}
+                        onClick={() =>
+                            navigate(
+                                `/packages/add?type=${typeFilter ?? 'hotspot'}`,
+                            )
+                        }
+                    >
+                        Add Package
+                    </Button>
+                </Group>
+            }
+        >
             <Stack gap='md'>
                 {!loading && !error && (
                     <SimpleGrid cols={{ base: 2, lg: 4 }}>
@@ -268,7 +273,7 @@ export default function PackagesPage() {
                             : 'No packages yet.'}
                     </Text>
                 ) : (
-                    <Table.ScrollContainer
+                    <PageTableScrollContainer
                         minWidth={980}
                         aria-label='Packages table'
                     >
@@ -443,7 +448,7 @@ export default function PackagesPage() {
                                 ))}
                             </Table.Tbody>
                         </Table>
-                    </Table.ScrollContainer>
+                    </PageTableScrollContainer>
                 )}
                 <TablePagination
                     page={page}
@@ -498,6 +503,6 @@ export default function PackagesPage() {
                     </Group>
                 </Stack>
             </Modal>
-        </Stack>
+        </PageLayout>
     );
 }

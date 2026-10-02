@@ -1,8 +1,6 @@
 import {
     Anchor,
     Button,
-    Card,
-    Center,
     Group,
     PasswordInput,
     PinInput,
@@ -19,6 +17,7 @@ import { Link, Navigate, useNavigate } from 'react-router-dom';
 
 import { authClient, useSession } from '@/lib/auth';
 import { reportClientError } from '@/lib/clientError';
+import { AuthPageLayout } from '@/components/Layout/AuthPageLayout';
 
 // Email-OTP password reset on the dedicated admin BetterAuth instance:
 // request a 6-digit code by email (valid 5 minutes), then redeem it with a
@@ -125,132 +124,114 @@ export default function ForgotPasswordPage() {
     const isRequest = step === 'request';
 
     return (
-        <Center mih='100dvh' p='md'>
-            <Card
-                withBorder
-                shadow='sm'
-                radius='md'
-                p={{ base: 'md', sm: 'xl' }}
-                w='100%'
-                maw={420}
-            >
-                <Stack gap='lg'>
-                    <Stack gap={4}>
-                        <Title order={2} size='h3'>
-                            Reset password
-                        </Title>
-                        <Text size='sm' c='dimmed'>
-                            {isRequest
-                                ? 'Enter your admin email and we will send you a 6-digit reset code.'
-                                : 'Enter the 6-digit code we emailed you and choose a new password.'}
-                        </Text>
-                    </Stack>
-
-                    <form onSubmit={form.onSubmit(onReset)}>
-                        <Stack gap='md'>
-                            <TextInput
-                                label='Email'
-                                type='email'
-                                inputMode='email'
-                                autoCapitalize='none'
-                                autoComplete='username'
-                                required
-                                disabled={!isRequest}
-                                {...form.getInputProps('email')}
-                            />
-
-                            {!isRequest ? (
-                                <>
-                                    <Group gap='sm' align='flex-start'>
-                                        <Stack gap={4}>
-                                            <Text size='sm' fw={500}>
-                                                Reset code
-                                            </Text>
-                                            <PinInput
-                                                size='sm'
-                                                gap={6}
-                                                inputMode='numeric'
-                                                length={6}
-                                                oneTimeCode
-                                                ariaLabel='6-digit reset code'
-                                                value={form.values.otp}
-                                                onChange={(value) =>
-                                                    form.setFieldValue(
-                                                        'otp',
-                                                        value,
-                                                    )
-                                                }
-                                                error={!!form.errors.otp}
-                                                getInputProps={() => ({
-                                                    'aria-describedby': form
-                                                        .errors.otp
-                                                        ? 'reset-code-error'
-                                                        : undefined,
-                                                })}
-                                            />
-                                        </Stack>
-                                    </Group>
-                                    {form.errors.otp ? (
-                                        <Text
-                                            id='reset-code-error'
-                                            size='xs'
-                                            c='red'
-                                            role='alert'
-                                        >
-                                            {form.errors.otp}
-                                        </Text>
-                                    ) : null}
-                                    <PasswordInput
-                                        label='New password'
-                                        visibilityToggleButtonProps={{
-                                            'aria-label':
-                                                'Toggle new password visibility',
-                                        }}
-                                        autoComplete='new-password'
-                                        required
-                                        description='At least 8 characters, combining 2 of: lowercase, uppercase, numbers, symbols'
-                                        {...form.getInputProps('password')}
-                                    />
-                                    <PasswordInput
-                                        label='Confirm new password'
-                                        visibilityToggleButtonProps={{
-                                            'aria-label':
-                                                'Toggle confirm password visibility',
-                                        }}
-                                        autoComplete='new-password'
-                                        required
-                                        {...form.getInputProps(
-                                            'confirmPassword',
-                                        )}
-                                    />
-                                </>
-                            ) : null}
-
-                            <Button
-                                type={isRequest ? 'button' : 'submit'}
-                                fullWidth
-                                loading={isRequest ? requesting : resetting}
-                                onClick={
-                                    isRequest
-                                        ? () => void handleRequest()
-                                        : undefined
-                                }
-                            >
-                                {isRequest
-                                    ? 'Send reset code'
-                                    : 'Reset password'}
-                            </Button>
-                        </Stack>
-                    </form>
-
-                    <Text size='sm' ta='center' c='dimmed'>
-                        Remembered it?{' '}
-                        <Anchor component={Link} to='/login' size='sm'>
-                            Back to sign in
-                        </Anchor>
+        <AuthPageLayout
+            label='Reset password'
+            header={
+                <Stack gap={4}>
+                    <Title order={2} size='h3'>
+                        Reset password
+                    </Title>
+                    <Text size='sm' c='dimmed'>
+                        {isRequest
+                            ? 'Enter your admin email and we will send you a 6-digit reset code.'
+                            : 'Enter the 6-digit code we emailed you and choose a new password.'}
                     </Text>
                 </Stack>
-            </Card>
-        </Center>
+            }
+        >
+            <form onSubmit={form.onSubmit(onReset)}>
+                <Stack gap='md'>
+                    <TextInput
+                        label='Email'
+                        type='email'
+                        inputMode='email'
+                        autoCapitalize='none'
+                        autoComplete='username'
+                        required
+                        disabled={!isRequest}
+                        {...form.getInputProps('email')}
+                    />
+
+                    {!isRequest ? (
+                        <>
+                            <Group gap='sm' align='flex-start'>
+                                <Stack gap={4}>
+                                    <Text size='sm' fw={500}>
+                                        Reset code
+                                    </Text>
+                                    <PinInput
+                                        size='sm'
+                                        gap={6}
+                                        inputMode='numeric'
+                                        length={6}
+                                        oneTimeCode
+                                        ariaLabel='6-digit reset code'
+                                        value={form.values.otp}
+                                        onChange={(value) =>
+                                            form.setFieldValue('otp', value)
+                                        }
+                                        error={!!form.errors.otp}
+                                        getInputProps={() => ({
+                                            'aria-describedby': form.errors.otp
+                                                ? 'reset-code-error'
+                                                : undefined,
+                                        })}
+                                    />
+                                </Stack>
+                            </Group>
+                            {form.errors.otp ? (
+                                <Text
+                                    id='reset-code-error'
+                                    size='xs'
+                                    c='red'
+                                    role='alert'
+                                >
+                                    {form.errors.otp}
+                                </Text>
+                            ) : null}
+                            <PasswordInput
+                                label='New password'
+                                visibilityToggleButtonProps={{
+                                    'aria-label':
+                                        'Toggle new password visibility',
+                                }}
+                                autoComplete='new-password'
+                                required
+                                description='At least 8 characters, combining 2 of: lowercase, uppercase, numbers, symbols'
+                                {...form.getInputProps('password')}
+                            />
+                            <PasswordInput
+                                label='Confirm new password'
+                                visibilityToggleButtonProps={{
+                                    'aria-label':
+                                        'Toggle confirm password visibility',
+                                }}
+                                autoComplete='new-password'
+                                required
+                                {...form.getInputProps('confirmPassword')}
+                            />
+                        </>
+                    ) : null}
+
+                    <Button
+                        type={isRequest ? 'button' : 'submit'}
+                        fullWidth
+                        loading={isRequest ? requesting : resetting}
+                        onClick={
+                            isRequest ? () => void handleRequest() : undefined
+                        }
+                    >
+                        {isRequest ? 'Send reset code' : 'Reset password'}
+                    </Button>
+                </Stack>
+            </form>
+
+            <Text size='sm' ta='center' c='dimmed'>
+                Remembered it?{' '}
+                <Anchor component={Link} to='/login' size='sm'>
+                    Back to sign in
+                </Anchor>
+            </Text>
+        </AuthPageLayout>
     );
 }

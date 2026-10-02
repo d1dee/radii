@@ -19,6 +19,8 @@ import {
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { MdRefresh } from 'react-icons/md';
 
+import { PageLayout } from '@/components/Layout/PageLayout';
+import { PageTableScrollContainer } from '@/components/PageTableScrollContainer';
 import { TablePagination } from '@/components/TablePagination';
 import {
     getAdminReports,
@@ -209,30 +211,33 @@ export default function DashboardPage() {
     }));
 
     return (
-        <Stack gap='md' miw={0}>
-            <Group justify='space-between' wrap='wrap'>
-                <Stack gap={4}>
-                    <Title order={3}>Dashboard</Title>
-                    <Text size='sm' c='dimmed'>
-                        Live network activity and revenue overview for the
-                        selected date range.
-                    </Text>
-                </Stack>
-                <Group
-                    gap='sm'
-                    align='flex-end'
-                    w={{ base: '100%', md: 'auto' }}
-                >
-                    <SegmentedControl
-                        aria-label='Date range preset'
-                        w={{ base: '100%', sm: 'auto' }}
-                        value={preset}
-                        onChange={applyPreset}
-                        data={rangePresets.map((p) => p.label)}
-                    />
+        <PageLayout
+            label='Dashboard page content'
+            header={
+                <Group justify='space-between' wrap='wrap'>
+                    <Stack gap={4}>
+                        <Title order={3}>Dashboard</Title>
+                        <Text size='sm' c='dimmed'>
+                            Live network activity and revenue overview for the
+                            selected date range.
+                        </Text>
+                    </Stack>
+                    <Group
+                        gap='sm'
+                        align='flex-end'
+                        w={{ base: '100%', md: 'auto' }}
+                    >
+                        <SegmentedControl
+                            aria-label='Date range preset'
+                            w={{ base: '100%', sm: 'auto' }}
+                            value={preset}
+                            onChange={applyPreset}
+                            data={rangePresets.map((p) => p.label)}
+                        />
+                    </Group>
                 </Group>
-            </Group>
-
+            }
+        >
             {/* Live network right now */}
             <Card withBorder padding='md' radius='md'>
                 <Group justify='space-between' mb='xs'>
@@ -439,7 +444,7 @@ export default function DashboardPage() {
                                         No paid purchases in this range.
                                     </Text>
                                 ) : (
-                                    <Table.ScrollContainer
+                                    <PageTableScrollContainer
                                         minWidth={380}
                                         aria-label='Top customers table'
                                     >
@@ -504,7 +509,7 @@ export default function DashboardPage() {
                                                 )}
                                             </Table.Tbody>
                                         </Table>
-                                    </Table.ScrollContainer>
+                                    </PageTableScrollContainer>
                                 )}
                                 <TablePagination
                                     page={topUsersPage}
@@ -518,6 +523,6 @@ export default function DashboardPage() {
                     </Grid>
                 </>
             )}
-        </Stack>
+        </PageLayout>
     );
 }

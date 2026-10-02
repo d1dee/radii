@@ -1,8 +1,6 @@
 import {
     Anchor,
     Button,
-    Card,
-    Center,
     Divider,
     PasswordInput,
     Stack,
@@ -18,6 +16,7 @@ import { Link, Navigate, useNavigate } from 'react-router-dom';
 
 import { authClient, useSession } from '@/lib/auth';
 import { reportClientError } from '@/lib/clientError';
+import { AuthPageLayout } from '@/components/Layout/AuthPageLayout';
 
 export default function RegisterPage() {
     const navigate = useNavigate();
@@ -85,78 +84,69 @@ export default function RegisterPage() {
     }
 
     return (
-        <Center mih='100dvh' p='md'>
-            <Card
-                withBorder
-                shadow='sm'
-                radius='md'
-                p={{ base: 'md', sm: 'xl' }}
-                w='100%'
-                maw={420}
-            >
-                <Stack gap='lg'>
-                    <Stack gap={4}>
-                        <Title order={2} size='h3'>
-                            Create admin account
-                        </Title>
-                        <Text size='sm' c='dimmed'>
-                            Administrators manage NAS devices, packages,
-                            customers and payments.
-                        </Text>
-                    </Stack>
-
-                    <form onSubmit={form.onSubmit(onSubmit)}>
-                        <Stack gap='md'>
-                            <TextInput
-                                label='Full name'
-                                autoComplete='name'
-                                required
-                                {...form.getInputProps('name')}
-                            />
-                            <TextInput
-                                label='Email'
-                                type='email'
-                                inputMode='email'
-                                autoCapitalize='none'
-                                autoComplete='username'
-                                required
-                                {...form.getInputProps('email')}
-                            />
-                            <PasswordInput
-                                label='Password'
-                                visibilityToggleButtonProps={{
-                                    'aria-label': 'Toggle password visibility',
-                                }}
-                                autoComplete='new-password'
-                                required
-                                description='At least 8 characters, combining 2 of: lowercase, uppercase, numbers, symbols'
-                                {...form.getInputProps('password')}
-                            />
-                            <PasswordInput
-                                label='Confirm password'
-                                visibilityToggleButtonProps={{
-                                    'aria-label':
-                                        'Toggle confirm password visibility',
-                                }}
-                                autoComplete='new-password'
-                                required
-                                {...form.getInputProps('confirmPassword')}
-                            />
-                            <Button type='submit' fullWidth loading={loading}>
-                                Create account
-                            </Button>
-                        </Stack>
-                    </form>
-
-                    <Divider label='or' labelPosition='center' />
-                    <Text size='sm' ta='center'>
-                        Already registered?{' '}
-                        <Anchor component={Link} to='/login' size='sm'>
-                            Sign in
-                        </Anchor>
+        <AuthPageLayout
+            label='Create admin account'
+            header={
+                <Stack gap={4}>
+                    <Title order={2} size='h3'>
+                        Create admin account
+                    </Title>
+                    <Text size='sm' c='dimmed'>
+                        Administrators manage NAS devices, packages, customers
+                        and payments.
                     </Text>
                 </Stack>
-            </Card>
-        </Center>
+            }
+        >
+            <form onSubmit={form.onSubmit(onSubmit)}>
+                <Stack gap='md'>
+                    <TextInput
+                        label='Full name'
+                        autoComplete='name'
+                        required
+                        {...form.getInputProps('name')}
+                    />
+                    <TextInput
+                        label='Email'
+                        type='email'
+                        inputMode='email'
+                        autoCapitalize='none'
+                        autoComplete='username'
+                        required
+                        {...form.getInputProps('email')}
+                    />
+                    <PasswordInput
+                        label='Password'
+                        visibilityToggleButtonProps={{
+                            'aria-label': 'Toggle password visibility',
+                        }}
+                        autoComplete='new-password'
+                        required
+                        description='At least 8 characters, combining 2 of: lowercase, uppercase, numbers, symbols'
+                        {...form.getInputProps('password')}
+                    />
+                    <PasswordInput
+                        label='Confirm password'
+                        visibilityToggleButtonProps={{
+                            'aria-label': 'Toggle confirm password visibility',
+                        }}
+                        autoComplete='new-password'
+                        required
+                        {...form.getInputProps('confirmPassword')}
+                    />
+                    <Button type='submit' fullWidth loading={loading}>
+                        Create account
+                    </Button>
+                </Stack>
+            </form>
+
+            <Divider label='or' labelPosition='center' />
+            <Text size='sm' ta='center'>
+                Already registered?{' '}
+                <Anchor component={Link} to='/login' size='sm'>
+                    Sign in
+                </Anchor>
+            </Text>
+        </AuthPageLayout>
     );
 }

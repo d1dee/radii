@@ -1,8 +1,6 @@
 import {
     Anchor,
     Button,
-    Card,
-    Center,
     Group,
     PinInput,
     Stack,
@@ -15,6 +13,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 
 import { authClient, useSession } from '@/lib/auth';
 import { reportClientError } from '@/lib/clientError';
+import { AuthPageLayout } from '@/components/Layout/AuthPageLayout';
 import { notifications } from '@mantine/notifications';
 
 // 2FA-style email verification for admin accounts: the admin registers (or
@@ -121,79 +120,71 @@ export default function VerifyEmailPage() {
     }
 
     return (
-        <Center mih='100dvh' p='md'>
-            <Card
-                withBorder
-                shadow='sm'
-                radius='md'
-                p={{ base: 'md', sm: 'xl' }}
-                w='100%'
-                maw={420}
-            >
-                <Stack gap='lg'>
-                    <Stack gap={4}>
-                        <Title order={2} size='h3'>
-                            Verify your email
-                        </Title>
-                        <Text size='sm' c='dimmed'>
-                            Enter the 6-digit code we emailed you. It expires in
-                            5 minutes.
-                        </Text>
-                    </Stack>
-
-                    <Stack gap='md'>
-                        <TextInput
-                            label='Email'
-                            type='email'
-                            inputMode='email'
-                            autoComplete='email'
-                            autoCapitalize='none'
-                            required
-                            disabled={!!session}
-                            value={email}
-                            onChange={(e) => setEmail(e.currentTarget.value)}
-                        />
-                        <Stack gap={4} align='center'>
-                            <Text size='sm' fw={500}>
-                                Verification code
-                            </Text>
-                            <PinInput
-                                size='sm'
-                                gap={6}
-                                inputMode='numeric'
-                                oneTimeCode
-                                length={6}
-                                ariaLabel='6-digit verification code'
-                                value={otp}
-                                onChange={setOtp}
-                            />
-                        </Stack>
-                        <Button
-                            fullWidth
-                            loading={verifying}
-                            disabled={!canVerify}
-                            onClick={verify}
-                        >
-                            Verify email
-                        </Button>
-                        <Group justify='space-between'>
-                            <Button
-                                variant='subtle'
-                                size='sm'
-                                px='xs'
-                                onClick={resend}
-                                loading={resending}
-                                disabled={!emailValid}
-                            >
-                                Resend code
-                            </Button>
-                            <Anchor component={Link} to='/login' size='sm'>
-                                Back to sign in
-                            </Anchor>
-                        </Group>
-                    </Stack>
+        <AuthPageLayout
+            label='Email verification'
+            header={
+                <Stack gap={4}>
+                    <Title order={2} size='h3'>
+                        Verify your email
+                    </Title>
+                    <Text size='sm' c='dimmed'>
+                        Enter the 6-digit code we emailed you. It expires in 5
+                        minutes.
+                    </Text>
                 </Stack>
-            </Card>
-        </Center>
+            }
+        >
+            <Stack gap='md'>
+                <TextInput
+                    label='Email'
+                    type='email'
+                    inputMode='email'
+                    autoComplete='email'
+                    autoCapitalize='none'
+                    required
+                    disabled={!!session}
+                    value={email}
+                    onChange={(e) => setEmail(e.currentTarget.value)}
+                />
+                <Stack gap={4} align='center'>
+                    <Text size='sm' fw={500}>
+                        Verification code
+                    </Text>
+                    <PinInput
+                        size='sm'
+                        gap={6}
+                        inputMode='numeric'
+                        oneTimeCode
+                        length={6}
+                        ariaLabel='6-digit verification code'
+                        value={otp}
+                        onChange={setOtp}
+                    />
+                </Stack>
+                <Button
+                    fullWidth
+                    loading={verifying}
+                    disabled={!canVerify}
+                    onClick={verify}
+                >
+                    Verify email
+                </Button>
+                <Group justify='space-between'>
+                    <Button
+                        variant='subtle'
+                        size='sm'
+                        px='xs'
+                        onClick={resend}
+                        loading={resending}
+                        disabled={!emailValid}
+                    >
+                        Resend code
+                    </Button>
+                    <Anchor component={Link} to='/login' size='sm'>
+                        Back to sign in
+                    </Anchor>
+                </Group>
+            </Stack>
+        </AuthPageLayout>
     );
 }
