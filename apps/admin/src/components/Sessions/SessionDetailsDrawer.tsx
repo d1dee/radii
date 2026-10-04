@@ -401,8 +401,8 @@ export function SessionDetailsDrawer({
                             )}
                         </LinkedCard>
 
-                        <LinkedCard label='PPPoE service account'>
-                            {detail.serviceAccount ? (
+                        {detail.serviceAccount ? (
+                            <LinkedCard label='PPPoE service account'>
                                 <>
                                     <Group gap='xs'>
                                         <Text fw={600}>
@@ -427,13 +427,8 @@ export function SessionDetailsDrawer({
                                     </Text>
                                     <Code>{detail.serviceAccount.id}</Code>
                                 </>
-                            ) : (
-                                <Text size='sm' c='dimmed'>
-                                    This session is not linked to a PPPoE
-                                    service account.
-                                </Text>
-                            )}
-                        </LinkedCard>
+                            </LinkedCard>
+                        ) : null}
 
                         <LinkedCard label='Package'>
                             {detail.package ? (
