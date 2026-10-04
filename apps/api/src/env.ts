@@ -120,6 +120,20 @@ export const env = {
             process.env.RADIUS_BANK_INTERIM_SECONDS || '60',
             10,
         ),
+        // Read-only NAS session polling after startup and stale accounting.
+        // Staleness is never less than three configured interim intervals.
+        sessionReconcileSeconds: parseInt(
+            process.env.RADIUS_SESSION_RECONCILE_SECONDS || '60',
+            10,
+        ),
+        sessionStaleSeconds: parseInt(
+            process.env.RADIUS_SESSION_STALE_SECONDS || '180',
+            10,
+        ),
+        nasPollTimeoutMs: parseInt(
+            process.env.RADIUS_NAS_POLL_TIMEOUT_MS || '10000',
+            10,
+        ),
     },
     // Shared secret authenticating the FreeRADIUS rlm_rest backend
     // (/api/radius/rest, routes/radiusRest.ts). FreeRADIUS injects it as the

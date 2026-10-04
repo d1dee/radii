@@ -140,6 +140,11 @@ export const nasSetupScript = pgTable(
         // services to the WireGuard management subnet. Nullable only for
         // rows generated before the column existed.
         ipLockdown: boolean('ip_lockdown'),
+        // Generated configuration includes read-only session monitoring;
+        // application still requires an applied status and reported WG key.
+        sessionMonitoringEnabled: boolean('session_monitoring_enabled')
+            .default(false)
+            .notNull(),
         // WireGuard public key reported by the device when the script runs.
         // Null until the report arrives; reset to null on regeneration
         // (the device generates a fresh keypair when re-running the script).

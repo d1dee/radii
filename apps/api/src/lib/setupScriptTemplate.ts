@@ -81,6 +81,7 @@ const ROS_QUOTED_VARS = new Set([
     'HOTSPOT_INTERFACE',
     'HOTSPOT_DNS_NAME',
     'PPP_INTERFACE',
+    'MONITORING_PASSWORD',
 ]);
 
 export function rosStringLines(varName: string, value: string): string {
@@ -336,14 +337,6 @@ const IP_LOCKDOWN_SECTION = `# -------------------------------------------------
 } on-error={};
 
 :do {
-    /ip/service/set [find where name="www"] \
-        disabled=no \
-        address={{WG_ALLOWED_ADDRESS}};
-} on-error={
-    $radiiLog "WARNING - WebFig HTTP service not found/configured";
-};
-
-:do {
     /ip/service/set [find where name="www-ssl"] disabled=yes;
 } on-error={};
 
@@ -353,7 +346,7 @@ const IP_LOCKDOWN_DISABLED_SECTION = `# ----------------------------------------
 # 6. IP service lockdown (skipped: disabled in generation options)
 # ---------------------------------------------------------------------
 
-$radiiLog "IP service lockdown skipped (disabled)";
+$radiiLog "Optional IP service lockdown skipped (REST remains WireGuard-only)";
 `;
 
 const TEMPLATE = `# =====================================================================
@@ -374,6 +367,7 @@ const TEMPLATE = `# ============================================================
 #    4. WireGuard management tunnel
 #    5. Firewall input rules
 #    6. IP service lockdown
+#   6a. Read-only session monitoring (always WireGuard-only)
 #    7. Report device facts to radii
 #    8. HotSpot + DHCP + NAT
 #    9. PPPoE server
@@ -554,6 +548,57 @@ $radiiLog ("WireGuard public key: " . $wgPubKey);
 $radiiLog "WireGuard firewall access rules configured";
 
 {{IP_LOCKDOWN_SECTION}}
+
+# ---------------------------------------------------------------------
+# 6a. Read-only session monitoring
+# ---------------------------------------------------------------------
+
+# HTTP REST is intentionally restricted to the WireGuard server even when
+# optional IP service lockdown is disabled. WireGuard encrypts this traffic;
+# no HTTPS certificate or TLS verification bypass is needed.
+:do {
+    :local monitorGroup [/user/group/find where name="radii-monitor"];
+    :if ([:len $monitorGroup] = 0) do={
+        /user/group/add name="radii-monitor" policy=read,api,rest-api;
+    } else={
+        # Explicit revocations ensure reruns cannot retain elevated policies.
+        /user/group/set $monitorGroup \
+            policy=read,api,rest-api,!local,!telnet,!ssh,!ftp,!reboot,!write,!policy,!test,!winbox,!password,!web,!sniff,!sensitive,!romon;
+    };
+
+    :local monitorUser [/user/find where name="radii-monitor"];
+    :if ([:len $monitorUser] = 0) do={
+        /user/add name="radii-monitor" group="radii-monitor" \
+            address={{WG_ALLOWED_ADDRESS}} password="{{MONITORING_PASSWORD}}" \
+            disabled=no comment="radii session monitoring";
+    } else={
+        /user/set $monitorUser group="radii-monitor" \
+            address={{WG_ALLOWED_ADDRESS}} password="{{MONITORING_PASSWORD}}" \
+            disabled=no comment="radii session monitoring";
+    };
+
+    :local monitorWeb [/ip/service/find where name="www"];
+    :if ([:len $monitorWeb] != 1) do={
+        :error "HTTP REST service not found";
+    };
+    /ip/service/set $monitorWeb port=80 address={{WG_ALLOWED_ADDRESS}} disabled=no;
+
+    # Newer RouterOS versions can separately disable plain REST. Parse the
+    # optional command so older versions without this menu remain supported;
+    # an execution failure on a supported version still aborts provisioning.
+    :local restPlainSetup;
+    :do {
+        :set restPlainSetup [:parse "/ip/service/webserver/set rest-plain=yes"];
+    } on-error={};
+    :if ([:typeof $restPlainSetup] = "code") do={
+        $restPlainSetup;
+    };
+} on-error={
+    $radiiLog "ERROR - session monitoring provisioning failed; device report skipped";
+    :error "radii session monitoring provisioning failed";
+};
+
+$radiiLog "Read-only session monitoring configured (HTTP REST over WireGuard only)";
 
 # ---------------------------------------------------------------------
 # 7. Report device facts + WireGuard public key

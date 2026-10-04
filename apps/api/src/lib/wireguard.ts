@@ -77,6 +77,25 @@ export async function interfaceReady(): Promise<boolean> {
     }
 }
 
+// Plain REST credentials must never follow a fallback/default route if the
+// tunnel is down or its routes have not yet been restored after startup.
+export async function hasWireGuardManagementRoute(host: string): Promise<boolean> {
+    let proc;
+    try {
+        proc = Bun.spawn(['ip', '-j', 'route', 'get', host], {
+            stdout: 'pipe', stderr: 'ignore',
+        });
+        const output = await new Response(proc.stdout).text();
+        if (await proc.exited !== 0) return false;
+        const routes: unknown = JSON.parse(output);
+        if (!Array.isArray(routes) || routes.length !== 1) return false;
+        const route = routes[0] as { dev?: string; prefsrc?: string };
+        return route.dev === env.wgIface && route.prefsrc === env.wgInterfaceIp;
+    } catch {
+        return false;
+    }
+}
+
 // Adds or updates a single peer without affecting any other peer. Idempotent.
 export async function upsertPeer(peer: WgPeerConfig): Promise<void> {
     const args = [

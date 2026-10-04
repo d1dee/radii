@@ -6,6 +6,7 @@ import { nas, nasDevice, nasSetupScript } from '../db/schema';
 import { env } from '../env';
 import { apiLogger } from '../logging';
 import type { NasDeviceRow } from './nas';
+import { deriveNasMonitoringPassword } from './nasMonitoringCredentials';
 import {
     renderMikrotikSetupScript,
     sanitizeRosComment,
@@ -332,6 +333,11 @@ export async function generateSetupScript(
     const brandName = input.brandName || device.name;
 
     const radiusSecret = randomToken(24);
+    const monitoringPassword = deriveNasMonitoringPassword(
+        device.id,
+        radiusSecret,
+        env.adminBetterAuthSecret,
+    );
     const wgPsk = randomBase64(32);
     // Only token hashes and the expiry are persisted.
     const bootstrapExpiresAt = new Date(Date.now() + BOOTSTRAP_TOKEN_TTL_MS);
@@ -356,6 +362,7 @@ export async function generateSetupScript(
             GENERATED_AT: new Date().toISOString(),
             RADIUS_SERVER: radiusServer,
             RADIUS_SECRET: radiusSecret,
+            MONITORING_PASSWORD: monitoringPassword,
             WG_LISTEN_PORT: String(env.wgListenPort),
             WG_CLIENT_IP: wgClientIp,
             WG_PREFIX_LEN: String(wgSubnet.prefixLen),
@@ -472,6 +479,7 @@ export async function generateSetupScript(
                     pppoeInterface: input.pppoeInterface,
                     pppoeNetwork: input.pppoeNetwork,
                     ipLockdown: input.ipLockdown,
+                    sessionMonitoringEnabled: true,
                     wgPublicKey: null,
                     wgClientIp,
                     wgPsk,
@@ -500,6 +508,7 @@ export async function generateSetupScript(
                 pppoeInterface: input.pppoeInterface,
                 pppoeNetwork: input.pppoeNetwork,
                 ipLockdown: input.ipLockdown,
+                sessionMonitoringEnabled: true,
                 wgPublicKey: null,
                 wgClientIp,
                 wgPsk,
