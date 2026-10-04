@@ -61,7 +61,7 @@ function StatCard({
     sub?: string;
 }) {
     return (
-        <Card withBorder padding='md' radius='md'>
+        <Card withBorder padding='md' radius='md' h='100%'>
             <Text size='xs' c='dimmed'>
                 {label}
             </Text>

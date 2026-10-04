@@ -31,7 +31,6 @@ import {
     formatSeconds,
     formatSpeed,
 } from '@/lib/format';
-
 import { SessionAdjustmentControls } from './SessionAdjustmentControls';
 
 const PAYMENT_STATUS_COLOR: Record<PackagePaymentStatus, string> = {
@@ -207,16 +206,6 @@ export function SessionDetailsDrawer({
                         ) : null}
                     </Group>
 
-                    {session.live ? (
-                        <LinkedCard label='Adjust session'>
-                            <SessionAdjustmentControls
-                                key={session.radacctId}
-                                detail={detail}
-                                onAdjusted={onAdjusted}
-                            />
-                        </LinkedCard>
-                    ) : null}
-
                     <Divider label='Connection' labelPosition='left' />
 
                     <Grid>
@@ -331,6 +320,55 @@ export function SessionDetailsDrawer({
                     </SimpleGrid>
 
                     <Divider label='Linked records' labelPosition='left' />
+                    {detail.activation ? (
+                        <LinkedCard label='Activation'>
+                            <Group justify='space-between' align='flex-start'>
+                                <Code>{detail.activation.id}</Code>
+                                <Text size='xs' c='dimmed'>
+                                    {formatDateTime(
+                                        detail.activation.activatedAt,
+                                    )}{' '}
+                                    to{' '}
+                                    {formatDateTime(detail.activation.expireAt)}
+                                </Text>
+                            </Group>
+                            <SimpleGrid cols={{ base: 1, sm: 3 }} mt='sm'>
+                                <DetailItem
+                                    label={
+                                        detail.activation.balance.mode ===
+                                        'cumulative'
+                                            ? 'Total allowance'
+                                            : 'Validity window'
+                                    }
+                                    value={formatSeconds(
+                                        detail.activation.balance.totalSeconds,
+                                    )}
+                                />
+                                <DetailItem
+                                    label={
+                                        detail.adjustments.timeBank
+                                            ? 'Bucket usage'
+                                            : 'Accounting usage'
+                                    }
+                                    value={formatSeconds(
+                                        detail.activation.balance.usedSeconds,
+                                    )}
+                                />
+                                <DetailItem
+                                    label={
+                                        detail.activation.balance.mode ===
+                                        'cumulative'
+                                            ? 'Balance remaining'
+                                            : 'Validity remaining'
+                                    }
+                                    value={formatSeconds(
+                                        detail.activation.balance
+                                            .remainingSeconds,
+                                    )}
+                                />
+                            </SimpleGrid>
+                        </LinkedCard>
+                    ) : null}
 
                     <SimpleGrid cols={{ base: 1, sm: 2 }}>
                         <LinkedCard label='NAS device'>
@@ -456,54 +494,22 @@ export function SessionDetailsDrawer({
                         </LinkedCard>
                     </SimpleGrid>
 
-                    {detail.activation ? (
-                        <LinkedCard label='Activation'>
-                            <Group justify='space-between' align='flex-start'>
-                                <Code>{detail.activation.id}</Code>
-                                <Text size='xs' c='dimmed'>
-                                    {formatDateTime(
-                                        detail.activation.activatedAt,
-                                    )}{' '}
-                                    to{' '}
-                                    {formatDateTime(detail.activation.expireAt)}
-                                </Text>
-                            </Group>
-                            <SimpleGrid cols={{ base: 1, sm: 3 }} mt='sm'>
-                                <DetailItem
-                                    label={
-                                        detail.activation.balance.mode ===
-                                        'cumulative'
-                                            ? 'Total allowance'
-                                            : 'Validity window'
-                                    }
-                                    value={formatSeconds(
-                                        detail.activation.balance.totalSeconds,
-                                    )}
-                                />
-                                <DetailItem
-                                    label={
-                                        detail.adjustments.timeBank
-                                            ? 'Bucket usage'
-                                            : 'Accounting usage'
-                                    }
-                                    value={formatSeconds(
-                                        detail.activation.balance.usedSeconds,
-                                    )}
-                                />
-                                <DetailItem
-                                    label={
-                                        detail.activation.balance.mode ===
-                                        'cumulative'
-                                            ? 'Balance remaining'
-                                            : 'Validity remaining'
-                                    }
-                                    value={formatSeconds(
-                                        detail.activation.balance
-                                            .remainingSeconds,
-                                    )}
-                                />
-                            </SimpleGrid>
-                        </LinkedCard>
+                    {session.live ? (
+                        <>
+                            <Divider
+                                label='Adjust session'
+                                labelPosition='left'
+                            />
+                            <Card withBorder padding='md' radius='md'>
+                                <Stack gap='4'>
+                                    <SessionAdjustmentControls
+                                        key={session.radacctId}
+                                        detail={detail}
+                                        onAdjusted={onAdjusted}
+                                    />
+                                </Stack>
+                            </Card>
+                        </>
                     ) : null}
 
                     {detail.activation ? (
@@ -551,23 +557,38 @@ export function SessionDetailsDrawer({
                                                                     size='sm'
                                                                     fw={600}
                                                                 >
-                                                                    {detail.adjustments.timeBank
+                                                                    {detail
+                                                                        .adjustments
+                                                                        .timeBank
                                                                         ? 'Bucket consumed '
                                                                         : 'Session consumed '}
                                                                     {formatSeconds(
-                                                                        detail.adjustments.timeBank
+                                                                        detail
+                                                                            .adjustments
+                                                                            .timeBank
                                                                             ? usage.bankChargedSeconds
                                                                             : usage.seconds,
                                                                     )}
                                                                 </Text>
                                                             </Group>
-                                                            {detail.adjustments.timeBank &&
-                                                            usage.bankWaivedSeconds > 0 ? (
-                                                                <Text size='xs' c='dimmed'>
+                                                            {detail.adjustments
+                                                                .timeBank &&
+                                                            usage.bankWaivedSeconds >
+                                                                0 ? (
+                                                                <Text
+                                                                    size='xs'
+                                                                    c='dimmed'
+                                                                >
                                                                     Connected{' '}
-                                                                    {formatSeconds(usage.seconds)};
-                                                                    additional time consumed{' '}
-                                                                    {formatSeconds(usage.bankWaivedSeconds)}
+                                                                    {formatSeconds(
+                                                                        usage.seconds,
+                                                                    )}
+                                                                    ; additional
+                                                                    time
+                                                                    consumed{' '}
+                                                                    {formatSeconds(
+                                                                        usage.bankWaivedSeconds,
+                                                                    )}
                                                                 </Text>
                                                             ) : null}
                                                             <Text
@@ -700,7 +721,9 @@ export function SessionDetailsDrawer({
                                                         additional !== null ? (
                                                             <Text size='xs'>
                                                                 Additional time:{' '}
-                                                                {formatSeconds(additional)}
+                                                                {formatSeconds(
+                                                                    additional,
+                                                                )}
                                                             </Text>
                                                         ) : null}
                                                         {event.type ===
