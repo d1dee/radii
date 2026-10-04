@@ -201,7 +201,8 @@ export default function SessionsPage() {
         setBusy(false);
         setEditSession(null);
         notifyResult(res, 'Session time updated');
-        if (res.success) void load(page, true);
+        // A failed CoA can still reconcile a session absent from the NAS.
+        void load(page, true);
     };
 
     return (

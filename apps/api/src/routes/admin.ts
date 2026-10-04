@@ -1068,6 +1068,7 @@ app.post('/pppoe-accounts/:id/disconnect', requireAdmin, async (c) => {
         });
     } catch (err) {
         logger.error('PPPoE disconnect failed', { error: err });
+        if (err instanceof RadiusError) return jsonError(c, 400, err.message);
         return jsonError(c, 502, 'Could not disconnect the PPPoE sessions');
     }
 });

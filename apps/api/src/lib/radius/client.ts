@@ -181,6 +181,45 @@ export class RadiusError extends Error {
     }
 }
 
+class RadiusNakError extends RadiusError {
+    constructor(reply: RadiusReply) {
+        const cause = reply.attributes.find((a) => a.type === ATTR.ERROR_CAUSE);
+        const errorCause =
+            cause?.data.length === 4
+                ? Buffer.from(cause.data).readUInt32BE(0)
+                : undefined;
+        const meanings: Record<number, string> = {
+            401: 'Unsupported attribute',
+            402: 'Missing required attribute',
+            403: 'NAS identification mismatch',
+            404: 'Invalid request',
+            405: 'Unsupported service',
+            406: 'Unsupported extension',
+            407: 'Invalid attribute value',
+            501: 'Administratively prohibited',
+            502: 'Request not routable by proxy',
+            503: 'Session context not found on the NAS',
+            504: 'Session found but could not be removed',
+            505: 'Proxy processing error',
+            506: 'NAS resources unavailable',
+            507: 'Reauthorization request initiated',
+            508: 'Multiple session selection unsupported',
+        };
+        const response =
+            reply.code === CODE.DISCONNECT_NAK ? 'Disconnect-NAK' : 'CoA-NAK';
+        super(
+            `NAS answered ${response}: ${
+                errorCause === undefined
+                    ? 'No error cause provided'
+                    : `${meanings[errorCause] ?? 'Unknown error cause'} (${errorCause})`
+            }`,
+        );
+        this.errorCause = errorCause;
+    }
+
+    readonly errorCause: number | undefined;
+}
+
 // --- RADIUS protocol constants (RFC 2865/2866/3576/5176) ---------------------
 
 const CODE = {
@@ -224,6 +263,7 @@ const ATTR = {
     PORT_LIMIT: 62,
     ACCT_INTERIM_INTERVAL: 85,
     MESSAGE_AUTHENTICATOR: 80,
+    ERROR_CAUSE: 101,
 } as const;
 
 // Mikrotik vendor-specific attributes (vendor 14988, RouterOS RADIUS page).
@@ -1153,6 +1193,7 @@ export class RadiusClient {
         username: string,
         adminId: string,
         restrictedOnly?: boolean,
+        reportFailures = false,
     ): Promise<number> {
         const addresses = [...(await getAdminNasAddresses(adminId))];
         if (addresses.length === 0) return 0;
@@ -1169,21 +1210,29 @@ export class RadiusClient {
                 ),
             );
         let disconnected = 0;
+        const failures: string[] = [];
         for (const row of liveRows) {
             const session = this.sessionInfoFromRow(row);
             try {
                 if (
-                    await this.terminateSessionAtNas(username, session, adminId)
+                    (await this.terminateSessionAtNas(username, session, adminId))
+                        .ok
                 ) {
                     await this.closeSessionRecord(session);
                     disconnected += 1;
                 }
             } catch (err) {
+                failures.push(err instanceof Error ? err.message : String(err));
                 logger.error('PPPoE disconnect failed', {
                     nasIpAddress: session.nasIpAddress,
                     error: err,
                 });
             }
+        }
+        if (reportFailures && failures.length > 0) {
+            throw new RadiusError(
+                `${failures.length} session(s) could not be disconnected at the NAS: ${[...new Set(failures)].join('; ')}`,
+            );
         }
         return disconnected;
     }
@@ -1235,12 +1284,14 @@ export class RadiusClient {
             for (const { username, session, target } of prepared) {
                 try {
                     if (
-                        await this.terminateSessionAtNas(
-                            username,
-                            session,
-                            adminId,
-                            target,
-                        )
+                        (
+                            await this.terminateSessionAtNas(
+                                username,
+                                session,
+                                adminId,
+                                target,
+                            )
+                        ).ok
                     ) {
                         await this.closeSessionRecord(session);
                         disconnected += 1;
@@ -1435,6 +1486,8 @@ export class RadiusClient {
         const sessionsDisconnected = await this.disconnectLivePppoeSessions(
             account.username,
             adminId,
+            undefined,
+            true,
         );
         return { username: account.username, sessionsDisconnected };
     }
@@ -1836,7 +1889,7 @@ export class RadiusClient {
                         session,
                         dmAdminId,
                     );
-                    if (ack) {
+                    if (ack.ok) {
                         sessionsDisconnected++;
                         await this.closeSessionRecord(session);
                     } else {
@@ -2003,7 +2056,7 @@ export class RadiusClient {
                     session,
                     tenantAdminId,
                 );
-                if (ack) {
+                if (ack.ok) {
                     sessionsDisconnected++;
                     await this.closeSessionRecord(session);
                 } else {
@@ -2025,7 +2078,7 @@ export class RadiusClient {
             ok,
             message: ok
                 ? 'Session disconnected — the package stays active'
-                : `${failures.length} session(s) could not be disconnected at the NAS`,
+                : `${failures.length} session(s) could not be disconnected at the NAS: ${[...new Set(failures.map((failure) => failure.reason))].join('; ')}`,
             sessionsFound: liveSessions.length,
             sessionsDisconnected,
             failures,
@@ -2358,11 +2411,11 @@ export class RadiusClient {
                 session,
                 adminId,
             );
-            if (!ack) {
-                return { ok: false, message: 'NAS answered Disconnect-NAK' };
+            if (!ack.ok) {
+                return ack;
             }
             await this.closeSessionRecord(session);
-            return { ok: true, message: 'Session disconnected' };
+            return ack;
         } catch (err) {
             return {
                 ok: false,
@@ -2539,7 +2592,8 @@ export class RadiusClient {
         for (const session of liveSessions) {
             try {
                 if (
-                    await this.terminateSessionAtNas(username, session, adminId)
+                    (await this.terminateSessionAtNas(username, session, adminId))
+                        .ok
                 ) {
                     sessionsDisconnected++;
                     await this.closeSessionRecord(session);
@@ -2880,6 +2934,7 @@ export class RadiusClient {
             this.withEventTimestamp(attributes),
             new Set([CODE.DISCONNECT_ACK, CODE.DISCONNECT_NAK]),
         );
+        if (reply.code === CODE.DISCONNECT_NAK) throw new RadiusNakError(reply);
         return reply.code === CODE.DISCONNECT_ACK;
     }
 
@@ -2899,6 +2954,7 @@ export class RadiusClient {
             this.withEventTimestamp(attributes),
             new Set([CODE.COA_ACK, CODE.COA_NAK]),
         );
+        if (reply.code === CODE.COA_NAK) throw new RadiusNakError(reply);
         return reply.code === CODE.COA_ACK;
     }
 
@@ -4064,15 +4120,15 @@ export class RadiusClient {
 
     // Terminates a live session by sending a Disconnect-Request directly to
     // the NAS holding it (RouterOS `/radius/incoming`, key Acct-Session-Id).
-    // Returns true on Disconnect-ACK.
+    // A missing session is reconciled locally, not treated as a NAS restart.
     private async terminateSessionAtNas(
         username: string,
         session: SessionInfo,
         adminId?: string,
         preparedTarget?: { host: string; port: number; secret: string },
-    ): Promise<boolean> {
+    ): Promise<{ ok: boolean; message: string }> {
         const target =
-            preparedTarget ?? await this.nasTargetForSession(session, adminId);
+            preparedTarget ?? (await this.nasTargetForSession(session, adminId));
         const attrs = this.sessionCoaIdentity(username, session);
         if (session.callingStationId) {
             attrs.push({
@@ -4080,13 +4136,23 @@ export class RadiusClient {
                 value: session.callingStationId,
             });
         }
-        if (session.framedIpAddress) {
-            attrs.push({
-                type: ATTR.FRAMED_IP_ADDRESS,
-                value: ipv4ToOctets(session.framedIpAddress),
-            });
+        try {
+            const ok = await this.sendDisconnectRequest(
+                target,
+                target.secret,
+                attrs,
+            );
+            return { ok, message: 'Session disconnected' };
+        } catch (error) {
+            if (!(error instanceof RadiusNakError) || error.errorCause !== 503) {
+                throw error;
+            }
+            await this.closeSessionRecord(session, 'Session-Context-Not-Found');
+            return {
+                ok: true,
+                message: 'NAS reports session context not found (503). The stale database session has been closed.',
+            };
         }
-        return this.sendDisconnectRequest(target, target.secret, attrs);
     }
 
     // CoA-Request pushing a new Session-Timeout onto one live session
@@ -4102,7 +4168,17 @@ export class RadiusClient {
         const target = await this.nasTargetForSession(session, adminId);
         const attrs = this.sessionCoaIdentity(username, session);
         attrs.push({ type: ATTR.SESSION_TIMEOUT, value: seconds });
-        return this.sendCoARequest(target, target.secret, attrs);
+        try {
+            return await this.sendCoARequest(target, target.secret, attrs);
+        } catch (error) {
+            if (error instanceof RadiusNakError && error.errorCause === 503) {
+                await this.closeSessionRecord(session, 'Session-Context-Not-Found');
+                throw new RadiusError(
+                    `${error.message}. The stale database session has been closed; its timeout was not changed.`,
+                );
+            }
+            throw error;
+        }
     }
 
     private async coaRateLimit(
@@ -4117,19 +4193,30 @@ export class RadiusClient {
             type: MIKROTIK_ATTR.RATE_LIMIT,
             value: rateLimit,
         });
-        return this.sendCoARequest(target, target.secret, attrs);
+        try {
+            return await this.sendCoARequest(target, target.secret, attrs);
+        } catch (error) {
+            if (error instanceof RadiusNakError && error.errorCause === 503) {
+                await this.closeSessionRecord(session, 'Session-Context-Not-Found');
+            }
+            throw error;
+        }
     }
 
-    // Closes an accounting record after a confirmed (ACKed) disconnect:
-    // stop time + Admin-Reset cause (RFC 2866 §5.10 terminology, the value
-    // FreeRADIUS itself stores for admin kills).
-    private async closeSessionRecord(session: SessionInfo): Promise<void> {
+    // Close only the targeted live row. For absent NAS context, preserve the
+    // last accounted duration rather than billing until reconciliation time.
+    private async closeSessionRecord(
+        session: SessionInfo,
+        cause = 'Admin-Reset',
+    ): Promise<void> {
         await db
             .update(radacct)
             .set({
                 acctstoptime: new Date(),
-                acctterminatecause: 'Admin-Reset',
-                acctsessiontime: session.seconds,
+                acctterminatecause: cause,
+                ...(cause === 'Admin-Reset'
+                    ? { acctsessiontime: session.seconds }
+                    : {}),
             })
             .where(
                 and(
