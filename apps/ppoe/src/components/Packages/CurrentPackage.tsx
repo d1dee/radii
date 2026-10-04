@@ -34,6 +34,10 @@ export function CurrentPackage() {
 
     // Prefer an online activation; fall back to the most recent one.
     const thisDevice = quota.find((v) => v.online) || quota[0];
+    const currentSession = thisDevice?.liveSessions?.[0];
+    const sessionAdjusted = currentSession?.remainingSeconds != null;
+    const remainingSeconds =
+        currentSession?.remainingSeconds ?? thisDevice?.remainingSeconds ?? 0;
 
     const progressValue = thisDevice
         ? Math.max(
@@ -123,12 +127,25 @@ export function CurrentPackage() {
 
                     <Group justify='space-between'>
                         <Text size='sm' fw={500}>
-                            Time remaining
+                            {sessionAdjusted
+                                ? 'Session time remaining'
+                                : 'Time remaining'}
                         </Text>
                         <Text size='sm' fw={500}>
-                            {timeRemaining(thisDevice?.remainingSeconds || 0)}
+                            {timeRemaining(remainingSeconds)}
                         </Text>
                     </Group>
+
+                    {sessionAdjusted ? (
+                        <Group justify='space-between'>
+                            <Text size='xs' c='dimmed'>
+                                Package time remaining
+                            </Text>
+                            <Text size='xs' c='dimmed'>
+                                {timeRemaining(thisDevice.remainingSeconds)}
+                            </Text>
+                        </Group>
+                    ) : null}
 
                     <Progress
                         value={progressValue}

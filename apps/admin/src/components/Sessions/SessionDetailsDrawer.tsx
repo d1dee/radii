@@ -32,6 +32,8 @@ import {
     formatSpeed,
 } from '@/lib/format';
 
+import { SessionAdjustmentControls } from './SessionAdjustmentControls';
+
 const PAYMENT_STATUS_COLOR: Record<PackagePaymentStatus, string> = {
     paid: 'green',
     pending: 'orange',
@@ -48,6 +50,8 @@ const EVENT_LABELS: Record<ActivationEvent['type'], string> = {
     deactivated: 'Activation deactivated',
     limits_adjusted: 'Activation limits adjusted',
     session_timeout_adjusted: 'Session timeout adjusted',
+    session_fup_activated: 'Session FUP activated',
+    session_bonus_added: 'Additional session time added',
 };
 
 function metadataNumber(metadata: Record<string, unknown>, key: string) {
@@ -94,10 +98,14 @@ export function SessionDetailsDrawer({
     sessionId,
     onClose,
     onDisconnect,
+    adjustmentRevision,
+    onAdjusted,
 }: {
     sessionId: string | null;
     onClose: () => void;
     onDisconnect: (session: SessionInfo) => void;
+    adjustmentRevision: number;
+    onAdjusted: () => void;
 }) {
     const [detail, setDetail] = useState<AdminSessionDetail | null>(null);
     const [error, setError] = useState<string | null>(null);
@@ -125,7 +133,7 @@ export function SessionDetailsDrawer({
         return () => {
             ignore = true;
         };
-    }, [sessionId]);
+    }, [sessionId, adjustmentRevision]);
 
     const session = detail?.session;
     const auditItems = detail?.activation
@@ -198,6 +206,16 @@ export function SessionDetailsDrawer({
                             </Button>
                         ) : null}
                     </Group>
+
+                    {session.live ? (
+                        <LinkedCard label='Adjust session'>
+                            <SessionAdjustmentControls
+                                key={session.radacctId}
+                                detail={detail}
+                                onAdjusted={onAdjusted}
+                            />
+                        </LinkedCard>
+                    ) : null}
 
                     <Divider label='Connection' labelPosition='left' />
 
@@ -463,7 +481,11 @@ export function SessionDetailsDrawer({
                                     )}
                                 />
                                 <DetailItem
-                                    label='Accounting usage'
+                                    label={
+                                        detail.adjustments.timeBank
+                                            ? 'Bucket usage'
+                                            : 'Accounting usage'
+                                    }
                                     value={formatSeconds(
                                         detail.activation.balance.usedSeconds,
                                     )}
@@ -529,13 +551,25 @@ export function SessionDetailsDrawer({
                                                                     size='sm'
                                                                     fw={600}
                                                                 >
-                                                                    Session
-                                                                    consumed{' '}
+                                                                    {detail.adjustments.timeBank
+                                                                        ? 'Bucket consumed '
+                                                                        : 'Session consumed '}
                                                                     {formatSeconds(
-                                                                        usage.seconds,
+                                                                        detail.adjustments.timeBank
+                                                                            ? usage.bankChargedSeconds
+                                                                            : usage.seconds,
                                                                     )}
                                                                 </Text>
                                                             </Group>
+                                                            {detail.adjustments.timeBank &&
+                                                            usage.bankWaivedSeconds > 0 ? (
+                                                                <Text size='xs' c='dimmed'>
+                                                                    Connected{' '}
+                                                                    {formatSeconds(usage.seconds)};
+                                                                    additional time consumed{' '}
+                                                                    {formatSeconds(usage.bankWaivedSeconds)}
+                                                                </Text>
+                                                            ) : null}
                                                             <Text
                                                                 size='xs'
                                                                 c='dimmed'
@@ -585,6 +619,10 @@ export function SessionDetailsDrawer({
                                         const timeout = metadataNumber(
                                             event.metadata,
                                             'sessionTimeoutSeconds',
+                                        );
+                                        const additional = metadataNumber(
+                                            event.metadata,
+                                            'additionalSeconds',
                                         );
                                         return (
                                             <Card
@@ -655,6 +693,30 @@ export function SessionDetailsDrawer({
                                                                 {formatSeconds(
                                                                     timeout,
                                                                 )}
+                                                            </Text>
+                                                        ) : null}
+                                                        {event.type ===
+                                                            'session_bonus_added' &&
+                                                        additional !== null ? (
+                                                            <Text size='xs'>
+                                                                Additional time:{' '}
+                                                                {formatSeconds(additional)}
+                                                            </Text>
+                                                        ) : null}
+                                                        {event.type ===
+                                                            'session_fup_activated' &&
+                                                        typeof event.metadata
+                                                            .rateLimit ===
+                                                            'string' ? (
+                                                            <Text size='xs'>
+                                                                FUP rate limit:{' '}
+                                                                <Code>
+                                                                    {
+                                                                        event
+                                                                            .metadata
+                                                                            .rateLimit
+                                                                    }
+                                                                </Code>
                                                             </Text>
                                                         ) : null}
                                                     </Stack>

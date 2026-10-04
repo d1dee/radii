@@ -1169,6 +1169,19 @@ export function getRadiusSessions(query: ListRadiusSessionsQuery = {}) {
 }
 
 export type AdminSessionDetail = {
+    adjustments: {
+        remainingSeconds: number | null;
+        timeBank: boolean;
+        bonusRemainingSeconds: number;
+        bankRemainingSeconds: number | null;
+        fairUsage: {
+            available: boolean;
+            active: boolean;
+            forced: boolean;
+            uploadRate: number;
+            downloadRate: number;
+        };
+    };
     session: SessionInfo & {
         acctUniqueId: string;
         realm: string | null;
@@ -1206,7 +1219,9 @@ export type AdminSessionDetail = {
                 | 'reactivated'
                 | 'deactivated'
                 | 'limits_adjusted'
-                | 'session_timeout_adjusted';
+                | 'session_timeout_adjusted'
+                | 'session_fup_activated'
+                | 'session_bonus_added';
             actor: {
                 type: 'admin' | 'customer' | 'system';
                 id: string | null;
@@ -1223,6 +1238,8 @@ export type AdminSessionDetail = {
             stoppedAt: string | null;
             live: boolean;
             seconds: number;
+            bankChargedSeconds: number;
+            bankWaivedSeconds: number;
             inputOctets: number;
             outputOctets: number;
             totalOctets: number;
@@ -1293,6 +1310,22 @@ export function editSessionTimeout(radacctId: string, sessionTimeout: number) {
         `/admin/radius/sessions/${radacctId}`,
         { sessionTimeout },
         { method: 'PUT' },
+    );
+}
+
+export function activateSessionFup(radacctId: string) {
+    return request<{ ok: boolean; message: string }>(
+        `/admin/radius/sessions/${radacctId}/fup`,
+        undefined,
+        { method: 'POST' },
+    );
+}
+
+export function addSessionBonus(radacctId: string, additionalSeconds: number) {
+    return request<{ ok: boolean; message: string }>(
+        `/admin/radius/sessions/${radacctId}/bonus`,
+        { additionalSeconds },
+        { method: 'POST' },
     );
 }
 

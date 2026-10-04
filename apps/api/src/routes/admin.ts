@@ -558,7 +558,10 @@ app.post('/nas-devices/:id/setup-script/bootstrap', requireAdmin, async (c) => {
     if (!device) return jsonError(c, 404, 'NAS device not found');
     const row = await getNasBootstrapScript(device.id);
     c.header('Cache-Control', 'no-store');
-    return c.json({ success: true, data: row ? publicSetupScriptFields(row) : null });
+    return c.json({
+        success: true,
+        data: row ? publicSetupScriptFields(row) : null,
+    });
 });
 
 // Fetch the stored generated script for this device.
@@ -666,8 +669,12 @@ app.delete('/nas-devices/:id', requireAdmin, async (c) => {
         }
         return c.json({
             success: true,
-            message: 'NAS device deleted; linked PPPoE accounts closed and detached',
-            data: { accountsClosed: result.accountsClosed, sessionsDisconnected },
+            message:
+                'NAS device deleted; linked PPPoE accounts closed and detached',
+            data: {
+                accountsClosed: result.accountsClosed,
+                sessionsDisconnected,
+            },
         });
     } catch (e) {
         if (isForeignKeyViolation(e)) {
@@ -758,7 +765,9 @@ const userTagSchema = z.object({
 app.put('/users/:id/tag', requireAdmin, async (c) => {
     const id = c.req.param('id');
     if (!id) return jsonError(c, 404, 'User not found');
-    const parsed = userTagSchema.safeParse(await c.req.json().catch(() => ({})));
+    const parsed = userTagSchema.safeParse(
+        await c.req.json().catch(() => ({})),
+    );
     if (!parsed.success) return jsonError(c, 400, 'Invalid tag payload');
     const tag = await upsertUserAdminTag(c.get('adminSession').userId, id, {
         name: parsed.data.name || null,
@@ -1542,6 +1551,52 @@ app.put('/radius/sessions/:radacctId', requireAdmin, async (c) => {
     } catch (err) {
         logger.error('RADIUS session update failed', { error: err });
         return jsonError(c, 502, 'Could not contact the RADIUS system');
+    }
+});
+
+app.post('/radius/sessions/:radacctId/bonus', requireAdmin, async (c) => {
+    const radacctId = c.req.param('radacctId');
+    const adminId = c.get('adminSession').userId;
+    if (!/^\d+$/.test(radacctId) || !(await isAdminRadacctVisible(adminId, radacctId))) {
+        return jsonError(c, 404, 'Unknown session');
+    }
+    const parsed = z.object({ additionalSeconds: z.number().int().positive().max(0xffffffff) })
+        .safeParse(await c.req.json().catch(() => ({})));
+    if (!parsed.success) return jsonError(c, 400, 'Additional seconds must be a positive integer');
+    const result = await radiusClient.addSessionBonusByRadacctId(radacctId, parsed.data.additionalSeconds, {
+        adminId, actorId: adminId, nasIpAddresses: [...(await getAdminNasAddresses(adminId))],
+    });
+    if (!result.ok) return jsonError(c, 400, result.message);
+    return c.json({ success: true, message: result.message, data: result });
+});
+
+app.post('/radius/sessions/:radacctId/fup', requireAdmin, async (c) => {
+    const radacctId = c.req.param('radacctId');
+    const adminId = c.get('adminSession').userId;
+    if (
+        !/^\d+$/.test(radacctId) ||
+        !(await isAdminRadacctVisible(adminId, radacctId))
+    ) {
+        return jsonError(c, 404, 'Unknown session');
+    }
+    try {
+        const result = await radiusClient.activateSessionFairUsageByRadacctId(
+            radacctId,
+            {
+                adminId,
+                actorId: adminId,
+                nasIpAddresses: [...(await getAdminNasAddresses(adminId))],
+            },
+        );
+        if (!result.ok) return jsonError(c, 400, result.message);
+        return c.json({ success: true, message: result.message, data: result });
+    } catch (err) {
+        logger.error('RADIUS session FUP activation failed', { error: err });
+        return jsonError(
+            c,
+            502,
+            'Could not activate FUP on the RADIUS session',
+        );
     }
 });
 

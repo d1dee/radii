@@ -131,7 +131,9 @@ export function ConnectedDevicesModal({ accountId, isOpen, onClose }: Props) {
                     </Stack>
                 </Table.Td>
                 <Table.Td style={{ maxWidth: 130 }}>
-                    {timeRemaining(v.remainingSeconds)}
+                    {timeRemaining(
+                        session.remainingSeconds ?? v.remainingSeconds,
+                    )}
                 </Table.Td>
                 <Table.Td>
                     {pendingDeauth.includes(session.radacctId) ? (

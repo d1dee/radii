@@ -28,6 +28,19 @@ export function CurrentPackage() {
 
     // Pick the highest if no token belongs to this devices
     const thisDevice = quota.find((v) => v.thisDevice && v.online) || quota[0];
+    const currentSession = thisDevice?.liveSessions?.find(
+        (session) => session.radacctId === thisDevice.currentSessionId,
+    );
+    const bonusRemainingSeconds = thisDevice?.noExpiry
+        ? currentSession?.bonusRemainingSeconds ?? 0
+        : 0;
+    const sessionAdjusted = currentSession?.remainingSeconds != null;
+    const remainingSeconds =
+        bonusRemainingSeconds > 0
+            ? bonusRemainingSeconds
+            : currentSession?.remainingSeconds ??
+              thisDevice?.remainingSeconds ??
+              0;
 
     const progressValue = thisDevice
         ? Math.max(
@@ -118,12 +131,36 @@ export function CurrentPackage() {
 
                     <Group justify='space-between'>
                         <Text size='sm' fw={500}>
-                            Time remaining
+                            {bonusRemainingSeconds > 0
+                                ? 'Additional time remaining'
+                                : sessionAdjusted
+                                ? 'Session time remaining'
+                                : 'Time remaining'}
                         </Text>
                         <Text size='sm' fw={500}>
-                            {timeRemaining(thisDevice?.remainingSeconds || 0)}
+                            {timeRemaining(remainingSeconds)}
                         </Text>
                     </Group>
+
+                    {sessionAdjusted || bonusRemainingSeconds > 0 ? (
+                        <Group justify='space-between'>
+                            <Text size='xs' c='dimmed'>
+                                {thisDevice.noExpiry
+                                    ? bonusRemainingSeconds > 0
+                                        ? 'Bucket remaining (paused for this session)'
+                                        : 'Bucket time remaining'
+                                    : 'Package time remaining'}
+                            </Text>
+                            <Text size='xs' c='dimmed'>
+                                {timeRemaining(
+                                    thisDevice.noExpiry
+                                        ? thisDevice.bankRemainingSeconds ??
+                                          thisDevice.remainingSeconds
+                                        : thisDevice.remainingSeconds,
+                                )}
+                            </Text>
+                        </Group>
+                    ) : null}
 
                     <Progress
                         value={progressValue}

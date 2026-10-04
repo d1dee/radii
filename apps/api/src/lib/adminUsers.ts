@@ -48,6 +48,8 @@ import {
     verification,
 } from '../db/schema';
 import { calculateActivationTime } from './radius/activationLimits';
+import { manualFairUsageAvailable } from './radius/fairUsage';
+import { bankSessionUsage } from './radius/bankUsage';
 import {
     nasAddressClaims,
     scopedNasHistoryAddress,
@@ -172,10 +174,7 @@ function scopedToAdminNas(adminId: string): SQL {
     return eq(nasDevice.ownerId, adminId);
 }
 
-function activationTypeExists(
-    adminId: string,
-    type: AdminUserTypeFilter,
-): SQL {
+function activationTypeExists(adminId: string, type: AdminUserTypeFilter): SQL {
     return exists(
         db
             .select()
@@ -185,10 +184,7 @@ function activationTypeExists(
                 packagePayments,
                 eq(activatedPackages.packagePaymentId, packagePayments.id),
             )
-            .innerJoin(
-                nasDevice,
-                eq(packagePayments.nasDeviceId, nasDevice.id),
-            )
+            .innerJoin(nasDevice, eq(packagePayments.nasDeviceId, nasDevice.id))
             .where(
                 and(
                     eq(activatedPackages.userId, user.id),
@@ -229,10 +225,7 @@ async function getUserAdminTags(
             ),
         );
     return new Map(
-        rows.map((r) => [
-            r.userId,
-            { name: r.name, location: r.location },
-        ]),
+        rows.map((r) => [r.userId, { name: r.name, location: r.location }]),
     );
 }
 
@@ -256,7 +249,10 @@ export async function upsertUserAdminTag(
             target: [userAdminTag.adminId, userAdminTag.userId],
             set: { name: fields.name, location: fields.location },
         })
-        .returning({ name: userAdminTag.name, location: userAdminTag.location });
+        .returning({
+            name: userAdminTag.name,
+            location: userAdminTag.location,
+        });
     return row ? { name: row.name, location: row.location } : null;
 }
 
@@ -599,8 +595,9 @@ export async function listAdminUsers(opts: ListAdminUsersOpts) {
                 revenue: sql<number>`0::float8`.as('revenue'),
                 payments: sql<number>`0::int`.as('payments'),
                 activations: sql<number>`0::int`.as('activations'),
-                lastPaymentAt:
-                    sql<Date | null>`null::timestamptz`.as('last_payment_at'),
+                lastPaymentAt: sql<Date | null>`null::timestamptz`.as(
+                    'last_payment_at',
+                ),
                 lastPaymentRank: sql<number>`1`.as('last_payment_rank'),
                 defaultRank: sql<number>`0`.as('default_rank'),
                 createdAt:
@@ -624,10 +621,7 @@ export async function listAdminUsers(opts: ListAdminUsersOpts) {
             case 'payments':
                 return [direction(sql<number>`"payments"`), ...tieBreakers];
             case 'activations':
-                return [
-                    direction(sql<number>`"activations"`),
-                    ...tieBreakers,
-                ];
+                return [direction(sql<number>`"activations"`), ...tieBreakers];
             case 'lastPaymentAt':
                 return [
                     asc(sql<number>`"last_payment_rank"`),
@@ -635,10 +629,7 @@ export async function listAdminUsers(opts: ListAdminUsersOpts) {
                     ...tieBreakers,
                 ];
             case 'createdAt':
-                return [
-                    direction(sql<Date>`"created_at"`),
-                    ...tieBreakers,
-                ];
+                return [direction(sql<Date>`"created_at"`), ...tieBreakers];
             default:
                 return [
                     asc(sql<number>`"default_rank"`),
@@ -888,10 +879,7 @@ export async function getAdminUserDetail(userId: string, adminId: string) {
         .from(verification)
         .where(
             and(
-                eq(
-                    verification.identifier,
-                    `forget-password-otp-${u.email}`,
-                ),
+                eq(verification.identifier, `forget-password-otp-${u.email}`),
                 gt(verification.expiresAt, new Date()),
             ),
         )
@@ -1053,7 +1041,7 @@ export async function getAdminNasAddresses(
     adminId: string,
     nasDeviceId?: string,
 ): Promise<Set<string>> {
-    const rows = await db.execute(nasAddressClaims) as NasAddressClaim[];
+    const rows = (await db.execute(nasAddressClaims)) as NasAddressClaim[];
     return visibleNasAddresses(rows, adminId, nasDeviceId);
 }
 
@@ -1080,6 +1068,9 @@ export async function getAdminSessionDetail(
             },
             packageSessionLength: packages.sessionLength,
             packageNoExpiry: packages.noExpiry,
+            fairUsageLimit: packages.fairUsageLimit,
+            fairUsageUploadRate: packages.fairUsageUploadRate,
+            fairUsageDownloadRate: packages.fairUsageDownloadRate,
             customer: {
                 id: user.id,
                 name: user.name,
@@ -1240,6 +1231,7 @@ export async function getAdminSessionDetail(
                 stoppedAt: accounting.acctstoptime,
                 live: sessionLive,
                 seconds: Math.round(sessionSeconds),
+                ...bankSessionUsage(sessionSeconds, accounting, sessionLive),
                 inputOctets: sessionInputOctets,
                 outputOctets: sessionOutputOctets,
                 totalOctets: sessionInputOctets + sessionOutputOctets,
@@ -1249,7 +1241,7 @@ export async function getAdminSessionDetail(
             };
         });
         const usedSeconds = consumption.reduce(
-            (total, item) => total + item.seconds,
+            (total, item) => total + (row.packageNoExpiry ? item.bankChargedSeconds : item.seconds),
             0,
         );
         const packageAllowanceSeconds = (row.packageSessionLength ?? 0) * 60;
@@ -1321,6 +1313,7 @@ export async function getAdminSessionDetail(
             connectInfoStop: row.accounting.connectinfoStop,
             live,
             seconds: Math.round(seconds),
+            ...bankSessionUsage(seconds, row.accounting, live),
             inputOctets,
             outputOctets,
             totalOctets: inputOctets + outputOctets,
@@ -1328,6 +1321,48 @@ export async function getAdminSessionDetail(
                 seconds > 0
                     ? Math.round(((inputOctets + outputOctets) * 8) / seconds)
                     : 0,
+        },
+        adjustments: {
+            timeBank: Boolean(row.packageNoExpiry),
+            bonusRemainingSeconds: row.packageNoExpiry ? bankSessionUsage(seconds, row.accounting, live).bonusRemainingSeconds : 0,
+            bankRemainingSeconds: row.packageNoExpiry && activationDetail
+                ? Math.max(0, (row.activation!.timeAllowanceSeconds ?? (row.packageSessionLength ?? 0) * 60) - activationDetail.balance.usedSeconds)
+                : null,
+            remainingSeconds:
+                live && row.accounting.sessionTimeoutExpiresAt
+                    ? Math.max(
+                          0,
+                          Math.ceil(
+                              (row.accounting.sessionTimeoutExpiresAt.getTime() -
+                                  Date.now()) /
+                                  1000,
+                          ),
+                      )
+                    : null,
+            fairUsage: {
+                available:
+                    live &&
+                    Boolean(row.activation?.id) &&
+                    row.activation?.deactivatedAt === null &&
+                    Boolean(
+                        row.activation?.expireAt &&
+                        row.activation.expireAt.getTime() > Date.now(),
+                    ) &&
+                    manualFairUsageAvailable({
+                        fairUsageLimit: row.fairUsageLimit ?? 0,
+                        fairUsageUploadRate: row.fairUsageUploadRate ?? 0,
+                        fairUsageDownloadRate: row.fairUsageDownloadRate ?? 0,
+                    }),
+                active:
+                    row.accounting.fupForced ||
+                    ((row.fairUsageLimit ?? 0) > 0 &&
+                        row.accounting.fupThresholdReached &&
+                        row.accounting.fupRateLimit ===
+                            `${row.fairUsageUploadRate}k/${row.fairUsageDownloadRate}k`),
+                forced: row.accounting.fupForced,
+                uploadRate: row.fairUsageUploadRate ?? 0,
+                downloadRate: row.fairUsageDownloadRate ?? 0,
+            },
         },
         nasDevice: row.nasDevice,
         activation: activationDetail,
@@ -1467,12 +1502,7 @@ export interface ListPaymentsOpts {
     pppoeAccountId?: string;
     from?: Date;
     to?: Date;
-    sortBy?:
-        | 'createdAt'
-        | 'customer'
-        | 'package'
-        | 'amount'
-        | 'status';
+    sortBy?: 'createdAt' | 'customer' | 'package' | 'amount' | 'status';
     sortDirection?: 'asc' | 'desc';
     page?: number;
     perPage?: number;
@@ -1556,30 +1586,34 @@ export async function listPayments(opts: ListPaymentsOpts) {
                 eq(packagePayments.transaction, transaction.id),
             )
             .where(where),
-        db.select({
-            id: packagePayments.id,
-            userId: packagePayments.userId,
-            userName: user.name,
-            phoneNumber: packagePayments.phoneNumber,
-            amount: packagePayments.amount,
-            status: packagePayments.status,
-            packageTitle: packages.title,
-            packageType: packages.type,
-            provider: transaction.provider,
-            providerTransactionId: transaction.providerTransactionId,
-            providerReference: transaction.providerReference,
-            createdAt: packagePayments.createdAt,
-            updatedAt: packagePayments.updatedAt,
-        })
-        .from(packagePayments)
-        .innerJoin(nasDevice, eq(packagePayments.nasDeviceId, nasDevice.id))
-        .leftJoin(user, eq(packagePayments.userId, user.id))
-        .innerJoin(packages, eq(packagePayments.packageId, packages.id))
-        .leftJoin(transaction, eq(packagePayments.transaction, transaction.id))
-        .where(where)
-        .orderBy(...paymentOrder)
-        .limit(perPage)
-        .offset((page - 1) * perPage),
+        db
+            .select({
+                id: packagePayments.id,
+                userId: packagePayments.userId,
+                userName: user.name,
+                phoneNumber: packagePayments.phoneNumber,
+                amount: packagePayments.amount,
+                status: packagePayments.status,
+                packageTitle: packages.title,
+                packageType: packages.type,
+                provider: transaction.provider,
+                providerTransactionId: transaction.providerTransactionId,
+                providerReference: transaction.providerReference,
+                createdAt: packagePayments.createdAt,
+                updatedAt: packagePayments.updatedAt,
+            })
+            .from(packagePayments)
+            .innerJoin(nasDevice, eq(packagePayments.nasDeviceId, nasDevice.id))
+            .leftJoin(user, eq(packagePayments.userId, user.id))
+            .innerJoin(packages, eq(packagePayments.packageId, packages.id))
+            .leftJoin(
+                transaction,
+                eq(packagePayments.transaction, transaction.id),
+            )
+            .where(where)
+            .orderBy(...paymentOrder)
+            .limit(perPage)
+            .offset((page - 1) * perPage),
     ]);
 
     return {

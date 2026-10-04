@@ -29,6 +29,7 @@ export type Quota = {
     downloadRate: number;
     maxDevices: number;
     thisDevice?: boolean;
+    currentSessionId?: string | null;
     expiresAt?: string;
     noExpiry: boolean;
     online?: boolean;
@@ -57,6 +58,11 @@ export type Quota = {
         updatedAt: Date | string | null;
         stoppedAt: Date | string | null;
         live: boolean;
+        // Acknowledged NAS timeout, separate from bucket and bonus balances.
+        remainingSeconds: number | null;
+        bonusRemainingSeconds: number;
+        bankChargedSeconds: number;
+        bankWaivedSeconds: number;
         seconds: number;
         inputOctets: number;
         outputOctets: number;

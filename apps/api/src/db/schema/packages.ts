@@ -270,6 +270,8 @@ export const activationEvents = pgTable(
                 'deactivated',
                 'limits_adjusted',
                 'session_timeout_adjusted',
+                'session_fup_activated',
+                'session_bonus_added',
             ],
         }).notNull(),
         actorType: text('actor_type', {

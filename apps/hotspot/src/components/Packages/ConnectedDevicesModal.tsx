@@ -128,6 +128,12 @@ export function ConnectedDevicesModal({ isOpen, onClose }: Props) {
         .toSorted((v) => (v.thisDevice ? -1 : 1))
         .map((v, i) => {
             const downloadRate = formatPackageRate(v.downloadRate);
+            const adjustedSessions =
+                v.liveSessions?.filter(
+                    (session) =>
+                        session.remainingSeconds != null ||
+                        (v.noExpiry && session.bonusRemainingSeconds > 0),
+                ) ?? [];
 
             return (
                 <Table.Tr key={v.id} bg={v.thisDevice ? 'grape.0' : undefined}>
@@ -149,7 +155,36 @@ export function ConnectedDevicesModal({ isOpen, onClose }: Props) {
                         </Stack>
                     </Table.Td>
                     <Table.Td style={{ maxWidth: 130 }}>
-                        {timeRemaining(v.remainingSeconds)}
+                        <Stack gap={2}>
+                            <Text size='sm'>
+                                {adjustedSessions.length > 0
+                                    ? v.noExpiry
+                                        ? 'Bucket: '
+                                        : 'Package: '
+                                    : ''}
+                                {timeRemaining(
+                                    v.noExpiry
+                                        ? v.bankRemainingSeconds ?? v.remainingSeconds
+                                        : v.remainingSeconds,
+                                )}
+                            </Text>
+                            {adjustedSessions.map((session) => (
+                                <Text size='xs' key={session.radacctId}>
+                                    {v.noExpiry && session.bonusRemainingSeconds > 0
+                                        ? 'Additional time ('
+                                        : 'Session ('}
+                                    {session.callingStationId ??
+                                        session.framedIpAddress ??
+                                        session.acctSessionId}
+                                    ):{' '}
+                                    {timeRemaining(
+                                        v.noExpiry && session.bonusRemainingSeconds > 0
+                                            ? session.bonusRemainingSeconds
+                                            : session.remainingSeconds ?? 0,
+                                    )}
+                                </Text>
+                            ))}
+                        </Stack>
                     </Table.Td>
                     <Table.Td>
                         {pendingDeauth.includes(v.id) ? (

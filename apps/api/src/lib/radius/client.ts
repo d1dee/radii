@@ -93,6 +93,12 @@ import {
     allowanceForRemainingTime,
     calculateActivationTime,
 } from './activationLimits';
+import {
+    effectiveFairUsageThrottled,
+    manualFairUsageAvailable,
+} from './fairUsage';
+import { portalStatusIsVisible, sessionRemainingSeconds } from './sessionStatus';
+import { additionalBankTime, bankSessionTimeout, bankSessionUsage } from './bankUsage';
 
 const logger = apiLogger.getChild('radius');
 const PPPOE_EXPIRED_PROFILE = 'radii-ppp-expired';
@@ -401,6 +407,11 @@ export interface SessionInfo {
     stoppedAt: Date | null;
     live: boolean;
     seconds: number;
+    bonusRemainingSeconds: number;
+    bankChargedSeconds: number;
+    bankWaivedSeconds: number;
+    // Acknowledged session timeout deadline, independent of activation quota.
+    remainingSeconds: number | null;
     inputOctets: number;
     outputOctets: number;
     totalOctets: number;
@@ -410,6 +421,7 @@ export interface SessionInfo {
     avgSpeedBps: number;
     fupWindowStart: Date | null;
     fupRateLimit: string | null;
+    fupForced: boolean;
     fupUsedBytes: number;
     fupThresholdReached: boolean;
     fupEvaluatedAt: Date | null;
@@ -453,6 +465,9 @@ export interface ActivationStatus {
     deactivatedAt: Date | null;
     sessionLimitSeconds: number;
     usedSeconds: number;
+    bankTotalSeconds: number | null;
+    bankUsedSeconds: number | null;
+    bankRemainingSeconds: number | null;
     // Bank packages report the smaller of their cumulative balance and their
     // calendar validity; expiry packages report wall-clock time to expireAt.
     remainingSeconds: number | null;
@@ -962,8 +977,9 @@ export class RadiusClient {
         return { activationId: row.activation.id, username, password };
     }
 
-    // The user's active (non-expired) activations enriched with live RADIUS
-    // usage — the portal status payload (remaining time/bytes, speeds). The
+    // Portal status includes available activations and live timeout overrides,
+    // without extending package eligibility for authorization or enforcement.
+    // The payload carries remaining time/bytes and live RADIUS usage. The
     // optional type restricts the result to one package type so the hotspot
     // and PPPoE portals only see their own activations.
     async getUserPackageStatuses(
@@ -971,6 +987,7 @@ export class RadiusClient {
         type?: 'hotspot' | 'pppoe',
         pppoeServiceAccountId?: string,
     ) {
+        const now = new Date();
         const rows = await db
             .select({
                 activation: activatedPackages,
@@ -981,7 +998,31 @@ export class RadiusClient {
             .where(
                 and(
                     eq(activatedPackages.userId, userId),
-                    activeActivationCondition(),
+                    or(
+                        activeActivationCondition(),
+                        and(
+                            isNull(activatedPackages.deactivatedAt),
+                            exists(
+                                db
+                                    .select({ one: sql`1` })
+                                    .from(radacct)
+                                    .where(
+                                        and(
+                                            eq(
+                                                radacct.class,
+                                                sql`${activatedPackages.id}::text`,
+                                            ),
+                                            isNotNull(radacct.acctstarttime),
+                                            isNull(radacct.acctstoptime),
+                                            gt(
+                                                radacct.sessionTimeoutExpiresAt,
+                                                now,
+                                            ),
+                                        ),
+                                    ),
+                            ),
+                        ),
+                    ),
                     type ? eq(packages.type, type) : undefined,
                     pppoeServiceAccountId
                         ? eq(
@@ -1000,7 +1041,13 @@ export class RadiusClient {
                 row.activation,
                 row.pkg,
             );
-            if (!status || !activationStatusIsAvailable(status)) {
+            if (
+                !status ||
+                !portalStatusIsVisible(
+                    status,
+                    activationStatusIsAvailable(status),
+                )
+            ) {
                 continue;
             }
             out.push({
@@ -1170,10 +1217,7 @@ export class RadiusClient {
         // goes through the tenant-scoped helper: all tenants share one
         // accounting table, so only the account's tenant NAS addresses are
         // eligible rows and Disconnect-Request targets.
-        await this.disconnectLivePppoeSessions(
-            username,
-            account.tenantAdminId,
-        );
+        await this.disconnectLivePppoeSessions(username, account.tenantAdminId);
         return {
             activationId: activation.activationId,
             username,
@@ -1215,8 +1259,13 @@ export class RadiusClient {
             const session = this.sessionInfoFromRow(row);
             try {
                 if (
-                    (await this.terminateSessionAtNas(username, session, adminId))
-                        .ok
+                    (
+                        await this.terminateSessionAtNas(
+                            username,
+                            session,
+                            adminId,
+                        )
+                    ).ok
                 ) {
                     await this.closeSessionRecord(session);
                     disconnected += 1;
@@ -2300,9 +2349,10 @@ export class RadiusClient {
             username,
             activationId,
             nasIpAddresses: opts.nasIpAddresses,
+            limit: null,
         });
         const usedSeconds = Math.round(
-            sessions.reduce((sum, session) => sum + session.seconds, 0),
+            sessions.reduce((sum, session) => sum + (row.pkg.noExpiry ? session.bankChargedSeconds : session.seconds), 0),
         );
         const timeAllowanceSeconds = allowanceForRemainingTime(
             usedSeconds,
@@ -2451,6 +2501,14 @@ export class RadiusClient {
         if (row.acctstoptime !== null || row.acctstarttime === null) {
             return { ok: false, message: 'Session is not live' };
         }
+        const [bucket] = await db.select({ noExpiry: packages.noExpiry })
+            .from(activatedPackages)
+            .innerJoin(packages, eq(activatedPackages.packageId, packages.id))
+            .where(sql`${activatedPackages.id}::text = ${row.class}`)
+            .limit(1);
+        if (bucket?.noExpiry) {
+            return { ok: false, message: 'Time-bank sessions require additional time. Use POST /admin/radius/sessions/:id/bonus with additionalSeconds instead of replacing the timeout.' };
+        }
         const session = this.sessionInfoFromRow(row);
         const username = row.username ?? '';
         try {
@@ -2503,6 +2561,168 @@ export class RadiusClient {
                 message: err instanceof Error ? err.message : String(err),
             };
         }
+    }
+
+    async addSessionBonusByRadacctId(
+        radacctId: string,
+        additionalSeconds: number,
+        opts: { adminId: string; actorId: string; nasIpAddresses: string[] },
+    ): Promise<{ ok: boolean; message: string; bonusRemainingSeconds?: number }> {
+        if (!Number.isSafeInteger(additionalSeconds) || additionalSeconds <= 0) {
+            return { ok: false, message: 'Additional seconds must be a positive integer' };
+        }
+        const [anchor] = await db.select({ activationId: radacct.class }).from(radacct)
+            .where(and(eq(radacct.radacctid, BigInt(radacctId)),
+                opts.nasIpAddresses.length ? inArray(radacct.nasipaddress, opts.nasIpAddresses) : sql`false`))
+            .limit(1);
+        if (!anchor?.activationId) return { ok: false, message: 'Unknown supported activation session' };
+        const activationId = anchor.activationId;
+        try {
+            return await db.transaction(async (tx) => {
+                await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`bank:${activationId}`}))`);
+                const [owned] = await tx.select({ activation: activatedPackages, pkg: packages })
+                    .from(activatedPackages)
+                    .innerJoin(packages, eq(activatedPackages.packageId, packages.id))
+                    .where(and(sql`${activatedPackages.id}::text = ${activationId}`, activationOwnedByAdmin(opts.adminId)))
+                    .limit(1);
+                if (!owned?.pkg.noExpiry) return { ok: false, message: 'Additional time is supported only for time-bank packages' };
+                if (owned.activation.deactivatedAt || owned.activation.expireAt.getTime() <= Date.now()) {
+                    return { ok: false, message: 'Activation is deactivated or its validity has expired' };
+                }
+                const [row] = await tx.select().from(radacct)
+                    .where(and(eq(radacct.radacctid, BigInt(radacctId)), eq(radacct.class, activationId),
+                        inArray(radacct.nasipaddress, opts.nasIpAddresses)))
+                    .limit(1);
+                if (!row || row.acctstoptime || !row.acctstarttime) return { ok: false, message: 'Session is not live' };
+                const session = this.sessionInfoFromRow(row);
+                const usage = await this.getBankUsage(owned.activation.id);
+                const timeout = bankSessionTimeout(usage?.remainingSeconds ?? 0,
+                    session.bonusRemainingSeconds + additionalSeconds,
+                    Math.max(0, Math.floor((owned.activation.expireAt.getTime() - Date.now()) / 1000)));
+                if (timeout <= 0 || timeout > 0xffffffff) return { ok: false, message: 'Additional time exceeds the supported session timeout or validity has expired' };
+                if (!(await this.coaSessionTimeout(row.username ?? '', session, timeout, opts.adminId))) {
+                    return { ok: false, message: 'NAS answered CoA-NAK; additional time was not granted' };
+                }
+                // Accounting may stop while the NAS is answering. Never grant to a stale row.
+                const [fresh] = await tx.select().from(radacct).where(eq(radacct.radacctid, BigInt(radacctId))).limit(1);
+                if (!fresh || fresh.acctstoptime || !fresh.acctstarttime) return { ok: false, message: 'Session is no longer live; additional time was not granted' };
+                const current = this.sessionInfoFromRow(fresh);
+                const ledger = additionalBankTime(current.seconds, fresh, additionalSeconds);
+                const [saved] = await tx.update(radacct).set(ledger)
+                    .where(and(eq(radacct.radacctid, BigInt(radacctId)), isNull(radacct.acctstoptime),
+                        exists(tx.select({ one: sql`1` }).from(activatedPackages).where(and(
+                            eq(activatedPackages.id, owned.activation.id), isNull(activatedPackages.deactivatedAt),
+                            gt(activatedPackages.expireAt, new Date()))))))
+                    .returning({ id: radacct.radacctid });
+                if (!saved) return { ok: false, message: 'Session or activation is no longer live; additional time was not granted' };
+                const bonusRemainingSeconds = ledger.bankBonusEndSeconds - ledger.bankBonusStartSeconds;
+                await tx.insert(activationEvents).values({
+                    activationId: owned.activation.id,
+                    eventType: 'session_bonus_added', actorType: 'admin', actorId: opts.actorId, source: 'admin_api',
+                    metadata: { additionalSeconds, bonusRemainingSeconds, radacctId },
+                });
+                return { ok: true, message: 'Additional session time granted', bonusRemainingSeconds };
+            });
+        } catch (err) {
+            return { ok: false, message: err instanceof Error ? err.message : String(err) };
+        }
+    }
+
+    async activateSessionFairUsageByRadacctId(
+        radacctId: string,
+        opts: { adminId: string; actorId: string; nasIpAddresses: string[] },
+    ): Promise<{ ok: boolean; message: string }> {
+        return db.transaction(async (tx) => {
+            // Serialize with periodic enforcement, including its CoA packet.
+            await tx.execute(
+                sql`select pg_advisory_xact_lock(hashtext(${`fup-session:${radacctId}`}))`,
+            );
+            const [row] = await tx
+                .select()
+                .from(radacct)
+                .where(
+                    and(
+                        eq(radacct.radacctid, BigInt(radacctId)),
+                        opts.nasIpAddresses.length > 0
+                            ? inArray(radacct.nasipaddress, opts.nasIpAddresses)
+                            : sql`false`,
+                    ),
+                )
+                .limit(1);
+            if (!row) return { ok: false, message: 'Unknown session' };
+            if (row.acctstoptime !== null || row.acctstarttime === null) {
+                return { ok: false, message: 'Session is not live' };
+            }
+            if (
+                !row.class ||
+                !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+                    row.class,
+                )
+            ) {
+                return {
+                    ok: false,
+                    message: 'Session has no supported package activation',
+                };
+            }
+            const [owned] = await tx
+                .select({ activation: activatedPackages, pkg: packages })
+                .from(activatedPackages)
+                .innerJoin(
+                    packages,
+                    eq(activatedPackages.packageId, packages.id),
+                )
+                .where(
+                    and(
+                        eq(activatedPackages.id, row.class),
+                        activationOwnedByAdmin(opts.adminId),
+                        activeActivationCondition(),
+                    ),
+                )
+                .limit(1);
+            if (!owned || !manualFairUsageAvailable(owned.pkg)) {
+                return {
+                    ok: false,
+                    message:
+                        'Session has no active package with configured FUP rates',
+                };
+            }
+            const rateLimit = this.rateLimitValue(owned.pkg, true);
+            if (!row.fupForced || row.fupRateLimit !== rateLimit) {
+                const acknowledged = await this.coaRateLimit(
+                    row.username ?? '',
+                    this.sessionInfoFromRow(row),
+                    rateLimit,
+                    opts.adminId,
+                );
+                if (!acknowledged)
+                    return { ok: false, message: 'NAS answered CoA-NAK' };
+                const updated = await tx
+                    .update(radacct)
+                    .set({
+                        fupForced: true,
+                        fupRateLimit: rateLimit,
+                        fupEvaluatedAt: new Date(),
+                    })
+                    .where(
+                        and(
+                            eq(radacct.radacctid, row.radacctid),
+                            isNull(radacct.acctstoptime),
+                        ),
+                    )
+                    .returning({ id: radacct.radacctid });
+                if (updated.length === 0)
+                    return { ok: false, message: 'Session is no longer live' };
+                await tx.insert(activationEvents).values({
+                    activationId: owned.activation.id,
+                    eventType: 'session_fup_activated',
+                    actorType: 'admin',
+                    actorId: opts.actorId,
+                    source: 'admin_api',
+                    metadata: { radacctId, rateLimit },
+                });
+            }
+            return { ok: true, message: 'Session FUP activated' };
+        });
     }
 
     // The customer's stable PPPoE dialer credentials for admin display. The
@@ -2592,8 +2812,13 @@ export class RadiusClient {
         for (const session of liveSessions) {
             try {
                 if (
-                    (await this.terminateSessionAtNas(username, session, adminId))
-                        .ok
+                    (
+                        await this.terminateSessionAtNas(
+                            username,
+                            session,
+                            adminId,
+                        )
+                    ).ok
                 ) {
                     sessionsDisconnected++;
                     await this.closeSessionRecord(session);
@@ -3074,10 +3299,7 @@ export class RadiusClient {
                         eq(radacct.class, activationId),
                         isNotNull(radacct.acctstarttime),
                         session
-                            ? eq(
-                                  radacct.radacctid,
-                                  BigInt(session.radacctId),
-                              )
+                            ? eq(radacct.radacctid, BigInt(session.radacctId))
                             : undefined,
                     ),
                 );
@@ -3215,34 +3437,105 @@ export class RadiusClient {
                         ? null
                         : await this.fairUsageState(row.activation, row.pkg);
 
-                for (const session of sessions) {
-                    const state = enabled
-                        ? (sharedState ??
-                          (await this.fairUsageState(
-                              row.activation,
-                              row.pkg,
-                              session,
-                          )))
-                        : null;
-                    const rateLimit = this.rateLimitValue(
-                        row.pkg,
-                        state?.throttled ?? false,
-                    );
-                    if (
-                        enabled &&
-                        session.fupRateLimit === null &&
-                        !state!.throttled
-                    ) {
-                        // Access-Accept already installed the normal package
-                        // rate. Record that baseline without sending a no-op
-                        // CoA; the first CoA is reserved for a real transition.
-                        await db
+                for (const cachedSession of sessions) {
+                    touched += await db.transaction(async (tx) => {
+                        await tx.execute(
+                            sql`select pg_advisory_xact_lock(hashtext(${`fup-session:${cachedSession.radacctId}`}))`,
+                        );
+                        const [current] = await tx
+                            .select()
+                            .from(radacct)
+                            .where(
+                                and(
+                                    eq(
+                                        radacct.radacctid,
+                                        BigInt(cachedSession.radacctId),
+                                    ),
+                                    isNull(radacct.acctstoptime),
+                                    isNotNull(radacct.acctstarttime),
+                                ),
+                            )
+                            .limit(1);
+                        if (!current) return 0;
+                        const session = this.sessionInfoFromRow(current);
+                        const state = enabled
+                            ? (sharedState ??
+                              (await this.fairUsageState(
+                                  row.activation,
+                                  row.pkg,
+                                  session,
+                              )))
+                            : null;
+                        const rateLimit =
+                            session.fupForced &&
+                            !manualFairUsageAvailable(row.pkg)
+                                ? (session.fupRateLimit ??
+                                  this.rateLimitValue(row.pkg, true))
+                                : this.rateLimitValue(
+                                      row.pkg,
+                                      effectiveFairUsageThrottled(
+                                          state?.throttled ?? false,
+                                          session.fupForced,
+                                      ),
+                                  );
+                        if (
+                            enabled &&
+                            session.fupRateLimit === null &&
+                            !state!.throttled &&
+                            !session.fupForced
+                        ) {
+                            // Access-Accept already installed the normal package
+                            // rate. Record that baseline without sending a no-op
+                            // CoA; the first CoA is reserved for a real transition.
+                            await tx
+                                .update(radacct)
+                                .set({
+                                    fupWindowStart: state!.windowStart,
+                                    fupRateLimit: rateLimit,
+                                    fupUsedBytes: state!.usedBytes,
+                                    fupThresholdReached: false,
+                                    fupEvaluatedAt: new Date(),
+                                })
+                                .where(
+                                    eq(
+                                        radacct.radacctid,
+                                        BigInt(session.radacctId),
+                                    ),
+                                );
+                            return 0;
+                        }
+                        if (enabled) {
+                            if (
+                                session.fupRateLimit === rateLimit &&
+                                session.fupWindowStart?.getTime() ===
+                                    state!.windowStart.getTime()
+                            ) {
+                                return 0;
+                            }
+                        } else if (
+                            session.fupRateLimit === null ||
+                            (session.fupForced &&
+                                session.fupRateLimit === rateLimit)
+                        ) {
+                            return 0;
+                        }
+
+                        const acknowledged = await this.coaRateLimit(
+                            username,
+                            session,
+                            rateLimit,
+                        );
+                        if (!acknowledged) return 0;
+                        await tx
                             .update(radacct)
                             .set({
-                                fupWindowStart: state!.windowStart,
-                                fupRateLimit: rateLimit,
-                                fupUsedBytes: state!.usedBytes,
-                                fupThresholdReached: false,
+                                fupWindowStart: state?.windowStart ?? null,
+                                fupRateLimit:
+                                    enabled || session.fupForced
+                                        ? rateLimit
+                                        : null,
+                                fupUsedBytes: state?.usedBytes ?? 0,
+                                fupThresholdReached: state?.throttled ?? false,
                                 fupEvaluatedAt: new Date(),
                             })
                             .where(
@@ -3251,43 +3544,8 @@ export class RadiusClient {
                                     BigInt(session.radacctId),
                                 ),
                             );
-                        continue;
-                    }
-                    if (enabled) {
-                        if (
-                            session.fupRateLimit === rateLimit &&
-                            session.fupWindowStart?.getTime() ===
-                                state!.windowStart.getTime()
-                        ) {
-                            continue;
-                        }
-                    } else if (session.fupRateLimit === null) {
-                        continue;
-                    }
-
-                    const acknowledged = await this.coaRateLimit(
-                        username,
-                        session,
-                        rateLimit,
-                    );
-                    if (!acknowledged) continue;
-                    await db
-                        .update(radacct)
-                        .set({
-                            fupWindowStart: state?.windowStart ?? null,
-                            fupRateLimit: enabled ? rateLimit : null,
-                            fupUsedBytes: state?.usedBytes ?? 0,
-                            fupThresholdReached:
-                                state?.throttled ?? false,
-                            fupEvaluatedAt: new Date(),
-                        })
-                        .where(
-                            eq(
-                                radacct.radacctid,
-                                BigInt(session.radacctId),
-                            ),
-                        );
-                    touched++;
+                        return 1;
+                    });
                 }
             } catch (err) {
                 logger.error('Fair-usage reconciliation failed', {
@@ -3336,10 +3594,11 @@ export class RadiusClient {
             username,
             activationId,
             nasIpAddresses,
+            limit: null,
         });
         let usedSeconds = 0;
         for (const session of sessions) {
-            usedSeconds += session.seconds;
+            usedSeconds += row.pkg.noExpiry ? session.bankChargedSeconds : session.seconds;
         }
         return {
             totalSeconds,
@@ -3369,6 +3628,16 @@ export class RadiusClient {
         activationId: string,
         pkg: typeof packages.$inferSelect,
     ): Promise<{ active: boolean; remainingSeconds: number }> {
+        return db.transaction(async (tx) => {
+            await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`bank:${activationId}`}))`);
+            return this.syncBankAuthorizationLocked(activationId, pkg);
+        });
+    }
+
+    private async syncBankAuthorizationLocked(
+        activationId: string,
+        pkg: typeof packages.$inferSelect,
+    ): Promise<{ active: boolean; remainingSeconds: number }> {
         const usage = await this.getBankUsage(activationId);
         const username = usage?.username ?? activationUsername(activationId);
         const remainingSeconds = usage?.remainingSeconds ?? 0;
@@ -3393,9 +3662,10 @@ export class RadiusClient {
             username,
             activationId,
             liveOnly: true,
+            limit: null,
         });
 
-        if (remainingSeconds <= 0 || usage.expireAt.getTime() <= Date.now()) {
+        if ((!pkg.noExpiry && remainingSeconds <= 0) || usage.expireAt.getTime() <= Date.now()) {
             // This also runs request-driven (restAuthorize/login paths), so
             // scope the deactivation to the activation's owning tenant when
             // attribution resolves; 'system' stays the fallback for legacy or
@@ -3432,11 +3702,28 @@ export class RadiusClient {
             'Expiration',
             dayjs(usage.expireAt).format('DD MMM YYYY HH:mm:ss'),
         );
+        if (remainingSeconds <= 0) {
+            await this.upsertCheckAttribute(username, 'Auth-Type', 'Reject');
+        } else {
+            await db.delete(radcheck).where(and(eq(radcheck.username, username), eq(radcheck.attribute, 'Auth-Type'), eq(radcheck.value, 'Reject')));
+        }
         for (const session of liveSessions) {
+            const sessionTimeout = pkg.noExpiry
+                ? bankSessionTimeout(remainingSeconds, session.bonusRemainingSeconds,
+                    Math.max(0, Math.floor((usage.expireAt.getTime() - Date.now()) / 1000)))
+                : enforcedSeconds;
+            if (sessionTimeout <= 0) {
+                const result = await this.terminateSessionAtNas(username, session).catch((err) => {
+                    logger.error('Time-bank disconnect failed', { error: err });
+                    return null;
+                });
+                if (result?.ok) await this.closeSessionRecord(session);
+                continue;
+            }
             await this.coaSessionTimeout(
                 username,
                 session,
-                enforcedSeconds,
+                sessionTimeout,
             ).catch((err) =>
                 logger.error('Time-bank CoA failed', {
                     nasIpAddress: session.nasIpAddress,
@@ -3444,7 +3731,7 @@ export class RadiusClient {
                 }),
             );
         }
-        return { active: true, remainingSeconds: enforcedSeconds };
+        return { active: remainingSeconds > 0, remainingSeconds: enforcedSeconds };
     }
 
     // Periodic bank reconciliation keeps both hotspot and PPPoE bank balances
@@ -4169,10 +4456,35 @@ export class RadiusClient {
         const attrs = this.sessionCoaIdentity(username, session);
         attrs.push({ type: ATTR.SESSION_TIMEOUT, value: seconds });
         try {
-            return await this.sendCoARequest(target, target.secret, attrs);
+            const acknowledged = await this.sendCoARequest(
+                target,
+                target.secret,
+                attrs,
+            );
+            if (acknowledged) {
+                // Include system time-bank CoAs so later enforcement cannot
+                // leave the admin's displayed remaining time stale.
+                await db
+                    .update(radacct)
+                    .set({
+                        sessionTimeoutExpiresAt: new Date(
+                            Date.now() + seconds * 1000,
+                        ),
+                    })
+                    .where(
+                        and(
+                            eq(radacct.radacctid, BigInt(session.radacctId)),
+                            isNull(radacct.acctstoptime),
+                        ),
+                    );
+            }
+            return acknowledged;
         } catch (error) {
             if (error instanceof RadiusNakError && error.errorCause === 503) {
-                await this.closeSessionRecord(session, 'Session-Context-Not-Found');
+                await this.closeSessionRecord(
+                    session,
+                    'Session-Context-Not-Found',
+                );
                 throw new RadiusError(
                     `${error.message}. The stale database session has been closed; its timeout was not changed.`,
                 );
@@ -4185,8 +4497,9 @@ export class RadiusClient {
         username: string,
         session: SessionInfo,
         rateLimit: string,
+        adminId?: string,
     ): Promise<boolean> {
-        const target = await this.nasTargetForSession(session);
+        const target = await this.nasTargetForSession(session, adminId);
         const attrs = this.sessionCoaIdentity(username, session);
         attrs.push({
             vendor: MIKROTIK_VENDOR_ID,
@@ -4197,7 +4510,10 @@ export class RadiusClient {
             return await this.sendCoARequest(target, target.secret, attrs);
         } catch (error) {
             if (error instanceof RadiusNakError && error.errorCause === 503) {
-                await this.closeSessionRecord(session, 'Session-Context-Not-Found');
+                await this.closeSessionRecord(
+                    session,
+                    'Session-Context-Not-Found',
+                );
             }
             throw error;
         }
@@ -4238,7 +4554,7 @@ export class RadiusClient {
         username: string;
         activationId: string;
         liveOnly?: boolean;
-        limit?: number;
+        limit?: number | null;
         nasIpAddresses?: string[];
     }): Promise<SessionInfo[]> {
         if (opts.nasIpAddresses?.length === 0) return [];
@@ -4248,7 +4564,7 @@ export class RadiusClient {
                   eq(radacct.username, opts.username),
                   eq(radacct.class, opts.activationId),
               );
-        const rows = await db
+        const query = db
             .select()
             .from(radacct)
             .where(
@@ -4263,8 +4579,8 @@ export class RadiusClient {
                         : undefined,
                 ),
             )
-            .orderBy(desc(radacct.acctstarttime))
-            .limit(opts.limit ?? 200);
+            .orderBy(desc(radacct.acctstarttime));
+        const rows = await (opts.limit === null ? query : query.limit(opts.limit ?? 200));
         return rows.map((row) => this.sessionInfoFromRow(row));
     }
 
@@ -4292,6 +4608,8 @@ export class RadiusClient {
             stoppedAt: row.acctstoptime,
             live,
             seconds: Math.round(seconds),
+            ...bankSessionUsage(seconds, row, live),
+            remainingSeconds: sessionRemainingSeconds(row),
             inputOctets,
             outputOctets,
             totalOctets,
@@ -4300,6 +4618,7 @@ export class RadiusClient {
                 seconds > 0 ? Math.round((totalOctets * 8) / seconds) : 0,
             fupWindowStart: row.fupWindowStart,
             fupRateLimit: row.fupRateLimit,
+            fupForced: row.fupForced,
             fupUsedBytes: Number(row.fupUsedBytes),
             fupThresholdReached: row.fupThresholdReached,
             fupEvaluatedAt: row.fupEvaluatedAt,
@@ -4320,10 +4639,11 @@ export class RadiusClient {
             username,
             activationId,
             nasIpAddresses,
+            limit: null,
         });
         const liveSessions = sessions.filter((s) => s.live);
 
-        const cumulativeUsed = sessions.reduce((sum, s) => sum + s.seconds, 0);
+        const cumulativeUsed = sessions.reduce((sum, s) => sum + (pkg.noExpiry ? s.bankChargedSeconds : s.seconds), 0);
         const usedSeconds = Math.round(cumulativeUsed);
 
         const expireAt = effectiveExpireAt(activation, pkg);
@@ -4374,10 +4694,7 @@ export class RadiusClient {
                 fairUsage = {
                     limitBytes,
                     usedBytes: state.usedBytes,
-                    remainingBytes: Math.max(
-                        0,
-                        limitBytes - state.usedBytes,
-                    ),
+                    remainingBytes: Math.max(0, limitBytes - state.usedBytes),
                     throttled: state.throttled,
                     windowStart: state.windowStart,
                     windowValue: pkg.fairUsageWindowValue,
@@ -4406,6 +4723,9 @@ export class RadiusClient {
             deactivatedAt: activation.deactivatedAt,
             sessionLimitSeconds,
             usedSeconds,
+            bankTotalSeconds: pkg.noExpiry ? (activation.timeAllowanceSeconds ?? pkg.sessionLength * 60) : null,
+            bankUsedSeconds: pkg.noExpiry ? usedSeconds : null,
+            bankRemainingSeconds: pkg.noExpiry ? Math.max(0, (activation.timeAllowanceSeconds ?? pkg.sessionLength * 60) - usedSeconds) : null,
             remainingSeconds,
             octetsUsed,
             octetsLimit: quotaBytes > 0 ? quotaBytes : null,

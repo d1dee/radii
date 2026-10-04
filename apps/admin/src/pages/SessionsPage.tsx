@@ -7,7 +7,6 @@ import {
     Group,
     Loader,
     Modal,
-    NumberInput,
     Select,
     SimpleGrid,
     Stack,
@@ -25,6 +24,7 @@ import { useSearchParams } from 'react-router-dom';
 
 import { PageLayout } from '@/components/Layout/PageLayout';
 import { PageTableScrollContainer } from '@/components/PageTableScrollContainer';
+import { SessionAdjustmentControls } from '@/components/Sessions/SessionAdjustmentControls';
 import { SessionDetailsDrawer } from '@/components/Sessions/SessionDetailsDrawer';
 import {
     SortableTableHeader,
@@ -34,8 +34,9 @@ import { TableFilters } from '@/components/TableFilters';
 import { TablePagination } from '@/components/TablePagination';
 import {
     disconnectSession,
-    editSessionTimeout,
+    getAdminSession,
     getRadiusSessions,
+    type AdminSessionDetail,
     type AdminSessionRow,
     type SessionInfo,
     type SessionSortKey,
@@ -95,7 +96,9 @@ export default function SessionsPage() {
     const [confirmDisconnect, setConfirmDisconnect] =
         useState<SessionInfo | null>(null);
     const [editSession, setEditSession] = useState<SessionInfo | null>(null);
-    const [editMinutes, setEditMinutes] = useState<number | string>('');
+    const [editDetail, setEditDetail] = useState<AdminSessionDetail | null>(null);
+    const [editError, setEditError] = useState<string | null>(null);
+    const [adjustmentRevision, setAdjustmentRevision] = useState(0);
     const [busy, setBusy] = useState(false);
     const loadRequest = useRef(0);
 
@@ -191,19 +194,32 @@ export default function SessionsPage() {
         }
     };
 
-    const submitEdit = async () => {
-        if (!editSession || typeof editMinutes !== 'number') return;
-        setBusy(true);
-        const res = await editSessionTimeout(
-            editSession.radacctId,
-            Math.max(1, Math.round(editMinutes * 60)),
-        );
-        setBusy(false);
-        setEditSession(null);
-        notifyResult(res, 'Session time updated');
-        // A failed CoA can still reconcile a session absent from the NAS.
+    const handleAdjusted = () => {
+        setAdjustmentRevision((revision) => revision + 1);
         void load(page, true);
     };
+
+    useEffect(() => {
+        if (!editSession) return;
+        let ignore = false;
+        setEditDetail(null);
+        setEditError(null);
+        void getAdminSession(editSession.radacctId).then((result) => {
+            if (ignore) return;
+            if (!result.success || !result.data) {
+                setEditError(
+                    result.success
+                        ? 'Failed to load session details'
+                        : result.message,
+                );
+                return;
+            }
+            setEditDetail(result.data);
+        });
+        return () => {
+            ignore = true;
+        };
+    }, [editSession, adjustmentRevision]);
 
     return (
         <PageLayout
@@ -462,14 +478,13 @@ export default function SessionsPage() {
                                                 gap={4}
                                                 wrap='nowrap'
                                             >
-                                                <Tooltip label='Edit remaining time'>
+                                                <Tooltip label='Adjust session'>
                                                     <ActionIcon
                                                         variant='light'
                                                         aria-label='Edit session'
                                                         onClick={(event) => {
                                                             event.stopPropagation();
                                                             setEditSession(s);
-                                                            setEditMinutes(60);
                                                         }}
                                                     >
                                                         <MdEdit size={16} />
@@ -516,6 +531,8 @@ export default function SessionsPage() {
                 sessionId={detailsId}
                 onClose={() => setDetailsId(null)}
                 onDisconnect={setConfirmDisconnect}
+                adjustmentRevision={adjustmentRevision}
+                onAdjusted={handleAdjusted}
             />
 
             <Modal
@@ -558,32 +575,22 @@ export default function SessionsPage() {
             <Modal
                 opened={editSession !== null}
                 onClose={() => setEditSession(null)}
-                title='Edit session remaining time'
+                title='Adjust session'
                 centered
             >
-                <Stack>
-                    <Text size='sm' c='dimmed'>
-                        Session {editSession?.username} has been up for{' '}
-                        {editSession ? formatSeconds(editSession.seconds) : ''}.
-                        Set the new remaining time — the NAS enforces it via CoA
-                        Session-Timeout.
-                    </Text>
-                    <NumberInput
-                        label='Remaining time (minutes)'
-                        min={1}
-                        value={editMinutes}
-                        onChange={setEditMinutes}
+                {editError ? (
+                    <Text c='red'>{editError}</Text>
+                ) : editDetail ? (
+                    <SessionAdjustmentControls
+                        key={editDetail.session.radacctId}
+                        detail={editDetail}
+                        onAdjusted={handleAdjusted}
                     />
-                    <Button
-                        onClick={() => void submitEdit()}
-                        disabled={
-                            typeof editMinutes !== 'number' || editMinutes < 1
-                        }
-                        loading={busy}
-                    >
-                        Apply
-                    </Button>
-                </Stack>
+                ) : (
+                    <Center py='xl'>
+                        <Loader />
+                    </Center>
+                )}
             </Modal>
         </PageLayout>
     );

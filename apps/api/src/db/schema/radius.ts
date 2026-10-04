@@ -31,6 +31,11 @@ export const radacct = pgTable(
         acctinterval: bigint({ mode: 'number' }),
         // You can use { mode: "bigint" } if numbers are exceeding js number limitations
         acctsessiontime: bigint({ mode: 'number' }),
+        bankWaivedSeconds: bigint('bank_waived_seconds', { mode: 'number' })
+            .default(0)
+            .notNull(),
+        bankBonusStartSeconds: bigint('bank_bonus_start_seconds', { mode: 'number' }),
+        bankBonusEndSeconds: bigint('bank_bonus_end_seconds', { mode: 'number' }),
         acctauthentic: text(),
         connectinfoStart: text('connectinfo_start'),
         connectinfoStop: text('connectinfo_stop'),
@@ -54,6 +59,12 @@ export const radacct = pgTable(
             mode: 'date',
         }),
         fupRateLimit: text('fup_rate_limit'),
+        // Manual FUP applies only for this accounting session's lifetime.
+        fupForced: boolean('fup_forced').default(false).notNull(),
+        sessionTimeoutExpiresAt: timestamp('session_timeout_expires_at', {
+            withTimezone: true,
+            mode: 'date',
+        }),
         fupUsedBytes: bigint('fup_used_bytes', { mode: 'number' })
             .default(0)
             .notNull(),

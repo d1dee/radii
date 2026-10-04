@@ -370,11 +370,9 @@ app.get('/status', requireAuth, async (c) => {
             username: a.username,
             usedSeconds: a.usedSeconds,
             sessionLimitSeconds: a.sessionLimitSeconds,
-            bankTotalSeconds: a.noExpiry ? a.sessionLength * 60 : null,
-            bankUsedSeconds: a.noExpiry ? a.usedSeconds : null,
-            bankRemainingSeconds: a.noExpiry
-                ? Math.max(0, a.sessionLength * 60 - a.usedSeconds)
-                : null,
+            bankTotalSeconds: a.bankTotalSeconds,
+            bankUsedSeconds: a.bankUsedSeconds,
+            bankRemainingSeconds: a.bankRemainingSeconds,
             octetsUsed: a.octetsUsed,
             octetsLimit: a.octetsLimit,
             remainingOctets: a.remainingOctets,

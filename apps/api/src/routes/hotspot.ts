@@ -47,6 +47,7 @@ import {
 } from '../lib/packages';
 import { paymentService } from '../lib/payments';
 import { radiusClient, type ActivationRedirect } from '../lib/radius';
+import { currentDeviceSessionId, normalizeMac } from '../lib/radius/sessionStatus';
 import { hashNasToken, nasTokenMatchesHash } from '../lib/setupScript';
 import { deriveNasPortalSecret } from '../lib/setupScriptTemplate';
 import { apiLogger } from '../logging';
@@ -233,6 +234,7 @@ app.get('/status', requireAuth, async (c) => {
             expiresAt: a.expireAt.toISOString(),
             lastActive: a.lastActive?.toISOString(),
             noExpiry: a.noExpiry,
+            currentSessionId: currentDeviceSessionId(a.liveSessions, clientMac),
             thisDevice:
                 clientMac !== '' &&
                 a.liveSessions.some(
@@ -247,11 +249,9 @@ app.get('/status', requireAuth, async (c) => {
             username: a.username,
             usedSeconds: a.usedSeconds,
             sessionLimitSeconds: a.sessionLimitSeconds,
-            bankTotalSeconds: a.noExpiry ? a.sessionLength * 60 : null,
-            bankUsedSeconds: a.noExpiry ? a.usedSeconds : null,
-            bankRemainingSeconds: a.noExpiry
-                ? Math.max(0, a.sessionLength * 60 - a.usedSeconds)
-                : null,
+            bankTotalSeconds: a.bankTotalSeconds,
+            bankUsedSeconds: a.bankUsedSeconds,
+            bankRemainingSeconds: a.bankRemainingSeconds,
             octetsUsed: a.octetsUsed,
             octetsLimit: a.octetsLimit,
             remainingOctets: a.remainingOctets,
@@ -1115,13 +1115,5 @@ app.get('/users', requireAdmin, async (c) => {
         data: { users, total: users.length, limit: 100, offset: 0 },
     });
 });
-
-// --- Auth helpers -----------------------------------------------------------
-
-// Compares MACs across formats (AA:BB:.., AA-BB-.., aabb..): hex digits only,
-// lowercase.
-function normalizeMac(mac: string | null | undefined) {
-    return (mac ?? '').toLowerCase().replace(/[^0-9a-f]/g, '');
-}
 
 export default app;
