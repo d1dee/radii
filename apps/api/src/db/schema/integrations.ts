@@ -146,8 +146,8 @@ export const nasSetupScript = pgTable(
             .default(false)
             .notNull(),
         // WireGuard public key reported by the device when the script runs.
-        // Null until the report arrives; reset to null on regeneration
-        // (the device generates a fresh keypair when re-running the script).
+        // Null until the first report; regeneration preserves the key so the
+        // existing tunnel remains valid while updated configuration is applied.
         wgPublicKey: text('wg_public_key'),
         // Tunnel address allocated to the device from the management subnet;
         // the server reaches the NAS over it once the tunnel is up.

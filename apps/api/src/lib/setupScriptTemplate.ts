@@ -349,7 +349,7 @@ const IP_LOCKDOWN_DISABLED_SECTION = `# ----------------------------------------
 $radiiLog "Optional IP service lockdown skipped (REST remains WireGuard-only)";
 `;
 
-const TEMPLATE = `# =====================================================================
+export const MIKROTIK_SETUP_SCRIPT_TEMPLATE = `# =====================================================================
 #  radii NAS auto-configuration
 # =====================================================================
 #  Device    : {{NAS_NAME}} ({{NAS_MODEL}}, s/n {{NAS_SERIAL}})
@@ -453,26 +453,23 @@ $radiiLog ("RADIUS incoming (CoA / Disconnect-Messages) enabled on port 1700");
 
 :local wgName "wg-radii";
 :local wgIds [/interface/wireguard/find where name=$wgName];
-:local oldWgPeerIds [/interface/wireguard/peers/find where comment="radii server peer"];
-:local oldWgAddresses [/ip/address/find where comment="radii mgmt"];
 
-# IMPORTANT:
-# Recreate the interface so RouterOS generates its keypair when the interface
-# is created. Removing managed dependencies first makes reruns deterministic.
-:if ([:len $oldWgPeerIds] > 0) do={
-    /interface/wireguard/peers/remove $oldWgPeerIds;
+# Generate a keypair only on first setup. Reruns preserve the interface ID and
+# private key; only managed settings are updated.
+:if ([:len $wgIds] = 0) do={
+    /interface/wireguard/add \
+        name=$wgName \
+        listen-port={{WG_LISTEN_PORT}} \
+        mtu=1420 \
+        disabled=no \
+        comment="radii management tunnel";
+} else={
+    /interface/wireguard/set [:pick $wgIds 0] \
+        listen-port={{WG_LISTEN_PORT}} \
+        mtu=1420 \
+        disabled=no \
+        comment="radii management tunnel";
 };
-:if ([:len $oldWgAddresses] > 0) do={
-    /ip/address/remove $oldWgAddresses;
-};
-:if ([:len $wgIds] > 0) do={
-    /interface/wireguard/remove $wgIds;
-};
-/interface/wireguard/add \
-    name=$wgName \
-    listen-port={{WG_LISTEN_PORT}} \
-    mtu=1420 \
-    comment="radii management tunnel";
 
 
 :local wgId [/interface/wireguard/find where name=$wgName];
@@ -483,7 +480,7 @@ $radiiLog ("WireGuard public key: " . $wgPubKey);
 # --- WireGuard IP -----------------------------------------------------
 
 :local wgAddress "{{WG_CLIENT_IP}}/{{WG_PREFIX_LEN}}";
-:local existingWgAddress [/ip/address/find where address=$wgAddress];
+:local existingWgAddress [/ip/address/find where interface=$wgName && comment="radii mgmt"];
 
 :if ([:len $existingWgAddress] = 0) do={
     /ip/address/add \
@@ -492,22 +489,46 @@ $radiiLog ("WireGuard public key: " . $wgPubKey);
         comment="radii mgmt";
 } else={
     /ip/address/set [:pick $existingWgAddress 0] \
+        address=$wgAddress \
         interface=$wgName \
         comment="radii mgmt";
 };
 
+# Remove only exact duplicates of the managed address, never unrelated addresses.
+:local duplicateWgAddresses [/ip/address/find where interface=$wgName && comment="radii mgmt" && address=$wgAddress];
+:if ([:len $duplicateWgAddresses] > 1) do={
+    :for i from=1 to=([:len $duplicateWgAddresses] - 1) do={
+        /ip/address/remove [:pick $duplicateWgAddresses $i];
+    };
+};
+
 # --- WireGuard peer ---------------------------------------------------
 
-/interface/wireguard/peers/add \
-    interface=$wgName \
-    name="radii-server" \
-    endpoint-address="{{WG_ENDPOINT_HOST}}" \
-    endpoint-port={{WG_ENDPOINT_PORT}} \
-    public-key="{{WG_SERVER_PUBLIC_KEY}}" \
-    preshared-key="{{WG_PSK}}" \
-    allowed-address={{WG_ALLOWED_ADDRESS}} \
+:local wgPeerIds [/interface/wireguard/peers/find where interface=$wgName && (name="radii-server" || comment="radii server peer")];
+:if ([:len $wgPeerIds] = 0) do={
+    /interface/wireguard/peers/add \
+        interface=$wgName \
+        name="radii-server" \
+        endpoint-address="{{WG_ENDPOINT_HOST}}" \
+        endpoint-port={{WG_ENDPOINT_PORT}} \
+        public-key="{{WG_SERVER_PUBLIC_KEY}}" \
+        preshared-key="{{WG_PSK}}" \
+        allowed-address={{WG_ALLOWED_ADDRESS}} \
         persistent-keepalive=20s \
-    comment="radii server peer";
+        disabled=no \
+        comment="radii server peer";
+} else={
+    /interface/wireguard/peers/set [:pick $wgPeerIds 0] \
+        name="radii-server" \
+        endpoint-address="{{WG_ENDPOINT_HOST}}" \
+        endpoint-port={{WG_ENDPOINT_PORT}} \
+        public-key="{{WG_SERVER_PUBLIC_KEY}}" \
+        preshared-key="{{WG_PSK}}" \
+        allowed-address={{WG_ALLOWED_ADDRESS}} \
+        persistent-keepalive=20s \
+        disabled=no \
+        comment="radii server peer";
+};
 
 # ---------------------------------------------------------------------
 # 5. Firewall input rules
@@ -1426,7 +1447,7 @@ export function renderMikrotikSetupScript(
         vars.NAS_ID,
         deriveNasPortalSecret(vars.RADIUS_SECRET, vars.NAS_ID),
     );
-    let out = TEMPLATE.split('{{IP_LOCKDOWN_SECTION}}').join(
+    let out = MIKROTIK_SETUP_SCRIPT_TEMPLATE.split('{{IP_LOCKDOWN_SECTION}}').join(
         options?.ipLockdown === false
             ? IP_LOCKDOWN_DISABLED_SECTION
             : IP_LOCKDOWN_SECTION,

@@ -48,6 +48,12 @@ import {
     verification,
 } from '../db/schema';
 import { calculateActivationTime } from './radius/activationLimits';
+import {
+    nasAddressClaims,
+    scopedNasHistoryAddress,
+    visibleNasAddresses,
+    type NasAddressClaim,
+} from './nasHistory';
 
 export type AdminUserTypeFilter = 'hotspot' | 'pppoe';
 export type AdminUserSortBy =
@@ -194,25 +200,10 @@ function activationTypeExists(
 }
 
 // Accounting tenancy follows the NAS that emitted the row. An address is
-// usable as an authorization boundary only when no other admin has registered
-// the same direct or WireGuard address.
+// usable as an authorization boundary only when no other admin has claimed it,
+// including exact UUID-bound historical registry addresses.
 function scopedAccountingToAdminNas(adminId: string): SQL {
-    return sql`${radacct.nasipaddress} in (
-        select owned.ip_address from nas_device owned
-        where owned.owner_id = ${adminId}
-        union
-        select owned_setup.wg_client_ip
-        from nas_setup_script owned_setup
-        inner join nas_device owned on owned.id = owned_setup.nas_device_id
-        where owned.owner_id = ${adminId}
-    ) and not exists (
-        select 1
-        from nas_device other
-        left join nas_setup_script other_setup on other_setup.nas_device_id = other.id
-        where other.owner_id <> ${adminId}
-          and (${radacct.nasipaddress} = other.ip_address
-               or ${radacct.nasipaddress} = other_setup.wg_client_ip)
-    )`;
+    return scopedNasHistoryAddress(sql`${radacct.nasipaddress}`, adminId);
 }
 
 // --- Per-admin CRM tags ------------------------------------------------------
@@ -1024,11 +1015,11 @@ export async function canAdminManageActivation(
 function scopedSessionToAdminNas(adminId: string): SQL {
     return and(
         eq(nasDevice.ownerId, adminId),
-        or(
-            eq(radacct.nasipaddress, nasDevice.ipAddress),
-            eq(radacct.nasipaddress, nasSetupScript.wgClientIp),
+        scopedNasHistoryAddress(
+            sql`${radacct.nasipaddress}`,
+            adminId,
+            sql`${nasDevice.id}`,
         ),
-        scopedAccountingToAdminNas(adminId),
     ) as SQL;
 }
 
@@ -1056,67 +1047,14 @@ export async function isAdminRadacctVisible(
 
 // Every IP address the admin's NAS devices can appear under in accounting
 // records: the directly reachable address and the WireGuard tunnel client
-// address (RADIUS packets may carry either as NAS-IP-Address). Used to
-// filter cross-NAS listings without touching the RADIUS client.
+// address plus verified registry history. These are visibility aliases only,
+// never CoA destinations; accounting retains its original NAS-IP-Address.
 export async function getAdminNasAddresses(
     adminId: string,
     nasDeviceId?: string,
 ): Promise<Set<string>> {
-    const rows = await db
-        .select({
-            ownerId: nasDevice.ownerId,
-            ip: nasDevice.ipAddress,
-            wgIp: nasSetupScript.wgClientIp,
-        })
-        .from(nasDevice)
-        .leftJoin(nasSetupScript, eq(nasSetupScript.nasDeviceId, nasDevice.id));
-    const ownersByIp = new Map<string, Set<string>>();
-    for (const r of rows) {
-        for (const value of [r.ip, r.wgIp]) {
-            if (!value) continue;
-            const ip = value.replace(/\/\d+$/, '');
-            const owners = ownersByIp.get(ip) ?? new Set<string>();
-            owners.add(r.ownerId);
-            ownersByIp.set(ip, owners);
-        }
-    }
-    const targetAddresses = new Set(
-        rows
-            .filter((row) => row.ownerId === adminId)
-            .flatMap((row) => [row.ip, row.wgIp])
-            .filter((value): value is string => Boolean(value))
-            .map((value) => value.replace(/\/\d+$/, '')),
-    );
-    if (nasDeviceId) {
-        const [target] = await db
-            .select({
-                ip: nasDevice.ipAddress,
-                wgIp: nasSetupScript.wgClientIp,
-            })
-            .from(nasDevice)
-            .leftJoin(
-                nasSetupScript,
-                eq(nasSetupScript.nasDeviceId, nasDevice.id),
-            )
-            .where(
-                and(
-                    eq(nasDevice.id, nasDeviceId),
-                    eq(nasDevice.ownerId, adminId),
-                ),
-            )
-            .limit(1);
-        targetAddresses.clear();
-        for (const value of [target?.ip, target?.wgIp]) {
-            if (value) targetAddresses.add(value.replace(/\/\d+$/, ''));
-        }
-    }
-    return new Set(
-        [...ownersByIp.entries()].flatMap(([ip, owners]) =>
-            owners.size === 1 && owners.has(adminId) && targetAddresses.has(ip)
-                ? [ip]
-                : [],
-        ),
-    );
+    const rows = await db.execute(nasAddressClaims) as NasAddressClaim[];
+    return visibleNasAddresses(rows, adminId, nasDeviceId);
 }
 
 export async function getAdminSessionDetail(

@@ -1,19 +1,16 @@
 import type { GenerateSetupScriptInput } from '@radii/shared';
 import { desc, eq } from 'drizzle-orm';
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
+import { isIP } from 'node:net';
 import { db } from '../db';
 import { nas, nasDevice, nasSetupScript } from '../db/schema';
 import { env } from '../env';
-import { apiLogger } from '../logging';
 import type { NasDeviceRow } from './nas';
 import { deriveNasMonitoringPassword } from './nasMonitoringCredentials';
 import {
     renderMikrotikSetupScript,
     sanitizeRosComment,
 } from './setupScriptTemplate';
-import { removePeer, wgManagementEnabled } from './wireguard';
-
-const logger = apiLogger.getChild('wireguard');
 
 export class SetupScriptConfigError extends Error {}
 
@@ -205,6 +202,12 @@ async function allocateWgClientIp(
         if (row.nasDeviceId === nasDeviceId) continue;
         used.add(parseIpv4(row.wgClientIp));
     }
+    // Retired addresses still identify accounting history. Reassigning them
+    // to a different NAS would make that history ambiguous across tenants.
+    const historicalClients = await db.select({ address: nas.nasname }).from(nas);
+    for (const row of historicalClients) {
+        if (isIP(row.address) === 4) used.add(parseIpv4(row.address));
+    }
 
     const first = network + 2;
     const last = broadcast - 1;
@@ -324,23 +327,36 @@ export async function generateSetupScript(
             `WG_INTERFACE_IP (${wgInterfaceIp}) must be inside the management subnet ${env.wgManagementSubnet}`,
         );
     }
-    const wgClientIp = await allocateWgClientIp(
-        env.wgManagementSubnet,
-        device.id,
-        wgInterfaceIp,
+    const [existing] = await db
+        .select()
+        .from(nasSetupScript)
+        .where(eq(nasSetupScript.nasDeviceId, device.id))
+        .limit(1);
+    const wgClientIp = existing?.wgClientIp ?? await allocateWgClientIp(
+        env.wgManagementSubnet, device.id, wgInterfaceIp,
     );
+    const wgClientNum = parseIpv4(wgClientIp);
+    if (wgClientNum <= wgSubnet.network || wgClientNum >= wgSubnet.broadcast
+        || wgClientNum === wgInterfaceNum) {
+        throw new SetupScriptConfigError(
+            'The existing NAS WireGuard address is incompatible with the management subnet. Regeneration will not change the NAS identity.',
+        );
+    }
     const hotspotDnsName = input.hotspotDnsName || `hotspot.radii.lan`;
     const brandName = input.brandName || device.name;
 
-    const radiusSecret = randomToken(24);
+    const radiusSecret = existing?.radiusSecret ?? randomToken(24);
     const monitoringPassword = deriveNasMonitoringPassword(
         device.id,
         radiusSecret,
         env.adminBetterAuthSecret,
     );
-    const wgPsk = randomBase64(32);
+    const wgPsk = existing?.wgPsk ?? randomBase64(32);
     // Only token hashes and the expiry are persisted.
-    const bootstrapExpiresAt = new Date(Date.now() + BOOTSTRAP_TOKEN_TTL_MS);
+    const bootstrapExpiresAt = new Date(Math.max(
+        Date.now() + BOOTSTRAP_TOKEN_TTL_MS,
+        (existing?.bootstrapExpiresAt?.getTime() ?? 0) + 1,
+    ));
     const bootstrapToken = deriveBootstrapToken(
         device.id, radiusSecret, bootstrapExpiresAt,
     );
@@ -354,6 +370,7 @@ export async function generateSetupScript(
             NAS_ID: device.id,
             NAS_NAME: device.name,
             NAS_IDENTITY:
+                existing?.script.match(/\/system\/identity\/set name="([a-zA-Z0-9 ._-]+)";/)?.[1] ||
                 device.name.replace(/[^a-zA-Z0-9 ._-]/g, '').slice(0, 14) ||
                 (device.model ?? 'radii').slice(0, 14),
             NAS_MODEL: device.model ?? 'auto-detected',
@@ -418,27 +435,6 @@ export async function generateSetupScript(
             { ipLockdown: input.ipLockdown },
     );
 
-    const [existing] = await db
-        .select()
-        .from(nasSetupScript)
-        .where(eq(nasSetupScript.nasDeviceId, device.id))
-        .limit(1);
-
-    // Regenerating resets the peer identity: the device creates a fresh
-    // keypair when it re-runs the script, so the previously reported key
-    // becomes stale. Drop it from the interface now; the DB row below no
-    // longer references it, so reconciliation would prune it anyway.
-    if (existing?.wgPublicKey && wgManagementEnabled()) {
-        try {
-            await removePeer(existing.wgPublicKey);
-        } catch (e) {
-            logger.error('Failed to remove stale peer during setup regeneration', {
-                nasDeviceId: device.id,
-                error: e,
-            });
-        }
-    }
-
     const [row] = await db.transaction(async (tx) => {
         // Remember the tunnel address on the device; it is how the radii
         // server reaches the NAS (API/Web) once the tunnel is up.
@@ -457,14 +453,20 @@ export async function generateSetupScript(
         // RADIUS traffic always arrives via the WireGuard tunnel address,
         // not the user-entered `ipAddress` (which is identification only and
         // user-editable), so the FreeRADIUS `nasname` must be the tunnel IP.
-        await tx.delete(nas).where(eq(nas.nasname, wgClientIp));
-        await tx.insert(nas).values({
+        const clientValues = {
             nasname: wgClientIp,
             shortname: device.name,
             type: 'other',
             secret: radiusSecret,
-            description: `radii managed (${device.serialNumber ?? device.id})`,
-        });
+            description: `radii managed (${device.id})`,
+        };
+        const [existingClient] = await tx.select({ id: nas.id }).from(nas)
+            .where(eq(nas.nasname, wgClientIp)).limit(1);
+        if (existingClient) {
+            await tx.update(nas).set(clientValues).where(eq(nas.id, existingClient.id));
+        } else {
+            await tx.insert(nas).values(clientValues);
+        }
 
         if (existing) {
             const [updated] = await tx
@@ -480,14 +482,12 @@ export async function generateSetupScript(
                     pppoeNetwork: input.pppoeNetwork,
                     ipLockdown: input.ipLockdown,
                     sessionMonitoringEnabled: true,
-                    wgPublicKey: null,
                     wgClientIp,
                     wgPsk,
                     radiusSecret,
                     bootstrapTokenHash,
                     bootstrapExpiresAt,
                     pageTokenHash,
-                    wgKeyReportedAt: null,
                     status: 'pending',
                     generatedAt: new Date(),
                 })
