@@ -309,25 +309,19 @@ const IP_LOCKDOWN_SECTION = `# -------------------------------------------------
 # by the radii configuration.\
 
 :do {
-    /ip/service/set [find where name="ssh"] \
-        disabled=no \
-        address={{WG_ALLOWED_ADDRESS}};
+    $radiiEnableService [/ip/service/find where name="ssh"] "{{WG_ALLOWED_ADDRESS}}";
 } on-error={
     $radiiLog "WARNING - SSH service not found/configured";
 };
 
 :do {
-    /ip/service/set [find where name="winbox"] \
-        disabled=no \
-        address={{WG_ALLOWED_ADDRESS}};
+    $radiiEnableService [/ip/service/find where name="winbox"] "{{WG_ALLOWED_ADDRESS}}";
 } on-error={
     $radiiLog "WARNING - Winbox service not found/configured";
 };
 
 :do {
-    /ip/service/set [find where name="api"] \
-        disabled=no \
-        address={{WG_ALLOWED_ADDRESS}};
+    $radiiEnableService [/ip/service/find where name="api"] "{{WG_ALLOWED_ADDRESS}}";
 } on-error={
     $radiiLog "WARNING - API service not found/configured";
 };
@@ -378,6 +372,15 @@ export const MIKROTIK_SETUP_SCRIPT_TEMPLATE = `# ===============================
 :local radiiLog do={
     :log info ("radii: " . $1);
     :put ("radii: " . $1);
+};
+
+# RouterOS 7.24 renamed the service access restriction. Fall back only when
+# the new syntax cannot be parsed, not when applying a restriction fails.
+:local radiiEnableService;
+:do {
+    :set radiiEnableService [:parse "/ip/service/set \\$1 available-from=\\$2 disabled=no"];
+} on-error={
+    :set radiiEnableService [:parse "/ip/service/set \\$1 address=\\$2 disabled=no"];
 };
 
 # ---------------------------------------------------------------------
@@ -602,7 +605,8 @@ $radiiLog "WireGuard firewall access rules configured";
     :if ([:len $monitorWeb] != 1) do={
         :error "HTTP REST service not found";
     };
-    /ip/service/set $monitorWeb port=80 address={{WG_ALLOWED_ADDRESS}} disabled=no;
+    /ip/service/set $monitorWeb port=80;
+    $radiiEnableService $monitorWeb "{{WG_ALLOWED_ADDRESS}}";
 
     # Newer RouterOS versions can separately disable plain REST. Parse the
     # optional command so older versions without this menu remain supported;
@@ -1152,6 +1156,15 @@ $radiiLog "Read-only session monitoring configured (HTTP REST over WireGuard onl
             action=allow \
             dst-host=$walledPortalHost \
             comment="radii managed";
+
+        # Hostname-backed IP rules allow HTTPS and rebuild dynamic addresses
+        # after reboot as DNS becomes available, without pinning a stale IP.
+        /ip/hotspot/walled-garden/ip/add \
+            action=accept \
+            dst-host=$walledPortalHost \
+            protocol=tcp \
+            dst-port=443 \
+            comment="radii managed";
     };
 };
 
@@ -1166,6 +1179,13 @@ $radiiLog "Read-only session monitoring configured (HTTP REST over WireGuard onl
             /ip/hotspot/walled-garden/add \
                 action=allow \
                 dst-host=$walledApiHost \
+                comment="radii managed";
+
+            /ip/hotspot/walled-garden/ip/add \
+                action=accept \
+                dst-host=$walledApiHost \
+                protocol=tcp \
+                dst-port=443 \
                 comment="radii managed";
         };
     };
