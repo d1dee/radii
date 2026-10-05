@@ -1061,6 +1061,16 @@ export class PaymentService {
             }
         }
         if (event === MPESA_CALLBACK_EVENTS.status) {
+            // Persist authenticated callbacks before semantic validation so
+            // failed, expired, and rejected results remain available for audit.
+            await this.appendLog(
+                txRow.id,
+                txRow.provider,
+                STATUS_CALLBACK_EVENT,
+                result.payload,
+                result.requestId,
+                result.conversationId,
+            );
             if (!txRow.reportOnly) {
                 const [claim] = await db.select({ log: transactionLog, payment: packagePayments, pkg: packages, customerPhone: user.username })
                     .from(transactionLog)
@@ -1094,19 +1104,9 @@ export class PaymentService {
                 if (result.outcome === 'failed') {
                     await db.update(transactionLog).set({ payload: sql`${transactionLog.payload} || '{"phase":"rejected"}'::jsonb` })
                         .where(eq(transactionLog.id, claim.log.id));
-                    await this.appendLog(txRow.id, txRow.provider, STATUS_CALLBACK_EVENT, result.payload,
-                        result.requestId, result.conversationId);
                     return { status: 200, body: { success: true } };
                 }
             }
-            await this.appendLog(
-                txRow.id,
-                txRow.provider,
-                STATUS_CALLBACK_EVENT,
-                result.payload,
-                result.requestId,
-                result.conversationId,
-            );
         }
 
         if (txRow.reportOnly && txRow.status !== 'completed') {

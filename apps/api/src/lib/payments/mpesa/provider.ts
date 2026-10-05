@@ -543,6 +543,11 @@ export class MpesaPaymentProvider implements PaymentProvider {
                 parameters[param.Key] = param.Value;
             }
         }
+        // The top-level TransactionID may be a placeholder (e.g. MBN0000000).
+        // Only ReceiptNo identifies the payment in Transaction Status results.
+        const receipt = typeof parameters.ReceiptNo === 'string'
+            ? parameters.ReceiptNo.trim().toUpperCase() || null
+            : null;
 
         // Legacy acceptance rule: the transaction only counts as paid when it
         // is fully completed on M-Pesa's side.
@@ -581,8 +586,7 @@ export class MpesaPaymentProvider implements PaymentProvider {
                 reference: null,
                 requestId: null,
                 conversationId: originatorConversationId,
-                transactionId:
-                    'TransactionID' in result ? result.TransactionID : null,
+                transactionId: receipt,
                 amount: null,
                 payerPhoneNumber: payer,
                 payload: raw,
@@ -600,14 +604,12 @@ export class MpesaPaymentProvider implements PaymentProvider {
             reference: null,
             requestId: null,
             conversationId: originatorConversationId,
-            transactionId:
-                parameters.ReceiptNo ||
-                ('TransactionID' in result ? result.TransactionID : null),
+            transactionId: receipt,
             amount: amount !== null && Number.isFinite(amount) ? amount : null,
             payerPhoneNumber: payer,
             payload: raw,
             message:
-                `Transaction ${parameters.ReceiptNo ?? ''} completed on M-Pesa.`.trim(),
+                `Transaction ${receipt ?? ''} completed on M-Pesa.`.trim(),
         };
     }
 
