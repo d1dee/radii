@@ -89,6 +89,8 @@ export interface ReceiptClaimScope {
 const STATUS_QUERY_EVENT = 'status_query';
 const STATUS_CALLBACK_EVENT = 'status_callback';
 const STATUS_POLL_EVENT = 'status_poll';
+// Temporarily callback-only: portal polling reads persisted payment state.
+const PAYMENT_STATUS_CHECKS_ENABLED = false;
 const STATUS_CALLBACK_WAIT_MS = 30_000;
 const STATUS_POLL_INTERVAL_MS = 15_000;
 const PAYMENT_UNAVAILABLE_MESSAGE =
@@ -379,6 +381,9 @@ export class PaymentService {
     async refreshPackagePaymentStatus(
         payment: PackagePaymentRow,
     ): Promise<'pending' | 'paid' | 'failed'> {
+        if (!PAYMENT_STATUS_CHECKS_ENABLED) {
+            return this.getPackagePaymentStatus(payment.id, payment.status);
+        }
         if (payment.status === 'failed' || !payment.transaction) {
             return payment.status;
         }
@@ -513,6 +518,7 @@ export class PaymentService {
     }
 
     async canQueryTransactionStatus(transactionId: string): Promise<boolean> {
+        if (!PAYMENT_STATUS_CHECKS_ENABLED) return false;
         const tx = await this.getTransaction(transactionId);
         if (!tx || tx.status !== 'completed' || tx.providerTransactionId) return false;
         const [prior] = await db.select({ id: transactionLog.id })
@@ -568,6 +574,7 @@ export class PaymentService {
         provider: PaymentProvider,
         adminScope?: { paymentId: string; adminId: string },
     ): Promise<void> {
+        if (!PAYMENT_STATUS_CHECKS_ENABLED) return;
         if (!provider.requestPaymentReport) return;
         const current = await this.getTransaction(txRow.id);
         if (!current || current.status !== 'completed') return;
@@ -687,6 +694,10 @@ export class PaymentService {
                 (scope.serviceAccountId && payment.pppoeServiceAccountId !== scope.serviceAccountId)) return null;
             return this.receiptClaimForPayment(payment, packageType, scope);
         }
+        if (!PAYMENT_STATUS_CHECKS_ENABLED) return {
+            status: 'pending', paymentId: null, error: true,
+            message: 'Payment status checks are temporarily disabled. Wait for the payment callback.',
+        };
 
         // Attribute the verification to the tenant admin the customer last
         // paid (their M-Pesa till issued the receipt); fall back to the
@@ -1130,11 +1141,16 @@ export class PaymentService {
         }
 
         if (event === MPESA_CALLBACK_EVENTS.stk && result.outcome === 'completed') {
-            // A signed URL does not authenticate the callback body. Never
-            // authorize from it or trust its receipt: independently confirm
-            // the stored checkout after the grace period, then fetch a report.
             await this.appendLog(txRow.id, txRow.provider, 'stk_callback_received', result.payload,
                 result.requestId, result.conversationId);
+            if (!result.transactionId || result.amount === null || !result.payerPhoneNumber) {
+                paymentLogWarn('callback_missing_payment_details', { transactionId: txRow.id, provider: providerName, event });
+                return { status: 200, body: { success: true } };
+            }
+        }
+        if (PAYMENT_STATUS_CHECKS_ENABLED && event === MPESA_CALLBACK_EVENTS.stk && result.outcome === 'completed') {
+            // With fallback queries enabled, independently confirm checkout
+            // status before applying callback metadata.
             if (provider.name !== providerName) {
                 paymentLogWarn('callback_could_not_be_authenticated', { transactionId: txRow.id, provider: providerName });
                 return { status: 200, body: { success: true } };
