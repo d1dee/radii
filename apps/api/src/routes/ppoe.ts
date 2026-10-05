@@ -620,9 +620,10 @@ async function pppoeActivationForPayment(
 // Verify a gateway transaction code (e.g. M-Pesa receipt) supplied by the
 // customer. Idempotent and pollable: known receipts report their current
 // state; unknown ones are submitted to the provider and stay 'pending' until
-// the provider's status callback arrives, so the client re-posts the same
-// code until it leaves pending.
-app.post('/payment/:id/verify', requireAuth, async (c) => {
+// the provider's status callback arrives. GET observes that callback without
+// submitting another provider request; POST initiates verification.
+app.on(['POST', 'GET'], '/payment/:id/verify', requireAuth, async (c) => {
+    c.header('Cache-Control', 'no-store');
     const id = c.req.param('id');
     const parsed = paymentTransactionCodeSchema.safeParse({
         transactionCode: id ?? '',
@@ -638,7 +639,7 @@ app.post('/payment/:id/verify', requireAuth, async (c) => {
     const currentUser = c.get('user');
     const tenantAdminId = await getAdminIdForNasDevice(c.req.query('nas'));
     if (!tenantAdminId) return jsonError(c, 404, 'Unknown NAS device');
-    const rawBody: unknown = await c.req.json().catch(() => null);
+    const rawBody: unknown = c.req.method !== 'POST' ? {} : await c.req.json().catch(() => null);
     if (!rawBody || typeof rawBody !== 'object' || Array.isArray(rawBody)) return jsonError(c, 400, 'Invalid receipt claim');
     const body = rawBody as { serviceAccountId?: unknown };
     const queryAccount = c.req.query('account');
@@ -654,6 +655,7 @@ app.post('/payment/:id/verify', requireAuth, async (c) => {
         tenantAdminId,
         'pppoe',
         { nasDeviceId: c.req.query('nas')!, serviceAccountId: (body.serviceAccountId as string | undefined) ?? queryAccount },
+        c.req.method !== 'POST',
     );
 
     if (result === null) {

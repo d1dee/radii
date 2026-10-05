@@ -101,6 +101,18 @@ export function verifyPaymentReceipt(
     );
 }
 
+export function getPaymentReceiptStatus(
+    transactionCode: string,
+    loginRequestId = currentLoginRequestId(),
+) {
+    const query = loginRequestId
+        ? `?login_request=${encodeURIComponent(loginRequestId)}`
+        : '';
+    return request<PaymentReceiptClaimResult<ActivationRedirect>>(
+        `/payment/${encodeURIComponent(transactionCode)}/verify${query}`,
+    );
+}
+
 // Disconnects a device's live session of a package (frees a device slot).
 // The package itself stays active; the session is killed at the NAS via a
 // RADIUS Disconnect-Message. Pass sessionId (radacct id) to target one device.

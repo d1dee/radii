@@ -7,7 +7,7 @@ import {
     type AdminContactsSettings,
     type PaymentClaimActivationDetails,
 } from '@radii/shared';
-import { verifyPaymentReceipt } from '../../lib/api.ts';
+import { getPaymentReceiptStatus, verifyPaymentReceipt } from '../../lib/api.ts';
 import { mutationLogger } from '../../lib/logging.ts';
 import {
     refreshPppoeAccounts,
@@ -87,12 +87,10 @@ export function HavingIssues({ adminContacts }: Props) {
         setActivationDetails(null);
         setMessage({ message: 'Checking your payment and package activation...' });
 
-        // The provider may confirm asynchronously (status callback), so repost
-        // the receipt until the payment leaves the pending state; the service
-        // deduplicates in-flight verifications server-side.
-        const pollOnce = async (): Promise<boolean> => {
+        // Initiate verification once, then read the stored callback and activation result.
+        const pollOnce = async (initiate = false): Promise<boolean> => {
             try {
-                const res = await verifyPaymentReceipt(
+                const res = await (initiate ? verifyPaymentReceipt : getPaymentReceiptStatus)(
                     transactionId,
                     selectedAccountId,
                     nasDeviceId,
@@ -161,7 +159,7 @@ export function HavingIssues({ adminContacts }: Props) {
             }
         };
 
-        const pending = await pollOnce();
+        const pending = await pollOnce(true);
         if (generationRef.current !== generation) return;
         if (pending) {
             let attempts = 1;
@@ -182,10 +180,10 @@ export function HavingIssues({ adminContacts }: Props) {
                             'Payment verification or package activation is taking longer than usual. Check again shortly or contact the admin.',
                     });
                 } else {
-                    timerRef.current = setTimeout(poll, 3_000);
+                    timerRef.current = setTimeout(poll, 5_000);
                 }
             };
-            timerRef.current = setTimeout(poll, 3_000);
+            timerRef.current = setTimeout(poll, 5_000);
         } else {
             checkingRef.current = false;
             setChecking(false);

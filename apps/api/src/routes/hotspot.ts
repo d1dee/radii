@@ -486,9 +486,10 @@ async function activationForPayment(
 // Verify a gateway transaction code (e.g. M-Pesa receipt) supplied by the
 // customer. Idempotent and pollable: known receipts report their current
 // state; unknown ones are submitted to the provider and stay 'pending' until
-// the provider's status callback arrives, so the client re-posts the same
-// code until it leaves pending.
-app.post('/payment/:id/verify', requireAuth, async (c) => {
+// the provider's status callback arrives. GET observes that callback without
+// submitting another provider request; POST initiates verification.
+app.on(['POST', 'GET'], '/payment/:id/verify', requireAuth, async (c) => {
+    c.header('Cache-Control', 'no-store');
     const id = c.req.param('id');
     const parsed = paymentTransactionCodeSchema.safeParse({
         transactionCode: id ?? '',
@@ -530,6 +531,7 @@ app.post('/payment/:id/verify', requireAuth, async (c) => {
         tenantAdminId,
         'hotspot',
         { nasDeviceId: loginRequest!.nasDeviceId, loginRequestId },
+        c.req.method !== 'POST',
     );
 
     if (result === null) {

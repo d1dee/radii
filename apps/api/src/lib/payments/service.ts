@@ -89,8 +89,8 @@ export interface ReceiptClaimScope {
 const STATUS_QUERY_EVENT = 'status_query';
 const STATUS_CALLBACK_EVENT = 'status_callback';
 const STATUS_POLL_EVENT = 'status_poll';
-// Temporarily callback-only: portal polling reads persisted payment state.
-const PAYMENT_STATUS_CHECKS_ENABLED = false;
+// Disable automatic STK polling only; explicit receipt verification stays enabled.
+const AUTOMATIC_STATUS_POLLING_ENABLED = false;
 const STATUS_CALLBACK_WAIT_MS = 30_000;
 const STATUS_POLL_INTERVAL_MS = 15_000;
 const PAYMENT_UNAVAILABLE_MESSAGE =
@@ -381,7 +381,7 @@ export class PaymentService {
     async refreshPackagePaymentStatus(
         payment: PackagePaymentRow,
     ): Promise<'pending' | 'paid' | 'failed'> {
-        if (!PAYMENT_STATUS_CHECKS_ENABLED) {
+        if (!AUTOMATIC_STATUS_POLLING_ENABLED) {
             return this.getPackagePaymentStatus(payment.id, payment.status);
         }
         if (payment.status === 'failed' || !payment.transaction) {
@@ -518,7 +518,6 @@ export class PaymentService {
     }
 
     async canQueryTransactionStatus(transactionId: string): Promise<boolean> {
-        if (!PAYMENT_STATUS_CHECKS_ENABLED) return false;
         const tx = await this.getTransaction(transactionId);
         if (!tx || tx.status !== 'completed' || tx.providerTransactionId) return false;
         const [prior] = await db.select({ id: transactionLog.id })
@@ -574,7 +573,6 @@ export class PaymentService {
         provider: PaymentProvider,
         adminScope?: { paymentId: string; adminId: string },
     ): Promise<void> {
-        if (!PAYMENT_STATUS_CHECKS_ENABLED) return;
         if (!provider.requestPaymentReport) return;
         const current = await this.getTransaction(txRow.id);
         if (!current || current.status !== 'completed') return;
@@ -657,6 +655,7 @@ export class PaymentService {
         tenantAdminId?: string,
         packageType?: 'hotspot' | 'pppoe',
         scope?: ReceiptClaimScope,
+        pollOnly = false,
     ): Promise<VerifyByCodeOutcome | null> {
         const code = rawCode.trim().toUpperCase();
 
@@ -694,10 +693,39 @@ export class PaymentService {
                 (scope.serviceAccountId && payment.pppoeServiceAccountId !== scope.serviceAccountId)) return null;
             return this.receiptClaimForPayment(payment, packageType, scope);
         }
-        if (!PAYMENT_STATUS_CHECKS_ENABLED) return {
-            status: 'pending', paymentId: null, error: true,
-            message: 'Payment status checks are temporarily disabled. Wait for the payment callback.',
-        };
+
+        if (pollOnly) {
+            const [attempt] = await db.select({ log: transactionLog, tx: transaction, payment: packagePayments })
+                .from(transactionLog)
+                .innerJoin(transaction, eq(transaction.id, transactionLog.transactionId))
+                .innerJoin(packagePayments, eq(packagePayments.transaction, transaction.id))
+                .innerJoin(packages, eq(packages.id, packagePayments.packageId))
+                .where(and(...conditions, eq(transactionLog.eventType, STATUS_QUERY_EVENT),
+                    sql`${transactionLog.payload}->>'purpose' = 'receipt_claim'`,
+                    sql`${transactionLog.payload}->>'receipt' = ${code}`,
+                    sql`${transactionLog.payload}->>'userId' = ${userId}`,
+                    sql`${transactionLog.payload}->>'tenantAdminId' = ${tenantAdminId}`,
+                    sql`${transactionLog.payload}->>'nasDeviceId' = ${scope.nasDeviceId}`,
+                    sql`${transactionLog.payload}->>'packageType' = ${packageType}`,
+                    scope.serviceAccountId ? sql`${transactionLog.payload}->>'serviceAccountId' = ${scope.serviceAccountId}` : undefined,
+                )).orderBy(desc(transactionLog.createdAt)).limit(1);
+            if (!attempt) return null;
+            const requested = attempt.log.payload as { phase?: string; nonce?: string };
+            if (requested.phase === 'rejected' || requested.phase === 'error') return {
+                status: 'pending', paymentId: attempt.payment.id, error: true, errorStatus: 409,
+                message: requested.phase === 'error' ? PAYMENT_VERIFICATION_FAILED_MESSAGE
+                    : 'The receipt could not be verified for this purchase. Check the code or contact support.',
+            };
+            if (requested.phase === 'expired' || Date.now() - attempt.log.createdAt.getTime() > 120_000) return {
+                status: 'pending', paymentId: attempt.payment.id, error: true, errorStatus: 409,
+                message: 'The verification callback did not arrive in time. Check again to submit a new verification request.',
+            };
+            if ((attempt.tx.callbackNonces as Record<string, string> | null)?.[MPESA_CALLBACK_EVENTS.status] !== requested.nonce) return {
+                status: 'pending', paymentId: attempt.payment.id, error: true, errorStatus: 409,
+                message: 'A newer verification request replaced this one. Check the receipt again.',
+            };
+            return { status: 'pending', paymentId: attempt.payment.id, message: 'Waiting for the provider to confirm this transaction...' };
+        }
 
         // Attribute the verification to the tenant admin the customer last
         // paid (their M-Pesa till issued the receipt); fall back to the
@@ -824,7 +852,9 @@ export class PaymentService {
             const latest = attempts[0];
             // Dedupe the entire target, not just one receipt. A typo must not
             // retire a valid query already in flight.
-            if (latest && Date.now() - latest.createdAt.getTime() < 120_000) return { pending: true };
+            if (latest && Date.now() - latest.createdAt.getTime() < 120_000) return {
+                pending: true, phase: (latest.payload as { phase?: string }).phase,
+            };
             if (attempts.filter((entry) => (entry.payload as { receipt?: string })?.receipt === code).length >= 3) return { exhausted: true };
             const nonces = (current?.callbackNonces ?? {}) as Record<string, string>;
             const nonce = newCallbackNonce();
@@ -840,6 +870,10 @@ export class PaymentService {
             return { nonce, id: claim!.id };
         });
         if (!attempt) return null;
+        if ('pending' in attempt && (attempt.phase === 'rejected' || attempt.phase === 'error' || attempt.phase === 'expired')) return {
+            status: 'pending', paymentId: target.payment.id, error: true, errorStatus: 409,
+            message: 'The receipt could not be verified for this purchase. Check the code or contact support.',
+        };
         if (!('nonce' in attempt)) return {
             status: 'pending', paymentId: target.payment.id,
             message: 'exhausted' in attempt
@@ -1107,9 +1141,17 @@ export class PaymentService {
                         requested.customerPhone !== normalizeMpesaPhoneNumber(result.payerPhoneNumber ?? '') ||
                         requested.customerPhone !== normalizeMpesaPhoneNumber(claim.customerPhone ?? '') ||
                         requested.customerPhone !== normalizeMpesaPhoneNumber(claim.payment.phoneNumber)))) {
+                    if (claim) await db.update(transactionLog).set({ payload: sql`${transactionLog.payload} || ${JSON.stringify({
+                        phase: Date.now() - claim.log.createdAt.getTime() > 120_000 ? 'expired' : 'rejected',
+                    })}::jsonb` }).where(eq(transactionLog.id, claim.log.id));
                     return { status: 200, body: { success: true } };
                 }
                 txRow.receiptClaim = true;
+                if (result.outcome === 'pending') {
+                    await db.update(transactionLog).set({ payload: sql`${transactionLog.payload} || '{"phase":"expired"}'::jsonb` })
+                        .where(eq(transactionLog.id, claim.log.id));
+                    return { status: 200, body: { success: true } };
+                }
                 // A failed lookup concerns the supplied receipt, not the
                 // original checkout. Preserve pending/paid purchase state.
                 if (result.outcome === 'failed') {
@@ -1148,7 +1190,7 @@ export class PaymentService {
                 return { status: 200, body: { success: true } };
             }
         }
-        if (PAYMENT_STATUS_CHECKS_ENABLED && event === MPESA_CALLBACK_EVENTS.stk && result.outcome === 'completed') {
+        if (AUTOMATIC_STATUS_POLLING_ENABLED && event === MPESA_CALLBACK_EVENTS.stk && result.outcome === 'completed') {
             // With fallback queries enabled, independently confirm checkout
             // status before applying callback metadata.
             if (provider.name !== providerName) {
@@ -1220,7 +1262,13 @@ export class PaymentService {
                     { provider: providerName, event },
                 ));
             if (rejection) {
-                if (txRow.receiptClaim) return { status: 200, body: { success: true } };
+                if (txRow.receiptClaim) {
+                    await db.update(transactionLog).set({ payload: sql`${transactionLog.payload} || '{"phase":"rejected"}'::jsonb` })
+                        .where(and(eq(transactionLog.transactionId, txRow.id), eq(transactionLog.eventType, STATUS_QUERY_EVENT),
+                            sql`${transactionLog.payload}->>'purpose' = 'receipt_claim'`,
+                            sql`${transactionLog.payload}->>'nonce' = ${callbackNonce}`));
+                    return { status: 200, body: { success: true } };
+                }
                 await this.applyOutcome(txRow, 'failed', {
                     enrichmentOnly: txRow.reportOnly,
                     transactionId: result.transactionId,
@@ -1390,8 +1438,6 @@ export class PaymentService {
                     sql`${transaction.callbackNonces}->>${MPESA_CALLBACK_EVENTS.status} = ${callbackNonce}`,
                 )).limit(1);
             if (claim) {
-                const receipt = (claim.log.payload as { receipt?: string }).receipt;
-                if (result.outcome === 'completed' && receipt !== result.transactionId?.toUpperCase()) return null;
                 return { ...claim.tx, receiptClaim: true };
             }
             const [row] = await db.select().from(transaction).where(and(
@@ -1414,8 +1460,7 @@ export class PaymentService {
             if (queryLog) {
                 const row = await this.getTransaction(queryLog.transactionId);
                 const claim = queryLog.payload as { purpose?: string; nonce?: string; receipt?: string };
-                if (claim?.purpose === 'receipt_claim' && (claim.nonce !== callbackNonce ||
-                    (result.outcome === 'completed' && claim.receipt !== result.transactionId?.toUpperCase()))) return null;
+                if (claim?.purpose === 'receipt_claim' && claim.nonce !== callbackNonce) return null;
                 return row ? { ...row, reportOnly: claim?.purpose === 'payment_report' || claim?.purpose === 'admin_reconcile',
                     reportNonce: claim?.purpose === 'receipt_claim' ? undefined : claim?.nonce,
                     receiptClaim: claim?.purpose === 'receipt_claim' } : null;

@@ -145,6 +145,19 @@ export function verifyPaymentReceipt(
     );
 }
 
+export function getPaymentReceiptStatus(
+    transactionCode: string,
+    serviceAccountId: string | null,
+    nasDeviceId = currentNasDeviceId(),
+) {
+    const query = serviceAccountId
+        ? `?account=${encodeURIComponent(serviceAccountId)}`
+        : '';
+    return request<PaymentReceiptClaimResult<PppoeActivation>>(
+        withNas(`/payment/${encodeURIComponent(transactionCode)}/verify${query}`, nasDeviceId),
+    );
+}
+
 // Disconnects a dialer's live PPP session (RADIUS Disconnect-Message to the
 // NAS). The package itself stays active; the dialer can reconnect using the
 // same credentials. Pass sessionId (radacct id) to target one session.
