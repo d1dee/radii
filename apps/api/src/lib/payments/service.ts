@@ -103,6 +103,7 @@ export class PaymentService {
     private defaultProviderName: string | null = null;
     private reconciliationInFlight = new Map<string, Promise<void>>();
     private reportsInFlight = new Map<string, Promise<void>>();
+    private statusPollsInFlight = new Map<string, Promise<PackagePaymentRow['status']>>();
 
     // Register a provider. The first registered provider becomes the default
     // for package purchases. Throws on duplicate names so misconfiguration
@@ -393,6 +394,18 @@ export class PaymentService {
         }
         if (txRow.status !== 'pending' || !txRow.providerReference) return localStatus;
 
+        if (this.statusPollsInFlight.has(txRow.id)) return localStatus;
+        const work = this.pollPackagePaymentStatus(payment, txRow, provider, localStatus);
+        this.statusPollsInFlight.set(txRow.id, work);
+        try { return await work; }
+        finally { this.statusPollsInFlight.delete(txRow.id); }
+    }
+
+    private async pollPackagePaymentStatus(
+        payment: PackagePaymentRow, txRow: TransactionRow, provider: PaymentProvider,
+        localStatus: PackagePaymentRow['status'],
+    ): Promise<PackagePaymentRow['status']> {
+
         // Give callbacks time to arrive before the first fallback query, then
         // throttle subsequent queries. Portal polls still read local status.
         if (provider.handleCallback && !await this.claimStatusPoll(txRow.id)) {
@@ -431,8 +444,9 @@ export class PaymentService {
             phase: 'result', outcome: result.outcome, message: result.message,
         });
         if (result.outcome === 'completed') {
+            const receipt = result.transactionId ?? await this.receiptFromStkCallback(txRow, provider, payment);
             const transitioned = await this.applyOutcome(txRow, 'completed', {
-                transactionId: result.transactionId,
+                transactionId: receipt,
                 source: 'status_poll',
                 message: result.message,
             });
@@ -463,6 +477,24 @@ export class PaymentService {
         return this.getPackagePaymentStatus(payment.id, payment.status);
     }
 
+    // Only use callback metadata after the checkout has been independently
+    // confirmed. Daraja's STK receipt is not its MerchantRequestID.
+    private async receiptFromStkCallback(
+        tx: TransactionRow, provider: PaymentProvider, payment: PackagePaymentRow,
+    ): Promise<string | null> {
+        if (!provider.handleCallback) return null;
+        const [entry] = await db.select({ payload: transactionLog.payload }).from(transactionLog)
+            .where(and(eq(transactionLog.transactionId, tx.id), eq(transactionLog.eventType, 'stk_callback_received')))
+            .orderBy(desc(transactionLog.createdAt)).limit(1);
+        if (!entry) return null;
+        const callback = await provider.handleCallback(MPESA_CALLBACK_EVENTS.stk, entry.payload);
+        if (callback.outcome !== 'completed' || callback.reference !== tx.providerReference ||
+            callback.amount !== Number(tx.amount) || !callback.payerPhoneNumber ||
+            callback.payerPhoneNumber !== normalizeMpesaPhoneNumber(payment.phoneNumber) ||
+            !callback.transactionId || !/^[A-Z0-9]{6,15}$/i.test(callback.transactionId)) return null;
+        return callback.transactionId.toUpperCase();
+    }
+
     private async claimStatusPoll(transactionId: string): Promise<boolean> {
         return db.transaction(async (trx) => {
             const [tx] = await trx.select().from(transaction)
@@ -483,12 +515,6 @@ export class PaymentService {
     async canQueryTransactionStatus(transactionId: string): Promise<boolean> {
         const tx = await this.getTransaction(transactionId);
         if (!tx || tx.status !== 'completed' || tx.providerTransactionId) return false;
-        const [initiated] = await db.select({ requestId: transactionLog.providerRequestId })
-            .from(transactionLog).where(and(
-                eq(transactionLog.transactionId, tx.id),
-                eq(transactionLog.eventType, 'payment_initiated'),
-            )).orderBy(desc(transactionLog.createdAt)).limit(1);
-        if (!initiated?.requestId) return false;
         const [prior] = await db.select({ id: transactionLog.id })
             .from(transactionLog).where(and(
                 eq(transactionLog.transactionId, tx.id),
@@ -497,7 +523,11 @@ export class PaymentService {
             )).limit(1);
         if (prior) return false;
         try {
-            return Boolean((await this.resolveProvider(tx.provider))?.requestPaymentReport);
+            const provider = await this.resolveProvider(tx.provider);
+            if (!provider?.requestPaymentReport) return false;
+            const [payment] = await db.select().from(packagePayments)
+                .where(eq(packagePayments.transaction, tx.id)).limit(1);
+            return Boolean(payment && await this.receiptFromStkCallback(tx, provider, payment));
         } catch {
             return false;
         }
@@ -539,6 +569,15 @@ export class PaymentService {
         adminScope?: { paymentId: string; adminId: string },
     ): Promise<void> {
         if (!provider.requestPaymentReport) return;
+        const current = await this.getTransaction(txRow.id);
+        if (!current || current.status !== 'completed') return;
+        const [payment] = await db.select().from(packagePayments)
+            .where(eq(packagePayments.transaction, current.id)).limit(1);
+        const receipt = current.providerTransactionId ?? (payment
+            ? await this.receiptFromStkCallback(current, provider, payment) : null);
+        // No receipt means no valid Transaction Status lookup for an STK
+        // purchase. Never substitute MerchantRequestID or sweep old payments.
+        if (!receipt) return;
         const purpose = adminScope ? 'admin_reconcile' : 'payment_report';
         const existing = this.reportsInFlight.get(txRow.id);
         if (existing) {
@@ -549,7 +588,7 @@ export class PaymentService {
             const claim = await db.transaction(async (trx) => {
                 const [tx] = await trx.select().from(transaction)
                     .where(eq(transaction.id, txRow.id)).for('update');
-                if (!tx || tx.status !== 'completed' || tx.providerTransactionId) return null;
+                if (!tx || tx.status !== 'completed') return null;
                 if (adminScope) {
                     if (tx.providerTransactionId) return null;
                     const [payment] = await trx.select({ id: packagePayments.id })
@@ -566,19 +605,18 @@ export class PaymentService {
                 const [initiated] = await trx.select({ requestId: transactionLog.providerRequestId }).from(transactionLog)
                     .where(and(eq(transactionLog.transactionId, tx.id), eq(transactionLog.eventType, 'payment_initiated')))
                     .orderBy(desc(transactionLog.createdAt)).limit(1);
-                if (!tx.providerTransactionId && !initiated?.requestId) return null;
                 // Reports authenticate against their durable attempt, not the
                 // shared status nonce used by an in-flight manual receipt claim.
                 const nonce = newCallbackNonce();
                 await trx.insert(transactionLog).values({ transactionId: tx.id, provider: tx.provider,
                     eventType: STATUS_QUERY_EVENT, payload: { purpose, phase: 'requested', nonce },
                     providerRequestId: initiated?.requestId ?? null });
-                return { tx, nonce, requestId: initiated?.requestId ?? null };
+                return { tx, nonce, receipt: tx.providerTransactionId ?? receipt, requestId: initiated?.requestId ?? null };
             });
             if (!claim) return;
             try {
                 const result = await provider.requestPaymentReport!({
-                    transactionId: claim.tx.providerTransactionId, requestId: claim.requestId,
+                    transactionId: claim.receipt, requestId: claim.requestId,
                 }, { callbackBaseUrl: this.callbackBaseUrl(provider.name), callbackNonce: claim.nonce });
                 await this.appendLog(txRow.id, provider.name, STATUS_QUERY_EVENT, {
                     ...result.data, purpose, phase: 'result', nonce: claim.nonce, outcome: result.outcome, message: result.message,
@@ -1104,6 +1142,14 @@ export class PaymentService {
             const [payment] = await db.select().from(packagePayments)
                 .where(eq(packagePayments.transaction, txRow.id)).limit(1);
             if (payment) {
+                if (txRow.status === 'completed') {
+                    const receipt = await this.receiptFromStkCallback(txRow, provider, payment);
+                    if (receipt) await this.applyOutcome(txRow, 'completed', {
+                        enrichmentOnly: true, transactionId: receipt, source: 'verified_stk_callback',
+                        message: result.message, amount: result.amount,
+                    });
+                    return { status: 200, body: { success: true } };
+                }
                 const status = await this.refreshPackagePaymentStatus(payment);
                 if (status !== 'paid') paymentLogInfo('callback_not_confirmed_by_status_query', {
                     transactionId: txRow.id, provider: providerName, status,

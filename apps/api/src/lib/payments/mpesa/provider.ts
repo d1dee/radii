@@ -357,19 +357,14 @@ export class MpesaPaymentProvider implements PaymentProvider {
         payment: { transactionId: string | null; requestId: string | null },
         context: VerifyTransactionContext,
     ): Promise<VerifyTransactionResult> {
-        if (!payment.transactionId && !payment.requestId) {
+        if (!payment.transactionId) {
             return {
                 outcome: 'failed',
                 conversationId: null,
-                message: 'M-Pesa transaction report requires a receipt or original request ID.',
+                message: 'M-Pesa transaction reports require a receipt number. An STK MerchantRequestID is not an OriginatorConversationID.',
             };
         }
-        return this.queryTransactionReport(
-            payment.transactionId
-                ? { TransactionID: payment.transactionId }
-                : { OriginalConversationID: payment.requestId! },
-            context,
-        );
+        return this.verifyTransaction(payment.transactionId, context);
     }
 
     private async queryTransactionReport(

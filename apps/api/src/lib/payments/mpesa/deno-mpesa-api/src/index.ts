@@ -36,7 +36,7 @@ import timezone from "dayjs/plugin/timezone";
 import utc from "dayjs/plugin/utc";
 import { Buffer } from "node:buffer";
 import { RSA_PKCS1_PADDING } from "node:constants";
-import { publicEncrypt } from "node:crypto";
+import { createHash, publicEncrypt } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { routes } from "./routes";
@@ -45,6 +45,15 @@ import { HttpService } from "./services/http.service";
 dayjs.extend(utc);
 dayjs.extend(timezone);
 const { paths } = routes;
+const QUERY_INTERVAL_MS = 15_000;
+type AuthenticationResult = [T_AuthResponse, Headers] | Error;
+const clientStates = new Map<string, {
+    tail: Promise<void>;
+    lastQueryCompletedAt?: number;
+    auth?: { token: T_ValidAuth; expiresAt: number };
+    authenticating?: Promise<AuthenticationResult>;
+    authFailure?: { error: Error; retryAt: number };
+}>();
 
 // Safaricom distributes their public encryption certificates as DER (.cer);
 // node:crypto publicEncrypt accepts PEM, so convert DER to PEM when needed.
@@ -91,6 +100,37 @@ export class MpesaApi {
         this.http = new HttpService(this.baseUrl);
     }
 
+    private state() {
+        const key = createHash("sha256").update(JSON.stringify([
+            this.baseUrl, this.consumerKey, this.consumerSecret,
+        ])).digest("hex");
+        let state = clientStates.get(key);
+        if (!state) {
+            state = { tail: Promise.resolve() };
+            clientStates.set(key, state);
+        }
+        return state;
+    }
+
+    private async runQuery<T>(work: () => Promise<T>): Promise<T> {
+        const state = this.state();
+        const previous = state.tail;
+        let release!: () => void;
+        state.tail = new Promise<void>((resolve) => { release = resolve; });
+        await previous;
+        try {
+            const wait = state.lastQueryCompletedAt === undefined ? 0
+                : state.lastQueryCompletedAt + QUERY_INTERVAL_MS - Date.now();
+            if (wait > 0) await new Promise<void>((resolve) => setTimeout(resolve, wait));
+            const result = await work();
+            if ((result as { status?: number })?.status === 401) state.auth = undefined;
+            return result;
+        } finally {
+            state.lastQueryCompletedAt = Date.now();
+            release();
+        }
+    }
+
     private generateSecurityCredential(
         initiatorPassword: string,
         certificatePath?: string,
@@ -128,7 +168,37 @@ export class MpesaApi {
     }
 
     // https://developer.safaricom.co.ke/APIs/Authorization
-    async authenticate(): Promise<[T_AuthResponse, Headers] | Error> {
+    async authenticate(): Promise<AuthenticationResult> {
+        const state = this.state();
+        if (state.auth && state.auth.expiresAt > Date.now()) {
+            return [state.auth.token, new Headers({
+                Authorization: "Bearer " + state.auth.token.access_token,
+                "Content-Type": "application/json",
+            })];
+        }
+        if (state.authFailure && state.authFailure.retryAt > Date.now()) return state.authFailure.error;
+        if (state.authenticating) return state.authenticating;
+        const work = this.fetchAuthentication();
+        state.authenticating = work;
+        try {
+            const result = await work;
+            if (result instanceof Error) {
+                state.authFailure = { error: result, retryAt: Date.now() + QUERY_INTERVAL_MS };
+            } else {
+                state.authFailure = undefined;
+                const token = result[0] as T_ValidAuth;
+                const lifetime = Number(token.expires_in) * 1000;
+                if (Number.isFinite(lifetime) && lifetime > 0) state.auth = {
+                    token, expiresAt: Date.now() + lifetime - Math.min(30_000, lifetime / 10),
+                };
+            }
+            return result;
+        } finally {
+            state.authenticating = undefined;
+        }
+    }
+
+    private async fetchAuthentication(): Promise<AuthenticationResult> {
         const headers = new Headers();
         headers.append(
             "Authorization",
@@ -205,7 +275,11 @@ export class MpesaApi {
      * @param {any} data.passKey Lipa Na Mpesa Pass Key
      * @returns {Promise} Returns a Promise with data from Safaricom if successful
      */
-    public async lipaNaMpesaQuery({
+    public lipaNaMpesaQuery(request: StkQueryInterface) {
+        return this.runQuery(() => this.queryStk(request));
+    }
+
+    private async queryStk({
         BusinessShortCode,
         passKey,
         CheckoutRequestID,
@@ -395,7 +469,11 @@ export class MpesaApi {
      * @param  {string} data.Occasion Optional
      * @returns {Promise} Returns a Promise with data from Safaricom if successful Promise
      */
-    public async transactionStatus(initiatorPassword: string, {
+    public transactionStatus(initiatorPassword: string, request: TransactionStatusInterface) {
+        return this.runQuery(() => this.queryTransactionStatus(initiatorPassword, request));
+    }
+
+    private async queryTransactionStatus(initiatorPassword: string, {
         Initiator,
         TransactionID,
         OriginalConversationID,
@@ -412,7 +490,8 @@ export class MpesaApi {
 
         this.generateSecurityCredential(initiatorPassword);
 
-        // Safaricom accepts the original request ID when the receipt is missing.
+        // OriginalConversationID must be the original transaction's genuine
+        // OriginatorConversationID, not an STK MerchantRequestID.
         const response = await this.http.post(
             routes.paths.transactionstatus,
             headers,
