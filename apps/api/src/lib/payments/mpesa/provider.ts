@@ -575,6 +575,12 @@ export class MpesaPaymentProvider implements PaymentProvider {
             const timedOut = resultDescription
                 .toLowerCase()
                 .includes('timeout');
+            if (!timedOut) {
+                paymentLogError('mpesa_transaction_report_failed', {
+                    provider: this.name, resultCode, resultType,
+                    providerMessage: resultDescription || 'M-Pesa reported the transaction as not completed.',
+                });
+            }
             return {
                 outcome: timedOut ? 'pending' : 'failed',
                 reference: null,

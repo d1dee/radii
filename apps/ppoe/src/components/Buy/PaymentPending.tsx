@@ -51,7 +51,7 @@ export function PendingPayment({
         const poll = async () => {
             try {
                 const pending = await handlePoll();
-                if (!cancelled && pending) pollTimer = setTimeout(poll, 2_000);
+                if (!cancelled && pending) pollTimer = setTimeout(poll, 5_000);
             } catch (error) {
                 mutationLogger.warning('Unexpected payment polling failure.', {
                     operation: 'poll-payment',
@@ -60,7 +60,7 @@ export function PendingPayment({
                 });
                 if (!cancelled) {
                     setConnectionWarning(true);
-                    pollTimer = setTimeout(poll, 2_000);
+                    pollTimer = setTimeout(poll, 5_000);
                 }
             }
         };

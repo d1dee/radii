@@ -89,11 +89,8 @@ export interface ReceiptClaimScope {
 const STATUS_QUERY_EVENT = 'status_query';
 const STATUS_CALLBACK_EVENT = 'status_callback';
 const STATUS_POLL_EVENT = 'status_poll';
-// Providers that deliver callbacks resolve payments on their own, so the
-// fallback poll-by-reference only needs to run every this often.
-const STATUS_POLL_INTERVAL_MS = 35_000;
-const REPORT_RETRY_INTERVAL_MS = 120_000;
-const REPORT_MAX_ATTEMPTS = 3;
+const STATUS_CALLBACK_WAIT_MS = 30_000;
+const STATUS_POLL_INTERVAL_MS = 15_000;
 const PAYMENT_UNAVAILABLE_MESSAGE =
     'Payments are temporarily unavailable. Please try again in a moment.';
 const PAYMENT_START_FAILED_MESSAGE =
@@ -106,8 +103,6 @@ export class PaymentService {
     private defaultProviderName: string | null = null;
     private reconciliationInFlight = new Map<string, Promise<void>>();
     private reportsInFlight = new Map<string, Promise<void>>();
-    private reportRecoveryRunning = false;
-    private pendingRecoveryRunning = false;
 
     // Register a provider. The first registered provider becomes the default
     // for package purchases. Throws on duplicate names so misconfiguration
@@ -394,10 +389,6 @@ export class PaymentService {
         const provider = await this.resolveProvider(txRow.provider);
         if (!provider) return localStatus;
         if (txRow.status === 'completed') {
-            if (!txRow.providerTransactionId) {
-                void this.requestPaymentReport(txRow, provider).catch((error) =>
-                    paymentLogError('payment_report_threw', { transactionId: txRow.id, provider: txRow.provider }, error));
-            }
             return localStatus;
         }
         if (txRow.status !== 'pending' || !txRow.providerReference) return localStatus;
@@ -477,11 +468,12 @@ export class PaymentService {
             const [tx] = await trx.select().from(transaction)
                 .where(eq(transaction.id, transactionId)).for('update');
             if (!tx || tx.status !== 'pending') return false;
+            if (Date.now() - tx.createdAt.getTime() < STATUS_CALLBACK_WAIT_MS) return false;
             const [last] = await trx.select({ createdAt: transactionLog.createdAt }).from(transactionLog)
                 .where(and(eq(transactionLog.transactionId, tx.id), eq(transactionLog.eventType, STATUS_POLL_EVENT),
                     sql`${transactionLog.payload}->>'phase' = 'requested'`))
                 .orderBy(desc(transactionLog.createdAt)).limit(1);
-            if (Date.now() - (last?.createdAt ?? tx.createdAt).getTime() < STATUS_POLL_INTERVAL_MS) return false;
+            if (last && Date.now() - last.createdAt.getTime() < STATUS_POLL_INTERVAL_MS) return false;
             await trx.insert(transactionLog).values({ transactionId: tx.id, provider: tx.provider,
                 eventType: STATUS_POLL_EVENT, payload: { phase: 'requested' } });
             return true;
@@ -567,13 +559,10 @@ export class PaymentService {
                             eq(nasDevice.ownerId, adminScope.adminId))).limit(1);
                     if (!payment) return null;
                 }
-                const attempts = await trx.select({ createdAt: transactionLog.createdAt }).from(transactionLog)
+                const [prior] = await trx.select({ id: transactionLog.id }).from(transactionLog)
                     .where(and(eq(transactionLog.transactionId, tx.id), eq(transactionLog.eventType, STATUS_QUERY_EVENT),
-                        sql`${transactionLog.payload}->>'purpose' = ${purpose}`,
-                        sql`${transactionLog.payload}->>'phase' = 'requested'`))
-                    .orderBy(desc(transactionLog.createdAt));
-                if (attempts.length >= (adminScope ? 1 : REPORT_MAX_ATTEMPTS) ||
-                    (attempts[0] && Date.now() - attempts[0].createdAt.getTime() < REPORT_RETRY_INTERVAL_MS)) return null;
+                        sql`${transactionLog.payload}->>'purpose' = ${purpose}`)).limit(1);
+                if (prior) return null;
                 const [initiated] = await trx.select({ requestId: transactionLog.providerRequestId }).from(transactionLog)
                     .where(and(eq(transactionLog.transactionId, tx.id), eq(transactionLog.eventType, 'payment_initiated')))
                     .orderBy(desc(transactionLog.createdAt)).limit(1);
@@ -613,62 +602,6 @@ export class PaymentService {
         this.reportsInFlight.set(txRow.id, work);
         try { await work; }
         finally { this.reportsInFlight.delete(txRow.id); }
-    }
-
-    // Lost report callbacks must recover even after the portal stops polling.
-    // Durable attempt claims keep this bounded across restarts and replicas.
-    async retryPaymentReports(): Promise<void> {
-        if (this.reportRecoveryRunning) return;
-        this.reportRecoveryRunning = true;
-        try {
-            const candidates = await db.select().from(transaction).where(and(
-                eq(transaction.status, 'completed'), isNull(transaction.providerTransactionId),
-                sql`(select count(*) from ${transactionLog} where ${transactionLog.transactionId} = ${transaction.id}
-                    and ${transactionLog.eventType} = ${STATUS_QUERY_EVENT}
-                    and ${transactionLog.payload}->>'purpose' = 'payment_report'
-                    and ${transactionLog.payload}->>'phase' = 'requested') < ${REPORT_MAX_ATTEMPTS}`,
-                sql`exists (select 1 from ${transactionLog} where ${transactionLog.transactionId} = ${transaction.id}
-                    and ${transactionLog.eventType} = 'payment_initiated' and ${transactionLog.providerRequestId} is not null)`,
-                sql`coalesce((select max(${transactionLog.createdAt}) from ${transactionLog}
-                    where ${transactionLog.transactionId} = ${transaction.id}
-                    and ${transactionLog.eventType} = ${STATUS_QUERY_EVENT}
-                    and ${transactionLog.payload}->>'purpose' = 'payment_report'
-                    and ${transactionLog.payload}->>'phase' = 'requested'), ${transaction.createdAt}) <= now() - interval '120 seconds'`,
-            )).orderBy(transaction.createdAt).limit(50);
-            for (const tx of candidates) {
-                try {
-                    const provider = await this.resolveProvider(tx.provider);
-                    if (provider) await this.requestPaymentReport(tx, provider);
-                } catch (error) {
-                    paymentLogError('payment_report_recovery_failed', { transactionId: tx.id, provider: tx.provider }, error);
-                }
-            }
-        } finally {
-            this.reportRecoveryRunning = false;
-        }
-    }
-
-    async reconcilePendingPayments(): Promise<void> {
-        if (this.pendingRecoveryRunning) return;
-        this.pendingRecoveryRunning = true;
-        try {
-            const candidates = await db.select({ payment: packagePayments }).from(packagePayments)
-                .innerJoin(transaction, eq(transaction.id, packagePayments.transaction))
-                .where(and(eq(packagePayments.status, 'pending'), eq(transaction.status, 'pending'),
-                    sql`${transaction.createdAt} <= now() - interval '35 seconds'`,
-                    sql`exists (select 1 from ${transactionLog} where ${transactionLog.transactionId} = ${transaction.id}
-                        and ${transactionLog.eventType} = 'stk_callback_received')`))
-                .orderBy(packagePayments.createdAt).limit(50);
-            for (const { payment } of candidates) {
-                try {
-                    await this.refreshPackagePaymentStatus(payment);
-                } catch (error) {
-                    paymentLogError('payment_confirmation_recovery_failed', { paymentId: payment.id }, error);
-                }
-            }
-        } finally {
-            this.pendingRecoveryRunning = false;
-        }
     }
 
     // Resolve immutable receipt ownership/history first. Unknown receipts
@@ -1065,6 +998,7 @@ export class PaymentService {
                 providerConversationId: result.conversationId,
                 providerTransactionId: result.transactionId,
                 outcome: result.outcome,
+                providerMessage: result.message,
             });
             return { status: 200, body: { success: true } };
         }
@@ -1138,6 +1072,10 @@ export class PaymentService {
         }
 
         if (txRow.reportOnly && txRow.status !== 'completed') {
+            paymentLogInfo('payment_report_ignored_for_transaction_state', {
+                transactionId: txRow.id, provider: providerName, transactionStatus: txRow.status,
+                outcome: result.outcome, providerMessage: result.message,
+            });
             return { status: 200, body: { success: true } };
         }
 
@@ -1368,40 +1306,14 @@ export class PaymentService {
             if (row) return row;
         }
 
-        // Verification callbacks are correlated through the status_query log
-        // row written when the verification was submitted.
-        if (result.conversationId) {
-            const [queryLog] = await db
-                .select()
-                .from(transactionLog)
-                .where(
-                    and(
-                        eq(transactionLog.provider, providerName),
-                        eq(transactionLog.eventType, STATUS_QUERY_EVENT),
-                        eq(
-                            transactionLog.providerConversationId,
-                            result.conversationId,
-                        ),
-                    ),
-                )
-                .limit(1);
-            if (queryLog) {
-                const row = await this.getTransaction(queryLog.transactionId);
-                const claim = queryLog.payload as { purpose?: string; nonce?: string; receipt?: string };
-                if (claim?.purpose === 'receipt_claim' && (claim.nonce !== callbackNonce ||
-                    (result.outcome === 'completed' && claim.receipt !== result.transactionId?.toUpperCase()))) return null;
-                return row ? { ...row, reportOnly: claim?.purpose === 'payment_report' || claim?.purpose === 'admin_reconcile',
-                    reportNonce: claim?.purpose === 'receipt_claim' ? undefined : claim?.nonce,
-                    receiptClaim: claim?.purpose === 'receipt_claim' } : null;
-            }
-        }
         // The signed nonce is persisted before dispatch. It can safely bind
         // a fast report callback even before the acknowledgment/correlation
-        // log arrives; reports never authorize pending transactions.
+        // log arrives. Prefer it over payload conversation IDs. Even stale
+        // reports are attributed; the handler never authorizes from a report.
         if (callbackNonce) {
             const [report] = await db.select({ log: transactionLog, tx: transaction }).from(transactionLog)
                 .innerJoin(transaction, eq(transaction.id, transactionLog.transactionId))
-                .where(and(eq(transaction.provider, providerName), eq(transaction.status, 'completed'),
+                .where(and(eq(transaction.provider, providerName),
                     eq(transactionLog.eventType, STATUS_QUERY_EVENT),
                     sql`${transactionLog.payload}->>'purpose' in ('payment_report', 'admin_reconcile')`,
                     sql`${transactionLog.payload}->>'phase' = 'requested'`,
@@ -1429,6 +1341,23 @@ export class PaymentService {
                     and ${transactionLog.payload}->>'purpose' in ('payment_report', 'admin_reconcile'))`,
             )).limit(1);
             if (row) return { ...row, reportOnly: true };
+        }
+        // Compatibility for persisted attempts predating per-report nonces.
+        // The handler still verifies the transaction's stored signed nonce.
+        if (result.conversationId) {
+            const [queryLog] = await db.select().from(transactionLog).where(and(
+                eq(transactionLog.provider, providerName), eq(transactionLog.eventType, STATUS_QUERY_EVENT),
+                eq(transactionLog.providerConversationId, result.conversationId),
+            )).limit(1);
+            if (queryLog) {
+                const row = await this.getTransaction(queryLog.transactionId);
+                const claim = queryLog.payload as { purpose?: string; nonce?: string; receipt?: string };
+                if (claim?.purpose === 'receipt_claim' && (claim.nonce !== callbackNonce ||
+                    (result.outcome === 'completed' && claim.receipt !== result.transactionId?.toUpperCase()))) return null;
+                return row ? { ...row, reportOnly: claim?.purpose === 'payment_report' || claim?.purpose === 'admin_reconcile',
+                    reportNonce: claim?.purpose === 'receipt_claim' ? undefined : claim?.nonce,
+                    receiptClaim: claim?.purpose === 'receipt_claim' } : null;
+            }
         }
         return null;
     }
