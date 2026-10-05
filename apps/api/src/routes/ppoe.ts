@@ -638,11 +638,22 @@ app.post('/payment/:id/verify', requireAuth, async (c) => {
     const currentUser = c.get('user');
     const tenantAdminId = await getAdminIdForNasDevice(c.req.query('nas'));
     if (!tenantAdminId) return jsonError(c, 404, 'Unknown NAS device');
+    const rawBody: unknown = await c.req.json().catch(() => null);
+    if (!rawBody || typeof rawBody !== 'object' || Array.isArray(rawBody)) return jsonError(c, 400, 'Invalid receipt claim');
+    const body = rawBody as { serviceAccountId?: unknown };
+    const queryAccount = c.req.query('account');
+    if ((!body.serviceAccountId && !queryAccount) ||
+        (body.serviceAccountId !== undefined && (typeof body.serviceAccountId !== 'string' || !UUID_RE.test(body.serviceAccountId))) ||
+        (queryAccount && !UUID_RE.test(queryAccount)) ||
+        (queryAccount && body.serviceAccountId && queryAccount !== body.serviceAccountId)) {
+        return jsonError(c, 400, 'Invalid service account');
+    }
     const result = await paymentService.verifyTransactionCode(
         currentUser!.id,
         parsed.data.transactionCode,
         tenantAdminId,
         'pppoe',
+        { nasDeviceId: c.req.query('nas')!, serviceAccountId: (body.serviceAccountId as string | undefined) ?? queryAccount },
     );
 
     if (result === null) {
@@ -652,20 +663,15 @@ app.post('/payment/:id/verify', requireAuth, async (c) => {
         return jsonError(c, result.errorStatus ?? 502, result.message);
     }
 
-    // The payment service activates hotspot-style on its own; for PPPoE the
-    // portal needs the dialer credentials, derived here idempotently.
-    const activation =
-        result.status === 'paid' && result.paymentId
-            ? await pppoeActivationForPayment(result.paymentId, tenantAdminId)
-            : null;
-
     return c.json({
         success: true,
         data: {
-            paymentId: result.paymentId ?? '',
+            paymentId: result.paymentId,
             status: result.status,
             message: result.message,
-            activation,
+            activation: null,
+            claimOutcome: result.claimOutcome,
+            activationDetails: result.activationDetails,
         },
     });
 });

@@ -3,6 +3,7 @@ import type {
     AdminContactsSettings,
     ApiEnvelope,
     Package,
+    PaymentReceiptClaimResult,
     Quota,
 } from '@radii/shared';
 import { ApiErrorType } from '@radii/shared';
@@ -86,17 +87,14 @@ export function getLatestPendingPayment() {
     return request<OrderResult | null>('/payment/pending/latest');
 }
 
-export function verifyPaymentReceipt(transactionCode: string) {
-    const loginRequestId = currentLoginRequestId();
+export function verifyPaymentReceipt(
+    transactionCode: string,
+    loginRequestId = currentLoginRequestId(),
+) {
     const query = loginRequestId
         ? `?login_request=${encodeURIComponent(loginRequestId)}`
         : '';
-    return request<{
-        paymentId: string;
-        status: 'pending' | 'paid' | 'failed';
-        message: string;
-        activation?: ActivationRedirect | null;
-    }>(
+    return request<PaymentReceiptClaimResult<ActivationRedirect>>(
         `/payment/${encodeURIComponent(transactionCode)}/verify${query}`,
         { transactionCode },
         { method: 'POST' },

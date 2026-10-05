@@ -2,6 +2,7 @@ import type {
     AdminContactsSettings,
     ApiEnvelope,
     Package,
+    PaymentReceiptClaimResult,
     PppoeActivation,
     PppoeClient,
     PppoeClientConfig,
@@ -132,15 +133,14 @@ export function getLatestPendingPayment() {
     return request<OrderResult | null>(withNas('/payment/pending/latest'));
 }
 
-export function verifyPaymentReceipt(transactionCode: string) {
-    return request<{
-        paymentId: string;
-        status: 'pending' | 'paid' | 'failed';
-        message: string;
-        activation?: PppoeActivation | null;
-    }>(
-        withNas(`/payment/${encodeURIComponent(transactionCode)}/verify`),
-        { transactionCode },
+export function verifyPaymentReceipt(
+    transactionCode: string,
+    serviceAccountId: string | null,
+    nasDeviceId = currentNasDeviceId(),
+) {
+    return request<PaymentReceiptClaimResult<PppoeActivation>>(
+        withNas(`/payment/${encodeURIComponent(transactionCode)}/verify`, nasDeviceId),
+        { transactionCode, serviceAccountId },
         { method: 'POST' },
     );
 }

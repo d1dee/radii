@@ -681,6 +681,69 @@ export class RadiusClient {
         return this.buildRedirect(provisioned.activationId, loginRequest);
     }
 
+    // A receipt claim is recovery, not renewal or credential repair. The
+    // provisioning transactions serialize their own history check/insertion.
+    async recoverUnactivatedPayment(paymentId: string): Promise<boolean> {
+        if (await this.getActivationByPayment(paymentId)) return false;
+        await this.ensureProvisioned(paymentId);
+        return (await this.getActivationByPayment(paymentId)) !== null;
+    }
+
+    async existingPaymentRedirect(paymentId: string, loginRequestId?: string): Promise<ActivationRedirect | null> {
+        if (!loginRequestId) return null;
+        const activation = await this.getActivationByPayment(paymentId);
+        if (!activation || activation.deactivatedAt || activation.expireAt.getTime() <= Date.now()) return null;
+        const [payment] = await db.select().from(packagePayments).where(eq(packagePayments.id, paymentId)).limit(1);
+        if (!payment?.nasDeviceId) return null;
+        const [loginRequest] = await db.select().from(hotspotLoginRequest).where(and(
+            eq(hotspotLoginRequest.id, loginRequestId), eq(hotspotLoginRequest.userId, payment.userId),
+            eq(hotspotLoginRequest.nasDeviceId, payment.nasDeviceId),
+        )).limit(1);
+        return this.buildRedirect(activation.id, loginRequest ?? null);
+    }
+
+    async activationCredentialsReady(activationId: string, packageType: 'hotspot' | 'pppoe'): Promise<boolean> {
+        if (packageType === 'hotspot') return Boolean(await this.getProvisionedPassword(activationUsername(activationId)));
+        const account = await getPppoeAccountForActivation(activationId);
+        return Boolean(account?.status === 'active' && await this.getProvisionedPassword(account.username));
+    }
+
+    // Repair only a missing password on an existing valid entitlement. No
+    // activation/expiry/authorization changes and no forced reconnection.
+    async repairClaimCredentials(paymentId: string): Promise<boolean> {
+        const [entitlement] = await db.select({ activation: activatedPackages, pkg: packages, payment: packagePayments })
+            .from(activatedPackages).innerJoin(packages, eq(packages.id, activatedPackages.packageId))
+            .innerJoin(packagePayments, eq(packagePayments.id, activatedPackages.packagePaymentId))
+            .where(eq(activatedPackages.packagePaymentId, paymentId)).limit(1);
+        if (!entitlement || entitlement.activation.deactivatedAt || entitlement.activation.expireAt.getTime() <= Date.now()) return false;
+        if (entitlement.pkg.noExpiry || entitlement.activation.timeAllowanceSeconds !== null) {
+            const usage = await this.getBankUsage(entitlement.activation.id);
+            if (!usage || usage.remainingSeconds <= 0) return false;
+        }
+        return db.transaction(async (tx) => {
+            const [activation] = await tx.select().from(activatedPackages)
+                .where(eq(activatedPackages.packagePaymentId, paymentId)).for('update');
+            if (!activation || activation.deactivatedAt || activation.expireAt.getTime() <= Date.now()) return false;
+            let username = activationUsername(activation.id);
+            if (entitlement.pkg.type === 'pppoe') {
+                if (!activation.pppoeServiceAccountId) return false;
+                const [account] = await tx.select().from(pppoeServiceAccounts)
+                    .where(eq(pppoeServiceAccounts.id, activation.pppoeServiceAccountId)).for('update');
+                if (!account || account.status !== 'active' || account.customerUserId !== activation.userId ||
+                    account.tenantAdminId !== entitlement.payment.tenantAdminId || account.nasDeviceId !== entitlement.payment.nasDeviceId) return false;
+                username = account.username;
+            }
+            const condition = and(eq(radcheck.username, username), eq(radcheck.attribute, 'Cleartext-Password'));
+            const [existing] = await tx.select({ value: radcheck.value }).from(radcheck).where(condition).limit(1);
+            if (existing?.value) return true;
+            if (existing) return false;
+            await tx.insert(radcheck).values({ username, attribute: 'Cleartext-Password', op: ':=', value: randomCredentialPassword(12) })
+                .onConflictDoNothing({ target: [radcheck.username, radcheck.attribute] });
+            const [persisted] = await tx.select({ value: radcheck.value }).from(radcheck).where(condition).limit(1);
+            return Boolean(persisted?.value);
+        });
+    }
+
     // Type-agnostic provisioning core shared by the hotspot and PPPoE flows:
     // ensures a paid payment has an activation with usable RADIUS credentials
     // and returns them. Bank (noExpiry) activations are reconciled first; an
@@ -776,20 +839,37 @@ export class RadiusClient {
         const existing = await this.getActivationByPayment(payment.id);
         const account = await getPppoeAccountForPayment(payment);
         if (!account || account.status !== 'active') return null;
+        if (existing) {
+            if (existing.deactivatedAt || existing.expireAt.getTime() <= Date.now()) return null;
+            const password = await this.getProvisionedPassword(account.username);
+            return password ? { activationId: existing.id, username: account.username, password } : null;
+        }
         const hadActiveActivation =
             (await this.newestActivePppoeActivationId(account.id)) !== null;
+        // Credentials must exist before creating immutable activation history.
+        // A failed first-password setup must leave the paid purchase recoverable.
+        const initialPassword = await this.ensurePppoePassword(account.username);
         let activation = existing;
         if (!activation) {
             try {
-                activation = await this.provisionPppoeActivation(
+                const provisioned = await this.provisionPppoeActivation(
                     payment,
                     pkg,
                     account,
                 );
+                activation = provisioned.activation;
+                if (!provisioned.created) {
+                    if (activation.deactivatedAt || activation.expireAt.getTime() <= Date.now()) return null;
+                    const password = await this.getProvisionedPassword(account.username);
+                    return password ? { activationId: activation.id, username: account.username, password } : null;
+                }
             } catch (error) {
                 if (!isUniqueViolation(error)) throw error;
                 activation = await this.getActivationByPayment(payment.id);
                 if (!activation) throw error;
+                if (activation.deactivatedAt || activation.expireAt.getTime() <= Date.now()) return null;
+                const password = await this.getProvisionedPassword(account.username);
+                return password ? { activationId: activation.id, username: account.username, password } : null;
             }
         }
 
@@ -805,7 +885,7 @@ export class RadiusClient {
         const username = account.username;
 
         // Generate credentials only on the very first PPPoE purchase.
-        const password = await this.ensurePppoePassword(username);
+        const password = initialPassword ?? await this.ensurePppoePassword(username);
 
         await this.applyPppoeAuthorization(activation, pkg);
         // Captured sessions must reconnect to leave the expired profile, but
@@ -3859,6 +3939,11 @@ export class RadiusClient {
             (await this.getLoginRequestNasIp(payment)) ?? '0.0.0.0';
 
         const [activation] = await db.transaction(async (tx) => {
+            await tx.select({ id: packagePayments.id }).from(packagePayments)
+                .where(eq(packagePayments.id, payment.id)).for('update');
+            const [existing] = await tx.select().from(activatedPackages)
+                .where(eq(activatedPackages.packagePaymentId, payment.id)).limit(1);
+            if (existing) return [existing];
             const [anchor] = await tx
                 .insert(radacct)
                 .values({
@@ -3948,7 +4033,16 @@ export class RadiusClient {
 
         // Anchor accounting row (Class carries the activation id so sessions
         // of the shared dialer account still correlate to this purchase).
-        const [activation] = await db.transaction(async (tx) => {
+        const result = await db.transaction(async (tx) => {
+            await tx.select({ id: packagePayments.id }).from(packagePayments)
+                .where(eq(packagePayments.id, payment.id)).for('update');
+            const [existing] = await tx.select().from(activatedPackages)
+                .where(eq(activatedPackages.packagePaymentId, payment.id)).limit(1);
+            if (existing) return { activation: existing, created: false };
+            // PPP expiry/rates come from REST. Remove legacy SQL blockers
+            // atomically with first history insertion, before later CoA work.
+            await tx.delete(radcheck).where(and(eq(radcheck.username, username), eq(radcheck.attribute, 'Expiration')));
+            await tx.delete(radreply).where(eq(radreply.username, username));
             const [anchor] = await tx
                 .insert(radacct)
                 .values({
@@ -3990,9 +4084,9 @@ export class RadiusClient {
                         : null,
                 },
             });
-            return [row];
+            return { activation: row!, created: true };
         });
-        return activation;
+        return result;
     }
 
     // Access-Accept attributes of one activation's session, computed once and

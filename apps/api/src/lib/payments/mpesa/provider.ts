@@ -564,12 +564,18 @@ export class MpesaPaymentProvider implements PaymentProvider {
             resultCode === '0' &&
             resultType === '0' &&
             transactionStatus.toLowerCase() === 'completed';
-        // TransactionStatus results report the payer's number as the MSISDN
-        // result parameter; normalize it for the core's payer-binding check
-        // (absent on some Safaricom payloads — the core then skips it).
-        const payer = parameters.MSISDN
-            ? normalizeMpesaPhoneNumber(parameters.MSISDN)
+        // C2B reports can identify the payer as "2547... - Name" instead of
+        // MSISDN. Only use the debit party, never the receiving credit party.
+        const msisdn = parameters.MSISDN
+            ? normalizeMpesaPhoneNumber(String(parameters.MSISDN))
             : null;
+        const debitPhone = String(parameters.DebitPartyName ?? '').match(
+            /^\s*(\+?254[17]\d{8}|0[17]\d{8})(?=\s*(?:-|$))/,
+        )?.[1];
+        const debitPayer = debitPhone ? normalizeMpesaPhoneNumber(debitPhone) : null;
+        const payer = msisdn && debitPayer && msisdn !== debitPayer
+            ? null
+            : msisdn ?? debitPayer;
 
         if (!completed) {
             const timedOut = resultDescription

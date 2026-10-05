@@ -529,6 +529,7 @@ app.post('/payment/:id/verify', requireAuth, async (c) => {
         parsed.data.transactionCode,
         tenantAdminId,
         'hotspot',
+        { nasDeviceId: loginRequest!.nasDeviceId, loginRequestId },
     );
 
     if (result === null) {
@@ -541,10 +542,12 @@ app.post('/payment/:id/verify', requireAuth, async (c) => {
     return c.json({
         success: true,
         data: {
-            paymentId: result.paymentId ?? '',
+            paymentId: result.paymentId,
             status: result.status,
             message: result.message,
             activation: result.activation ?? null,
+            claimOutcome: result.claimOutcome,
+            activationDetails: result.activationDetails,
         },
     });
 });

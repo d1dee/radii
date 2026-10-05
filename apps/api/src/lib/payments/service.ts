@@ -14,10 +14,14 @@
 //                      flipped pending -> paid/failed when the provider
 //                      resolves it
 
-import { and, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
+import type { PaymentClaimActivationDetails, PaymentClaimOutcome } from '@radii/shared';
 import { db } from '../../db';
 import {
     packagePayments,
+    activatedPackages,
+    pppoeServiceAccounts,
+    user,
     nasDevice,
     packages,
     transaction,
@@ -26,7 +30,7 @@ import {
 import { env } from '../../env';
 import { apiLogger } from '../../logging';
 import { getAdminIdForNasDevice, getAdminIdForUser } from '../adminSettings';
-import { getPaymentByTransactionCode, type PackageRow } from '../packages';
+import { type PackageRow } from '../packages';
 import { radiusClient, type ActivationRedirect } from '../radius';
 import {
     getAdminMpesaProvider,
@@ -72,6 +76,14 @@ export interface VerifyByCodeOutcome {
     // Present once the verified payment has its package activated on RADIUS;
     // the portal uses it for the final redirect to the NAS.
     activation?: ActivationRedirect | null;
+    claimOutcome?: PaymentClaimOutcome;
+    activationDetails?: PaymentClaimActivationDetails | null;
+}
+
+export interface ReceiptClaimScope {
+    nasDeviceId: string;
+    serviceAccountId?: string;
+    loginRequestId?: string;
 }
 
 const STATUS_QUERY_EVENT = 'status_query';
@@ -607,25 +619,51 @@ export class PaymentService {
         finally { this.reportsInFlight.delete(txRow.id); }
     }
 
-    // Verifies a gateway transaction number supplied by the customer (e.g. an
-    // M-Pesa receipt code pasted into the "having issues" form). Mirrors the
-    // legacy verifyTransactionHandler flow:
-    //  1. Known receipt: a package payment already carries it -> report its
-    //     state as-is (package link + activation checked later, see TODO).
-    //  2. Known verification transaction (submitted earlier, callback already
-    //     applied) -> report the gateway outcome.
-    //  3. Verification already in flight -> keep reporting pending.
-    //  4. Otherwise submit a fresh verification to the provider. The outcome
-    //     arrives asynchronously via the status callback
-    //     (handleProviderCallback) and the client converges by re-calling
-    //     this endpoint until the payment leaves pending.
+    // Resolve immutable receipt ownership/history first. Unknown receipts
+    // require exactly one scoped purchase and a durable bounded verification.
     async verifyTransactionCode(
         userId: string,
         rawCode: string,
         tenantAdminId?: string,
         packageType?: 'hotspot' | 'pppoe',
+        scope?: ReceiptClaimScope,
     ): Promise<VerifyByCodeOutcome | null> {
         const code = rawCode.trim().toUpperCase();
+
+        if (!tenantAdminId || !packageType || !scope?.nasDeviceId) return null;
+        if (packageType === 'pppoe') {
+            if (!scope.serviceAccountId) return null;
+            const [account] = await db.select({ id: pppoeServiceAccounts.id }).from(pppoeServiceAccounts)
+                .where(and(eq(pppoeServiceAccounts.id, scope.serviceAccountId),
+                    eq(pppoeServiceAccounts.customerUserId, userId),
+                    eq(pppoeServiceAccounts.tenantAdminId, tenantAdminId),
+                    eq(pppoeServiceAccounts.nasDeviceId, scope.nasDeviceId))).limit(1);
+            if (!account) return null;
+        }
+        const conditions = [
+            eq(packagePayments.userId, userId),
+            eq(packagePayments.tenantAdminId, tenantAdminId),
+            eq(packagePayments.nasDeviceId, scope.nasDeviceId),
+            eq(packages.type, packageType),
+        ];
+        if (scope.serviceAccountId) conditions.push(
+            eq(packagePayments.pppoeServiceAccountId, scope.serviceAccountId),
+        );
+        // Completed receipts are globally owned, independent of the current
+        // provider configuration. Never disclose an out-of-scope purchase.
+        const [owner] = await db.select({ tx: transaction, payment: packagePayments, pkg: packages })
+            .from(transaction)
+            .leftJoin(packagePayments, eq(packagePayments.transaction, transaction.id))
+            .leftJoin(packages, eq(packages.id, packagePayments.packageId))
+            .where(and(eq(transaction.providerTransactionId, code), eq(transaction.status, 'completed')))
+            .limit(1);
+        if (owner) {
+            const payment = owner.payment;
+            if (!payment || payment.userId !== userId || payment.tenantAdminId !== tenantAdminId ||
+                payment.nasDeviceId !== scope.nasDeviceId || owner.pkg?.type !== packageType ||
+                (scope.serviceAccountId && payment.pppoeServiceAccountId !== scope.serviceAccountId)) return null;
+            return this.receiptClaimForPayment(payment, packageType, scope);
+        }
 
         // Attribute the verification to the tenant admin the customer last
         // paid (their M-Pesa till issued the receipt); fall back to the
@@ -664,107 +702,12 @@ export class PaymentService {
             };
         }
 
-        // 1. A package payment already carries this receipt.
-        const payment = await getPaymentByTransactionCode(code);
-        if (payment) {
-            if (
-                payment.userId !== userId ||
-                (tenantAdminId && payment.tenantAdminId !== tenantAdminId)
-            )
-                return null;
-            // Paid but never activated (e.g. callback arrived before the
-            // client polled): activate now — idempotent.
-            const activation =
-                payment.status === 'paid'
-                    ? await radiusClient
-                          .ensureActivated(payment.id)
-                          .catch((err) => {
-                              logger.error('RADIUS payment activation failed', {
-                                  paymentId: payment.id,
-                                  error: err,
-                              });
-                              return null;
-                          })
-                    : null;
-            return {
-                paymentId: payment.id,
-                status: payment.status,
-                activation,
-                message:
-                    payment.status === 'paid'
-                        ? 'This payment has already been completed.'
-                        : payment.status === 'failed'
-                          ? 'This payment was not completed. Check the receipt number and try again.'
-                          : 'This payment is still being processed.',
-            };
-        }
-
-        // 2. A verification transaction for this receipt (created when the
-        // code was first submitted) — the status callback reconciles it.
         const family = this.providerFamilyNames(provider.name);
-        const known = await this.findTransactionByCode(family, code);
-        if (known) {
-            if (known.userId !== userId) return null;
-            paymentLogWarn('unlinked_verification_transaction_found', {
-                transactionId: known.id,
-                userId,
-                provider: known.provider,
-                receipt: code,
-                status: known.status,
-            });
-            return null;
-        }
-
-        // 3. An in-flight verification whose row we could not match above
-        // (e.g. callback still in transit): keep the client polling.
-        const [pendingQuery] = await db
-            .select({
-                log: transactionLog,
-                transactionStatus: transaction.status,
-            })
-            .from(transactionLog)
-            .innerJoin(
-                transaction,
-                eq(transaction.id, transactionLog.transactionId),
-            )
-            .where(
-                and(
-                    inArray(transactionLog.provider, family),
-                    eq(transactionLog.eventType, STATUS_QUERY_EVENT),
-                    sql`${transactionLog.payload}->>'receipt' = ${code}`,
-                    eq(transaction.userId, userId),
-                ),
-            )
-            .orderBy(desc(transactionLog.createdAt))
-            .limit(1);
-        if (pendingQuery?.log.providerConversationId) {
-            const [callback] = await db
-                .select({ id: transactionLog.id })
-                .from(transactionLog)
-                .where(
-                    and(
-                        inArray(transactionLog.provider, family),
-                        eq(transactionLog.eventType, STATUS_CALLBACK_EVENT),
-                        eq(
-                            transactionLog.providerConversationId,
-                            pendingQuery.log.providerConversationId,
-                        ),
-                    ),
-                )
-                .limit(1);
-            if (!callback) {
-                return {
-                    paymentId: null,
-                    status: 'pending',
-                    message:
-                        'Verification is still in progress. Check back in a moment.',
-                };
-            }
-        }
-
         const pendingConditions = [
-            eq(packagePayments.userId, userId),
-            eq(packagePayments.status, 'pending'),
+            ...conditions,
+            // Failed purchases can be recovered only by a verified receipt;
+            // paid purchases without a receipt need ownership enrichment.
+            or(isNull(transaction.providerTransactionId), eq(transaction.providerTransactionId, code))!,
             inArray(transaction.provider, family),
         ];
         if (tenantAdminId) {
@@ -776,8 +719,9 @@ export class PaymentService {
             pendingConditions.push(eq(packages.type, packageType));
         }
         const targets = await db
-            .select({ payment: packagePayments, tx: transaction })
+            .select({ payment: packagePayments, tx: transaction, customerPhone: user.username })
             .from(packagePayments)
+            .innerJoin(user, eq(user.id, packagePayments.userId))
             .innerJoin(packages, eq(packages.id, packagePayments.packageId))
             .innerJoin(
                 transaction,
@@ -820,27 +764,56 @@ export class PaymentService {
                 errorStatus: 409,
             };
         }
+        const customerPhone = normalizeMpesaPhoneNumber(target.customerPhone ?? '');
+        if (!customerPhone || customerPhone !== normalizeMpesaPhoneNumber(target.payment.phoneNumber)) return {
+            status: 'pending', paymentId: null, error: true, errorStatus: 409,
+            message: 'This receipt cannot be matched safely to your account. Contact support.',
+        };
+        // Callback URLs must use the exact provider stored on this purchase,
+        // including legacy global-provider purchases in a tenant scope.
+        provider = await this.resolveProvider(target.tx.provider);
+        if (!provider) return {
+            status: 'pending', paymentId: target.payment.id, message: PAYMENT_UNAVAILABLE_MESSAGE, error: true,
+        };
 
-        // 4. Submit a fresh verification to the provider.
-        //
-        // Mint the status-callback nonce first and bind it to the
-        // transaction row: the async status callback carries it in its
-        // signed ?ct= token and is only accepted when it matches, so a
-        // forged (or replayed from another transaction) status callback
-        // cannot complete this payment. Pending verifications retire earlier
-        // attempts; if polling completed it meanwhile, preserve any report URL.
-        const statusCallbackNonce = await db.transaction(async (trx) => {
+        // Persist the exact target, requested receipt and signed nonce before
+        // dispatch, under a row lock shared by concurrent claims.
+        const attempt = await db.transaction(async (trx) => {
             const [current] = await trx.select().from(transaction)
                 .where(eq(transaction.id, target.tx.id)).for('update');
+            if (!current || (current.providerTransactionId && current.providerTransactionId !== code)) return null;
+            const attempts = await trx.select().from(transactionLog).where(and(
+                eq(transactionLog.transactionId, target.tx.id),
+                eq(transactionLog.eventType, STATUS_QUERY_EVENT),
+                sql`${transactionLog.payload}->>'purpose' = 'receipt_claim'`,
+            )).orderBy(desc(transactionLog.createdAt));
+            const latest = attempts[0];
+            // Dedupe the entire target, not just one receipt. A typo must not
+            // retire a valid query already in flight.
+            if (latest && Date.now() - latest.createdAt.getTime() < 120_000) return { pending: true };
+            if (attempts.filter((entry) => (entry.payload as { receipt?: string })?.receipt === code).length >= 3) return { exhausted: true };
             const nonces = (current?.callbackNonces ?? {}) as Record<string, string>;
-            const nonce = current?.status === 'completed'
-                ? nonces[MPESA_CALLBACK_EVENTS.status] ?? newCallbackNonce()
-                : newCallbackNonce();
+            const nonce = newCallbackNonce();
             await trx.update(transaction).set({
                 callbackNonces: { ...nonces, [MPESA_CALLBACK_EVENTS.status]: nonce },
             }).where(eq(transaction.id, target.tx.id));
-            return nonce;
+            const [claim] = await trx.insert(transactionLog).values({
+                transactionId: target.tx.id, provider: current.provider, eventType: STATUS_QUERY_EVENT,
+                payload: { purpose: 'receipt_claim', phase: 'requested', nonce, receipt: code,
+                    userId, tenantAdminId, packageType, nasDeviceId: scope.nasDeviceId,
+                    serviceAccountId: scope.serviceAccountId ?? null, customerPhone },
+            }).returning({ id: transactionLog.id });
+            return { nonce, id: claim!.id };
         });
+        if (!attempt) return null;
+        if (!('nonce' in attempt)) return {
+            status: 'pending', paymentId: target.payment.id,
+            message: 'exhausted' in attempt
+                ? 'Receipt verification could not finish. Contact support before trying again.'
+                : 'Verification is still in progress. Check back in a moment.',
+            ...('exhausted' in attempt ? { error: true, errorStatus: 409 as const } : {}),
+        };
+        const statusCallbackNonce = attempt.nonce;
 
         let result;
         try {
@@ -849,6 +822,7 @@ export class PaymentService {
                 callbackNonce: statusCallbackNonce,
             });
         } catch (err) {
+            await trxAttemptPhase('error');
             paymentLogError(
                 'verification_threw',
                 { userId, tenantAdminId, provider: provider.name, receipt: code },
@@ -863,6 +837,7 @@ export class PaymentService {
         }
 
         if (result.outcome === 'failed') {
+            await trxAttemptPhase('rejected');
             paymentLogError('verification_rejected', {
                 userId,
                 tenantAdminId,
@@ -885,6 +860,9 @@ export class PaymentService {
             // receipt must be for the package amount and paid by the phone
             // number on the payment.
             const rejection =
+                (result.amount == null || !normalizeMpesaPhoneNumber(result.payerPhoneNumber ?? '') ||
+                    normalizeMpesaPhoneNumber(result.payerPhoneNumber ?? '') !== customerPhone
+                    ? 'The provider could not establish ownership of this receipt.' : null) ??
                 (await this.amountMismatch(
                     target.tx,
                     result.amount ?? null,
@@ -901,24 +879,10 @@ export class PaymentService {
                     },
                 );
             if (rejection) {
-                const rejected = await this.applyOutcome(
-                    target.tx,
-                    'failed',
-                    {
-                        transactionId: code,
-                        source: 'receipt_verification',
-                        message: rejection,
-                        amount: result.amount ?? null,
-                    },
-                );
+                await trxAttemptPhase('rejected');
                 return {
                     paymentId: target.payment.id,
-                    status: rejected
-                        ? 'failed'
-                        : await this.getPackagePaymentStatus(
-                              target.payment.id,
-                              target.payment.status,
-                          ),
+                    status: 'pending', error: true, errorStatus: 409,
                     message: rejection,
                 };
             }
@@ -929,37 +893,29 @@ export class PaymentService {
                     transactionId: code,
                     source: 'receipt_verification',
                     message: result.message,
+                    verifiedReceipt: true,
+                    verificationNonce: statusCallbackNonce,
                 },
             );
+            const verifiedTransaction = await this.getTransaction(target.tx.id);
+            if (verifiedTransaction?.providerTransactionId !== code || verifiedTransaction.status !== 'completed') return null;
             const status = transitioned
                 ? 'paid'
                 : await this.getPackagePaymentStatus(
                       target.payment.id,
                       target.payment.status,
                   );
+            if (status === 'paid') return this.receiptClaimForPayment({ ...target.payment, status }, packageType, scope);
             return {
                 paymentId: target.payment.id,
                 status,
-                message:
-                    status === 'paid'
-                        ? 'Payment verified.'
-                        : 'The receipt was verified, but the payment state changed. Refresh and try again.',
+                message: 'The receipt was verified, but the payment state changed. Refresh and try again.',
             };
         }
 
         if (result.conversationId) {
-            await this.appendLog(
-                target.tx.id,
-                provider.name,
-                STATUS_QUERY_EVENT,
-                {
-                    receipt: code,
-                    userId,
-                    ...result.data,
-                },
-                null,
-                result.conversationId,
-            );
+            await db.update(transactionLog).set({ providerConversationId: result.conversationId })
+                .where(eq(transactionLog.id, attempt.id));
         }
 
         return {
@@ -967,6 +923,11 @@ export class PaymentService {
             status: 'pending',
             message: 'Waiting for the provider to confirm this transaction...',
         };
+
+        async function trxAttemptPhase(phase: string) {
+            await db.update(transactionLog).set({ payload: sql`${transactionLog.payload} || ${JSON.stringify({ phase })}::jsonb` })
+                .where(eq(transactionLog.id, attempt!.id!));
+        }
     }
 
     // Dispatches an inbound webhook to the owning provider and reconciles the
@@ -1076,6 +1037,44 @@ export class PaymentService {
                     outcome: result.outcome,
                 });
                 return { status: 200, body: { success: true } };
+            }
+            if (!txRow.reportOnly) {
+                const [claim] = await db.select({ log: transactionLog, payment: packagePayments, pkg: packages, customerPhone: user.username })
+                    .from(transactionLog)
+                    .innerJoin(packagePayments, eq(packagePayments.transaction, transactionLog.transactionId))
+                    .innerJoin(packages, eq(packages.id, packagePayments.packageId))
+                    .innerJoin(user, eq(user.id, packagePayments.userId))
+                    .where(and(eq(transactionLog.transactionId, txRow.id),
+                        eq(transactionLog.eventType, STATUS_QUERY_EVENT),
+                        sql`${transactionLog.payload}->>'purpose' = 'receipt_claim'`,
+                        sql`${transactionLog.payload}->>'nonce' = ${callbackNonce}`,
+                    )).limit(1);
+                const requested = claim?.log.payload as {
+                    receipt?: string; userId?: string; tenantAdminId?: string; nasDeviceId?: string;
+                    packageType?: string; serviceAccountId?: string | null; phase?: string; customerPhone?: string;
+                } | undefined;
+                if (!claim || !requested || Date.now() - claim.log.createdAt.getTime() > 120_000 ||
+                    requested.phase === 'rejected' || requested.phase === 'error' ||
+                    requested.userId !== claim.payment.userId || requested.tenantAdminId !== claim.payment.tenantAdminId ||
+                    requested.nasDeviceId !== claim.payment.nasDeviceId || requested.packageType !== claim.pkg.type ||
+                    (requested.serviceAccountId && requested.serviceAccountId !== claim.payment.pppoeServiceAccountId) ||
+                    (result.outcome === 'completed' && (requested.receipt !== result.transactionId?.toUpperCase() ||
+                        result.amount === null || !normalizeMpesaPhoneNumber(result.payerPhoneNumber ?? '') ||
+                        requested.customerPhone !== normalizeMpesaPhoneNumber(result.payerPhoneNumber ?? '') ||
+                        requested.customerPhone !== normalizeMpesaPhoneNumber(claim.customerPhone ?? '') ||
+                        requested.customerPhone !== normalizeMpesaPhoneNumber(claim.payment.phoneNumber)))) {
+                    return { status: 200, body: { success: true } };
+                }
+                txRow.receiptClaim = true;
+                // A failed lookup concerns the supplied receipt, not the
+                // original checkout. Preserve pending/paid purchase state.
+                if (result.outcome === 'failed') {
+                    await db.update(transactionLog).set({ payload: sql`${transactionLog.payload} || '{"phase":"rejected"}'::jsonb` })
+                        .where(eq(transactionLog.id, claim.log.id));
+                    await this.appendLog(txRow.id, txRow.provider, STATUS_CALLBACK_EVENT, result.payload,
+                        result.requestId, result.conversationId);
+                    return { status: 200, body: { success: true } };
+                }
             }
             await this.appendLog(
                 txRow.id,
@@ -1191,6 +1190,7 @@ export class PaymentService {
                     { provider: providerName, event },
                 ));
             if (rejection) {
+                if (txRow.receiptClaim) return { status: 200, body: { success: true } };
                 await this.applyOutcome(txRow, 'failed', {
                     enrichmentOnly: txRow.reportOnly,
                     transactionId: result.transactionId,
@@ -1205,7 +1205,9 @@ export class PaymentService {
             }
             await this.applyOutcome(txRow, 'completed', {
                 enrichmentOnly: txRow.reportOnly,
-                transactionId: result.transactionId,
+                verifiedReceipt: txRow.receiptClaim,
+                verificationNonce: txRow.receiptClaim ? callbackNonce : undefined,
+                transactionId: txRow.receiptClaim ? result.transactionId?.toUpperCase() : result.transactionId,
                 source: `callback_${event}`,
                 message: result.message,
                 amount: result.amount,
@@ -1232,6 +1234,82 @@ export class PaymentService {
 
     // --- Internals --------------------------------------------------------------
 
+    private async receiptClaimForPayment(
+        payment: PackagePaymentRow,
+        packageType: 'hotspot' | 'pppoe',
+        scope: ReceiptClaimScope,
+    ): Promise<VerifyByCodeOutcome> {
+        if (payment.status !== 'paid') return {
+            paymentId: payment.id, status: payment.status,
+            message: 'This payment has not been completed.',
+        };
+        let history = await this.claimActivationDetails(payment.id);
+        let recovered = false;
+        let recoveryFailed = false;
+        if (!history) {
+            try {
+                recovered = await radiusClient.recoverUnactivatedPayment(payment.id);
+            } catch (error) {
+                recoveryFailed = true;
+                logger.error('Receipt claim activation failed', { paymentId: payment.id, error });
+            }
+            history = await this.claimActivationDetails(payment.id);
+        }
+        if (!history || recoveryFailed) return {
+            paymentId: payment.id, status: 'paid', claimOutcome: 'activation_pending',
+            activationDetails: null, activation: null,
+            message: 'Payment confirmed. Package activation is not complete yet. Try again shortly.',
+        };
+        if (history.active) {
+            try {
+                if (!await radiusClient.activationCredentialsReady(history.activationId, packageType) &&
+                    !await radiusClient.repairClaimCredentials(payment.id)) {
+                    return { paymentId: payment.id, status: 'paid', claimOutcome: 'activation_pending',
+                        activationDetails: { ...history, active: false }, activation: null,
+                        message: 'Payment confirmed. Package access could not be restored yet. Try again shortly.' };
+                }
+            } catch (error) {
+                logger.error('Receipt claim credential repair failed', { paymentId: payment.id, error });
+                return { paymentId: payment.id, status: 'paid', claimOutcome: 'activation_pending',
+                    activationDetails: { ...history, active: false }, activation: null,
+                    message: 'Payment confirmed. Package access could not be restored yet. Try again shortly.' };
+            }
+        }
+        const activation = packageType === 'hotspot' && history.active
+            ? await radiusClient.existingPaymentRedirect(payment.id, scope.loginRequestId).catch(() => null) : null;
+        return {
+            paymentId: payment.id, status: 'paid',
+            claimOutcome: recovered ? 'activated' : 'already_activated',
+            activationDetails: history, activation,
+            message: recovered ? 'Payment verified and package activated.' : 'This payment was already activated.',
+        };
+    }
+
+    private async claimActivationDetails(paymentId: string): Promise<PaymentClaimActivationDetails | null> {
+        const [row] = await db.select({ activation: activatedPackages, pkg: packages, nasDeviceName: nasDevice.name,
+            accountStatus: pppoeServiceAccounts.status })
+            .from(activatedPackages)
+            .innerJoin(packages, eq(packages.id, activatedPackages.packageId))
+            .innerJoin(packagePayments, eq(packagePayments.id, activatedPackages.packagePaymentId))
+            .leftJoin(nasDevice, eq(nasDevice.id, packagePayments.nasDeviceId))
+            .leftJoin(pppoeServiceAccounts, eq(pppoeServiceAccounts.id, activatedPackages.pppoeServiceAccountId))
+            .where(eq(activatedPackages.packagePaymentId, paymentId)).limit(1);
+        if (!row) return null;
+        const { activation, pkg } = row;
+        let active = activation.deactivatedAt === null && activation.expireAt.getTime() > Date.now() &&
+            (pkg.type !== 'pppoe' || row.accountStatus === 'active');
+        if (active && (pkg.noExpiry || activation.timeAllowanceSeconds !== null)) {
+            const usage = await radiusClient.getBankUsage(activation.id);
+            active = Boolean(usage && usage.remainingSeconds > 0);
+        }
+        return {
+            activationId: activation.id, packageTitle: pkg.title,
+            nasDeviceName: row.nasDeviceName ?? '',
+            activatedAt: activation.activatedAt.toISOString(), expireAt: activation.expireAt.toISOString(),
+            noExpiry: pkg.noExpiry, sessionLength: pkg.sessionLength, active,
+        };
+    }
+
     private async getTransaction(id: string): Promise<TransactionRow | null> {
         const [row] = await db
             .select()
@@ -1241,31 +1319,11 @@ export class PaymentService {
         return row ?? null;
     }
 
-    // Finds a provider transaction by the gateway transaction number (receipt).
-    // Covers both linked package payments and standalone receipt-verification
-    // rows created by verifyTransactionCode.
-    private async findTransactionByCode(
-        providerNames: string[],
-        code: string,
-    ): Promise<TransactionRow | null> {
-        const [row] = await db
-            .select()
-            .from(transaction)
-            .where(
-                and(
-                    inArray(transaction.provider, providerNames),
-                    eq(transaction.providerTransactionId, code),
-                ),
-            )
-            .limit(1);
-        return row ?? null;
-    }
-
     private async findTransactionForCallback(
         providerName: string,
         result: ProviderCallbackResult,
         callbackNonce?: string | null,
-    ): Promise<(TransactionRow & { reportOnly?: boolean }) | null> {
+    ): Promise<(TransactionRow & { reportOnly?: boolean; receiptClaim?: boolean }) | null> {
         if (result.reference) {
             const [row] = await db
                 .select()
@@ -1299,14 +1357,30 @@ export class PaymentService {
                 .limit(1);
             if (queryLog) {
                 const row = await this.getTransaction(queryLog.transactionId);
-                return row ? { ...row, reportOnly:
-                    (queryLog.payload as { purpose?: string })?.purpose === 'payment_report' } : null;
+                const claim = queryLog.payload as { purpose?: string; nonce?: string; receipt?: string };
+                if (claim?.purpose === 'receipt_claim' && (claim.nonce !== callbackNonce ||
+                    (result.outcome === 'completed' && claim.receipt !== result.transactionId?.toUpperCase()))) return null;
+                return row ? { ...row, reportOnly: claim?.purpose === 'payment_report',
+                    receiptClaim: claim?.purpose === 'receipt_claim' } : null;
             }
         }
         // The signed nonce is persisted before dispatch. It can safely bind
         // a fast report callback even before the acknowledgment/correlation
         // log arrives; reports never authorize pending transactions.
         if (callbackNonce) {
+            const [claim] = await db.select({ log: transactionLog, tx: transaction }).from(transactionLog)
+                .innerJoin(transaction, eq(transaction.id, transactionLog.transactionId))
+                .where(and(eq(transaction.provider, providerName),
+                    eq(transactionLog.eventType, STATUS_QUERY_EVENT),
+                    sql`${transactionLog.payload}->>'purpose' = 'receipt_claim'`,
+                    sql`${transactionLog.payload}->>'nonce' = ${callbackNonce}`,
+                    sql`${transaction.callbackNonces}->>${MPESA_CALLBACK_EVENTS.status} = ${callbackNonce}`,
+                )).limit(1);
+            if (claim) {
+                const receipt = (claim.log.payload as { receipt?: string }).receipt;
+                if (result.outcome === 'completed' && receipt !== result.transactionId?.toUpperCase()) return null;
+                return { ...claim.tx, receiptClaim: true };
+            }
             const [row] = await db.select().from(transaction).where(and(
                 eq(transaction.provider, providerName),
                 eq(transaction.status, 'completed'),
@@ -1402,6 +1476,8 @@ export class PaymentService {
             requestId?: string | null;
             conversationId?: string | null;
             enrichmentOnly?: boolean;
+            verifiedReceipt?: boolean;
+            verificationNonce?: string | null;
         },
     ): Promise<boolean> {
         this.lastStatusPoll.delete(txRow.id);
@@ -1410,7 +1486,7 @@ export class PaymentService {
             let enriched = false;
             let receiptRejected = false;
             if (details.transactionId && outcome === 'completed') {
-                const [current] = await trx.select({ receipt: transaction.providerTransactionId }).from(transaction)
+                const [current] = await trx.select({ receipt: transaction.providerTransactionId, nonces: transaction.callbackNonces }).from(transaction)
                     .where(eq(transaction.id, txRow.id)).for('update');
                 // No schema change: serialize receipt assignment globally,
                 // including receipts shared across tenant provider names.
@@ -1419,7 +1495,8 @@ export class PaymentService {
                     .where(and(eq(transaction.providerTransactionId, details.transactionId),
                         eq(transaction.status, 'completed'))).limit(1);
                 receiptRejected = Boolean((used && used.id !== txRow.id) ||
-                    (current?.receipt && current.receipt !== details.transactionId));
+                    (current?.receipt && current.receipt !== details.transactionId) ||
+                    (details.verifiedReceipt && (current?.nonces as Record<string, string> | null)?.[MPESA_CALLBACK_EVENTS.status] !== details.verificationNonce));
             }
             const updated = details.enrichmentOnly || receiptRejected ? [] : await trx
                 .update(transaction)
@@ -1435,7 +1512,8 @@ export class PaymentService {
                 .where(
                     and(
                         eq(transaction.id, txRow.id),
-                        eq(transaction.status, 'pending'),
+                        details.verifiedReceipt && outcome === 'completed'
+                            ? inArray(transaction.status, ['pending', 'failed']) : eq(transaction.status, 'pending'),
                     ),
                 )
                 .returning({ id: transaction.id });
@@ -1460,7 +1538,8 @@ export class PaymentService {
                     .where(
                         and(
                             eq(packagePayments.transaction, txRow.id),
-                            eq(packagePayments.status, 'pending'),
+                            details.verifiedReceipt && outcome === 'completed'
+                                ? inArray(packagePayments.status, ['pending', 'failed']) : eq(packagePayments.status, 'pending'),
                         ),
                     );
             }
@@ -1507,7 +1586,7 @@ export class PaymentService {
             )?.packagePaymentId;
             if (packagePaymentId) {
                 void radiusClient
-                    .ensureActivated(packagePaymentId)
+                    .recoverUnactivatedPayment(packagePaymentId)
                     .catch((err) =>
                         logger.error('RADIUS payment activation failed', {
                             paymentId: packagePaymentId,
