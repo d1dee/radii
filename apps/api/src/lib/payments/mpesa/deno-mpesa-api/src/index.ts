@@ -1,6 +1,6 @@
 // Vendored from https://github.com/d1dee/deno-mpesa-api (MIT, Copyright (c) 2025 Maina Derrick (d1dee)).
 //
-// Vendored patches (runtime compatibility with Bun/Node, logic unchanged):
+// Vendored patches (Bun/Node compatibility and error propagation):
 //  - dayjs is imported from npm ("dayjs", "dayjs/plugin/utc", "dayjs/plugin/timezone")
 //    instead of https://esm.sh
 //  - "jsr:@std/path" resolve -> node:path
@@ -8,6 +8,7 @@
 //    DER (.cer) certificates converted to PEM on the fly (upstream only read .pem)
 //  - the configured certificatePath (CredentialsInterface) is honoured when
 //    generating security credentials
+//  - authentication failures retain their original error and cause
 
 import type {
     AccountBalanceInterface,
@@ -134,6 +135,7 @@ export class MpesaApi {
             `Basic ${Buffer.from(this.consumerKey + ":" + this.consumerSecret).toString("base64")}`,
         );
         const tokenRes = await this.http.get(paths.auth, headers) as T_AuthResponse;
+        if (tokenRes instanceof Error) return tokenRes;
         if (!isValidAuth(tokenRes)) {
             const errorMessage =
                 ("errorMessage" in tokenRes && tokenRes.errorMessage) ||
@@ -170,7 +172,7 @@ export class MpesaApi {
         const Password = Buffer.from(BusinessShortCode + passKey + Timestamp).toString("base64");
 
         const authenticateResults = await this.authenticate();
-        if (authenticateResults instanceof Error) return new Error("Auth failed");
+        if (authenticateResults instanceof Error) return authenticateResults;
         const [, headers] = authenticateResults;
 
         const body = JSON.stringify({
@@ -215,7 +217,7 @@ export class MpesaApi {
         ).toString("base64");
 
         const authenticateResults = await this.authenticate();
-        if (authenticateResults instanceof Error) return new Error("Auth failed");
+        if (authenticateResults instanceof Error) return authenticateResults;
         const [, headers] = authenticateResults;
 
         const response = await this.http.post(
@@ -253,7 +255,7 @@ export class MpesaApi {
         Occasion,
     }: ReversalInterface) {
         const authenticateResults = await this.authenticate();
-        if (authenticateResults instanceof Error) return new Error("Auth failed");
+        if (authenticateResults instanceof Error) return authenticateResults;
         const [, headers] = authenticateResults;
 
         this.generateSecurityCredential(initiatorPassword);
@@ -310,7 +312,7 @@ export class MpesaApi {
         ValidationURL,
     }: C2BRegisterInterface) {
         const authenticateResults = await this.authenticate();
-        if (authenticateResults instanceof Error) return new Error("Auth failed");
+        if (authenticateResults instanceof Error) return authenticateResults;
         const [, headers] = authenticateResults;
 
         const data = await this.http.post(
@@ -350,7 +352,7 @@ export class MpesaApi {
         ResultURL,
     }: AccountBalanceInterface) {
         const authenticateResults = await this.authenticate();
-        if (authenticateResults instanceof Error) return new Error("Auth failed");
+        if (authenticateResults instanceof Error) return authenticateResults;
         const [, headers] = authenticateResults;
 
         this.generateSecurityCredential(initiatorPassword);
@@ -405,7 +407,7 @@ export class MpesaApi {
         Occasion,
     }: TransactionStatusInterface) {
         const authenticateResults = await this.authenticate();
-        if (authenticateResults instanceof Error) return new Error("Auth failed");
+        if (authenticateResults instanceof Error) return authenticateResults;
         const [, headers] = authenticateResults;
 
         this.generateSecurityCredential(initiatorPassword);
@@ -468,7 +470,7 @@ export class MpesaApi {
         Occasion,
     }: B2CInterface) {
         const authenticateResults = await this.authenticate();
-        if (authenticateResults instanceof Error) return new Error("Auth failed");
+        if (authenticateResults instanceof Error) return authenticateResults;
         const [, headers] = authenticateResults;
 
         this.generateSecurityCredential(initiatorPassword);
@@ -505,7 +507,7 @@ export class MpesaApi {
         ResultURL,
     }: B2BInterface) {
         const authenticateResults = await this.authenticate();
-        if (authenticateResults instanceof Error) return new Error("Auth failed");
+        if (authenticateResults instanceof Error) return authenticateResults;
         const [, headers] = authenticateResults;
 
         this.generateSecurityCredential(initiatorPassword);

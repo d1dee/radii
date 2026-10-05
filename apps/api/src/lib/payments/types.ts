@@ -12,6 +12,22 @@
 // 'failed' means the gateway rejected or aborted it.
 export type PaymentOutcome = 'pending' | 'completed' | 'failed';
 
+export type ClientPaymentFailure = 'cancelled' | 'timeout' | 'insufficient_balance';
+
+// Only allowlisted outcomes can become a specific customer-facing message.
+export function paymentFailureMessage(failure: unknown): string {
+    switch (failure) {
+        case 'cancelled':
+            return 'You cancelled the M-Pesa payment. Please try again when ready.';
+        case 'timeout':
+            return 'The M-Pesa payment request timed out. Please try again.';
+        case 'insufficient_balance':
+            return 'Your M-Pesa balance is insufficient. Top up and try again.';
+        default:
+            return 'Payment could not be completed. Please try again.';
+    }
+}
+
 // Normalized request to initiate a payment. Amounts are whole units of the
 // currency (providers that accept fractional amounts may subdivide; M-Pesa
 // only supports whole shillings).
@@ -37,6 +53,7 @@ export interface PaymentRequest {
 
 export interface InitiatePaymentResult {
     outcome: PaymentOutcome;
+    clientFailure?: ClientPaymentFailure;
     // Gateway reference used later to poll status (e.g. M-Pesa
     // CheckoutRequestID). Null when initiation failed outright.
     reference: string | null;
@@ -50,6 +67,7 @@ export interface InitiatePaymentResult {
 
 export interface PaymentStatusResult {
     outcome: PaymentOutcome;
+    clientFailure?: ClientPaymentFailure;
     message: string;
     // Gateway transaction/receipt number if the gateway reports it (not all
     // status queries do — M-Pesa STK query never does; only callbacks carry
@@ -72,6 +90,7 @@ export interface VerifyTransactionResult {
     // 'pending' while the gateway acknowledges the verification request but
     // reports the outcome asynchronously (via callback).
     outcome: PaymentOutcome;
+    clientFailure?: ClientPaymentFailure;
     // Tracking id for the asynchronous verification, used to correlate the
     // later callback (e.g. M-Pesa OriginatorConversationID).
     conversationId: string | null;
@@ -92,6 +111,7 @@ export interface VerifyTransactionResult {
 // matching transaction row and reconcile its status.
 export interface ProviderCallbackResult {
     outcome: PaymentOutcome | 'ignored';
+    clientFailure?: ClientPaymentFailure;
     // Gateway reference stored at initiation time (e.g. CheckoutRequestID);
     // primary lookup key for payment callbacks.
     reference: string | null;

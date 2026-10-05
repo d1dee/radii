@@ -46,7 +46,7 @@ export function PendingPayment({
             return true;
         }
         if (status === 'failed') {
-            onError('Payment failed. Please try again.');
+            onError(result.data!.message || 'Payment failed. Please try again.');
             return false;
         }
         return true;

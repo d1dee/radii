@@ -41,6 +41,8 @@ import {
 } from './mpesa/provider';
 import {
     PaymentProviderError,
+    paymentFailureMessage,
+    type ClientPaymentFailure,
     type PaymentOutcome,
     type PaymentProvider,
     type ProviderCallbackResult,
@@ -79,7 +81,7 @@ const STATUS_POLL_INTERVAL_MS = 15_000;
 const PAYMENT_UNAVAILABLE_MESSAGE =
     'Payments are temporarily unavailable. Please try again in a moment.';
 const PAYMENT_START_FAILED_MESSAGE =
-    'We could not start the payment. Please check the phone number and try again.';
+    'We could not start the payment. Please try again in a moment.';
 const PAYMENT_VERIFICATION_FAILED_MESSAGE =
     'We could not verify that receipt right now. Please try again in a moment.';
 
@@ -317,11 +319,14 @@ export class PaymentService {
             await this.applyOutcome(txRow, 'failed', {
                 source: 'initiation',
                 message: result.message,
+                clientFailure: result.clientFailure,
                 requestId: result.requestId,
             });
             return {
                 success: false,
-                message: PAYMENT_START_FAILED_MESSAGE,
+                message: result.clientFailure
+                    ? paymentFailureMessage(result.clientFailure)
+                    : PAYMENT_START_FAILED_MESSAGE,
             };
         }
 
@@ -349,7 +354,10 @@ export class PaymentService {
             providerRequestId: result.requestId,
         });
 
-        return { success: true, message: result.message };
+        return {
+            success: true,
+            message: 'Check your phone to complete the payment.',
+        };
     }
 
     // Returns the current status, opportunistically reconciling a pending
@@ -420,6 +428,7 @@ export class PaymentService {
             const transitioned = await this.applyOutcome(txRow, 'failed', {
                 source: 'status_poll',
                 message: result.message,
+                clientFailure: result.clientFailure,
             });
             return transitioned
                 ? 'failed'
@@ -695,7 +704,9 @@ export class PaymentService {
             return {
                 status: 'pending',
                 paymentId: null,
-                message: PAYMENT_VERIFICATION_FAILED_MESSAGE,
+                message: result.clientFailure
+                    ? paymentFailureMessage(result.clientFailure)
+                    : PAYMENT_VERIFICATION_FAILED_MESSAGE,
                 error: true,
             };
         }
@@ -784,9 +795,7 @@ export class PaymentService {
         return {
             paymentId: target.payment.id,
             status: 'pending',
-            message:
-                result.message ||
-                'Waiting for the provider to confirm this transaction...',
+            message: 'Waiting for the provider to confirm this transaction...',
         };
     }
 
@@ -1037,6 +1046,7 @@ export class PaymentService {
             transactionId: result.transactionId,
             source: `callback_${event}`,
             message: result.message,
+            clientFailure: result.clientFailure,
             amount: result.amount,
             payload: result.payload,
             requestId: result.requestId,
@@ -1191,6 +1201,7 @@ export class PaymentService {
             transactionId?: string | null;
             source: string;
             message: string;
+            clientFailure?: ClientPaymentFailure;
             // Amount reported by the gateway; recorded on the transaction
             // (receipt-verification rows carry a 0 placeholder until now).
             amount?: number | null;
@@ -1245,7 +1256,10 @@ export class PaymentService {
                         : `payment_failed_${details.source}`
                     : `payment_outcome_ignored_${details.source}`,
                 payload: transitioned
-                    ? (details.payload ?? { message: details.message })
+                    ? {
+                          ...(details.payload ?? { message: details.message }),
+                          clientFailure: details.clientFailure ?? null,
+                      }
                     : {
                           requestedOutcome: outcome,
                           message: details.message,
@@ -1294,6 +1308,25 @@ export class PaymentService {
             .where(eq(packagePayments.id, paymentId))
             .limit(1);
         return row?.status ?? fallback;
+    }
+
+    async getPaymentFailureMessage(payment: PackagePaymentRow): Promise<string> {
+        if (!payment.transaction) return paymentFailureMessage(undefined);
+        const [event] = await db
+            .select({ payload: transactionLog.payload })
+            .from(transactionLog)
+            .where(
+                and(
+                    eq(transactionLog.transactionId, payment.transaction),
+                    sql`starts_with(${transactionLog.eventType}, 'payment_failed_')`,
+                ),
+            )
+            .orderBy(desc(transactionLog.createdAt))
+            .limit(1);
+        // Never interpret historical raw gateway messages as client-safe text.
+        return paymentFailureMessage(
+            (event?.payload as { clientFailure?: unknown } | null)?.clientFailure,
+        );
     }
 
     private async appendLog(

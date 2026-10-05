@@ -523,6 +523,9 @@ app.get('/payment/pending/latest', requireAuth, async (c) => {
         data: {
             paymentId: payment.package_payments.id,
             status,
+            message: status === 'failed'
+                ? await paymentService.getPaymentFailureMessage(payment.package_payments)
+                : undefined,
             amount: Number(payment.package_payments.amount),
             packageId: payment.package_payments.packageId,
             activation,
@@ -575,6 +578,9 @@ app.get('/payment/:id', requireAuth, async (c) => {
         data: {
             paymentId: payment.id,
             status,
+            message: status === 'failed'
+                ? await paymentService.getPaymentFailureMessage(payment)
+                : undefined,
             amount: Number(payment.amount),
             packageId: payment.packageId,
             activation,

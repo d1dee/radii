@@ -63,6 +63,7 @@ export type PppoeClientConfig =
 export type PppoeOrderResult = {
     paymentId: string;
     status: 'pending' | 'paid' | 'failed';
+    message?: string;
     amount: number;
     packageId: string;
     // Present once the payment is paid and its package was activated on the

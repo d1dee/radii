@@ -17,6 +17,7 @@ import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import {
     PaymentProviderError,
+    type ClientPaymentFailure,
     type InitiatePaymentResult,
     type PaymentProvider,
     type PaymentRequest,
@@ -33,6 +34,7 @@ import type {
     TransactionStatusResponseInterface,
 } from './deno-mpesa-api/@types/types.d';
 import MpesaApi from './deno-mpesa-api/mod';
+import { HttpServiceError } from './deno-mpesa-api/src/services/http.service';
 import { signCallbackUrl } from '../callbackToken';
 import { paymentLogError } from '../log';
 
@@ -127,11 +129,25 @@ export function normalizeMpesaPhoneNumber(phoneNumber: string): string | null {
 // Result codes that mean the checkout definitively failed (no retry worth
 // attempting). See https://developer.safaricom.co.ke/APIs/MpesaExpressQuery
 const FINAL_STK_FAILURE_CODES = new Set([
+    '1', // Insufficient balance
     '1032', // Request cancelled by user
     '1037', // DS timeout (user never entered PIN)
     '2029', // Failed due to unresolved reason type
     '2002', // The Agent number and Store number entered do not match.
 ]);
+
+function clientStkFailure(code: unknown): ClientPaymentFailure | undefined {
+    switch (String(code)) {
+        case '1':
+            return 'insufficient_balance';
+        case '1032':
+            return 'cancelled';
+        case '1037':
+            return 'timeout';
+        default:
+            return undefined;
+    }
+}
 
 export class MpesaPaymentProvider implements PaymentProvider {
     // Instance identity used for provider registration, transaction rows and
@@ -236,9 +252,7 @@ export class MpesaPaymentProvider implements PaymentProvider {
             return failed(this.mapClientError(response, 'STK push'));
         }
         if (isMpesaErrorBody(response)) {
-            return failed(
-                `M-Pesa rejected the STK push request: ${response.errorMessage} (code ${response.errorCode}).`,
-            );
+            return failed(this.mapGatewayError(response, 'STK push'));
         }
 
         const push = response as StkPushResponse & MpesaResponseBody;
@@ -278,11 +292,9 @@ export class MpesaPaymentProvider implements PaymentProvider {
         }
         if (isMpesaErrorBody(response)) {
             // Includes "transaction not found" scenarios (unknown/expired
-            // CheckoutRequestID): keep the payment pending but surface the
-            // gateway's message so it can be logged/displayed.
-            return pending(
-                `M-Pesa could not check that checkout request: ${response.errorMessage} (code ${response.errorCode}).`,
-            );
+            // CheckoutRequestID): keep the payment pending and retain the
+            // gateway's message only for server-side diagnostics.
+            return pending(this.mapGatewayError(response, 'STK status query'));
         }
 
         const query = response as StkQueryResponseInterface & MpesaResponseBody;
@@ -294,7 +306,8 @@ export class MpesaPaymentProvider implements PaymentProvider {
 
         // STK query reports processing outcomes only; the receipt number and
         // amount are delivered exclusively via the STK callback.
-        if (query.ResultCode === '0') {
+        const resultCode = String(query.ResultCode);
+        if (resultCode === '0') {
             return {
                 outcome: 'completed',
                 transactionId: null,
@@ -302,9 +315,10 @@ export class MpesaPaymentProvider implements PaymentProvider {
                 message: query.ResultDesc || 'Payment completed.',
             };
         }
-        if (FINAL_STK_FAILURE_CODES.has(query.ResultCode)) {
+        if (FINAL_STK_FAILURE_CODES.has(resultCode)) {
             return {
                 outcome: 'failed',
+                clientFailure: clientStkFailure(query.ResultCode),
                 transactionId: null,
                 amount: null,
                 message: query.ResultDesc || 'Payment was not completed.',
@@ -366,7 +380,7 @@ export class MpesaPaymentProvider implements PaymentProvider {
         }
         if (isMpesaErrorBody(response)) {
             return failed(
-                `M-Pesa rejected the transaction status request: ${response.errorMessage} (code ${response.errorCode}).`,
+                this.mapGatewayError(response, 'transaction status query'),
             );
         }
 
@@ -430,6 +444,7 @@ export class MpesaPaymentProvider implements PaymentProvider {
         if (stk.ResultCode !== 0 || !stk.CallbackMetadata) {
             return {
                 outcome: 'failed',
+                clientFailure: clientStkFailure(stk.ResultCode),
                 reference: stk.CheckoutRequestID,
                 requestId: stk.MerchantRequestID,
                 conversationId: null,
@@ -562,20 +577,44 @@ export class MpesaPaymentProvider implements PaymentProvider {
 
     // --- Error mapping ---------------------------------------------------------
 
+    private mapGatewayError(
+        response: MpesaResponseBody,
+        operation: string,
+    ): string {
+        paymentLogError('mpesa_gateway_error', {
+            provider: this.name,
+            operation,
+            environment: this.config.environment,
+            errorKind: 'mpesa',
+            upstreamStatus: response.status,
+            gatewayCode: response.errorCode,
+            gatewayMessage: response.errorMessage,
+        });
+        return `M-Pesa ${operation} rejected: ${response.errorMessage || 'unknown error'} (code ${response.errorCode}).`;
+    }
+
     private mapClientError(error: Error, operation: string): string {
+        const httpError = error instanceof HttpServiceError ? error : null;
         paymentLogError(
             'mpesa_client_error',
             {
                 provider: this.name,
                 operation,
                 environment: this.config.environment,
+                errorKind: httpError?.kind ??
+                    (isMpesaErrorBody(error.cause) ? 'mpesa' : 'client'),
+                ...(httpError
+                    ? {
+                          upstreamMethod: httpError.method,
+                          upstreamPath: httpError.path,
+                          upstreamStatus: httpError.status,
+                          upstreamContentType: httpError.contentType,
+                      }
+                    : {}),
             },
             error,
         );
-        const message = error.message.toLowerCase();
-        if (message.includes('could not be parsed')) {
-            return `Could not reach M-Pesa while attempting the ${operation}. Try again in a moment.`;
-        }
+        // Diagnostic only; API boundaries never return this verbatim on failure.
         return `M-Pesa ${operation} failed: ${error.message}`;
     }
 }

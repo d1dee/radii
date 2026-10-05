@@ -1,5 +1,20 @@
 // Vendored from https://github.com/d1dee/deno-mpesa-api (MIT, Copyright (c) 2025 Maina Derrick (d1dee)).
-// Unmodified apart from this provenance header.
+// Locally modified: typed failures, bounded requests, and authoritative response metadata.
+export class HttpServiceError extends Error {
+    readonly name = "HttpServiceError";
+
+    constructor(
+        readonly kind: "network" | "response_parse" | "http",
+        readonly method: "GET" | "POST",
+        readonly path: string,
+        readonly status?: number,
+        readonly contentType?: string | null,
+        cause?: unknown,
+    ) {
+        super("M-Pesa request could not be completed.", { cause });
+    }
+}
+
 export class HttpService {
     private baseUrl: string;
     private headers: Headers;
@@ -10,47 +25,47 @@ export class HttpService {
     }
 
     async get(path: string, headers: Headers) {
-        let response;
-
-        try {
-            response = await fetch(`${this.baseUrl}${path}`, {
-                headers,
-            });
-            if (response.ok) {
-                return {
-                    success: response.ok,
-                    status: response.status,
-                    ...(await response.json()),
-                };
-            } else {
-                const res = await response.json();
-                return {
-                    success: response.ok,
-                    status: response.status,
-                    ...res,
-                };
-            }
-        } catch (_: unknown) {
-            return new Error("GET response could not be parsed.", { cause: response });
-        }
+        return this.request("GET", path, headers);
     }
 
     async post(path: string, headers: Headers, body: string): Promise<unknown | Error> {
-        let response;
+        return this.request("POST", path, headers, body);
+    }
+
+    private async request(method: "GET" | "POST", path: string, headers: Headers, body?: string) {
+        const signal = AbortSignal.timeout(15_000);
+        // Diagnostic metadata excludes query parameters, headers, and response bodies.
+        const diagnosticPath = path.split(/[?#]/, 1)[0];
+        let response: Response;
         try {
             response = await fetch(`${this.baseUrl}${path}`, {
-                method: "POST",
+                method,
                 headers,
-                body: body,
+                body,
+                signal,
             });
-
-            return {
-                success: response.ok,
-                status: response.status,
-                ...(await response.json()),
-            };
-        } catch (_: unknown) {
-            return new Error("POST response could not be parsed.", { cause: response });
+        } catch (cause: unknown) {
+            return new HttpServiceError("network", method, diagnosticPath, undefined, undefined, cause);
         }
+
+        const contentType = response.headers.get("content-type");
+        let data: unknown;
+        try {
+            data = await response.json();
+            if (data === null || typeof data !== "object" || Array.isArray(data)) {
+                throw new TypeError("Expected a JSON object.");
+            }
+        } catch (cause: unknown) {
+            return new HttpServiceError(
+                signal.aborted ? "network" : "response_parse",
+                method, diagnosticPath, response.status, contentType, cause,
+            );
+        }
+
+        if (!response.ok && !Object.hasOwn(data, "errorCode")) {
+            return new HttpServiceError("http", method, diagnosticPath, response.status, contentType);
+        }
+
+        return { ...data, success: response.ok, status: response.status };
     }
 }
