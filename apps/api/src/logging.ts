@@ -1,9 +1,10 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { inspect } from 'node:util';
 import {
     configure,
     dispose,
+    getAnsiColorFormatter,
     getConsoleSink,
-    getJsonLinesFormatter,
     getLogger,
     parseLogLevel,
 } from '@logtape/logtape';
@@ -40,7 +41,37 @@ globalRef.__apiLoggingConfigured ??= configure({
         console: redactByField(
             getConsoleSink({
                 formatter: redactByPattern(
-                    getJsonLinesFormatter({ properties: 'flatten' }),
+                    getAnsiColorFormatter({
+                        timestamp: 'rfc3339',
+                        timestampStyle: null,
+                        level: (level) =>
+                            level === 'warning' ? 'WARN' : level.toUpperCase(),
+                        value: (value) =>
+                            typeof value === 'string'
+                                ? value
+                                : inspect(value, {
+                                      colors: false,
+                                      compact: true,
+                                      breakLength: Infinity,
+                                  }),
+                        format: ({ timestamp, level, message, record }) => {
+                            const showDetails = ['warning', 'error', 'fatal'].includes(
+                                record.level,
+                            );
+                            const details =
+                                showDetails && Object.keys(record.properties).length > 0
+                                    ? ` ${inspect(record.properties, {
+                                          colors: false,
+                                          compact: true,
+                                          breakLength: Infinity,
+                                      })}`
+                                    : '';
+                            return `${timestamp} ${level} ${message}${details}`.replace(
+                                /\r?\n/g,
+                                '\\n',
+                            );
+                        },
+                    }),
                     sensitiveValuePatterns,
                 ),
             }),
