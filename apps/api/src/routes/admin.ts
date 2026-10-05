@@ -26,6 +26,7 @@ import {
     isAdminUserVisible,
     listAdminUsers,
     listPayments,
+    reconcileAdminPayment,
     removeUserFlag,
     setUserBan,
     upsertUserAdminTag,
@@ -1217,6 +1218,14 @@ app.get('/payments/:id', requireAdmin, async (c) => {
         paymentId,
         c.get('adminSession').userId,
     );
+    if (!data) return jsonError(c, 404, 'Payment not found');
+    return c.json({ success: true, data });
+});
+
+app.post('/payments/:id/reconcile', requireAdmin, async (c) => {
+    const paymentId = c.req.param('id');
+    if (!paymentId) return jsonError(c, 404, 'Payment not found');
+    const data = await reconcileAdminPayment(paymentId, c.get('adminSession').userId);
     if (!data) return jsonError(c, 404, 'Payment not found');
     return c.json({ success: true, data });
 });

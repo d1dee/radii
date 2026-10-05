@@ -168,6 +168,13 @@ export interface PaymentProvider {
     // returned by initiatePayment (e.g. M-Pesa CheckoutRequestID).
     getPaymentStatus(reference: string): Promise<PaymentStatusResult>;
 
+    // Retrieve receipt/report details after completion was confirmed by polling.
+    // This is enrichment, not a second authorization of the payment.
+    requestPaymentReport?(
+        payment: { transactionId: string | null; requestId: string | null },
+        context: VerifyTransactionContext,
+    ): Promise<VerifyTransactionResult>;
+
     // Parse and normalize an inbound gateway webhook. Implementing this is
     // optional: providers that resolve payments purely by polling can omit
     // it, and the core rejects callbacks for such providers.

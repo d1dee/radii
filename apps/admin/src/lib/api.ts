@@ -769,6 +769,7 @@ export type AdminPaymentDetail = {
     createdAt: string;
     updatedAt: string;
     events: AdminPaymentEvent[];
+    canQueryStatus: boolean;
 };
 
 export type UserPaymentRow = {
@@ -1029,6 +1030,12 @@ export function getAdminPayments(query: ListPaymentsQuery = {}) {
 
 export function getAdminPayment(id: string) {
     return request<AdminPaymentDetail>(`/admin/payments/${id}`);
+}
+
+export function reconcileAdminPayment(id: string) {
+    return request<AdminPaymentDetail>(`/admin/payments/${id}/reconcile`, undefined, {
+        method: 'POST',
+    });
 }
 
 // --- Reports ---------------------------------------------------------------------

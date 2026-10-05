@@ -18,6 +18,7 @@ import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { db } from '../../db';
 import {
     packagePayments,
+    nasDevice,
     packages,
     transaction,
     transactionLog,
@@ -92,6 +93,8 @@ export class PaymentService {
     // transaction id). In-memory only: a restart just costs one immediate
     // poll, which is fine.
     private lastStatusPoll = new Map<string, number>();
+    private reconciliationInFlight = new Map<string, Promise<void>>();
+    private reportsInFlight = new Map<string, Promise<void>>();
 
     // Register a provider. The first registered provider becomes the default
     // for package purchases. Throws on duplicate names so misconfiguration
@@ -420,9 +423,19 @@ export class PaymentService {
                 source: 'status_poll',
                 message: result.message,
             });
-            return transitioned
+            const status = transitioned
                 ? 'paid'
                 : await this.getPackagePaymentStatus(payment.id, payment.status);
+            if (status === 'paid') {
+                // Reporting is enrichment only; never wait for it before
+                // authorizing the portal's already-confirmed payment.
+                void this.requestPaymentReport(txRow, provider).catch((error) =>
+                    paymentLogError('payment_report_threw', {
+                        transactionId: txRow.id, provider: txRow.provider,
+                    }, error),
+                );
+            }
+            return status;
         }
         if (result.outcome === 'failed') {
             const transitioned = await this.applyOutcome(txRow, 'failed', {
@@ -435,6 +448,163 @@ export class PaymentService {
                 : await this.getPackagePaymentStatus(payment.id, payment.status);
         }
         return payment.status;
+    }
+
+    async canQueryTransactionStatus(transactionId: string): Promise<boolean> {
+        const tx = await this.getTransaction(transactionId);
+        if (!tx?.providerReference || await this.hasPaymentCallback(tx.id)) return false;
+        const [prior] = await db.select({ id: transactionLog.id })
+            .from(transactionLog).where(and(
+                eq(transactionLog.transactionId, tx.id),
+                eq(transactionLog.eventType, STATUS_QUERY_EVENT),
+                sql`${transactionLog.payload}->>'purpose' = 'admin_reconcile'`,
+            )).limit(1);
+        if (prior) return false;
+        try {
+            return Boolean((await this.resolveProvider(tx.provider))?.handleCallback);
+        } catch {
+            return false;
+        }
+    }
+
+    private async hasPaymentCallback(transactionId: string): Promise<boolean> {
+        const [callback] = await db.select({ id: transactionLog.id })
+            .from(transactionLog).where(and(
+                eq(transactionLog.transactionId, transactionId),
+                sql`(${transactionLog.eventType} = ${STATUS_CALLBACK_EVENT}
+                    or ${transactionLog.eventType} like '%callback_%')`,
+            )).limit(1);
+        return Boolean(callback);
+    }
+
+    // At most one admin query per payment, including failed attempts. Scope
+    // and eligibility are checked again, not trusted from the detail response.
+    async reconcileAdminPayment(paymentId: string, adminId: string): Promise<boolean> {
+        const key = `${adminId}:${paymentId}`;
+        const existing = this.reconciliationInFlight.get(key);
+        if (existing) {
+            await existing;
+            return true;
+        }
+        let visible = false;
+        const work = (async () => {
+            const [row] = await db.select({ payment: packagePayments, tx: transaction })
+                .from(packagePayments)
+                .innerJoin(nasDevice, eq(nasDevice.id, packagePayments.nasDeviceId))
+                .leftJoin(transaction, eq(transaction.id, packagePayments.transaction))
+                .where(and(eq(packagePayments.id, paymentId), eq(nasDevice.ownerId, adminId)))
+                .limit(1);
+            if (!row) return;
+            visible = true;
+            const tx = row.tx;
+            if (!tx?.providerReference || !await this.canQueryTransactionStatus(tx.id)) return;
+            const provider = await this.resolveProvider(tx.provider);
+            if (!provider?.handleCallback) return;
+            const claimed = await db.transaction(async (trx) => {
+                await trx.select({ id: transaction.id }).from(transaction)
+                    .where(eq(transaction.id, tx.id)).for('update');
+                const [prior] = await trx.select({ id: transactionLog.id })
+                    .from(transactionLog).where(and(
+                        eq(transactionLog.transactionId, tx.id),
+                        eq(transactionLog.eventType, STATUS_QUERY_EVENT),
+                        sql`${transactionLog.payload}->>'purpose' = 'admin_reconcile'`,
+                    )).limit(1);
+                if (prior) return false;
+                const [scoped] = await trx.select({ id: packagePayments.id })
+                    .from(packagePayments).innerJoin(nasDevice, eq(nasDevice.id, packagePayments.nasDeviceId))
+                    .where(and(eq(packagePayments.id, paymentId), eq(nasDevice.ownerId, adminId))).limit(1);
+                const [callback] = await trx.select({ id: transactionLog.id }).from(transactionLog)
+                    .where(and(eq(transactionLog.transactionId, tx.id),
+                        sql`(${transactionLog.eventType} = ${STATUS_CALLBACK_EVENT} or ${transactionLog.eventType} like '%callback_%')`)).limit(1);
+                if (!scoped || callback) return false;
+                await trx.insert(transactionLog).values({
+                    transactionId: tx.id, provider: tx.provider, eventType: STATUS_QUERY_EVENT,
+                    payload: { purpose: 'admin_reconcile', phase: 'requested' },
+                });
+                return true;
+            });
+            if (!claimed) return;
+            try {
+                const result = await provider.getPaymentStatus(tx.providerReference);
+                await this.appendLog(tx.id, tx.provider, STATUS_QUERY_EVENT, {
+                    purpose: 'admin_reconcile', phase: 'result', outcome: result.outcome,
+                    message: result.message,
+                });
+                if (result.outcome !== 'pending') {
+                    await this.applyOutcome(tx, result.outcome, {
+                        source: 'admin_status_query', message: result.message,
+                        transactionId: result.transactionId, clientFailure: result.clientFailure,
+                    });
+                    if (result.outcome === 'completed') {
+                        void this.requestPaymentReport(tx, provider).catch((error) =>
+                            paymentLogError('payment_report_threw', { transactionId: tx.id, provider: tx.provider }, error));
+                    }
+                }
+            } catch (error) {
+                paymentLogError('admin_status_query_threw', { paymentId, transactionId: tx.id, provider: tx.provider }, error);
+                await this.appendLog(tx.id, tx.provider, STATUS_QUERY_EVENT, {
+                    purpose: 'admin_reconcile', phase: 'error', message: PAYMENT_UNAVAILABLE_MESSAGE,
+                });
+            }
+        })();
+        this.reconciliationInFlight.set(key, work);
+        try { await work; return visible; }
+        finally { this.reconciliationInFlight.delete(key); }
+    }
+
+    private async requestPaymentReport(txRow: TransactionRow, provider: PaymentProvider): Promise<void> {
+        if (!provider.requestPaymentReport) return;
+        const existing = this.reportsInFlight.get(txRow.id);
+        if (existing) return existing;
+        const work = (async () => {
+            const claim = await db.transaction(async (trx) => {
+                const [tx] = await trx.select().from(transaction)
+                    .where(eq(transaction.id, txRow.id)).for('update');
+                if (!tx || tx.status !== 'completed') return null;
+                const [prior] = await trx.select({ id: transactionLog.id }).from(transactionLog)
+                    .where(and(eq(transactionLog.transactionId, tx.id), eq(transactionLog.eventType, STATUS_QUERY_EVENT),
+                        sql`${transactionLog.payload}->>'purpose' = 'payment_report'`)).limit(1);
+                if (prior) return null;
+                const [initiated] = await trx.select({ requestId: transactionLog.providerRequestId }).from(transactionLog)
+                    .where(and(eq(transactionLog.transactionId, tx.id), eq(transactionLog.eventType, 'payment_initiated')))
+                    .orderBy(desc(transactionLog.createdAt)).limit(1);
+                if (!tx.providerTransactionId && !initiated?.requestId) return null;
+                const nonces = (tx.callbackNonces ?? {}) as Record<string, string>;
+                const nonce = nonces[MPESA_CALLBACK_EVENTS.status] ?? newCallbackNonce();
+                await trx.update(transaction).set({ callbackNonces: { ...nonces, [MPESA_CALLBACK_EVENTS.status]: nonce } })
+                    .where(eq(transaction.id, tx.id));
+                await trx.insert(transactionLog).values({ transactionId: tx.id, provider: tx.provider,
+                    eventType: STATUS_QUERY_EVENT, payload: { purpose: 'payment_report', phase: 'requested' },
+                    providerRequestId: initiated?.requestId ?? null });
+                return { tx, nonce, requestId: initiated?.requestId ?? null };
+            });
+            if (!claim) return;
+            try {
+                const result = await provider.requestPaymentReport!({
+                    transactionId: claim.tx.providerTransactionId, requestId: claim.requestId,
+                }, { callbackBaseUrl: this.callbackBaseUrl(provider.name), callbackNonce: claim.nonce });
+                await this.appendLog(txRow.id, provider.name, STATUS_QUERY_EVENT, {
+                    ...result.data, purpose: 'payment_report', phase: 'result', outcome: result.outcome, message: result.message,
+                }, claim.requestId, result.conversationId);
+                if (result.outcome === 'completed') {
+                    const rejection = await this.amountMismatch(claim.tx, result.amount ?? null)
+                        ?? await this.payerMismatchForTransaction(claim.tx, result.payerPhoneNumber ?? null, { source: 'payment_report' });
+                    if (!rejection) await this.applyOutcome(claim.tx, 'completed', {
+                        source: 'payment_report', enrichmentOnly: true, message: result.message,
+                        transactionId: claim.tx.providerTransactionId, amount: result.amount,
+                        conversationId: result.conversationId,
+                    });
+                }
+            } catch (error) {
+                paymentLogError('payment_report_threw', { transactionId: txRow.id, provider: provider.name }, error);
+                await this.appendLog(txRow.id, provider.name, STATUS_QUERY_EVENT, {
+                    purpose: 'payment_report', phase: 'error', message: PAYMENT_UNAVAILABLE_MESSAGE,
+                });
+            }
+        })();
+        this.reportsInFlight.set(txRow.id, work);
+        try { await work; }
+        finally { this.reportsInFlight.delete(txRow.id); }
     }
 
     // Verifies a gateway transaction number supplied by the customer (e.g. an
@@ -657,21 +827,20 @@ export class PaymentService {
         // transaction row: the async status callback carries it in its
         // signed ?ct= token and is only accepted when it matches, so a
         // forged (or replayed from another transaction) status callback
-        // cannot complete this payment. A re-submitted verification
-        // overwrites the nonce, retiring any earlier in-flight query's URL.
-        const statusCallbackNonce = newCallbackNonce();
-        await db
-            .update(transaction)
-            .set({
-                callbackNonces: {
-                    ...((target.tx.callbackNonces ?? {}) as Record<
-                        string,
-                        string
-                    >),
-                    [MPESA_CALLBACK_EVENTS.status]: statusCallbackNonce,
-                },
-            })
-            .where(eq(transaction.id, target.tx.id));
+        // cannot complete this payment. Pending verifications retire earlier
+        // attempts; if polling completed it meanwhile, preserve any report URL.
+        const statusCallbackNonce = await db.transaction(async (trx) => {
+            const [current] = await trx.select().from(transaction)
+                .where(eq(transaction.id, target.tx.id)).for('update');
+            const nonces = (current?.callbackNonces ?? {}) as Record<string, string>;
+            const nonce = current?.status === 'completed'
+                ? nonces[MPESA_CALLBACK_EVENTS.status] ?? newCallbackNonce()
+                : newCallbackNonce();
+            await trx.update(transaction).set({
+                callbackNonces: { ...nonces, [MPESA_CALLBACK_EVENTS.status]: nonce },
+            }).where(eq(transaction.id, target.tx.id));
+            return nonce;
+        });
 
         let result;
         try {
@@ -792,6 +961,7 @@ export class PaymentService {
                 result.conversationId,
             );
         }
+
         return {
             paymentId: target.payment.id,
             status: 'pending',
@@ -869,6 +1039,7 @@ export class PaymentService {
         const txRow = await this.findTransactionForCallback(
             providerName,
             result,
+            event === MPESA_CALLBACK_EVENTS.status ? callbackNonce : null,
         );
         if (!txRow) {
             // Nothing to reconcile (unknown/stale reference). Acknowledge so
@@ -914,6 +1085,10 @@ export class PaymentService {
                 result.requestId,
                 result.conversationId,
             );
+        }
+
+        if (txRow.reportOnly && txRow.status !== 'completed') {
+            return { status: 200, body: { success: true } };
         }
 
         if (result.outcome === 'pending') {
@@ -1002,10 +1177,7 @@ export class PaymentService {
             // callback-loss fallback even though Safaricom omits amount from
             // the query response. Manual receipt verification is different:
             // its status callback must report and match the package amount.
-            const mismatch =
-                event === MPESA_CALLBACK_EVENTS.status
-                    ? await this.amountMismatch(txRow, result.amount)
-                    : null;
+            const mismatch = await this.amountMismatch(txRow, result.amount);
             // Payer binding: refuse completion when the gateway reports a
             // different payer than the phone number on the linked package
             // payment. Skipped when either side is absent — some Safaricom
@@ -1020,6 +1192,7 @@ export class PaymentService {
                 ));
             if (rejection) {
                 await this.applyOutcome(txRow, 'failed', {
+                    enrichmentOnly: txRow.reportOnly,
                     transactionId: result.transactionId,
                     source: `callback_${event}`,
                     message: rejection,
@@ -1031,6 +1204,7 @@ export class PaymentService {
                 return { status: 200, body: { success: true } };
             }
             await this.applyOutcome(txRow, 'completed', {
+                enrichmentOnly: txRow.reportOnly,
                 transactionId: result.transactionId,
                 source: `callback_${event}`,
                 message: result.message,
@@ -1043,6 +1217,7 @@ export class PaymentService {
         }
 
         await this.applyOutcome(txRow, 'failed', {
+            enrichmentOnly: txRow.reportOnly,
             transactionId: result.transactionId,
             source: `callback_${event}`,
             message: result.message,
@@ -1089,7 +1264,8 @@ export class PaymentService {
     private async findTransactionForCallback(
         providerName: string,
         result: ProviderCallbackResult,
-    ): Promise<TransactionRow | null> {
+        callbackNonce?: string | null,
+    ): Promise<(TransactionRow & { reportOnly?: boolean }) | null> {
         if (result.reference) {
             const [row] = await db
                 .select()
@@ -1121,8 +1297,25 @@ export class PaymentService {
                     ),
                 )
                 .limit(1);
-            if (queryLog)
-                return await this.getTransaction(queryLog.transactionId);
+            if (queryLog) {
+                const row = await this.getTransaction(queryLog.transactionId);
+                return row ? { ...row, reportOnly:
+                    (queryLog.payload as { purpose?: string })?.purpose === 'payment_report' } : null;
+            }
+        }
+        // The signed nonce is persisted before dispatch. It can safely bind
+        // a fast report callback even before the acknowledgment/correlation
+        // log arrives; reports never authorize pending transactions.
+        if (callbackNonce) {
+            const [row] = await db.select().from(transaction).where(and(
+                eq(transaction.provider, providerName),
+                eq(transaction.status, 'completed'),
+                sql`${transaction.callbackNonces}->>${MPESA_CALLBACK_EVENTS.status} = ${callbackNonce}`,
+                sql`exists (select 1 from ${transactionLog} where ${transactionLog.transactionId} = ${transaction.id}
+                    and ${transactionLog.eventType} = ${STATUS_QUERY_EVENT}
+                    and ${transactionLog.payload}->>'purpose' = 'payment_report')`,
+            )).limit(1);
+            if (row) return { ...row, reportOnly: true };
         }
         return null;
     }
@@ -1190,8 +1383,8 @@ export class PaymentService {
     }
 
     // Flips the transaction (and any linked package payment) to a final state
-    // and records the provider event. Webhook outcomes are authoritative and
-    // overwrite earlier poll-based results. A completed package purchase also
+    // and records the provider event. Final states never change; successful
+    // late callbacks can only enrich completed transactions. A purchase also
     // triggers RADIUS activation here (fire-and-forget: the payment is already
     // settled, and GET /payment/:id re-asserts activation idempotently).
     private async applyOutcome(
@@ -1208,16 +1401,31 @@ export class PaymentService {
             payload?: Record<string, unknown>;
             requestId?: string | null;
             conversationId?: string | null;
+            enrichmentOnly?: boolean;
         },
     ): Promise<boolean> {
         this.lastStatusPoll.delete(txRow.id);
         let transitioned = false;
         await db.transaction(async (trx) => {
-            const updated = await trx
+            let enriched = false;
+            let receiptRejected = false;
+            if (details.transactionId && outcome === 'completed') {
+                const [current] = await trx.select({ receipt: transaction.providerTransactionId }).from(transaction)
+                    .where(eq(transaction.id, txRow.id)).for('update');
+                // No schema change: serialize receipt assignment globally,
+                // including receipts shared across tenant provider names.
+                await trx.execute(sql`select pg_advisory_xact_lock(hashtext(${details.transactionId}))`);
+                const [used] = await trx.select({ id: transaction.id }).from(transaction)
+                    .where(and(eq(transaction.providerTransactionId, details.transactionId),
+                        eq(transaction.status, 'completed'))).limit(1);
+                receiptRejected = Boolean((used && used.id !== txRow.id) ||
+                    (current?.receipt && current.receipt !== details.transactionId));
+            }
+            const updated = details.enrichmentOnly || receiptRejected ? [] : await trx
                 .update(transaction)
                 .set({
                     status: outcome,
-                    ...(details.transactionId
+                    ...(details.transactionId && outcome === 'completed'
                         ? { providerTransactionId: details.transactionId }
                         : {}),
                     ...(details.amount && details.amount > 0
@@ -1232,6 +1440,16 @@ export class PaymentService {
                 )
                 .returning({ id: transaction.id });
             transitioned = updated.length > 0;
+
+            if (!transitioned && !receiptRejected && outcome === 'completed' &&
+                (details.transactionId || (details.amount && details.amount > 0))) {
+                const rows = await trx.update(transaction).set({
+                    ...(details.transactionId ? { providerTransactionId: details.transactionId } : {}),
+                    ...(details.amount && details.amount > 0 ? { amount: String(details.amount) } : {}),
+                }).where(and(eq(transaction.id, txRow.id), eq(transaction.status, 'completed')))
+                    .returning({ id: transaction.id });
+                enriched = rows.length > 0;
+            }
 
             if (transitioned) {
                 await trx
@@ -1254,15 +1472,18 @@ export class PaymentService {
                     ? outcome === 'completed'
                         ? `payment_completed_${details.source}`
                         : `payment_failed_${details.source}`
+                    : enriched ? `payment_enriched_${details.source}`
                     : `payment_outcome_ignored_${details.source}`,
-                payload: transitioned
+                payload: transitioned || enriched
                     ? {
                           ...(details.payload ?? { message: details.message }),
                           clientFailure: details.clientFailure ?? null,
                       }
                     : {
+                          ...details.payload,
                           requestedOutcome: outcome,
                           message: details.message,
+                          ...(receiptRejected ? { rejection: 'Receipt already assigned or conflicts with this transaction.' } : {}),
                       },
                 providerRequestId: details.requestId ?? null,
                 providerConversationId: details.conversationId ?? null,

@@ -408,10 +408,10 @@ export interface StkQueryResponseInterface {
 export interface TransactionStatusInterface {
     /** Takes only the 'TransactionStatusQuery' as Command ID..*/
 
-    TransactionID: string;
+    TransactionID?: string;
     /** This is a global unique identifier for the transaction request returned by the API proxy upon successful request submission.
      * If you don’t have the M-PESA transaction ID you can use this to query.. */
-    OriginatorConversationID?: string;
+    OriginalConversationID?: string;
     /** The name of the initiator initiating the request. This is the credential/username used to authenticate the transaction request. */
     Initiator: string;
     /** Organization/MSISDN receiving the transaction

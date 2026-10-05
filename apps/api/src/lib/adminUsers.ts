@@ -50,6 +50,7 @@ import {
 import { calculateActivationTime } from './radius/activationLimits';
 import { manualFairUsageAvailable } from './radius/fairUsage';
 import { bankSessionUsage } from './radius/bankUsage';
+import { paymentService } from './payments';
 import {
     nasAddressClaims,
     scopedNasHistoryAddress,
@@ -1757,11 +1758,19 @@ export async function getAdminPaymentDetail(
     const { transactionId: _, ...detail } = payment;
     return {
         ...detail,
+        canQueryStatus: payment.transactionId
+            ? await paymentService.canQueryTransactionStatus(payment.transactionId)
+            : false,
         events: logs.map(({ payload, ...log }) => ({
             ...log,
             ...sanitizePaymentEvent(payload),
         })),
     };
+}
+
+export async function reconcileAdminPayment(paymentId: string, adminId: string) {
+    if (!await paymentService.reconcileAdminPayment(paymentId, adminId)) return null;
+    return getAdminPaymentDetail(paymentId, adminId);
 }
 
 // The payment history of one user on the admin's network (the per-user

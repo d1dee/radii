@@ -398,7 +398,7 @@ export class MpesaApi {
     public async transactionStatus(initiatorPassword: string, {
         Initiator,
         TransactionID,
-        OriginatorConversationID,
+        OriginalConversationID,
         PartyA,
         IdentifierType,
         ResultURL,
@@ -412,9 +412,7 @@ export class MpesaApi {
 
         this.generateSecurityCredential(initiatorPassword);
 
-        // Vendored patch: upstream dropped the optional OriginatorConversationID
-        // even though TransactionStatusInterface declares it and Safaricom
-        // accepts it as an alternative to TransactionID.
+        // Safaricom accepts the original request ID when the receipt is missing.
         const response = await this.http.post(
             routes.paths.transactionstatus,
             headers,
@@ -422,9 +420,9 @@ export class MpesaApi {
                 "Initiator": Initiator,
                 "SecurityCredential": this.securityCredential,
                 "CommandID": "TransactionStatusQuery",
-                "TransactionID": TransactionID,
-                ...(OriginatorConversationID
-                    ? { "OriginatorConversationID": OriginatorConversationID }
+                ...(TransactionID ? { "TransactionID": TransactionID } : {}),
+                ...(OriginalConversationID
+                    ? { "OriginalConversationID": OriginalConversationID }
                     : {}),
                 "PartyA": PartyA,
                 "IdentifierType": IdentifierType,

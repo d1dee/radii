@@ -32,6 +32,7 @@ import type {
     StkQueryResponseInterface,
     TransactionStatusQueryCallback,
     TransactionStatusResponseInterface,
+    TransactionStatusInterface,
 } from './deno-mpesa-api/@types/types.d';
 import MpesaApi from './deno-mpesa-api/mod';
 import { HttpServiceError } from './deno-mpesa-api/src/services/http.service';
@@ -133,6 +134,7 @@ const FINAL_STK_FAILURE_CODES = new Set([
     '1032', // Request cancelled by user
     '1037', // DS timeout (user never entered PIN)
     '2029', // Failed due to unresolved reason type
+    '2001', // The initiator information is invalid.
     '2002', // The Agent number and Store number entered do not match.
 ]);
 
@@ -354,6 +356,40 @@ export class MpesaPaymentProvider implements PaymentProvider {
                 `"${transactionId}" is not a valid M-Pesa transaction code. Check your M-Pesa message and enter the receipt number only (e.g. NEF61H8J60).`,
             );
         }
+        return this.queryTransactionReport({ TransactionID: receipt }, context);
+    }
+
+    async requestPaymentReport(
+        payment: { transactionId: string | null; requestId: string | null },
+        context: VerifyTransactionContext,
+    ): Promise<VerifyTransactionResult> {
+        if (!payment.transactionId && !payment.requestId) {
+            return {
+                outcome: 'failed',
+                conversationId: null,
+                message: 'M-Pesa transaction report requires a receipt or original request ID.',
+            };
+        }
+        return this.queryTransactionReport(
+            payment.transactionId
+                ? { TransactionID: payment.transactionId }
+                : { OriginalConversationID: payment.requestId! },
+            context,
+        );
+    }
+
+    private async queryTransactionReport(
+        identifiers: Pick<TransactionStatusInterface, 'TransactionID' | 'OriginalConversationID'>,
+        context: VerifyTransactionContext,
+    ): Promise<VerifyTransactionResult> {
+        const failed = (message: string): VerifyTransactionResult => ({
+            outcome: 'failed',
+            conversationId: null,
+            message,
+        });
+        if (!this.config.initiatorName || !this.config.initiatorPassword) {
+            return failed('M-Pesa transaction reports require initiatorName and initiatorPassword.');
+        }
         const statusUrl = signCallbackUrl(
             `${context.callbackBaseUrl}/${MPESA_CALLBACK_EVENTS.status}`,
             this.name,
@@ -364,7 +400,7 @@ export class MpesaPaymentProvider implements PaymentProvider {
             this.config.initiatorPassword,
             {
                 Initiator: this.config.initiatorName,
-                TransactionID: receipt,
+                ...identifiers,
                 PartyA: this.config.shortcode,
                 IdentifierType: '4',
                 ResultURL: statusUrl,
@@ -563,10 +599,9 @@ export class MpesaPaymentProvider implements PaymentProvider {
             reference: null,
             requestId: null,
             conversationId: originatorConversationId,
-            // The TransactionID on a status result is the M-Pesa receipt we
-            // originally asked about.
             transactionId:
-                'TransactionID' in result ? result.TransactionID : null,
+                parameters.ReceiptNo ||
+                ('TransactionID' in result ? result.TransactionID : null),
             amount: amount !== null && Number.isFinite(amount) ? amount : null,
             payerPhoneNumber: payer,
             payload: raw,

@@ -17,6 +17,7 @@ import { useEffect, useState } from 'react';
 
 import {
     getAdminPayment,
+    reconcileAdminPayment,
     type AdminPaymentDetail,
     type AdminPaymentEvent,
     type PackagePaymentStatus,
@@ -129,6 +130,8 @@ export function PaymentDetailsDrawer({
 }) {
     const [payment, setPayment] = useState<AdminPaymentDetail | null>(null);
     const [error, setError] = useState<string | null>(null);
+    const [querying, setQuerying] = useState(false);
+    const [queryError, setQueryError] = useState<string | null>(null);
 
     useEffect(() => {
         if (!paymentId) return;
@@ -136,8 +139,10 @@ export function PaymentDetailsDrawer({
         let ignore = false;
         setPayment(null);
         setError(null);
+        setQuerying(false);
+        setQueryError(null);
 
-        void getAdminPayment(paymentId).then((result) => {
+        void getAdminPayment(paymentId).then(async (result) => {
             if (ignore) return;
             if (!result.success) {
                 setError(result.message);
@@ -148,6 +153,21 @@ export function PaymentDetailsDrawer({
                 return;
             }
             setPayment(result.data);
+            if (!result.data.canQueryStatus) return;
+
+            setQuerying(true);
+            const reconciliation = await reconcileAdminPayment(paymentId);
+            if (ignore) return;
+            setQuerying(false);
+            if (reconciliation.success && reconciliation.data) {
+                setPayment(reconciliation.data);
+            } else {
+                setQueryError(
+                    reconciliation.success
+                        ? 'Failed to refresh payment details'
+                        : reconciliation.message,
+                );
+            }
         });
 
         return () => {
@@ -182,6 +202,15 @@ export function PaymentDetailsDrawer({
                 </Center>
             ) : (
                 <Stack gap='lg'>
+                    {querying ? (
+                        <Group gap='xs' role='status'>
+                            <Loader size='xs' />
+                            <Text size='sm' c='dimmed'>
+                                Checking payment status with the provider...
+                            </Text>
+                        </Group>
+                    ) : null}
+                    {queryError ? <Text size='sm' c='red'>{queryError}</Text> : null}
                     <Group gap='xs'>
                         <Badge color={statusBadge.color} variant='light'>
                             {statusBadge.label}
