@@ -112,7 +112,6 @@ export function PaymentFlow({
                             setErrorMessage(message);
                             setStatus('errored');
                         }}
-                        onRetry={() => setStatus('buy')}
                     />
                 ) : null}
 

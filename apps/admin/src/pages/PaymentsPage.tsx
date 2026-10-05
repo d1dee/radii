@@ -182,7 +182,7 @@ export default function PaymentsPage() {
                     <Title order={3}>Payments</Title>
                     <Text size='sm' c='dimmed'>
                         Every package purchase across your NAS devices — filter
-                        by status, customer or date range.
+                        by status, customer, NAS or date range.
                     </Text>
                 </Stack>
             }
@@ -213,7 +213,7 @@ export default function PaymentsPage() {
                     search={
                         <TextInput
                             aria-label='Search payments'
-                            placeholder='Search phone, name, package or receipt code'
+                            placeholder='Search phone, name, package, NAS or receipt code'
                             leftSection={<MdSearch />}
                             value={search}
                             onChange={(e) => setSearch(e.currentTarget.value)}
@@ -306,7 +306,7 @@ export default function PaymentsPage() {
             ) : (
                 <>
                     <PageTableScrollContainer
-                        minWidth={900}
+                        minWidth={1080}
                         aria-label='Payments table'
                     >
                         <Table withRowBorders highlightOnHover stickyHeader>
@@ -337,6 +337,7 @@ export default function PaymentsPage() {
                                         sortDirection={sortDirection}
                                         onSort={handleSort}
                                     />
+                                    <Table.Th w={180}>NAS</Table.Th>
                                     <SortableTableHeader
                                         label='Amount'
                                         sortKey='amount'
@@ -389,6 +390,11 @@ export default function PaymentsPage() {
                                             </Text>
                                             <Text size='xs' c='dimmed'>
                                                 {p.packageType ?? ''}
+                                            </Text>
+                                        </Table.Td>
+                                        <Table.Td className='admin-table-identity'>
+                                            <Text size='sm'>
+                                                {p.nasDeviceName}
                                             </Text>
                                         </Table.Td>
                                         <Table.Td className='admin-table-value'>

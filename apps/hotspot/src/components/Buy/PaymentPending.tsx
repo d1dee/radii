@@ -17,20 +17,16 @@ export function PendingPayment({
     onError: (message: string) => void;
 }) {
     const [tick, setTick] = useState(0);
+    const [connectionWarning, setConnectionWarning] = useState(false);
     const tickRef = useRef(0);
-    const failedPollsRef = useRef(0);
     const paidWithoutActivationRef = useRef(0);
     const handlePoll = useEffectEvent(async () => {
         const result = await getPaymentStatus(orderId);
         if (!result.success) {
-            failedPollsRef.current++;
-            if (failedPollsRef.current >= 3) {
-                onError(result.message || 'Could not check payment status.');
-                return false;
-            }
+            setConnectionWarning(true);
             return true;
         }
-        failedPollsRef.current = 0;
+        setConnectionWarning(false);
 
         const { status } = result.data!;
         if (status === 'paid' && result.data!.activation) {
@@ -70,7 +66,10 @@ export function PendingPayment({
                     errorName:
                         error instanceof Error ? error.name : 'UnknownError',
                 });
-                if (!cancelled) onError('Could not reach the server. Try again.');
+                if (!cancelled) {
+                    setConnectionWarning(true);
+                    pollTimer = setTimeout(poll, 2_000);
+                }
             }
         };
         void poll();
@@ -97,10 +96,17 @@ export function PendingPayment({
                     {isFree ? 'activate your package' : 'process your payment'}.
                 </Text>
                 <Text size='sm' c='gray.6'>
-                    This may take a few seconds.
+                    {isFree
+                        ? 'This may take a few seconds.'
+                        : 'Payment confirmation can take a minute. Do not submit another payment while we wait.'}
                 </Text>
+                {connectionWarning ? (
+                    <Text size='sm' c='orange.7' role='status'>
+                        Connection interrupted. We are retrying the status check
+                        {isFree ? ' for your activation.' : ' for your existing payment.'}
+                    </Text>
+                ) : null}
             </Stack>
-
         </Stack>
     );
 }

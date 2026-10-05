@@ -1497,7 +1497,7 @@ export interface ListPaymentsOpts {
     adminId: string;
     status?: 'pending' | 'paid' | 'failed';
     type?: AdminUserTypeFilter;
-    // Matches payer phone, name or the provider's transaction code.
+    // Matches payer phone, name, package, NAS name or provider references.
     q?: string;
     // Restrict to payments purchased through one PPPoE service account.
     pppoeAccountId?: string;
@@ -1532,6 +1532,7 @@ export async function listPayments(opts: ListPaymentsOpts) {
                 ilike(user.name, q),
                 ilike(user.username, q),
                 ilike(packages.title, q),
+                ilike(nasDevice.name, q),
                 ilike(transaction.providerTransactionId, q),
                 ilike(transaction.providerReference, q),
             )!,
@@ -1597,6 +1598,7 @@ export async function listPayments(opts: ListPaymentsOpts) {
                 status: packagePayments.status,
                 packageTitle: packages.title,
                 packageType: packages.type,
+                nasDeviceName: nasDevice.name,
                 provider: transaction.provider,
                 providerTransactionId: transaction.providerTransactionId,
                 providerReference: transaction.providerReference,
@@ -1758,7 +1760,7 @@ export async function getAdminPaymentDetail(
     const { transactionId: _, ...detail } = payment;
     return {
         ...detail,
-        canQueryStatus: payment.transactionId
+        canQueryStatus: payment.status === 'paid' && !payment.providerTransactionId && payment.transactionId
             ? await paymentService.canQueryTransactionStatus(payment.transactionId)
             : false,
         events: logs.map(({ payload, ...log }) => ({

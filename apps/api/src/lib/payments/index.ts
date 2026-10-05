@@ -61,11 +61,23 @@ function buildPaymentService(): PaymentService {
 // (same pattern as db/index.ts).
 const globalRef = globalThis as unknown as {
     __paymentService?: PaymentService;
+    __paymentReportTimer?: ReturnType<typeof setInterval>;
 };
 
 export const paymentService: PaymentService = globalRef.__paymentService
     ? globalRef.__paymentService
     : buildPaymentService();
+globalRef.__paymentService = paymentService;
+
+export function startPaymentReconciliation(): void {
+    if (globalRef.__paymentReportTimer) return;
+    const recover = () => void Promise.all([
+        paymentService.reconcilePendingPayments(), paymentService.retryPaymentReports(),
+    ]).catch((error) => logger.error('Payment reconciliation failed', { error }));
+    recover();
+    globalRef.__paymentReportTimer = setInterval(recover, 60_000);
+    globalRef.__paymentReportTimer.unref();
+}
 
 export { PaymentService } from './service';
 export type { PackagePaymentRow } from './service';

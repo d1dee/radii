@@ -2,10 +2,9 @@
 //
 // Every callback URL this server hands to a payment gateway carries a
 // `?ct=<token>` query parameter, where token = `<nonce>.<mac>`:
-//  - nonce  random per-URL value (hex), also stored on the transaction row
-//           (transaction.callbackNonces, keyed by callback event) so async
-//           callbacks can additionally be bound to the exact transaction
-//           that issued the URL (see service.ts handleProviderCallback);
+//  - nonce  random per-URL value (hex), persisted in transaction.callbackNonces
+//           or a transaction_log report attempt so callbacks bind to the
+//           transaction/query that issued the URL (see service.ts);
 //  - mac    hex HMAC-SHA256(PAYMENT_CALLBACK_HMAC_SECRET,
 //           "<provider>\n<event>\n<nonce>").
 //
@@ -13,6 +12,8 @@
 // body or touching the database: only URLs minted by this server carry a
 // valid token, so a tenant admin (or any other attacker) cannot forge a
 // callback even when they know the correlation ids in the payload.
+// It does not sign the callback body. STK success still requires independent
+// checkout confirmation before the service authorizes a package.
 // Safaricom's Transaction Status callbacks carry no signature of their own;
 // this token plus the stored-nonce check and the amount-match requirement
 // are what authenticate them.

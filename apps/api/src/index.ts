@@ -7,6 +7,7 @@ import { auth } from './auth';
 import { closeDb } from './db';
 import { env } from './env';
 import { radiusClient } from './lib/radius';
+import { startPaymentReconciliation } from './lib/payments';
 import { startNasSessionReconciliation } from './lib/radius/sessionReconcile';
 import { reconcileWireGuardPeers } from './lib/wgReconcile';
 import { apiLogger, disposeLogging } from './logging';
@@ -165,6 +166,8 @@ app.onError((err, c) => {
 void reconcileWireGuardPeers()
     .catch((err) => logger.error('WireGuard reconciliation failed', { error: err }))
     .finally(() => startNasSessionReconciliation());
+
+startPaymentReconciliation();
 
 // Flush the Bun SQL connection pool on shutdown.
 const shutdownFlags = globalThis as unknown as {

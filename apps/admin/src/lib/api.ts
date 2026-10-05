@@ -716,6 +716,7 @@ export type AdminPaymentRow = {
     status: PackagePaymentStatus;
     packageTitle: string | null;
     packageType: PackageType | null;
+    nasDeviceName: string;
     provider: string | null;
     providerTransactionId: string | null;
     providerReference: string | null;

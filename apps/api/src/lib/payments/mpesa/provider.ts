@@ -127,16 +127,10 @@ export function normalizeMpesaPhoneNumber(phoneNumber: string): string | null {
     return null;
 }
 
-// Result codes that mean the checkout definitively failed (no retry worth
-// attempting). See https://developer.safaricom.co.ke/APIs/MpesaExpressQuery
-const FINAL_STK_FAILURE_CODES = new Set([
-    '1', // Insufficient balance
-    '1032', // Request cancelled by user
-    '1037', // DS timeout (user never entered PIN)
-    '2029', // Failed due to unresolved reason type
-    '2001', // The initiator information is invalid.
-    '2002', // The Agent number and Store number entered do not match.
-]);
+// Known terminal checkout failures. Unknown codes remain pending rather than
+// risking a failed payment that the customer was charged for.
+// https://developer.safaricom.co.ke/APIs/MpesaExpressQuery
+const FINAL_STK_FAILURE_CODES = new Set(['1', '1032', '1037', '2029', '2001', '2002']);
 
 function clientStkFailure(code: unknown): ClientPaymentFailure | undefined {
     switch (String(code)) {
@@ -306,8 +300,8 @@ export class MpesaPaymentProvider implements PaymentProvider {
             );
         }
 
-        // STK query reports processing outcomes only; the receipt number and
-        // amount are delivered exclusively via the STK callback.
+        // STK query reports processing outcomes only; receipt recovery uses
+        // the STK callback or a separate Transaction Status report.
         const resultCode = String(query.ResultCode);
         if (resultCode === '0') {
             return {
@@ -477,7 +471,7 @@ export class MpesaPaymentProvider implements PaymentProvider {
 
         const raw = { ...(payload as Record<string, unknown>) };
 
-        if (stk.ResultCode !== 0 || !stk.CallbackMetadata) {
+        if (String(stk.ResultCode) !== '0' || !stk.CallbackMetadata) {
             return {
                 outcome: 'failed',
                 clientFailure: clientStkFailure(stk.ResultCode),

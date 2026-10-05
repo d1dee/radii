@@ -1,33 +1,31 @@
-import { Button, Loader, Stack, Text } from '@mantine/core';
+import { Loader, Stack, Text } from '@mantine/core';
 import { useEffect, useEffectEvent, useRef, useState } from 'react';
 import type { OrderResult } from '../../lib/api.ts';
 import { getPaymentStatus } from '../../lib/api.ts';
 import { mutationLogger } from '../../lib/logging.ts';
 import type { FlowStatus } from './PaymentFlow.tsx';
 
-import { IoMdRefresh } from 'react-icons/io';
-
 export function PendingPayment({
     orderId,
     isFree,
     onStatusChange,
     onError,
-    onRetry,
 }: {
     orderId: string;
     isFree: boolean;
     onStatusChange: (status: FlowStatus, data: OrderResult | null) => void;
     onError: (message: string) => void;
-    onRetry: () => void;
 }) {
     const [tick, setTick] = useState(0);
+    const [connectionWarning, setConnectionWarning] = useState(false);
     const tickRef = useRef(0);
     const handlePoll = useEffectEvent(async () => {
         const result = await getPaymentStatus(orderId);
         if (!result.success) {
-            onError(result.message || 'Could not check payment status.');
-            return false;
+            setConnectionWarning(true);
+            return true;
         }
+        setConnectionWarning(false);
 
         const { status, activation } = result.data!;
         if (status === 'paid' && activation) {
@@ -60,7 +58,10 @@ export function PendingPayment({
                     errorName:
                         error instanceof Error ? error.name : 'UnknownError',
                 });
-                if (!cancelled) onError('Could not reach the server. Try again.');
+                if (!cancelled) {
+                    setConnectionWarning(true);
+                    pollTimer = setTimeout(poll, 2_000);
+                }
             }
         };
         void poll();
@@ -87,18 +88,17 @@ export function PendingPayment({
                     {isFree ? 'activate your package' : 'process your payment'}.
                 </Text>
                 <Text size='sm' c='gray.6'>
-                    This may take a few seconds.
+                    {isFree
+                        ? 'This may take a few seconds.'
+                        : 'Payment confirmation can take a minute. Do not submit another payment while we wait.'}
                 </Text>
+                {connectionWarning ? (
+                    <Text size='sm' c='orange.7' role='status'>
+                        Connection interrupted. We are retrying the status check
+                        {isFree ? ' for your activation.' : ' for your existing payment.'}
+                    </Text>
+                ) : null}
             </Stack>
-
-            <Button
-                variant='outline'
-                fullWidth
-                onClick={onRetry}
-                leftSection={<IoMdRefresh />}
-            >
-                Retry
-            </Button>
         </Stack>
     );
 }

@@ -80,7 +80,7 @@ export interface PaymentStatusResult {
 // URLs without knowing how this service routes its own endpoints.
 export interface VerifyTransactionContext {
     callbackBaseUrl: string;
-    // Random nonce the core stores on the transaction row; providers embed
+    // Random nonce persisted on the transaction or report attempt; providers embed
     // it (HMAC-signed, see ./callbackToken.ts) in the ?ct= token of the
     // async-result callback URL they register for this verification.
     callbackNonce?: string | null;
@@ -95,6 +95,9 @@ export interface VerifyTransactionResult {
     // later callback (e.g. M-Pesa OriginatorConversationID).
     conversationId: string | null;
     message: string;
+    // Receipt returned by a synchronous report; asynchronous reports carry
+    // it in their callback instead.
+    transactionId?: string | null;
     // Amount the gateway reported for the receipt, when a synchronous
     // result carries it; the core guards completed outcomes with it.
     amount?: number | null;

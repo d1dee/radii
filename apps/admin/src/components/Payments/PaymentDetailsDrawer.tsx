@@ -137,6 +137,7 @@ export function PaymentDetailsDrawer({
         if (!paymentId) return;
 
         let ignore = false;
+        let refreshTimer: ReturnType<typeof setTimeout> | undefined;
         setPayment(null);
         setError(null);
         setQuerying(false);
@@ -153,7 +154,11 @@ export function PaymentDetailsDrawer({
                 return;
             }
             setPayment(result.data);
-            if (!result.data.canQueryStatus) return;
+            if (
+                result.data.status !== 'paid' ||
+                result.data.providerTransactionId ||
+                !result.data.canQueryStatus
+            ) return;
 
             setQuerying(true);
             const reconciliation = await reconcileAdminPayment(paymentId);
@@ -161,6 +166,37 @@ export function PaymentDetailsDrawer({
             setQuerying(false);
             if (reconciliation.success && reconciliation.data) {
                 setPayment(reconciliation.data);
+                if (reconciliation.data.status === 'paid' && !reconciliation.data.providerTransactionId) {
+                    // Read our stored details while awaiting the async M-Pesa
+                    // report callback; do not issue another provider query.
+                    let attempts = 0;
+                    const refreshReceipt = async () => {
+                        const refreshed = await getAdminPayment(paymentId);
+                        if (ignore) return;
+                        if (!refreshed.success || !refreshed.data) {
+                            setQuerying(false);
+                            setQueryError(
+                                refreshed.success
+                                    ? 'Failed to refresh payment details'
+                                    : refreshed.message,
+                            );
+                            return;
+                        }
+                        setPayment(refreshed.data);
+                        attempts += 1;
+                        if (
+                            refreshed.data.providerTransactionId ||
+                            refreshed.data.status !== 'paid' ||
+                            attempts >= 15
+                        ) {
+                            setQuerying(false);
+                            return;
+                        }
+                        refreshTimer = setTimeout(() => void refreshReceipt(), 2000);
+                    };
+                    setQuerying(true);
+                    refreshTimer = setTimeout(() => void refreshReceipt(), 2000);
+                }
             } else {
                 setQueryError(
                     reconciliation.success
@@ -172,6 +208,7 @@ export function PaymentDetailsDrawer({
 
         return () => {
             ignore = true;
+            clearTimeout(refreshTimer);
         };
     }, [paymentId]);
 
@@ -206,7 +243,7 @@ export function PaymentDetailsDrawer({
                         <Group gap='xs' role='status'>
                             <Loader size='xs' />
                             <Text size='sm' c='dimmed'>
-                                Checking payment status with the provider...
+                                Retrieving the M-Pesa transaction reference...
                             </Text>
                         </Group>
                     ) : null}
