@@ -340,7 +340,7 @@ const IP_LOCKDOWN_DISABLED_SECTION = `# ----------------------------------------
 # 6. IP service lockdown (skipped: disabled in generation options)
 # ---------------------------------------------------------------------
 
-$radiiLog "Optional IP service lockdown skipped (REST remains WireGuard-only)";
+$radiiLog "Optional IP service lockdown skipped (monitoring account remains WireGuard-only)";
 `;
 
 export const MIKROTIK_SETUP_SCRIPT_TEMPLATE = `# =====================================================================
@@ -361,7 +361,7 @@ export const MIKROTIK_SETUP_SCRIPT_TEMPLATE = `# ===============================
 #    4. WireGuard management tunnel
 #    5. Firewall input rules
 #    6. IP service lockdown
-#   6a. Read-only session monitoring (always WireGuard-only)
+#   6a. Read-only session monitoring (account WireGuard-only)
 #    7. Report device facts to radii
 #    8. HotSpot + DHCP + NAT
 #    9. PPPoE server
@@ -653,9 +653,9 @@ $radiiLog "WireGuard firewall access rules configured";
 # 6a. Read-only session monitoring
 # ---------------------------------------------------------------------
 
-# HTTP REST is intentionally restricted to the WireGuard server even when
-# optional IP service lockdown is disabled. WireGuard encrypts this traffic;
-# no HTTPS certificate or TLS verification bypass is needed.
+# The monitoring account is always restricted to the WireGuard server.
+# WebFig and REST share www, so its service-level restriction must follow
+# the optional IP lockdown setting. Monitoring traffic still uses WireGuard.
 :local monitorStage "monitoring group";
 :onerror monitorError in={
     :local monitorGroup [/user/group/find where name="radii-monitor"];
@@ -687,8 +687,13 @@ $radiiLog "WireGuard firewall access rules configured";
     };
     :set monitorStage "HTTP REST port";
     /ip/service/set $monitorWeb port=80;
-    :set monitorStage "HTTP REST WireGuard access restriction";
-    $radiiEnableService $monitorWeb "{{WG_ALLOWED_ADDRESS}}";
+    :set monitorStage "HTTP service access configuration";
+    :if ({{IP_LOCKDOWN_ENABLED}}) do={
+        $radiiEnableService $monitorWeb "{{WG_ALLOWED_ADDRESS}}";
+    } else={
+        # Clear restrictions from earlier runs as well as enabling WebFig.
+        $radiiEnableService $monitorWeb "";
+    };
 
     # Newer RouterOS versions can separately disable plain REST. Parse the
     # optional command so older versions without this menu remain supported;
@@ -706,7 +711,7 @@ $radiiLog "WireGuard firewall access rules configured";
     :error ("radii session monitoring provisioning failed at " . $monitorStage . ": " . $monitorError);
 };
 
-$radiiLog "Read-only session monitoring configured (HTTP REST over WireGuard only)";
+$radiiLog "Read-only session monitoring configured (monitoring account WireGuard-only)";
 
 # ---------------------------------------------------------------------
 # 7. Report device facts + WireGuard public key
@@ -1639,6 +1644,9 @@ export function renderMikrotikSetupScript(
         options?.ipLockdown === false
             ? IP_LOCKDOWN_DISABLED_SECTION
             : IP_LOCKDOWN_SECTION,
+    );
+    out = out.split('{{IP_LOCKDOWN_ENABLED}}').join(
+        options?.ipLockdown === false ? 'false' : 'true',
     );
     for (const [key, value] of Object.entries(vars)) {
         // Route admin/device-controlled strings through the matching escaper
