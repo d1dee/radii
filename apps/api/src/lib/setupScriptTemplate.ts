@@ -301,37 +301,37 @@ const IP_LOCKDOWN_SECTION = `# -------------------------------------------------
 # ---------------------------------------------------------------------
 
 # Disable legacy/unused services.
-:do { /ip/service/set [find where name="telnet"] disabled=yes; } on-error={};
-:do { /ip/service/set [find where name="ftp"] disabled=yes; } on-error={};
+:do { /ip/service/set [find where name="telnet" && dynamic=no] disabled=yes; } on-error={};
+:do { /ip/service/set [find where name="ftp" && dynamic=no] disabled=yes; } on-error={};
 
-# Management services are restricted to the WireGuard management subnet.\
+# Management services are restricted to the WireGuard management subnet.
 # The enabled/disabled state is explicitly set for the services required
-# by the radii configuration.\
+# by the radii configuration.
 
-:do {
-    $radiiEnableService [/ip/service/find where name="ssh"] "{{WG_ALLOWED_ADDRESS}}";
-} on-error={
-    $radiiLog "WARNING - SSH service not found/configured";
+:onerror sshServiceError in={
+    $radiiEnableService [/ip/service/find where name="ssh" && dynamic=no] "{{WG_ALLOWED_ADDRESS}}";
+} do={
+    $radiiLog ("WARNING - SSH service not configured: " . $sshServiceError);
+};
+
+:onerror winboxServiceError in={
+    $radiiEnableService [/ip/service/find where name="winbox" && dynamic=no] "{{WG_ALLOWED_ADDRESS}}";
+} do={
+    $radiiLog ("WARNING - Winbox service not configured: " . $winboxServiceError);
+};
+
+:onerror apiServiceError in={
+    $radiiEnableService [/ip/service/find where name="api" && dynamic=no] "{{WG_ALLOWED_ADDRESS}}";
+} do={
+    $radiiLog ("WARNING - API service not configured: " . $apiServiceError);
 };
 
 :do {
-    $radiiEnableService [/ip/service/find where name="winbox"] "{{WG_ALLOWED_ADDRESS}}";
-} on-error={
-    $radiiLog "WARNING - Winbox service not found/configured";
-};
-
-:do {
-    $radiiEnableService [/ip/service/find where name="api"] "{{WG_ALLOWED_ADDRESS}}";
-} on-error={
-    $radiiLog "WARNING - API service not found/configured";
-};
-
-:do {
-    /ip/service/set [find where name="api-ssl"] disabled=yes;
+    /ip/service/set [find where name="api-ssl" && dynamic=no] disabled=yes;
 } on-error={};
 
 :do {
-    /ip/service/set [find where name="www-ssl"] disabled=yes;
+    /ip/service/set [find where name="www-ssl" && dynamic=no] disabled=yes;
 } on-error={};
 
 $radiiLog "IP management services restricted to {{WG_ALLOWED_ADDRESS}}";`;
@@ -352,10 +352,10 @@ export const MIKROTIK_SETUP_SCRIPT_TEMPLATE = `# ===============================
 #  Generated : {{GENERATED_AT}}
 #
 #  RouterOS 7.x required. Idempotent: managed settings are overwritten
-#  with the values in this configuration on every run.\
+#  with the values in this configuration on every run.
 #
 #  Sections:
-#    1. Identity & NTP
+#    1. Identity, DNS & NTP
 #    2. Device facts
 #    3. External RADIUS
 #    4. WireGuard management tunnel
@@ -374,6 +374,17 @@ export const MIKROTIK_SETUP_SCRIPT_TEMPLATE = `# ===============================
     :put ("radii: " . $1);
 };
 
+# Use internal IDs, not console row 0 (which may be a dynamic HotSpot rule).
+:local radiiMoveFilterFirst do={
+    :local staticRules [/ip/firewall/filter/find where dynamic=no];
+    :if ([:len $staticRules] > 0) do={
+        :local firstRule [:pick $staticRules 0];
+        :if ($firstRule != $1) do={
+            /ip/firewall/filter/move $1 destination=$firstRule;
+        };
+    };
+};
+
 # RouterOS 7.24 renamed the service access restriction. Fall back only when
 # the new syntax cannot be parsed, not when applying a restriction fails.
 :local radiiEnableService;
@@ -384,16 +395,67 @@ export const MIKROTIK_SETUP_SCRIPT_TEMPLATE = `# ===============================
 };
 
 # ---------------------------------------------------------------------
-# 1. Identity & NTP
+# 1. Identity, DNS & NTP
 # ---------------------------------------------------------------------
 
 /system/identity/set name="{{NAS_IDENTITY}}";
 
+# Plain DNS avoids depending on a valid clock for DoH certificate checks
+# while resolving the NTP servers and other setup hostnames.
 :do {
-    /system/ntp/client/set enabled=yes servers={{NTP_SERVERS}};
+    /ip/dns/set servers=1.1.1.1,8.8.8.8 use-doh-server="";
+    $radiiLog "DNS upstream servers configured";
+} on-error={
+    $radiiLog "ERROR - DNS configuration failed; setup aborted";
+    :error "radii DNS configuration failed";
+};
+
+:do {
+    /system/ntp/client/set enabled=yes mode=unicast servers={{NTP_SERVERS}};
     $radiiLog "NTP client configured";
 } on-error={
-    $radiiLog "WARNING - NTP client could not be configured";
+    $radiiLog "ERROR - NTP configuration failed; setup aborted";
+    :error "radii NTP configuration failed";
+};
+
+# Do not report the device or download pages with an unsynchronized clock.
+# Count delays rather than wall-clock time, which changes during NTP sync.
+$radiiLog "Waiting up to 180 seconds for NTP synchronization";
+:local ntpWaitSeconds 0;
+:while (([/system/ntp/client/get status] != "synchronized") && ($ntpWaitSeconds < 180)) do={
+    :delay 1s;
+    :set ntpWaitSeconds ($ntpWaitSeconds + 1);
+};
+:if ([/system/ntp/client/get status] != "synchronized") do={
+    $radiiLog "ERROR - NTP synchronization timed out; check DNS and outbound UDP port 123; setup aborted";
+    :error "radii NTP synchronization timed out";
+};
+$radiiLog "NTP synchronized; continuing setup";
+
+# Refuse obvious upstream/topology conflicts before changing the LAN.
+:local setupHsIf "{{HOTSPOT_INTERFACE}}";
+:local setupPppIf "{{PPP_INTERFACE}}";
+:if ($setupHsIf = $setupPppIf) do={
+    :error "radii HotSpot and PPPoE require separate interfaces";
+};
+:foreach setupIf in=($setupHsIf,$setupPppIf) do={
+    :if (([:len [/ip/dhcp-client/find where interface=$setupIf && disabled=no]] > 0) || ([:len [/interface/list/member/find where list="WAN" && interface=$setupIf]] > 0)) do={
+        :error ("radii cannot provision the upstream/WAN interface " . $setupIf);
+    };
+};
+:if ([:len [/ip/address/find where address="{{HOTSPOT_ADDRESS}}" && interface!=$setupHsIf && comment!="radii hotspot gateway"]] > 0) do={
+    :error "radii HotSpot subnet conflicts with an address on another interface; choose a separate subnet";
+};
+:if (([:len [/ip/address/find where interface=$setupPppIf && dynamic=no && comment!="radii pppoe gateway"]] > 0) || ([:len [/ip/dhcp-server/find where interface=$setupPppIf && disabled=no]] > 0)) do={
+    :error "radii PPPoE discovery interface has unrelated IP/DHCP configuration; use a dedicated port or VLAN";
+};
+:if (([:len [/ip/dhcp-server/find where name="radii-hs-dhcp"]] > 0) && ([:len [/ip/dhcp-server/find where interface=$setupHsIf && name!="radii-hs-dhcp"]] > 0)) do={
+    :error "radii HotSpot interface has an unrelated DHCP server alongside the managed server";
+};
+:if ([:len [/ip/dhcp-server/find where name="radii-hs-dhcp"]] = 0) do={
+    :if (([:len [/ip/dhcp-server/find where interface=$setupHsIf]] > 1) || ([:len [/ip/dhcp-server/find where interface=$setupHsIf && (dynamic=yes || relay!=0.0.0.0)]] > 0)) do={
+        :error "radii HotSpot requires a single static direct DHCP server; existing DHCP configuration is incompatible";
+    };
 };
 
 # ---------------------------------------------------------------------
@@ -543,8 +605,8 @@ $radiiLog ("WireGuard public key: " . $wgPubKey);
     /ip/firewall/filter/disable $rule;
 };
 
-# Remove previous managed rules so changed values never leave stale rules.
-:local oldRadiiFilter [/ip/firewall/filter/find where comment~"^radii:"];
+# Keep expired-subscriber enforcement intact if a later setup section fails.
+:local oldRadiiFilter [/ip/firewall/filter/find where comment="radii: wireguard" || comment="radii: management subnet"];
 :if ([:len $oldRadiiFilter] > 0) do={
     /ip/firewall/filter/remove $oldRadiiFilter;
 };
@@ -558,15 +620,17 @@ $radiiLog ("WireGuard public key: " . $wgPubKey);
 
 :local mgmtFirewallId [/ip/firewall/filter/add \
     chain=input \
+    in-interface=$wgName \
     src-address={{WG_ALLOWED_ADDRESS}} \
     action=accept \
     comment="radii: management subnet"];
 
-:do {
-    /ip/firewall/filter/move $mgmtFirewallId 0;
-    /ip/firewall/filter/move $wgFirewallId 0;
-} on-error={
-    $radiiLog "WARNING - could not move radii firewall rules";
+:onerror firewallError in={
+    $radiiMoveFilterFirst $mgmtFirewallId;
+    $radiiMoveFilterFirst $wgFirewallId;
+} do={
+    $radiiLog ("ERROR - could not order WireGuard firewall rules: " . $firewallError);
+    :error ("radii WireGuard firewall setup failed: " . $firewallError);
 };
 
 $radiiLog "WireGuard firewall access rules configured";
@@ -580,7 +644,8 @@ $radiiLog "WireGuard firewall access rules configured";
 # HTTP REST is intentionally restricted to the WireGuard server even when
 # optional IP service lockdown is disabled. WireGuard encrypts this traffic;
 # no HTTPS certificate or TLS verification bypass is needed.
-:do {
+:local monitorStage "monitoring group";
+:onerror monitorError in={
     :local monitorGroup [/user/group/find where name="radii-monitor"];
     :if ([:len $monitorGroup] = 0) do={
         /user/group/add name="radii-monitor" policy=read,api,rest-api;
@@ -590,6 +655,7 @@ $radiiLog "WireGuard firewall access rules configured";
             policy=read,api,rest-api,!local,!telnet,!ssh,!ftp,!reboot,!write,!policy,!test,!winbox,!password,!web,!sniff,!sensitive,!romon;
     };
 
+    :set monitorStage "monitoring user (check administrator permissions and password policy)";
     :local monitorUser [/user/find where name="radii-monitor"];
     :if ([:len $monitorUser] = 0) do={
         /user/add name="radii-monitor" group="radii-monitor" \
@@ -601,16 +667,21 @@ $radiiLog "WireGuard firewall access rules configured";
             disabled=no comment="radii session monitoring";
     };
 
-    :local monitorWeb [/ip/service/find where name="www"];
+    :set monitorStage "HTTP REST service";
+    # Ignore dynamic listeners/connections shown by newer RouterOS versions.
+    :local monitorWeb [/ip/service/find where name="www" && dynamic=no];
     :if ([:len $monitorWeb] != 1) do={
         :error "HTTP REST service not found";
     };
+    :set monitorStage "HTTP REST port";
     /ip/service/set $monitorWeb port=80;
+    :set monitorStage "HTTP REST WireGuard access restriction";
     $radiiEnableService $monitorWeb "{{WG_ALLOWED_ADDRESS}}";
 
     # Newer RouterOS versions can separately disable plain REST. Parse the
     # optional command so older versions without this menu remain supported;
     # an execution failure on a supported version still aborts provisioning.
+    :set monitorStage "plain REST endpoint";
     :local restPlainSetup;
     :do {
         :set restPlainSetup [:parse "/ip/service/webserver/set rest-plain=yes"];
@@ -618,9 +689,9 @@ $radiiLog "WireGuard firewall access rules configured";
     :if ([:typeof $restPlainSetup] = "code") do={
         $restPlainSetup;
     };
-} on-error={
-    $radiiLog "ERROR - session monitoring provisioning failed; device report skipped";
-    :error "radii session monitoring provisioning failed";
+} do={
+    $radiiLog ("ERROR - session monitoring failed at " . $monitorStage . ": " . $monitorError . "; device report skipped");
+    :error ("radii session monitoring provisioning failed at " . $monitorStage . ": " . $monitorError);
 };
 
 $radiiLog "Read-only session monitoring configured (HTTP REST over WireGuard only)";
@@ -699,6 +770,12 @@ $radiiLog "Read-only session monitoring configured (HTTP REST over WireGuard onl
     :local hsGatewayAddress "{{HOTSPOT_ADDRESS}}";
     :local existingHsAddress [/ip/address/find where address=$hsGatewayAddress];
 
+    :foreach hsAddressId in=$existingHsAddress do={
+        :if ([/ip/address/get $hsAddressId interface] != $hsIf) do={
+            :error "radii HotSpot subnet conflicts with an address on another interface; choose a separate subnet";
+        };
+    };
+
     :if ([:len $existingHsAddress] = 0) do={
         /ip/address/add \
             address=$hsGatewayAddress \
@@ -764,8 +841,8 @@ $radiiLog "Read-only session monitoring configured (HTTP REST over WireGuard onl
         };
     };
 
-    # Do NOT modify the built-in "default" HotSpot profile.\
-    # RADIUS can select the radii-default profile when appropriate.\
+    # Do NOT modify the built-in "default" HotSpot profile.
+    # RADIUS can select the radii-default profile when appropriate.
 
     # --- HotSpot server ----------------------------------------------
 
@@ -815,7 +892,7 @@ $radiiLog "Read-only session monitoring configured (HTTP REST over WireGuard onl
             disabled=no;
     };
 
-    # Remove duplicate managed HotSpot servers if any.\
+    # Remove duplicate managed HotSpot servers if any.
     :local duplicateHs [/ip/hotspot/find where name="radii-hotspot"];
 
     :if ([:len $duplicateHs] > 1) do={
@@ -828,18 +905,29 @@ $radiiLog "Read-only session monitoring configured (HTTP REST over WireGuard onl
 
     :local dhcpIds [/ip/dhcp-server/find where name="radii-hs-dhcp"];
 
+    # Quick Set may already have a DHCP server on the selected interface.
+    :if ([:len $dhcpIds] = 0) do={
+        :set dhcpIds [/ip/dhcp-server/find where interface=$hsIf && dynamic=no && relay=0.0.0.0];
+        :if ([:len $dhcpIds] > 1) do={
+            :error "radii HotSpot interface has multiple existing DHCP servers; refusing to remove unrelated servers";
+        };
+    };
+
     :if ([:len $dhcpIds] = 0) do={
         /ip/dhcp-server/add \
             name="radii-hs-dhcp" \
             interface=$hsIf \
             address-pool="radii-hs-pool" \
+            relay=0.0.0.0 \
             lease-time=1h \
             disabled=no \
             comment="radii managed";
     } else={
         /ip/dhcp-server/set [:pick $dhcpIds 0] \
+            name="radii-hs-dhcp" \
             interface=$hsIf \
             address-pool="radii-hs-pool" \
+            relay=0.0.0.0 \
             lease-time=1h \
             comment="radii managed" \
             disabled=no;
@@ -859,11 +947,32 @@ $radiiLog "Read-only session monitoring configured (HTTP REST over WireGuard onl
         /ip/dhcp-server/network/remove $dhcpNetworkIds;
     };
 
-    /ip/dhcp-server/network/add \
-        address={{HOTSPOT_NETWORK}} \
-        gateway={{HOTSPOT_GATEWAY}} \
-        dns-server={{HOTSPOT_GATEWAY}} \
-        comment="radii hotspot network";
+    :local existingDhcpNetwork [/ip/dhcp-server/network/find where address="{{HOTSPOT_NETWORK}}"];
+    :if ([:len $existingDhcpNetwork] = 0) do={
+        /ip/dhcp-server/network/add \
+            address={{HOTSPOT_NETWORK}} \
+            gateway={{HOTSPOT_GATEWAY}} \
+            dns-server={{HOTSPOT_GATEWAY}} \
+            comment="radii hotspot network";
+    } else={
+        /ip/dhcp-server/network/set $existingDhcpNetwork \
+            gateway={{HOTSPOT_GATEWAY}} \
+            dns-server={{HOTSPOT_GATEWAY}} \
+            comment="radii hotspot network";
+    };
+
+    # Detached Quick Set LAN ports are no longer members of its LAN list.
+    # Permit only the required router services, not general management access.
+    /ip/firewall/filter/remove [find where comment~"^radii: hotspot (dns|dhcp)"];
+    :local hsDnsTcpId [/ip/firewall/filter/add chain=input in-interface=$hsIf \
+        protocol=tcp dst-port=53 action=accept comment="radii: hotspot dns tcp"];
+    :local hsDnsUdpId [/ip/firewall/filter/add chain=input in-interface=$hsIf \
+        protocol=udp dst-port=53 action=accept comment="radii: hotspot dns udp"];
+    :local hsDhcpId [/ip/firewall/filter/add chain=input in-interface=$hsIf \
+        protocol=udp dst-port=67 action=accept comment="radii: hotspot dhcp"];
+    $radiiMoveFilterFirst $hsDnsTcpId;
+    $radiiMoveFilterFirst $hsDnsUdpId;
+    $radiiMoveFilterFirst $hsDhcpId;
 
     # Ensure DHCP is enabled.
 
@@ -891,13 +1000,19 @@ $radiiLog "Read-only session monitoring configured (HTTP REST over WireGuard onl
             comment="radii: hotspot masquerade";
     };
 
-    # Remove duplicate managed NAT entries.\
+    # Remove duplicate managed NAT entries.
     :local duplicateNat [/ip/firewall/nat/find where comment="radii: hotspot masquerade"];
 
     :if ([:len $duplicateNat] > 1) do={
         :for i from=1 to=([:len $duplicateNat] - 1) do={
             /ip/firewall/nat/remove [:pick $duplicateNat $i];
         };
+    };
+    :if ([:len [/interface/list/find where name="WAN"]] > 0) do={
+        /ip/firewall/nat/set [find where comment="radii: hotspot masquerade"] \
+            !out-interface out-interface-list="WAN";
+    } else={
+        $radiiLog "WARNING - no WAN interface list; HotSpot masquerade remains source-subnet scoped";
     };
 
     $radiiLog (\
@@ -930,6 +1045,10 @@ $radiiLog "Read-only session monitoring configured (HTTP REST over WireGuard onl
 };
 
 :local pppIf "{{PPP_INTERFACE}}";
+
+:if ([:len [/interface/list/find where name="radii-ppp"]] = 0) do={
+    /interface/list/add name="radii-ppp" comment="radii subscriber interfaces";
+};
 
 :if ([:len [/interface/find where name=$pppIf]] = 0) do={
 
@@ -983,18 +1102,10 @@ $radiiLog "Read-only session monitoring configured (HTTP REST over WireGuard onl
         /ip/address/remove $oldPppAddresses;
     };
 
-    :local pppGatewayAddress "{{PPP_ADDRESS}}";
-    :local existingPppAddress [/ip/address/find where address=$pppGatewayAddress];
-
-    :if ([:len $existingPppAddress] = 0) do={
-        /ip/address/add \
-            address=$pppGatewayAddress \
-            interface=$pppIf \
-            comment="radii pppoe gateway";
-    } else={
-        /ip/address/set [:pick $existingPppAddress 0] \
-            interface=$pppIf \
-            comment="radii pppoe gateway";
+    # The gateway belongs to PPP sessions, not the discovery Ethernet port.
+    # Ordinary IP access here would let clients bypass PPP authentication.
+    :if (([:len [/ip/address/find where interface=$pppIf && dynamic=no]] > 0) || ([:len [/ip/dhcp-server/find where interface=$pppIf && disabled=no]] > 0)) do={
+        :error "radii PPPoE discovery interface has unrelated IP/DHCP configuration; use a dedicated port or VLAN";
     };
 
     # --- PPP profile ----------------------------------------------------
@@ -1007,6 +1118,7 @@ $radiiLog "Read-only session monitoring configured (HTTP REST over WireGuard onl
             local-address={{PPP_GATEWAY}} \
             remote-address="radii-ppp-pool" \
             dns-server={{PPP_GATEWAY}} \
+            interface-list="radii-ppp" \
             use-compression=no \
             use-encryption=no \
             change-tcp-mss=yes \
@@ -1016,6 +1128,7 @@ $radiiLog "Read-only session monitoring configured (HTTP REST over WireGuard onl
             local-address={{PPP_GATEWAY}} \
             remote-address="radii-ppp-pool" \
             dns-server={{PPP_GATEWAY}} \
+            interface-list="radii-ppp" \
             use-compression=no \
             use-encryption=no \
             change-tcp-mss=yes \
@@ -1041,6 +1154,7 @@ $radiiLog "Read-only session monitoring configured (HTTP REST over WireGuard onl
             local-address={{PPP_GATEWAY}} \
             remote-address="radii-ppp-pool" \
             dns-server={{PPP_GATEWAY}} \
+            interface-list="radii-ppp" \
             address-list="radii-pppoe-expired" \
             rate-limit="{{PPP_EXPIRED_RATE_LIMIT}}" \
             use-ipv6=no \
@@ -1053,6 +1167,7 @@ $radiiLog "Read-only session monitoring configured (HTTP REST over WireGuard onl
             local-address={{PPP_GATEWAY}} \
             remote-address="radii-ppp-pool" \
             dns-server={{PPP_GATEWAY}} \
+            interface-list="radii-ppp" \
             address-list="radii-pppoe-expired" \
             rate-limit="{{PPP_EXPIRED_RATE_LIMIT}}" \
             use-ipv6=no \
@@ -1070,25 +1185,38 @@ $radiiLog "Read-only session monitoring configured (HTTP REST over WireGuard onl
 
     # --- PPPoE server ----------------------------------------------------
 
-    # max-mtu/max-mru follow the RouterOS manual guidance (underlying MTU
-    # reduced by 20) to avoid fragmentation. An empty service name means
-    # the server accepts any PADI; the property is only set when one is
-    # configured (it cannot be unset once present).
-   :local pppServiceName "{{PPP_SERVICE_NAME}}";
-
-    /interface/pppoe-server/server/remove \
-        [find where service-name=$pppServiceName];
-
-    /interface/pppoe-server/server/add \
-        service-name=$pppServiceName \
-        interface=$pppIf \
-        authentication=mschap2,mschap1,chap,pap \
-        max-mtu={{PPP_MTU}} \
-        max-mru={{PPP_MRU}} \
-        default-profile="radii-ppp" \
-        disabled=no \
-        one-session-per-host=yes \
-        keepalive-timeout=10;
+    :local pppServiceName "{{PPP_SERVICE_NAME}}";
+    :local pppServerIds [/interface/pppoe-server/server/find where comment="radii managed pppoe server"];
+    :if ([:len $pppServerIds] = 0) do={
+        # Older scripts had no ownership comment. The radii profile identifies
+        # their server even when the requested port or service name changes.
+        :set pppServerIds [/interface/pppoe-server/server/find where default-profile="radii-ppp" && comment=""];
+        :if ([:len $pppServerIds] > 1) do={
+            :error "radii found multiple untagged PPPoE servers using its profile; refusing ambiguous adoption";
+        };
+    };
+    :if ([:len $pppServerIds] = 0) do={
+        /interface/pppoe-server/server/add \
+            service-name=$pppServiceName interface=$pppIf \
+            authentication=mschap2,mschap1,chap,pap \
+            max-mtu={{PPP_MTU}} max-mru={{PPP_MRU}} \
+            default-profile="radii-ppp" disabled=no \
+            one-session-per-host=yes keepalive-timeout=10 \
+            comment="radii managed pppoe server";
+    } else={
+        /interface/pppoe-server/server/set [:pick $pppServerIds 0] \
+            service-name=$pppServiceName interface=$pppIf \
+            authentication=mschap2,mschap1,chap,pap \
+            max-mtu={{PPP_MTU}} max-mru={{PPP_MRU}} \
+            default-profile="radii-ppp" disabled=no \
+            one-session-per-host=yes keepalive-timeout=10 \
+            comment="radii managed pppoe server";
+    };
+    :if ([:len $pppServerIds] > 1) do={
+        :for i from=1 to=([:len $pppServerIds] - 1) do={
+            /interface/pppoe-server/server/remove [:pick $pppServerIds $i];
+        };
+    };
 
     # --- NAT -----------------------------------------------------------
 
@@ -1114,6 +1242,12 @@ $radiiLog "Read-only session monitoring configured (HTTP REST over WireGuard onl
         :for i from=1 to=([:len $pppNatIds] - 1) do={
             /ip/firewall/nat/remove [:pick $pppNatIds $i];
         };
+    };
+    :if ([:len [/interface/list/find where name="WAN"]] > 0) do={
+        /ip/firewall/nat/set [find where comment="radii: pppoe masquerade"] \
+            !out-interface out-interface-list="WAN";
+    } else={
+        $radiiLog "WARNING - no WAN interface list; PPPoE masquerade remains source-subnet scoped";
     };
 
     $radiiLog (\
@@ -1292,19 +1426,38 @@ $radiiLog "Read-only session monitoring configured (HTTP REST over WireGuard onl
     to-ports=53 \
     comment="radii: pppoe expired dns udp"];
 
-:do {
+:onerror expiredNatError in={
+    :local expiredNatIds ($expiredDnsTcpNatId,$expiredDnsUdpNatId);
     :if ([:len $expiredHttpNatId] > 0) do={
-        /ip/firewall/nat/move $expiredHttpNatId 0;
+        :set expiredNatIds ($expiredNatIds,$expiredHttpNatId);
     };
-    /ip/firewall/nat/move $expiredDnsTcpNatId 0;
-    /ip/firewall/nat/move $expiredDnsUdpNatId 0;
-} on-error={
-    $radiiLog "WARNING - could not move expired PPPoE NAT rules";
+    :foreach expiredNatId in=$expiredNatIds do={
+        :local staticNatRules [/ip/firewall/nat/find where dynamic=no];
+        :local firstNatRule [:pick $staticNatRules 0];
+        :if ($firstNatRule != $expiredNatId) do={
+            /ip/firewall/nat/move $expiredNatId destination=$firstNatRule;
+        };
+    };
+} do={
+    $radiiLog ("ERROR - could not order expired PPPoE NAT rules: " . $expiredNatError);
+    :error ("radii expired PPPoE NAT setup failed: " . $expiredNatError);
 };
 
 # The router answers the intercepted DNS requests. These input rules and the
 # payment allow/drop pair are moved ahead of pre-existing firewall policy.
 /ip/dns/set allow-remote-requests=yes;
+
+# Replace old enforcement only after all new filter rules are ordered.
+:local oldPppExpiredFilter [/ip/firewall/filter/find where comment~"^radii: pppoe expired"];
+
+# Active PPP subscribers also need DNS through Quick Set's non-LAN drop.
+/ip/firewall/filter/remove [find where comment~"^radii: pppoe subscriber dns"];
+:local pppDnsTcpId [/ip/firewall/filter/add chain=input in-interface-list="radii-ppp" \
+    protocol=tcp dst-port=53 action=accept comment="radii: pppoe subscriber dns tcp"];
+:local pppDnsUdpId [/ip/firewall/filter/add chain=input in-interface-list="radii-ppp" \
+    protocol=udp dst-port=53 action=accept comment="radii: pppoe subscriber dns udp"];
+$radiiMoveFilterFirst $pppDnsTcpId;
+$radiiMoveFilterFirst $pppDnsUdpId;
 
 :local expiredDnsTcpFilterId [/ip/firewall/filter/add \
     chain=input \
@@ -1345,26 +1498,24 @@ $radiiLog "Read-only session monitoring configured (HTTP REST over WireGuard onl
     action=drop \
     comment="radii: pppoe expired drop"];
 
-# RouterOS cannot always move a second rule to absolute position 0 when
-# dynamic HotSpot rules occupy the head of the table. Move the drop as early
-# as RouterOS permits, then place both payment rules directly before it.
-:do {
-    /ip/firewall/filter/move $expiredDropFilterId 0;
+# Place enforcement before static established/related accepts, while leaving
+# RouterOS-owned dynamic HotSpot rules alone.
+:onerror expiredFilterError in={
+    $radiiMoveFilterFirst $expiredDropFilterId;
     /ip/firewall/filter/move \
         $expiredPaymentIcmpFilterId \
         destination=$expiredDropFilterId;
     /ip/firewall/filter/move \
         $expiredPaymentFilterId \
         destination=$expiredPaymentIcmpFilterId;
-} on-error={
-    $radiiLog "WARNING - could not order expired PPPoE forward rules";
+    $radiiMoveFilterFirst $expiredDnsTcpFilterId;
+    $radiiMoveFilterFirst $expiredDnsUdpFilterId;
+} do={
+    $radiiLog ("ERROR - could not order expired PPPoE filter rules: " . $expiredFilterError);
+    :error ("radii expired PPPoE firewall setup failed: " . $expiredFilterError);
 };
-
-:do {
-    /ip/firewall/filter/move $expiredDnsTcpFilterId 0;
-    /ip/firewall/filter/move $expiredDnsUdpFilterId 0;
-} on-error={
-    $radiiLog "WARNING - could not move expired PPPoE DNS rules";
+:if ([:len $oldPppExpiredFilter] > 0) do={
+    /ip/firewall/filter/remove $oldPppExpiredFilter;
 };
 
 $radiiLog ("Expired PPPoE payment access configured for " . $pppPortalHost);
