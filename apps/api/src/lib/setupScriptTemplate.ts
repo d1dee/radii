@@ -42,7 +42,7 @@ export function escapeRosQuoted(value: string): string {
         .replace(/"/g, '\\"')
         .replace(/\r/g, '')
         .replace(/\n/g, '\\n')
-        .replace(/\$\(/g, '\\$(');
+        .replace(/\$/g, '\\$');
 }
 
 // Values interpolated into `#` comment headers cannot be escaped (a comment
@@ -457,6 +457,12 @@ $radiiLog "NTP synchronized; continuing setup";
         :error "radii HotSpot requires a single static direct DHCP server; existing DHCP configuration is incompatible";
     };
 };
+:if (([:len [/ip/hotspot/find where name="radii-hotspot"]] > 0) && ([:len [/ip/hotspot/find where interface=$setupHsIf && name!="radii-hotspot"]] > 0)) do={
+    :error "radii HotSpot target interface already has an unrelated HotSpot server";
+};
+:if ([:len [/ip/hotspot/find where interface=$setupHsIf]] > 1) do={
+    :error "radii HotSpot target interface has multiple servers; refusing ambiguous adoption";
+};
 
 # ---------------------------------------------------------------------
 # 2. Device facts
@@ -551,11 +557,13 @@ $radiiLog ("WireGuard public key: " . $wgPubKey);
     /ip/address/add \
         address=$wgAddress \
         interface=$wgName \
+        disabled=no \
         comment="radii mgmt";
 } else={
     /ip/address/set [:pick $existingWgAddress 0] \
         address=$wgAddress \
         interface=$wgName \
+        disabled=no \
         comment="radii mgmt";
 };
 
@@ -569,11 +577,16 @@ $radiiLog ("WireGuard public key: " . $wgPubKey);
 
 # --- WireGuard peer ---------------------------------------------------
 
-:local wgPeerIds [/interface/wireguard/peers/find where interface=$wgName && (name="radii-server" || comment="radii server peer")];
+:local wgPeerIds [/interface/wireguard/peers/find where interface=$wgName && comment="radii server peer"];
+# Remove owned duplicates before updating allowed-address (overlap is rejected).
+:if ([:len $wgPeerIds] > 1) do={
+    :for i from=1 to=([:len $wgPeerIds] - 1) do={
+        /interface/wireguard/peers/remove [:pick $wgPeerIds $i];
+    };
+};
 :if ([:len $wgPeerIds] = 0) do={
     /interface/wireguard/peers/add \
         interface=$wgName \
-        name="radii-server" \
         endpoint-address="{{WG_ENDPOINT_HOST}}" \
         endpoint-port={{WG_ENDPOINT_PORT}} \
         public-key="{{WG_SERVER_PUBLIC_KEY}}" \
@@ -584,7 +597,6 @@ $radiiLog ("WireGuard public key: " . $wgPubKey);
         comment="radii server peer";
 } else={
     /interface/wireguard/peers/set [:pick $wgPeerIds 0] \
-        name="radii-server" \
         endpoint-address="{{WG_ENDPOINT_HOST}}" \
         endpoint-port={{WG_ENDPOINT_PORT}} \
         public-key="{{WG_SERVER_PUBLIC_KEY}}" \
@@ -700,7 +712,7 @@ $radiiLog "Read-only session monitoring configured (HTTP REST over WireGuard onl
 # 7. Report device facts + WireGuard public key
 # ---------------------------------------------------------------------
 
-:do {
+:onerror reportError in={
     :local encKey [:convert $wgPubKey to=url];
     :local encModel [:convert $devModel to=url];
     :local encSerial [:convert $devSerial to=url];
@@ -710,16 +722,15 @@ $radiiLog "Read-only session monitoring configured (HTTP REST over WireGuard onl
 
     /tool/fetch \
         url="{{NAS_REPORT_URL}}" \
+        check-certificate=yes \
         http-method=post \
         output=none \
         http-data=("nasId={{NAS_ID}}" ."&token={{BOOTSTRAP_TOKEN}}" ."&publicKey=" . $encKey ."&model=" . $encModel ."&serialNumber=" . $encSerial ."&firmwareVersion=" . $encVersion ."&boardName=" . $encBoard . "&architecture=" . $encArch);
 
     $radiiLog "Device facts and WireGuard public key reported";
-} on-error={
-    $radiiLog (\
-        "WARNING - auto-report failed; WireGuard public key is: " .\
-        $wgPubKey\
-    );
+} do={
+    $radiiLog ("ERROR - device report failed: " . $reportError . "; WireGuard public key is: " . $wgPubKey);
+    :error ("radii device report failed: " . $reportError);
 };
 
 # ---------------------------------------------------------------------
@@ -795,7 +806,6 @@ $radiiLog "Read-only session monitoring configured (HTTP REST over WireGuard onl
         /ip/hotspot/profile/add \
             name="radii-hs" \
             dns-name="{{HOTSPOT_DNS_NAME}}" \
-            html-directory=radii-hs \
             login-by=http-chap,http-pap \
             use-radius=yes \
             radius-accounting=yes \
@@ -804,7 +814,6 @@ $radiiLog "Read-only session monitoring configured (HTTP REST over WireGuard onl
     } else={
         /ip/hotspot/profile/set [:pick $hsProfileIds 0] \
             dns-name="{{HOTSPOT_DNS_NAME}}" \
-            html-directory=radii-hs \
             login-by=http-chap,http-pap \
             use-radius=yes \
             radius-accounting=yes \
@@ -919,6 +928,8 @@ $radiiLog "Read-only session monitoring configured (HTTP REST over WireGuard onl
             interface=$hsIf \
             address-pool="radii-hs-pool" \
             relay=0.0.0.0 \
+            use-radius=no \
+            server-address={{HOTSPOT_GATEWAY}} \
             lease-time=1h \
             disabled=no \
             comment="radii managed";
@@ -928,6 +939,8 @@ $radiiLog "Read-only session monitoring configured (HTTP REST over WireGuard onl
             interface=$hsIf \
             address-pool="radii-hs-pool" \
             relay=0.0.0.0 \
+            use-radius=no \
+            server-address={{HOTSPOT_GATEWAY}} \
             lease-time=1h \
             comment="radii managed" \
             disabled=no;
@@ -1347,52 +1360,49 @@ $radiiLog "Read-only session monitoring configured (HTTP REST over WireGuard onl
 
 # Address-list hostnames are maintained by RouterOS DNS, so HTTPS access keeps
 # following DNS changes even when the HTTP redirect uses a pinned/resolved IP.
-:local oldPppPaymentAddresses [/ip/firewall/address-list/find where comment~"^radii: pppoe payment"];
+:local oldPppPaymentAddresses [/ip/firewall/address-list/find where list="radii-pppoe-payment" && dynamic=no && comment~"^radii: pppoe payment"];
 :if ([:len $oldPppPaymentAddresses] > 0) do={
     /ip/firewall/address-list/remove $oldPppPaymentAddresses;
 };
 
-/ip/firewall/address-list/add \
-    list="radii-pppoe-payment" \
-    address=$pppPortalHost \
-    comment="radii: pppoe payment portal";
-
-:if ([:len $pppPortalAddress] > 0) do={
-    :if ($pppPortalAddress != $pppPortalHost) do={
-        # Adding the hostname above creates a dynamic entry for its resolved
-        # address. Add a separately configured redirect IP only when it is not
-        # already covered, otherwise RouterOS rejects it as a duplicate.
-        :local existingPppPortalAddress [/ip/firewall/address-list/find \
-            where list="radii-pppoe-payment" && address=$pppPortalAddress];
-        :if ([:len $existingPppPortalAddress] = 0) do={
+# DNS can add an address between find and add. Suppress an add failure only
+# when the requested entry now exists; propagate all other provisioning errors.
+:local radiiEnsurePaymentAddress do={
+    :local paymentAddress $1;
+    :local paymentComment $2;
+    :if ([:len [/ip/firewall/address-list/find where list="radii-pppoe-payment" && address=$paymentAddress && disabled=no]] = 0) do={
+        :onerror paymentAddressError in={
             /ip/firewall/address-list/add \
                 list="radii-pppoe-payment" \
-                address=$pppPortalAddress \
-                comment="radii: pppoe payment redirect address";
+                address=$paymentAddress \
+                comment=$paymentComment;
+        } do={
+            :if ([:len [/ip/firewall/address-list/find where list="radii-pppoe-payment" && address=$paymentAddress && disabled=no]] = 0) do={
+                :error ("radii payment address-list entry " . $paymentAddress . " failed: " . $paymentAddressError);
+            };
         };
     };
 };
 
+$radiiEnsurePaymentAddress $pppPortalHost "radii: pppoe payment portal";
+
+:if ([:len $pppPortalAddress] > 0) do={
+    :if ($pppPortalAddress != $pppPortalHost) do={
+        $radiiEnsurePaymentAddress $pppPortalAddress "radii: pppoe payment redirect address";
+    };
+};
+
 :if ($walledApiHost != $pppPortalHost) do={
-    /ip/firewall/address-list/add \
-        list="radii-pppoe-payment" \
-        address=$walledApiHost \
-        comment="radii: pppoe payment api";
+    $radiiEnsurePaymentAddress $walledApiHost "radii: pppoe payment api";
 };
 
 # Let Windows complete its initial Network Connectivity Status Indicator
 # probes without redirecting them to the payment portal. RouterOS maintains
 # these hostname-backed entries as their DNS answers change.
-/ip/firewall/address-list/add \
-    list="radii-pppoe-payment" \
-    address="www.msftconnecttest.com" \
-    comment="radii: pppoe payment ncsi connect test";
+$radiiEnsurePaymentAddress "www.msftconnecttest.com" "radii: pppoe payment ncsi connect test";
 
 # Recreate only radii-managed expired-subscriber NAT rules.
 :local oldPppExpiredNat [/ip/firewall/nat/find where comment~"^radii: pppoe expired"];
-:if ([:len $oldPppExpiredNat] > 0) do={
-    /ip/firewall/nat/remove $oldPppExpiredNat;
-};
 
 :local expiredHttpNatId "";
 :if ([:len $pppPortalAddress] > 0) do={
@@ -1441,6 +1451,9 @@ $radiiLog "Read-only session monitoring configured (HTTP REST over WireGuard onl
 } do={
     $radiiLog ("ERROR - could not order expired PPPoE NAT rules: " . $expiredNatError);
     :error ("radii expired PPPoE NAT setup failed: " . $expiredNatError);
+};
+:if ([:len $oldPppExpiredNat] > 0) do={
+    /ip/firewall/nat/remove $oldPppExpiredNat;
 };
 
 # The router answers the intercepted DNS requests. These input rules and the
@@ -1534,57 +1547,61 @@ $radiiLog ("Expired PPPoE payment access configured for " . $pppPortalHost);
     :set encHsToken $hsToken;
 };
 
-:do {
-    # Remove exact managed targets first so every download replaces the prior
-    # page instead of depending on RouterOS fetch collision behavior.
-    :local hsPagePaths {
-        "radii-hs/login.html";
-        "radii-hs/alogin.html";
-        "radii-hs/status.html";
-        "radii-hs/logout.html";
-        "radii-hs/error.html";
-        "radii-hs/radvert.html";
-        "radii-hs/redirect.html";
+:local hsPageStage "page directory";
+:onerror hsPageError in={
+    # Devices exposing flash keep everything outside it on a volatile RAM disk.
+    :local hsHtmlDirectory "radii-hs";
+    :if ([:len [/file/find where name="flash" && type="directory"]] > 0) do={
+        :set hsHtmlDirectory "flash/radii-hs";
+    };
+    :if ([:len [/file/find where name=$hsHtmlDirectory]] = 0) do={
+        /file/add name=$hsHtmlDirectory type=directory;
+    };
+    :local hsPageNames {
+        "login.html";
+        "alogin.html";
+        "status.html";
+        "logout.html";
+        "error.html";
+        "radvert.html";
+        "redirect.html";
     };
 
-    :foreach hsPagePath in=$hsPagePaths do={
+    # Stage every download before deleting any working page on a rerun.
+    :foreach hsPageName in=$hsPageNames do={
+        :set hsPageStage ("download " . $hsPageName);
+        :local hsTempPath ($hsHtmlDirectory . "/" . $hsPageName . ".new");
+        :local oldHsTemp [/file/find where name=$hsTempPath];
+        :if ([:len $oldHsTemp] > 0) do={
+            /file/remove $oldHsTemp;
+        };
+        /tool/fetch \
+            url=($hsBaseUrl . "/" . $hsPageName . "?token=" . $encHsToken) \
+            check-certificate=yes \
+            dst-path=$hsTempPath;
+        :if ([/file/get [find where name=$hsTempPath] size] = 0) do={
+            :error "downloaded page is empty";
+        };
+    };
+
+    :foreach hsPageName in=$hsPageNames do={
+        :set hsPageStage ("install " . $hsPageName);
+        :local hsPagePath ($hsHtmlDirectory . "/" . $hsPageName);
+        :local hsTempPath ($hsPagePath . ".new");
         :local oldHsPage [/file/find where name=$hsPagePath];
         :if ([:len $oldHsPage] > 0) do={
             /file/remove $oldHsPage;
         };
+        /file/set [find where name=$hsTempPath] name=$hsPagePath;
     };
-
-    /tool/fetch \
-        url=($hsBaseUrl . "/login.html?token=" . $encHsToken) \
-        dst-path=radii-hs/login.html;
-
-    /tool/fetch \
-        url=($hsBaseUrl . "/alogin.html?token=" . $encHsToken) \
-        dst-path=radii-hs/alogin.html;
-
-    /tool/fetch \
-        url=($hsBaseUrl . "/status.html?token=" . $encHsToken) \
-        dst-path=radii-hs/status.html;
-
-    /tool/fetch \
-        url=($hsBaseUrl . "/logout.html?token=" . $encHsToken) \
-        dst-path=radii-hs/logout.html;
-
-    /tool/fetch \
-        url=($hsBaseUrl . "/error.html?token=" . $encHsToken) \
-        dst-path=radii-hs/error.html;
-
-    /tool/fetch \
-        url=($hsBaseUrl . "/radvert.html?token=" . $encHsToken) \
-        dst-path=radii-hs/radvert.html;
-
-    /tool/fetch \
-        url=($hsBaseUrl . "/redirect.html?token=" . $encHsToken) \
-        dst-path=radii-hs/redirect.html;
+    :set hsPageStage "HotSpot HTML directory";
+    /ip/hotspot/profile/set [find where name="radii-hs"] \
+        html-directory=$hsHtmlDirectory html-directory-override="";
 
     $radiiLog "Branded HotSpot pages downloaded";
-} on-error={
-    $radiiLog "WARNING - branded HotSpot pages could not be downloaded";
+} do={
+    $radiiLog ("ERROR - branded HotSpot pages failed at " . $hsPageStage . ": " . $hsPageError);
+    :error ("radii branded HotSpot page setup failed at " . $hsPageStage . ": " . $hsPageError);
 };
 
 # ---------------------------------------------------------------------
