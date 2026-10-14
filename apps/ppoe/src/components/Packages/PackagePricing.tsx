@@ -9,8 +9,7 @@ import {
     Stack,
     Text,
 } from '@mantine/core';
-import { upperFirstCase } from '@radii/shared';
-import { dayjs } from '../../lib/dayjs.ts';
+import { formatDuration, upperFirstCase } from '@radii/shared';
 
 import humanFormat from 'human-format';
 import { useContext, useState } from 'react';
@@ -176,9 +175,10 @@ export function PackagePricing({
                         const downloadRate = formatPackageRate(
                             pkg.downloadRate,
                         );
-                        const expiry = pkg.noExpiry
-                            ? 'No Expiry'
-                            : dayjs.duration(pkg.sessionLength, 'm').humanize();
+                        const expiry = formatDuration(
+                            pkg.sessionLength * 60,
+                            pkg.noExpiry,
+                        );
 
                         return (
                             <Card

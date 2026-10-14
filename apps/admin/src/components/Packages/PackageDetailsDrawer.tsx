@@ -31,6 +31,7 @@ import {
     formatPackageQuota,
     formatPackageRate,
     formatPaymentAmount,
+    formatSeconds,
 } from '@/lib/format';
 import { useAdminSettings } from '@/lib/settings';
 
@@ -207,9 +208,10 @@ export function PackageDetailsDrawer({
                             <DetailItem
                                 label='Session Length'
                                 value={
-                                    pkg.noExpiry
-                                        ? 'No expiry'
-                                        : `${pkg.sessionLength} min`
+                                    formatSeconds(
+                                        pkg.sessionLength * 60,
+                                        pkg.noExpiry,
+                                    )
                                 }
                             />
                         </Grid.Col>
@@ -266,7 +268,7 @@ export function PackageDetailsDrawer({
                                 label='Burst Period'
                                 value={
                                     pkg.burstTime > 0
-                                        ? `${pkg.burstTime} seconds`
+                                        ? formatSeconds(pkg.burstTime)
                                         : '—'
                                 }
                             />

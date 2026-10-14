@@ -3,6 +3,7 @@
 // until they load, the defaults below apply.
 
 import type { AdminSettings } from '@shared/index';
+import { formatDuration } from '@shared/utils/duration';
 import type { ConfigType } from 'dayjs';
 import { dayjs } from './dayjs';
 
@@ -131,19 +132,7 @@ export function formatPackageRate(rateKbps: number): string {
     })} ${units[unit]}`;
 }
 
-// Human duration from seconds ("45s", "12m", "3h 24m", "2d 4h").
-export function formatSeconds(totalSeconds: number): string {
-    if (!Number.isFinite(totalSeconds) || totalSeconds <= 0) return '0s';
-    const seconds = Math.round(totalSeconds);
-    const days = Math.floor(seconds / 86400);
-    const hours = Math.floor((seconds % 86400) / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
-    const secs = seconds % 60;
-    if (days > 0) return `${days}d ${hours}h`;
-    if (hours > 0) return `${hours}h ${minutes}m`;
-    if (minutes > 0) return `${minutes}m ${secs}s`;
-    return `${secs}s`;
-}
+export { formatDuration as formatSeconds };
 
 // Bits per second into a readable rate, scaled through Kbps/Mbps/Gbps/Tbps.
 export function formatSpeed(bps: number): string {

@@ -258,7 +258,7 @@ export function HavingIssues({ adminContacts }: Props) {
                                             {activationDetails.noExpiry ? 'Validity ends' : 'Expires'}:{' '}
                                             {activationDetails.expireAt
                                                 ? new Date(activationDetails.expireAt).toLocaleString()
-                                                : 'No expiry'}
+                                                : 'Unlimited'}
                                         </Text>
                                         <Text
                                             size='sm'

@@ -44,6 +44,7 @@ import {
     formatPackagePrice,
     formatPackageQuota,
     formatPackageRate,
+    formatSeconds,
 } from '@/lib/format';
 import { notifyResult } from '@/lib/notify';
 import { useAdminSettings } from '@/lib/settings';
@@ -373,9 +374,10 @@ export default function PackagesPage() {
                                             {formatPackagePrice(pkg.price)}
                                         </Table.Td>
                                         <Table.Td>
-                                            {pkg.noExpiry
-                                                ? '—'
-                                                : `${pkg.sessionLength} min`}
+                                            {formatSeconds(
+                                                pkg.sessionLength * 60,
+                                                pkg.noExpiry,
+                                            )}
                                         </Table.Td>
                                         <Table.Td>{pkg.maxDevices}</Table.Td>
                                         <Table.Td>
@@ -396,7 +398,7 @@ export default function PackagesPage() {
                                         </Table.Td>
                                         <Table.Td>
                                             {pkg.noExpiry
-                                                ? 'No expiry'
+                                                ? 'Unlimited'
                                                 : 'Expires'}
                                         </Table.Td>
                                         <Table.Td>
