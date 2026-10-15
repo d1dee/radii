@@ -99,6 +99,27 @@ body {
     font-size: var(--mantine-font-size-md);
 }
 
+.admin-panel-close {
+    flex-shrink: 0;
+    align-self: flex-start;
+    min-width: 44px;
+    min-height: 44px;
+    margin-inline-start: 20px;
+    border: 1px solid var(--mantine-color-default-border);
+    border-radius: var(--mantine-radius-md);
+    background: var(--mantine-color-default);
+    color: var(--mantine-color-text);
+}
+
+.admin-panel-close:hover {
+    background: var(--mantine-color-default-hover);
+}
+
+.admin-panel-close:focus-visible {
+    outline: 2px solid var(--mantine-color-blue-6);
+    outline-offset: 3px;
+}
+
 .admin-table-scroll {
     max-width: 100%;
     min-width: 0;

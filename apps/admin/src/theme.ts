@@ -57,8 +57,15 @@ export const adminTheme = createTheme({
         }),
         Drawer: Drawer.extend({
             defaultProps: {
-                classNames: { title: 'admin-dialog-title' },
-                closeButtonProps: { 'aria-label': 'Close panel' },
+                classNames: {
+                    title: 'admin-dialog-title',
+                    close: 'admin-panel-close',
+                },
+                closeButtonProps: {
+                    'aria-label': 'Close panel',
+                    size: 44,
+                    iconSize: 24,
+                },
             },
         }),
         Modal: Modal.extend({
