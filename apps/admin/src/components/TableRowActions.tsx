@@ -30,7 +30,7 @@ export function TableRowActions({
 
     return (
         <>
-            <Group justify='flex-end' gap={gap} wrap='nowrap' visibleFrom='sm'>
+            <Group justify='flex-end' gap={gap} wrap='nowrap' visibleFrom='md'>
                 {actions.map((action) => (
                     <Tooltip key={action.label} label={action.label}>
                         <ActionIcon
@@ -52,7 +52,7 @@ export function TableRowActions({
             <Menu position='bottom-end' shadow='md' width={240} withinPortal>
                 <Menu.Target>
                     <ActionIcon
-                        hiddenFrom='sm'
+                        hiddenFrom='md'
                         display='flex'
                         mx='auto'
                         variant='light'
