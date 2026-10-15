@@ -1,5 +1,4 @@
 import {
-    ActionIcon,
     Badge,
     Button,
     Card,
@@ -14,7 +13,6 @@ import {
     Text,
     TextInput,
     Title,
-    Tooltip,
     UnstyledButton,
 } from '@mantine/core';
 import { useDebouncedValue } from '@mantine/hooks';
@@ -52,6 +50,7 @@ import {
 } from '@/lib/format';
 import { notifyResult } from '@/lib/notify';
 import { useAdminSettings } from '@/lib/settings';
+import { TableRowActions } from '../components/TableRowActions';
 
 function SummaryCard({ label, value }: { label: string; value: string }) {
     return (
@@ -478,39 +477,26 @@ export default function SessionsPage() {
                                     </Table.Td>
                                     <Table.Td className='admin-table-actions'>
                                         {s.live ? (
-                                            <Group
-                                                justify='flex-end'
+                                            <TableRowActions
                                                 gap={4}
-                                                wrap='nowrap'
-                                            >
-                                                <Tooltip label='Adjust session'>
-                                                    <ActionIcon
-                                                        variant='light'
-                                                        aria-label='Edit session'
-                                                        onClick={(event) => {
-                                                            event.stopPropagation();
-                                                            setEditSession(s);
-                                                        }}
-                                                    >
-                                                        <MdEdit size={16} />
-                                                    </ActionIcon>
-                                                </Tooltip>
-                                                <Tooltip label='Disconnect'>
-                                                    <ActionIcon
-                                                        variant='light'
-                                                        color='red'
-                                                        aria-label='Disconnect session'
-                                                        onClick={(event) => {
-                                                            event.stopPropagation();
-                                                            setConfirmDisconnect(
-                                                                s,
-                                                            );
-                                                        }}
-                                                    >
-                                                        <MdDelete size={16} />
-                                                    </ActionIcon>
-                                                </Tooltip>
-                                            </Group>
+                                                actions={[
+                                                    {
+                                                        label: 'Adjust session',
+                                                        ariaLabel: 'Edit session',
+                                                        icon: <MdEdit size={16} />,
+                                                        onClick: () =>
+                                                            setEditSession(s),
+                                                    },
+                                                    {
+                                                        label: 'Disconnect',
+                                                        ariaLabel: 'Disconnect session',
+                                                        icon: <MdDelete size={16} />,
+                                                        color: 'red',
+                                                        onClick: () =>
+                                                            setConfirmDisconnect(s),
+                                                    },
+                                                ]}
+                                            />
                                         ) : (
                                             <Text ta='right' c='dimmed'>
                                                 —

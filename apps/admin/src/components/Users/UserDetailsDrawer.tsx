@@ -22,7 +22,6 @@ import {
     TextInput,
     Textarea,
     Title,
-    Tooltip,
 } from '@mantine/core';
 import { DateTimePicker } from '@mantine/dates';
 import type { ReactNode } from 'react';
@@ -86,6 +85,7 @@ import {
 } from '@/lib/format';
 import { notifyResult } from '@/lib/notify';
 import { useAdminSettings } from '@/lib/settings';
+import { TableRowActions } from '../TableRowActions';
 
 const PAYMENT_BADGE: Record<string, { color: string; label: string }> = {
     paid: { color: 'green', label: 'Paid' },
@@ -1164,58 +1164,32 @@ export function UserDetailsDrawer({
                                                         </Text>
                                                     </Table.Td>
                                                     <Table.Td className='admin-table-actions'>
-                                                        <Group
-                                                            justify='flex-end'
+                                                        <TableRowActions
                                                             gap={4}
-                                                            wrap='nowrap'
-                                                        >
-                                                            {a.deactivated ? (
-                                                                <Tooltip label='Reactivate with current limits'>
-                                                                    <ActionIcon
-                                                                        variant='light'
-                                                                        color='green'
-                                                                        aria-label='Activate'
-                                                                        loading={
-                                                                            busy
-                                                                        }
-                                                                        onClick={() =>
-                                                                            void doActivate(
-                                                                                a.activationId,
-                                                                            )
-                                                                        }
-                                                                    >
-                                                                        <MdPowerSettingsNew
-                                                                            size={
-                                                                                16
-                                                                            }
-                                                                        />
-                                                                    </ActionIcon>
-                                                                </Tooltip>
-                                                            ) : !a.expired ? (
-                                                                <Tooltip label='Deactivate'>
-                                                                    <ActionIcon
-                                                                        variant='light'
-                                                                        color='red'
-                                                                        aria-label='Deactivate'
-                                                                        onClick={() =>
-                                                                            setConfirmDeactivate(
-                                                                                a.activationId,
-                                                                            )
-                                                                        }
-                                                                    >
-                                                                        <MdBlock
-                                                                            size={
-                                                                                16
-                                                                            }
-                                                                        />
-                                                                    </ActionIcon>
-                                                                </Tooltip>
-                                                            ) : null}
-                                                            <Tooltip label='Edit expiry and time remaining'>
-                                                                <ActionIcon
-                                                                    variant='light'
-                                                                    aria-label='Edit activation limits'
-                                                                    onClick={() => {
+                                                            actions={[
+                                                                ...(a.deactivated
+                                                                    ? [{
+                                                                          label: 'Reactivate with current limits',
+                                                                          ariaLabel: 'Activate',
+                                                                          icon: <MdPowerSettingsNew size={16} />,
+                                                                          color: 'green',
+                                                                          loading: busy,
+                                                                          onClick: () => void doActivate(a.activationId),
+                                                                      }]
+                                                                    : !a.expired
+                                                                      ? [{
+                                                                            label: 'Deactivate',
+                                                                            ariaLabel: 'Deactivate',
+                                                                            icon: <MdBlock size={16} />,
+                                                                            color: 'red',
+                                                                            onClick: () => setConfirmDeactivate(a.activationId),
+                                                                        }]
+                                                                      : []),
+                                                                {
+                                                                    label: 'Edit expiry and time remaining',
+                                                                    ariaLabel: 'Edit activation limits',
+                                                                    icon: <MdEdit size={16} />,
+                                                                    onClick: () => {
                                                                         setExpiryEdit(
                                                                             {
                                                                                 activationId:
@@ -1241,16 +1215,10 @@ export function UserDetailsDrawer({
                                                                                     60,
                                                                             ),
                                                                         );
-                                                                    }}
-                                                                >
-                                                                    <MdEdit
-                                                                        size={
-                                                                            16
-                                                                        }
-                                                                    />
-                                                                </ActionIcon>
-                                                            </Tooltip>
-                                                        </Group>
+                                                                    },
+                                                                },
+                                                            ]}
+                                                        />
                                                     </Table.Td>
                                                 </Table.Tr>
                                             ))}

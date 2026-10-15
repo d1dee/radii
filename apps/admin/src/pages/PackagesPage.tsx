@@ -1,5 +1,4 @@
 import {
-    ActionIcon,
     Badge,
     Button,
     Card,
@@ -30,6 +29,7 @@ import {
 } from '@/components/SortableTableHeader';
 import { TablePagination } from '@/components/TablePagination';
 import { TableFilters } from '@/components/TableFilters';
+import { TableRowActions } from '@/components/TableRowActions';
 import {
     deleteAdminPackage,
     getAdminPackages,
@@ -430,33 +430,24 @@ export default function PackagesPage() {
                                             </Badge>
                                         </Table.Td>
                                         <Table.Td className='admin-table-actions'>
-                                            <Group
-                                                justify='flex-end'
+                                            <TableRowActions
                                                 gap='xs'
-                                                wrap='nowrap'
-                                            >
-                                                <ActionIcon
-                                                    variant='light'
-                                                    aria-label={`Edit ${pkg.title}`}
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        handleEdit(pkg);
-                                                    }}
-                                                >
-                                                    <MdEdit size={16} />
-                                                </ActionIcon>
-                                                <ActionIcon
-                                                    variant='light'
-                                                    color='red'
-                                                    aria-label={`Delete ${pkg.title}`}
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        openDeleteModal(pkg);
-                                                    }}
-                                                >
-                                                    <MdDelete size={16} />
-                                                </ActionIcon>
-                                            </Group>
+                                                actions={[
+                                                    {
+                                                        label: 'Edit package',
+                                                        ariaLabel: `Edit ${pkg.title}`,
+                                                        icon: <MdEdit size={16} />,
+                                                        onClick: () => handleEdit(pkg),
+                                                    },
+                                                    {
+                                                        label: 'Delete package',
+                                                        ariaLabel: `Delete ${pkg.title}`,
+                                                        icon: <MdDelete size={16} />,
+                                                        color: 'red',
+                                                        onClick: () => openDeleteModal(pkg),
+                                                    },
+                                                ]}
+                                            />
                                         </Table.Td>
                                     </Table.Tr>
                                 ))}

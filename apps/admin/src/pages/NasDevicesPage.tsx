@@ -1,5 +1,4 @@
 import {
-    ActionIcon,
     Alert,
     Badge,
     Box,
@@ -36,6 +35,7 @@ import {
 } from '@/components/SortableTableHeader';
 import { TablePagination } from '@/components/TablePagination';
 import { TableFilters } from '@/components/TableFilters';
+import { TableRowActions } from '@/components/TableRowActions';
 import {
     generateNasSetupScript,
     deleteNasDevice,
@@ -593,43 +593,30 @@ export default function NasDevicesPage() {
                                         </Badge>
                                     </Table.Td>
                                     <Table.Td className='admin-table-actions'>
-                                        <Group
-                                            justify='flex-end'
+                                        <TableRowActions
                                             gap='xs'
-                                            wrap='nowrap'
-                                        >
-                                            <ActionIcon
-                                                variant='light'
-                                                aria-label={`Setup script for ${device.name}`}
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    openScriptModal(device);
-                                                }}
-                                            >
-                                                <MdTerminal size={16} />
-                                            </ActionIcon>
-                                            <ActionIcon
-                                                variant='light'
-                                                aria-label={`Edit ${device.name}`}
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    handleEdit(device);
-                                                }}
-                                            >
-                                                <MdEdit size={16} />
-                                            </ActionIcon>
-                                            <ActionIcon
-                                                variant='light'
-                                                color='red'
-                                                aria-label={`Delete ${device.name}`}
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    openDeleteModal(device);
-                                                }}
-                                            >
-                                                <MdDelete size={16} />
-                                            </ActionIcon>
-                                        </Group>
+                                            actions={[
+                                                {
+                                                    label: 'Setup script',
+                                                    ariaLabel: `Setup script for ${device.name}`,
+                                                    icon: <MdTerminal size={16} />,
+                                                    onClick: () => openScriptModal(device),
+                                                },
+                                                {
+                                                    label: 'Edit device',
+                                                    ariaLabel: `Edit ${device.name}`,
+                                                    icon: <MdEdit size={16} />,
+                                                    onClick: () => handleEdit(device),
+                                                },
+                                                {
+                                                    label: 'Delete device',
+                                                    ariaLabel: `Delete ${device.name}`,
+                                                    icon: <MdDelete size={16} />,
+                                                    color: 'red',
+                                                    onClick: () => openDeleteModal(device),
+                                                },
+                                            ]}
+                                        />
                                     </Table.Td>
                                 </Table.Tr>
                             ))}

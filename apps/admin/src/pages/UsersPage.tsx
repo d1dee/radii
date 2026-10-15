@@ -18,7 +18,6 @@ import {
     Textarea,
     TextInput,
     Title,
-    Tooltip,
     UnstyledButton,
 } from '@mantine/core';
 import { useDebouncedValue } from '@mantine/hooks';
@@ -69,6 +68,7 @@ import { dayjs } from '@/lib/dayjs';
 import { formatDate, formatMoney } from '@/lib/format';
 import { notifyResult } from '@/lib/notify';
 import { useAdminSettings } from '@/lib/settings';
+import { TableRowActions } from '../components/TableRowActions';
 
 type TypeFilter = 'all' | PackageType;
 
@@ -774,105 +774,56 @@ export default function UsersPage() {
                                             </Text>
                                         </Table.Td>
                                         <Table.Td className='admin-table-actions'>
-                                            <Group
-                                                justify='flex-end'
-                                                gap={4}
-                                                wrap='nowrap'
-                                            >
-                                                {!u.pendingClaim ? (
-                                                    <>
-                                                        <Tooltip label='Edit name / location'>
-                                                            <ActionIcon
-                                                                variant='light'
-                                                                color='gray'
-                                                                aria-label={`Edit ${u.tag?.name || u.name}`}
-                                                                onClick={(
-                                                                    event,
-                                                                ) => {
-                                                                    event.stopPropagation();
-                                                                    openQuickAction(
-                                                                        u,
-                                                                        'edit',
-                                                                    );
-                                                                }}
-                                                            >
-                                                                <MdEdit
-                                                                    size={16}
-                                                                />
-                                                            </ActionIcon>
-                                                        </Tooltip>
-                                                        <Tooltip label='Flag user'>
-                                                            <ActionIcon
-                                                                variant='light'
-                                                                color='orange'
-                                                                aria-label={`Flag ${u.tag?.name || u.name}`}
-                                                                onClick={(
-                                                                    event,
-                                                                ) => {
-                                                                    event.stopPropagation();
-                                                                    openQuickAction(
-                                                                        u,
-                                                                        'flag',
-                                                                    );
-                                                                }}
-                                                            >
-                                                                <MdFlag
-                                                                    size={16}
-                                                                />
-                                                            </ActionIcon>
-                                                        </Tooltip>
-                                                        {u.banned ? (
-                                                            <Tooltip label='Unban user'>
-                                                                <ActionIcon
-                                                                    variant='light'
-                                                                    color='green'
-                                                                    aria-label={`Unban ${u.tag?.name || u.name}`}
-                                                                    disabled={
-                                                                        quickBusy
-                                                                    }
-                                                                    onClick={(
-                                                                        event,
-                                                                    ) => {
-                                                                        event.stopPropagation();
-                                                                        void submitQuickUnban(
-                                                                            u,
-                                                                        );
-                                                                    }}
-                                                                >
-                                                                    <MdCheckCircle
-                                                                        size={
-                                                                            16
-                                                                        }
-                                                                    />
-                                                                </ActionIcon>
-                                                            </Tooltip>
-                                                        ) : (
-                                                            <Tooltip label='Ban user'>
-                                                                <ActionIcon
-                                                                    variant='light'
-                                                                    color='red'
-                                                                    aria-label={`Ban ${u.tag?.name || u.name}`}
-                                                                    onClick={(
-                                                                        event,
-                                                                    ) => {
-                                                                        event.stopPropagation();
-                                                                        openQuickAction(
-                                                                            u,
-                                                                            'ban',
-                                                                        );
-                                                                    }}
-                                                                >
-                                                                    <MdBlock
-                                                                        size={
-                                                                            16
-                                                                        }
-                                                                    />
-                                                                </ActionIcon>
-                                                            </Tooltip>
-                                                        )}
-                                                    </>
-                                                ) : null}
-                                            </Group>
+                                            {!u.pendingClaim ? (
+                                                <TableRowActions
+                                                    gap={4}
+                                                    actions={[
+                                                        {
+                                                            label: 'Edit name / location',
+                                                            ariaLabel: `Edit ${u.tag?.name || u.name}`,
+                                                            icon: (
+                                                                <MdEdit size={16} />
+                                                            ),
+                                                            color: 'gray',
+                                                            onClick: () =>
+                                                                openQuickAction(u, 'edit'),
+                                                        },
+                                                        {
+                                                            label: 'Flag user',
+                                                            ariaLabel: `Flag ${u.tag?.name || u.name}`,
+                                                            icon: (
+                                                                <MdFlag size={16} />
+                                                            ),
+                                                            color: 'orange',
+                                                            onClick: () =>
+                                                                openQuickAction(u, 'flag'),
+                                                        },
+                                                        u.banned
+                                                            ? {
+                                                                  label: 'Unban user',
+                                                                  ariaLabel: `Unban ${u.tag?.name || u.name}`,
+                                                                  icon: (
+                                                                      <MdCheckCircle size={16} />
+                                                                  ),
+                                                                  color: 'green',
+                                                                  disabled: quickBusy,
+                                                                  onClick: () => {
+                                                                      void submitQuickUnban(u);
+                                                                  },
+                                                              }
+                                                            : {
+                                                                  label: 'Ban user',
+                                                                  ariaLabel: `Ban ${u.tag?.name || u.name}`,
+                                                                  icon: (
+                                                                      <MdBlock size={16} />
+                                                                  ),
+                                                                  color: 'red',
+                                                                  onClick: () =>
+                                                                      openQuickAction(u, 'ban'),
+                                                              },
+                                                    ]}
+                                                />
+                                            ) : null}
                                         </Table.Td>
                                     </Table.Tr>
                                 ))}
