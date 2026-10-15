@@ -1,5 +1,6 @@
 import {
     Badge,
+    Button,
     Card,
     Center,
     Divider,
@@ -14,6 +15,7 @@ import {
 } from '@mantine/core';
 import type { ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
+import { MdDelete, MdEdit } from 'react-icons/md';
 
 import { TablePagination } from '@/components/TablePagination';
 import {
@@ -86,9 +88,13 @@ function DetailItem({ label, value }: { label: string; value: ReactNode }) {
 export function PackageDetailsDrawer({
     packageId,
     onClose,
+    onEdit,
+    onDelete,
 }: {
     packageId: string | null;
     onClose: () => void;
+    onEdit: (pkg: PackageRow) => void;
+    onDelete: (pkg: PackageRow) => void;
 }) {
     const { settings } = useAdminSettings();
     const perPage = settings.dashboard.perPage;
@@ -171,9 +177,36 @@ export function PackageDetailsDrawer({
                 close: { flexShrink: 0 },
             }}
             title={
-                <Title component='span' order={4}>
-                    {pkg?.title ?? 'Package details'}
-                </Title>
+                <Group gap='xs' wrap='nowrap'>
+                    <Title
+                        component='span'
+                        order={4}
+                        style={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere' }}
+                    >
+                        {pkg?.title ?? 'Package details'}
+                    </Title>
+                    {pkg ? (
+                        <Group gap='xs' wrap='nowrap' style={{ flexShrink: 0 }}>
+                            <Button
+                                size='xs'
+                                variant='light'
+                                leftSection={<MdEdit size={16} />}
+                                onClick={() => onEdit(pkg)}
+                            >
+                                Edit
+                            </Button>
+                            <Button
+                                size='xs'
+                                variant='light'
+                                color='red'
+                                leftSection={<MdDelete size={16} />}
+                                onClick={() => onDelete(pkg)}
+                            >
+                                Delete
+                            </Button>
+                        </Group>
+                    ) : null}
+                </Group>
             }
         >
             {error ? (

@@ -220,6 +220,7 @@ export default function NasDevicesPage() {
     };
 
     const openScriptModal = async (device: NasDeviceRow) => {
+        setDetailsId(null);
         const requestId = ++scriptRequest.current;
         setScriptDevice(device);
         setScriptRow(null);
@@ -293,6 +294,17 @@ export default function NasDevicesPage() {
             scriptRow.script,
             'Setup script copied to clipboard',
         );
+    };
+
+    const handleEdit = (device: NasDeviceRow) => {
+        navigate(`/nas-devices/${device.id}/edit`);
+    };
+
+    const openDeleteModal = (device: NasDeviceRow) => {
+        setDetailsId(null);
+        setDeleteStep('warning');
+        setDeleteName('');
+        setDeleteTarget(device);
     };
 
     const handleDelete = async () => {
@@ -493,7 +505,12 @@ export default function NasDevicesPage() {
                                     sortDirection={sortDirection}
                                     onSort={handleSort}
                                 />
-                                <Table.Th ta='right'>Actions</Table.Th>
+                                <Table.Th
+                                    ta='right'
+                                    className='admin-table-actions'
+                                >
+                                    Actions
+                                </Table.Th>
                             </Table.Tr>
                         </Table.Thead>
                         <Table.Tbody>
@@ -575,7 +592,7 @@ export default function NasDevicesPage() {
                                             {device.status}
                                         </Badge>
                                     </Table.Td>
-                                    <Table.Td>
+                                    <Table.Td className='admin-table-actions'>
                                         <Group
                                             justify='flex-end'
                                             gap='xs'
@@ -596,9 +613,7 @@ export default function NasDevicesPage() {
                                                 aria-label={`Edit ${device.name}`}
                                                 onClick={(e) => {
                                                     e.stopPropagation();
-                                                    navigate(
-                                                        `/nas-devices/${device.id}/edit`,
-                                                    );
+                                                    handleEdit(device);
                                                 }}
                                             >
                                                 <MdEdit size={16} />
@@ -609,9 +624,7 @@ export default function NasDevicesPage() {
                                                 aria-label={`Delete ${device.name}`}
                                                 onClick={(e) => {
                                                     e.stopPropagation();
-                                                    setDeleteStep('warning');
-                                                    setDeleteName('');
-                                                    setDeleteTarget(device);
+                                                    openDeleteModal(device);
                                                 }}
                                             >
                                                 <MdDelete size={16} />
@@ -819,6 +832,9 @@ export default function NasDevicesPage() {
             <NasDetailsDrawer
                 nasDeviceId={detailsId}
                 onClose={() => setDetailsId(null)}
+                onSetupScript={openScriptModal}
+                onEdit={handleEdit}
+                onDelete={openDeleteModal}
             />
 
             <Modal

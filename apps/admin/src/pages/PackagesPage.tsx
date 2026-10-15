@@ -162,6 +162,15 @@ export default function PackagesPage() {
         };
     }, [packages, total]);
 
+    const handleEdit = (pkg: PackageRow) => {
+        navigate(`/packages/${pkg.id}/edit`);
+    };
+
+    const openDeleteModal = (pkg: PackageRow) => {
+        setDetailsId(null);
+        setDeleteTarget(pkg);
+    };
+
     const handleDelete = async () => {
         if (!deleteTarget) return;
         setDeleteBusy(true);
@@ -330,7 +339,12 @@ export default function PackagesPage() {
                                         sortDirection={sortDirection}
                                         onSort={handleSort}
                                     />
-                                    <Table.Th ta='right'>Actions</Table.Th>
+                                    <Table.Th
+                                        ta='right'
+                                        className='admin-table-actions'
+                                    >
+                                        Actions
+                                    </Table.Th>
                                 </Table.Tr>
                             </Table.Thead>
                             <Table.Tbody>
@@ -415,7 +429,7 @@ export default function PackagesPage() {
                                                     : 'Inactive'}
                                             </Badge>
                                         </Table.Td>
-                                        <Table.Td>
+                                        <Table.Td className='admin-table-actions'>
                                             <Group
                                                 justify='flex-end'
                                                 gap='xs'
@@ -426,9 +440,7 @@ export default function PackagesPage() {
                                                     aria-label={`Edit ${pkg.title}`}
                                                     onClick={(e) => {
                                                         e.stopPropagation();
-                                                        navigate(
-                                                            `/packages/${pkg.id}/edit`,
-                                                        );
+                                                        handleEdit(pkg);
                                                     }}
                                                 >
                                                     <MdEdit size={16} />
@@ -439,7 +451,7 @@ export default function PackagesPage() {
                                                     aria-label={`Delete ${pkg.title}`}
                                                     onClick={(e) => {
                                                         e.stopPropagation();
-                                                        setDeleteTarget(pkg);
+                                                        openDeleteModal(pkg);
                                                     }}
                                                 >
                                                     <MdDelete size={16} />
@@ -464,6 +476,8 @@ export default function PackagesPage() {
             <PackageDetailsDrawer
                 packageId={detailsId}
                 onClose={() => setDetailsId(null)}
+                onEdit={handleEdit}
+                onDelete={openDeleteModal}
             />
 
             <Modal

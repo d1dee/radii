@@ -375,7 +375,12 @@ export default function SessionsPage() {
                                     onSort={handleSort}
                                     initialDirection='desc'
                                 />
-                                <Table.Th ta='right'>Actions</Table.Th>
+                                <Table.Th
+                                    ta='right'
+                                    className='admin-table-actions'
+                                >
+                                    Actions
+                                </Table.Th>
                             </Table.Tr>
                         </Table.Thead>
                         <Table.Tbody>
@@ -471,7 +476,7 @@ export default function SessionsPage() {
                                             {formatSpeed(s.avgSpeedBps)}
                                         </Text>
                                     </Table.Td>
-                                    <Table.Td>
+                                    <Table.Td className='admin-table-actions'>
                                         {s.live ? (
                                             <Group
                                                 justify='flex-end'
@@ -530,7 +535,14 @@ export default function SessionsPage() {
             <SessionDetailsDrawer
                 sessionId={detailsId}
                 onClose={() => setDetailsId(null)}
-                onDisconnect={setConfirmDisconnect}
+                onAdjust={(session) => {
+                    setDetailsId(null);
+                    setEditSession(session);
+                }}
+                onDisconnect={(session) => {
+                    setDetailsId(null);
+                    setConfirmDisconnect(session);
+                }}
                 adjustmentRevision={adjustmentRevision}
                 onAdjusted={handleAdjusted}
             />

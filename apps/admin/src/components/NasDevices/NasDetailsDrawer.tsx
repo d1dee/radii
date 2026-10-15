@@ -1,5 +1,6 @@
 import {
     Badge,
+    Button,
     Card,
     Center,
     Code,
@@ -15,6 +16,7 @@ import {
 } from '@mantine/core';
 import type { ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
+import { MdDelete, MdEdit, MdTerminal } from 'react-icons/md';
 
 import { TablePagination } from '@/components/TablePagination';
 import {
@@ -93,9 +95,15 @@ function DetailItem({ label, value }: { label: string; value: ReactNode }) {
 export function NasDetailsDrawer({
     nasDeviceId,
     onClose,
+    onSetupScript,
+    onEdit,
+    onDelete,
 }: {
     nasDeviceId: string | null;
     onClose: () => void;
+    onSetupScript: (device: NasDeviceRow) => void;
+    onEdit: (device: NasDeviceRow) => void;
+    onDelete: (device: NasDeviceRow) => void;
 }) {
     const { settings } = useAdminSettings();
     const perPage = settings.dashboard.perPage;
@@ -178,9 +186,48 @@ export function NasDetailsDrawer({
                 close: { flexShrink: 0 },
             }}
             title={
-                <Title component='span' order={4}>
-                    {device?.name ?? 'NAS details'}
-                </Title>
+                <Group gap='xs' wrap='nowrap'>
+                    <Title
+                        component='span'
+                        order={4}
+                        style={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere' }}
+                    >
+                        {device?.name ?? 'NAS details'}
+                    </Title>
+                    {device ? (
+                        <Group gap='xs' wrap='nowrap' style={{ flexShrink: 0 }}>
+                            <Button
+                                size='xs'
+                                px='xs'
+                                variant='light'
+                                aria-label='Setup script'
+                                leftSection={<MdTerminal size={16} />}
+                                onClick={() => onSetupScript(device)}
+                            >
+                                Setup
+                            </Button>
+                            <Button
+                                size='xs'
+                                px='xs'
+                                variant='light'
+                                leftSection={<MdEdit size={16} />}
+                                onClick={() => onEdit(device)}
+                            >
+                                Edit
+                            </Button>
+                            <Button
+                                size='xs'
+                                px='xs'
+                                variant='light'
+                                color='red'
+                                leftSection={<MdDelete size={16} />}
+                                onClick={() => onDelete(device)}
+                            >
+                                Delete
+                            </Button>
+                        </Group>
+                    ) : null}
+                </Group>
             }
         >
             {error ? (

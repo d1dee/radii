@@ -16,7 +16,7 @@ import {
 } from '@mantine/core';
 import type { ReactNode } from 'react';
 import { useEffect, useState } from 'react';
-import { MdDelete } from 'react-icons/md';
+import { MdDelete, MdEdit } from 'react-icons/md';
 
 import {
     getAdminSession,
@@ -96,12 +96,14 @@ function LinkedCard({
 export function SessionDetailsDrawer({
     sessionId,
     onClose,
+    onAdjust,
     onDisconnect,
     adjustmentRevision,
     onAdjusted,
 }: {
     sessionId: string | null;
     onClose: () => void;
+    onAdjust: (session: SessionInfo) => void;
     onDisconnect: (session: SessionInfo) => void;
     adjustmentRevision: number;
     onAdjusted: () => void;
@@ -162,9 +164,37 @@ export function SessionDetailsDrawer({
                 close: { flexShrink: 0 },
             }}
             title={
-                <Title component='span' order={4}>
-                    Session details
-                </Title>
+                <Group gap='xs' wrap='nowrap'>
+                    <Title
+                        component='span'
+                        order={4}
+                        style={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere' }}
+                    >
+                        Session details
+                    </Title>
+                    {session?.live ? (
+                        <Group gap='xs' wrap='nowrap' style={{ flexShrink: 0 }}>
+                            <Button
+                                size='xs'
+                                variant='light'
+                                aria-label='Adjust session'
+                                leftSection={<MdEdit size={16} />}
+                                onClick={() => onAdjust(session)}
+                            >
+                                Adjust
+                            </Button>
+                            <Button
+                                size='xs'
+                                color='red'
+                                variant='light'
+                                leftSection={<MdDelete size={16} />}
+                                onClick={() => onDisconnect(session)}
+                            >
+                                Disconnect
+                            </Button>
+                        </Group>
+                    ) : null}
+                </Group>
             }
         >
             {error ? (
@@ -194,16 +224,6 @@ export function SessionDetailsDrawer({
                                 </Badge>
                             ) : null}
                         </Group>
-                        {session.live ? (
-                            <Button
-                                color='red'
-                                variant='light'
-                                leftSection={<MdDelete />}
-                                onClick={() => onDisconnect(session)}
-                            >
-                                Disconnect
-                            </Button>
-                        ) : null}
                     </Group>
 
                     <Divider label='Connection' labelPosition='left' />

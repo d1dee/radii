@@ -523,6 +523,74 @@ export function UserDetailsDrawer({
         detail && detail.payments.paid > 0
             ? detail.payments.revenue / detail.payments.paid
             : 0;
+    const displayName = detail?.tag?.name || detail?.name || detail?.phoneNumber;
+    const identitySubtitle = detail
+        ? [
+              detail.phoneNumber !== displayName ? detail.phoneNumber : null,
+              detail.tag?.location,
+          ].filter(Boolean).join(' · ')
+        : '';
+    const activePppoeAccounts = detail?.pppoeAccounts.filter(
+        (account) => account.status === 'active',
+    ).length ?? 0;
+    const hasHotspot = (detail?.activations.hotspot ?? 0) > 0;
+    const hasPppoe = (detail?.activations.pppoe ?? 0) > 0 ||
+        (detail?.pppoeAccounts.length ?? 0) > 0;
+    // Ordered by operational importance; only the first four applicable badges show.
+    const summaryBadges = detail ? [
+        {
+            key: 'banned',
+            show: detail.banned,
+            color: 'red',
+            label: 'Banned',
+        },
+        {
+            key: 'fup',
+            show: detail.activations.underFup > 0,
+            color: 'orange',
+            label: `Under FUP${detail.activations.underFup > 1 ? ` (${detail.activations.underFup})` : ''}`,
+        },
+        {
+            key: 'flags',
+            show: detail.flags.length > 0,
+            color: 'orange',
+            label: `${detail.flags.length} flag${detail.flags.length === 1 ? '' : 's'}`,
+        },
+        {
+            key: 'online',
+            show: detail.online,
+            color: 'green',
+            label: 'Online',
+        },
+        {
+            key: 'never-connected',
+            show: !detail.online && detail.usage.sessions === 0 &&
+                !detail.usage.lastSeen &&
+                !detail.pppoeAccounts.some((account) => account.lastUsedAt),
+            color: 'gray',
+            label: 'Never connected',
+        },
+        {
+            key: 'pppoe-accounts',
+            show: activePppoeAccounts > 1,
+            color: 'blue',
+            label: `${activePppoeAccounts} active PPPoE accounts`,
+        },
+        {
+            key: 'services',
+            show: hasHotspot || hasPppoe,
+            color: 'grape',
+            label: hasHotspot && hasPppoe ? 'Hotspot + PPPoE' : hasHotspot ? 'Hotspot' : 'PPPoE',
+        },
+        {
+            key: 'last-paid',
+            show: Boolean(detail.payments.lastAt),
+            color: 'gray',
+            label: detail.payments.lastAt
+                ? `Last paid ${dayjs(detail.payments.lastAt).fromNow()}`
+                : '',
+        },
+    ].filter((badge) => badge.show).slice(0, 4) : [];
 
     return (
         <Drawer
@@ -536,12 +604,79 @@ export function UserDetailsDrawer({
                 close: { flexShrink: 0 },
             }}
             title={
-                <Title component='span' order={4}>
-                    {detail?.tag?.name ||
-                        detail?.name ||
-                        detail?.phoneNumber ||
-                        'User details'}
-                </Title>
+                <Group gap='xs' wrap='nowrap'>
+                    {detail ? (
+                        <Avatar src={detail.image} radius='xl' size='md'>
+                            {displayName?.slice(0, 1).toUpperCase()}
+                        </Avatar>
+                    ) : null}
+                    <Stack
+                        gap={0}
+                        style={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere' }}
+                    >
+                        <Title component='span' order={4}>
+                            {displayName || 'User details'}
+                        </Title>
+                        {identitySubtitle ? (
+                            <Text size='xs' c='dimmed'>
+                                {identitySubtitle}
+                            </Text>
+                        ) : null}
+                    </Stack>
+                    {detail ? (
+                        <Group gap='xs' wrap='nowrap' style={{ flexShrink: 0 }}>
+                            <Button
+                                size='xs'
+                                px='xs'
+                                variant='light'
+                                aria-label={
+                                    detail.tag?.name || detail.tag?.location
+                                        ? 'Edit name / location'
+                                        : 'Add name / location'
+                                }
+                                leftSection={<MdEdit size={14} />}
+                                onClick={openTagModal}
+                            >
+                                Edit
+                            </Button>
+                            <Button
+                                size='xs'
+                                px='xs'
+                                variant='light'
+                                color='orange'
+                                aria-label='Flag user'
+                                leftSection={<MdFlag size={14} />}
+                                onClick={() => setFlagModal(true)}
+                            >
+                                Flag
+                            </Button>
+                            {detail.banned ? (
+                                <Button
+                                    size='xs'
+                                    px='xs'
+                                    variant='light'
+                                    color='green'
+                                    leftSection={<MdCheckCircle size={14} />}
+                                    loading={busy}
+                                    onClick={() => void submitUnban()}
+                                >
+                                    Unban
+                                </Button>
+                            ) : (
+                                <Button
+                                    size='xs'
+                                    px='xs'
+                                    variant='light'
+                                    color='red'
+                                    leftSection={<MdBlock size={14} />}
+                                    onClick={() => setBanModal(true)}
+                                >
+                                    Ban
+                                </Button>
+                            )}
+                        </Group>
+                    ) : null}
+                </Group>
             }
         >
             {error ? (
@@ -552,48 +687,19 @@ export function UserDetailsDrawer({
                 </Center>
             ) : (
                 <Stack gap='md'>
-                    <Group gap='xs' wrap='wrap'>
-                        <Avatar src={detail.image} radius='xl' size='md'>
-                            {detail.name.slice(0, 1).toUpperCase()}
-                        </Avatar>
-                        <Stack gap={0}>
-                            <Text fw={600}>
-                                {detail.tag?.name || detail.name}
-                            </Text>
-                            <Text size='xs' c='dimmed'>
-                                {detail.phoneNumber}
-                                {detail.tag?.location
-                                    ? ` · ${detail.tag.location}`
-                                    : ''}
-                            </Text>
-                        </Stack>
-                        <Group gap='xs' ml='auto'>
-                            {detail.online && (
-                                <Badge color='green' variant='light'>
-                                    Online
+                    {summaryBadges.length > 0 ? (
+                        <Group gap='xs'>
+                            {summaryBadges.map((badge) => (
+                                <Badge
+                                    key={badge.key}
+                                    color={badge.color}
+                                    variant={badge.key === 'fup' ? 'filled' : 'light'}
+                                >
+                                    {badge.label}
                                 </Badge>
-                            )}
-                            {detail.banned ? (
-                                <Badge color='red' variant='light'>
-                                    Banned
-                                </Badge>
-                            ) : null}
-                            {detail.flags.length > 0 && (
-                                <Badge color='orange' variant='light'>
-                                    {detail.flags.length} flag
-                                    {detail.flags.length > 1 ? 's' : ''}
-                                </Badge>
-                            )}
-                            {detail.activations.underFup > 0 ? (
-                                <Badge color='orange' variant='filled'>
-                                    Under FUP
-                                    {detail.activations.underFup > 1
-                                        ? ` (${detail.activations.underFup})`
-                                        : ''}
-                                </Badge>
-                            ) : null}
+                            ))}
                         </Group>
-                    </Group>
+                    ) : null}
 
                     {detail.banned && detail.banReason ? (
                         <Text size='sm' c='red'>
@@ -647,50 +753,6 @@ export function UserDetailsDrawer({
                             </Text>
                         </Card>
                     ) : null}
-
-                    <Group>
-                        <Button
-                            size='xs'
-                            variant='light'
-                            leftSection={<MdEdit size={14} />}
-                            onClick={openTagModal}
-                        >
-                            {detail.tag?.name || detail.tag?.location
-                                ? 'Edit name / location'
-                                : 'Add name / location'}
-                        </Button>
-                        <Button
-                            size='xs'
-                            variant='light'
-                            color='orange'
-                            leftSection={<MdFlag size={14} />}
-                            onClick={() => setFlagModal(true)}
-                        >
-                            Flag user
-                        </Button>
-                        {detail.banned ? (
-                            <Button
-                                size='xs'
-                                variant='light'
-                                color='green'
-                                leftSection={<MdCheckCircle size={14} />}
-                                loading={busy}
-                                onClick={() => void submitUnban()}
-                            >
-                                Unban
-                            </Button>
-                        ) : (
-                            <Button
-                                size='xs'
-                                variant='light'
-                                color='red'
-                                leftSection={<MdBlock size={14} />}
-                                onClick={() => setBanModal(true)}
-                            >
-                                Ban
-                            </Button>
-                        )}
-                    </Group>
 
                     <Tabs value={tab} onChange={setTab}>
                         <Tabs.List>
@@ -881,7 +943,10 @@ export function UserDetailsDrawer({
                                                 </Table.Th>
                                                 <Table.Th>Usage</Table.Th>
                                                 <Table.Th>Expires</Table.Th>
-                                                <Table.Th ta='right'>
+                                                <Table.Th
+                                                    ta='right'
+                                                    className='admin-table-actions'
+                                                >
                                                     Actions
                                                 </Table.Th>
                                             </Table.Tr>
@@ -1098,7 +1163,7 @@ export function UserDetailsDrawer({
                                                                 : `Activated ${dayjs(a.activatedAt).fromNow()}`}
                                                         </Text>
                                                     </Table.Td>
-                                                    <Table.Td>
+                                                    <Table.Td className='admin-table-actions'>
                                                         <Group
                                                             justify='flex-end'
                                                             gap={4}

@@ -143,6 +143,38 @@ body {
     white-space: nowrap;
 }
 
+.admin-table-actions {
+    position: sticky;
+    inset-inline-end: 0;
+    z-index: 1;
+    width: 1%;
+    white-space: nowrap;
+    background: var(--admin-surface);
+    box-shadow: inset 1px 0 0 var(--admin-rule);
+}
+
+th.admin-table-actions {
+    z-index: 3;
+    background: var(--admin-table-header);
+}
+
+.mantine-Table-tr[data-striped='odd']:nth-of-type(odd) > td.admin-table-actions,
+.mantine-Table-tr[data-striped='even']:nth-of-type(even) > td.admin-table-actions {
+    background: var(--table-striped-color);
+}
+
+@media (hover: hover) {
+    .mantine-Table-tr[data-hover]:hover > td.admin-table-actions {
+        background: var(--tr-hover-bg);
+    }
+}
+
+@media (hover: none) {
+    .mantine-Table-tr[data-hover]:active > td.admin-table-actions {
+        background: var(--tr-hover-bg);
+    }
+}
+
 .admin-table-cell .mantine-Badge-root {
     flex-shrink: 0;
     min-width: max-content;

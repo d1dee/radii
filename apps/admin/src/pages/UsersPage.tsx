@@ -631,7 +631,12 @@ export default function UsersPage() {
                                         onSort={handleSort}
                                         initialDirection='desc'
                                     />
-                                    <Table.Th ta='right'>Actions</Table.Th>
+                                    <Table.Th
+                                        ta='right'
+                                        className='admin-table-actions'
+                                    >
+                                        Actions
+                                    </Table.Th>
                                 </Table.Tr>
                             </Table.Thead>
                             <Table.Tbody>
@@ -768,7 +773,7 @@ export default function UsersPage() {
                                                 {formatDate(u.createdAt)}
                                             </Text>
                                         </Table.Td>
-                                        <Table.Td>
+                                        <Table.Td className='admin-table-actions'>
                                             <Group
                                                 justify='flex-end'
                                                 gap={4}
