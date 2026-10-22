@@ -1,7 +1,7 @@
 import '@mantine/core/styles.css';
 import '@mantine/notifications/styles.css';
 
-import { Container, MantineProvider, Stack } from '@mantine/core';
+import { Alert, Container, MantineProvider, Stack } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import { Notifications } from '@mantine/notifications';
 import type { Package } from '@radii/shared';
@@ -12,6 +12,7 @@ import {
     useMemo,
     useState,
 } from 'react';
+import { AiOutlineExclamationCircle } from 'react-icons/ai';
 import { PaymentFlow } from './components/Buy/PaymentFlow.tsx';
 import { PppoeAccountCard } from './components/Credentials/PppoeAccountCard.tsx';
 import { Footer } from './components/Footer.tsx';
@@ -213,7 +214,23 @@ export default function App() {
                                     // nothing to show yet: signing in lets
                                     // the portal resolve the network from the
                                     // customer's own accounts.
-                                    <LoginCard />
+                                    <>
+                                        <Alert
+                                            color='orange'
+                                            title='Network not identified'
+                                            icon={
+                                                <AiOutlineExclamationCircle
+                                                    size={24}
+                                                />
+                                            }
+                                        >
+                                            We could not identify the network
+                                            you are visiting from. Sign in to
+                                            see the packages available for your
+                                            network.
+                                        </Alert>
+                                        <LoginCard />
+                                    </>
                                 ) : null}
                                 {nasDeviceId ? (
                                     // Packages, status, and sessions only make
