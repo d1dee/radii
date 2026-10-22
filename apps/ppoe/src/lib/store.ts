@@ -5,7 +5,7 @@ import type {
     PppoeServiceConfig,
     Quota,
 } from '@radii/shared';
-import { defaultAdminSettings } from '@radii/shared';
+import { ApiErrorType, defaultAdminSettings } from '@radii/shared';
 import { useEffect, useSyncExternalStore } from 'react';
 import {
     currentNasDeviceId,
@@ -107,6 +107,30 @@ const publishScope = createPublisher(
     scopeListeners,
 );
 
+// The NAS devices the API reports for the customer's accounts. A scope that
+// is not part of them is stale (the line was moved to another router) and
+// must not be used.
+function knownNasIds(clients: PppoeClient[]) {
+    const ids = new Set<string>();
+    for (const client of clients) {
+        if (client.nasDeviceId) ids.add(client.nasDeviceId);
+    }
+    return ids;
+}
+
+// The network a signed-in customer belongs to: the first active account that
+// is bound to a NAS. Suspended or closed lines are only used when no active
+// one is left — they still identify the router serving the customer.
+function initialNasClient(clients: PppoeClient[]) {
+    return (
+        clients.find(
+            (client) => client.status === 'active' && client.nasDeviceId,
+        ) ??
+        clients.find((client) => client.nasDeviceId) ??
+        null
+    );
+}
+
 // Selects the network the whole portal is scoped to (packages, contacts,
 // payments). Persisted so the scope survives reloads after the ?nas= URL
 // parameter was cleaned up.
@@ -175,6 +199,23 @@ export function loadPppoePortal(
                     getPackages(nasDeviceId),
                 ]);
                 if (publicScope !== nasDeviceId) return;
+                // The scoped NAS does not exist (deleted by the admin, or an
+                // id left behind in storage): drop it instead of showing an
+                // empty portal. A signed-in customer falls back to the
+                // network of their accounts, a visitor gets the sign-in card.
+                if (
+                    nasDeviceId !== null &&
+                    !packages.success &&
+                    packages.type === ApiErrorType.NOT_FOUND
+                ) {
+                    publishPortal({
+                        packages: undefined,
+                        packagesError: null,
+                        packagesLoading: false,
+                    });
+                    setNasScope(null);
+                    return;
+                }
                 publishPortal({
                     contacts:
                         contacts.success && contacts.data
@@ -295,30 +336,39 @@ export function refreshPppoeAccounts() {
                           (b.lastUsedAt ?? '').localeCompare(a.lastUsedAt ?? ''),
                   )
                 : accountSnapshot.clients;
+            // The network the portal is scoped to. A scope the API does not
+            // know about is stale — it was deleted or the line moved to
+            // another router — so it is dropped in favour of the customer's
+            // own network. Without a scope (external visit) the first active
+            // account bound to a NAS defines the network, e.g. right after
+            // signing in or claiming admin-provisioned credentials.
+            const scope = scopeSnapshot.nasDeviceId;
+            const apiNasIds = knownNasIds(nextClients);
+            const scopeIsStale =
+                scope !== null &&
+                apiNasIds.size > 0 &&
+                !apiNasIds.has(scope);
+            const initial = initialNasClient(nextClients);
+            const nextScope =
+                scope === null || scopeIsStale
+                    ? (initial?.nasDeviceId ?? null)
+                    : scope;
+            const scopeChanged = nextScope !== scope;
+            if (scopeChanged) setNasScope(nextScope);
             // Prefer the account bound to the network this portal is scoped
             // to; the account switcher doubles as the network selector.
-            const scope = scopeSnapshot.nasDeviceId;
             const selectedAccountId = nextClients.some(
-                (client) => client.accountId === accountSnapshot.selectedAccountId,
+                (client) =>
+                    client.accountId === accountSnapshot.selectedAccountId &&
+                    (!scopeChanged || client.nasDeviceId === nextScope),
             )
                 ? accountSnapshot.selectedAccountId
-                : (nextClients.find((client) => client.nasDeviceId === scope)
+                : (nextClients.find((client) => client.nasDeviceId === nextScope)
                       ?.accountId ??
                   nextClients.find((client) => client.availableOnPortal)
                       ?.accountId ??
                   nextClients[0]?.accountId ??
                   null);
-            // The portal has no network scope (external visit): adopt the
-            // network of the account the customer will manage by default —
-            // e.g. right after claiming admin-provisioned credentials.
-            if (scope === null && selectedAccountId) {
-                const selectedClient = nextClients.find(
-                    (client) => client.accountId === selectedAccountId,
-                );
-                if (selectedClient?.nasDeviceId) {
-                    setNasScope(selectedClient.nasDeviceId);
-                }
-            }
             if (selectedAccountId !== accountSnapshot.selectedAccountId) {
                 publishQuota({
                     quota: [],

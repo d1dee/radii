@@ -22,6 +22,7 @@ import {
     RegisterModal,
     type AuthMode,
 } from './components/RegisterForm/Modal.tsx';
+import { LoginCard } from './components/UserAccounts/LoginCard.tsx';
 import { UserAccount } from './components/UserAccounts/UserAccount.tsx';
 import { type Client } from './lib/api.ts';
 import { useSession } from './lib/auth.ts';
@@ -57,6 +58,8 @@ export type ModalActions = {
     openRegister: (packageId?: string, price?: string) => void;
     /** Open the login modal, optionally seeding a packageId */
     openLogin: (packageId?: string, price?: string) => void;
+    /** Open the login modal in reset-PIN mode */
+    openForgotPin: () => void;
 };
 
 export const ModalActionsContext = createContext<ModalActions>(null!);
@@ -78,6 +81,8 @@ function pkgPrice(
 export default function App() {
     const [havingIssues, setHavingIssues] = useState(false);
     const { data, isPending } = useSession();
+    // The session is only known once the pending check has settled.
+    const signedOut = !isPending && !data?.session;
     const {
         client: clientData,
         packages,
@@ -167,10 +172,16 @@ export default function App() {
         },
         [openAuth],
     );
+    const openForgotPin = useCallback(() => {
+        setAuthPackageId('');
+        setAuthPrice('');
+        setAuthMode('reset');
+        openAuth();
+    }, [openAuth]);
 
     const modalActions = useMemo<ModalActions>(
-        () => ({ startBuy, openRegister, openLogin }),
-        [startBuy, openRegister, openLogin],
+        () => ({ startBuy, openRegister, openLogin, openForgotPin }),
+        [startBuy, openRegister, openLogin, openForgotPin],
     );
 
     // The stored package id has now been seeded into the buy flow; remove it.
@@ -197,6 +208,13 @@ export default function App() {
                                         setHavingIssues,
                                     ]}
                                 />
+                                {signedOut && !nasDeviceId ? (
+                                    // Without a scoped network there is
+                                    // nothing to show yet: signing in lets
+                                    // the portal resolve the network from the
+                                    // customer's own accounts.
+                                    <LoginCard />
+                                ) : null}
                                 {nasDeviceId ? (
                                     // Packages, status, and sessions only make
                                     // sense once the portal is scoped to the
