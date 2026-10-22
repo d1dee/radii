@@ -5,12 +5,14 @@ import {
 } from 'react-icons/ai';
 
 import type { Quota } from '@radii/shared';
+import { useSession } from '../../lib/auth.ts';
 
 type Props = {
     quota: Array<Quota>;
     onOpen: () => void;
 };
 export function ConnectedDevice({ quota, onOpen }: Props) {
+    const { data } = useSession();
     const anyOnline = !!quota?.some((v) => v.online);
 
     if (quota.length > 0) {
@@ -61,6 +63,9 @@ export function ConnectedDevice({ quota, onOpen }: Props) {
         }
     }
     if (quota?.length === 0) {
+        // A signed-out visitor has no line at all: there is no package to
+        // look for, so the sign-in prompt (CurrentPackage) covers it.
+        if (!data?.session) return null;
         return (
             <Alert
                 color='red'

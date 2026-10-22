@@ -20,6 +20,10 @@ import {
 import { useDisclosure } from '@mantine/hooks';
 import { IconSelector } from '@tabler/icons-react';
 import humanFormat from 'human-format';
+import { useContext } from 'react';
+import { AiOutlineInfoCircle } from 'react-icons/ai';
+import { ModalActionsContext } from '../../App.tsx';
+import { useSession } from '../../lib/auth.ts';
 import { ConnectedDevice } from './ConnectedDevices.tsx';
 import { ConnectedDevicesModal } from './ConnectedDevicesModal.tsx';
 import {
@@ -28,6 +32,8 @@ import {
 } from './PackagePricing.tsx';
 
 export function CurrentPackage() {
+    const { openLogin } = useContext(ModalActionsContext);
+    const { data } = useSession();
     const { selectedAccountId } = usePppoeAccounts();
     const { quota, error, loading } = usePppoeQuota(selectedAccountId);
     const [isOpen, { open, close }] = useDisclosure();
@@ -59,6 +65,44 @@ export function CurrentPackage() {
     const title = thisDevice?.packageTitle
         ? `${thisDevice.packageTitle} @ ${formatPackagePrice(thisDevice.price)}`
         : '_';
+
+    if (!data?.session) {
+        // Nothing to report without a session: the visitor has no line yet,
+        // so point them at the sign-in instead of an empty package.
+        return (
+            <Paper shadow='xl' radius='lg' p='lg' withBorder key=''>
+                <Stack gap='sm'>
+                    <Text size='lg' fw={600}>
+                        Active Package Details
+                    </Text>
+
+                    <Alert
+                        color='blue'
+                        variant='light'
+                        icon={<AiOutlineInfoCircle size={24} />}
+                        title='Sign in to view your package'
+                        mt='md'
+                    >
+                        <Stack gap='sm'>
+                            <Text size='sm'>
+                                Sign in to see your active package, the time
+                                left on it, and the PPPoE credentials for your
+                                network.
+                            </Text>
+                            <Button
+                                color='blue'
+                                variant='filled'
+                                size='xs'
+                                onClick={() => openLogin()}
+                            >
+                                Sign in
+                            </Button>
+                        </Stack>
+                    </Alert>
+                </Stack>
+            </Paper>
+        );
+    }
 
     if (!thisDevice) {
         return (
