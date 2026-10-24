@@ -150,6 +150,7 @@ function MeasurementInput({
 // A month is normalized to 30 days (43200 minutes).
 const LENGTH_UNITS = [
     { value: 'minutes', label: 'Minutes', minutes: 1 },
+    { value: 'hours', label: 'Hours', minutes: 60 },
     { value: 'days', label: 'Days', minutes: 1440 },
     { value: 'weeks', label: 'Weeks', minutes: 10080 },
     { value: 'months', label: 'Months', minutes: 43200 },
@@ -163,7 +164,7 @@ function unitToMinutes(unit: LengthUnit): number {
 
 // Largest unit that expresses totalMinutes exactly (edit-mode prefill).
 function bestUnitFor(totalMinutes: number): LengthUnit {
-    for (const unit of ['months', 'weeks', 'days'] as const) {
+    for (const unit of ['months', 'weeks', 'days', 'hours'] as const) {
         const m = unitToMinutes(unit);
         if (totalMinutes >= m && totalMinutes % m === 0) return unit;
     }

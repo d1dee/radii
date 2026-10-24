@@ -161,9 +161,10 @@ export function UserDetailsDrawer({
         currentRemainingSeconds: number;
     } | null>(null);
     const [expiryValue, setExpiryValue] = useState<Date | null>(null);
-    const [remainingMinutes, setRemainingMinutes] = useState<number | string>(
+    const [remainingTime, setRemainingTime] = useState<number | string>(
         0,
     );
+    const [remainingTimeUnit, setRemainingTimeUnit] = useState('60');
     const [confirmDeactivate, setConfirmDeactivate] = useState<string | null>(
         null,
     );
@@ -373,16 +374,16 @@ export function UserDetailsDrawer({
             !userId ||
             !expiryEdit ||
             !expiryValue ||
-            typeof remainingMinutes !== 'number' ||
-            !Number.isFinite(remainingMinutes) ||
-            remainingMinutes < 0
+            typeof remainingTime !== 'number' ||
+            !Number.isFinite(remainingTime) ||
+            remainingTime < 0
         ) {
             return;
         }
         setBusy(true);
         const res = await updateActivation(expiryEdit.activationId, {
             expireAt: expiryValue.toISOString(),
-            remainingSeconds: Math.round(remainingMinutes * 60),
+            remainingSeconds: Math.round(remainingTime * Number(remainingTimeUnit)),
         });
         setBusy(false);
         notifyResult(res, 'Activation limits updated');
@@ -1208,7 +1209,8 @@ export function UserDetailsDrawer({
                                                                                 a.expireAt,
                                                                             ),
                                                                         );
-                                                                        setRemainingMinutes(
+                                                                        setRemainingTimeUnit('60');
+                                                                        setRemainingTime(
                                                                             Math.ceil(
                                                                                 (a.remainingSeconds ??
                                                                                     0) /
@@ -1804,7 +1806,7 @@ export function UserDetailsDrawer({
                         clearable
                     />
                     <NumberInput
-                        label='Time remaining (minutes)'
+                        label='Time remaining'
                         description={
                             expiryEdit
                                 ? `Currently ${formatSeconds(expiryEdit.currentRemainingSeconds)}`
@@ -1812,15 +1814,29 @@ export function UserDetailsDrawer({
                         }
                         min={0}
                         allowDecimal={false}
-                        value={remainingMinutes}
-                        onChange={setRemainingMinutes}
+                        value={remainingTime}
+                        onChange={setRemainingTime}
+                    />
+                    <Select
+                        label='Time period'
+                        data={[
+                            { value: '60', label: 'Minutes' },
+                            { value: '3600', label: 'Hours' },
+                            { value: '86400', label: 'Days' },
+                            { value: '604800', label: 'Weeks' },
+                            { value: '2592000', label: 'Months (30 days)' },
+                        ]}
+                        value={remainingTimeUnit}
+                        onChange={(value) => value && setRemainingTimeUnit(value)}
+                        allowDeselect={false}
                     />
                     <Button
                         onClick={() => void submitExpiry()}
                         disabled={
                             !expiryValue ||
-                            typeof remainingMinutes !== 'number' ||
-                            remainingMinutes < 0
+                            typeof remainingTime !== 'number' ||
+                            !Number.isFinite(remainingTime) ||
+                            remainingTime < 0
                         }
                         loading={busy}
                     >
