@@ -390,7 +390,6 @@ export default function PackagesPage() {
                                         <Table.Td>
                                             {formatSeconds(
                                                 pkg.sessionLength * 60,
-                                                pkg.noExpiry,
                                             )}
                                         </Table.Td>
                                         <Table.Td>{pkg.maxDevices}</Table.Td>
