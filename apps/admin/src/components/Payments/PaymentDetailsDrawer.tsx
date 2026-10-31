@@ -12,6 +12,7 @@ import {
     Timeline,
     Title,
 } from '@mantine/core';
+import { ArchivedPackageBadge } from '@/components/Packages/ArchivedPackageBadge';
 import type { ReactNode } from 'react';
 import { useEffect, useState } from 'react';
 
@@ -286,7 +287,16 @@ export function PaymentDetailsDrawer({
                         <Grid.Col span={{ base: 12, sm: 6 }}>
                             <DetailItem
                                 label='Package'
-                                value={payment.packageTitle}
+                                value={
+                                    <Group gap='xs'>
+                                        {payment.packageTitle}
+                                        <ArchivedPackageBadge
+                                            archivedAt={
+                                                payment.packageArchivedAt
+                                            }
+                                        />
+                                    </Group>
+                                }
                             />
                         </Grid.Col>
                         <Grid.Col span={{ base: 12, sm: 6 }}>

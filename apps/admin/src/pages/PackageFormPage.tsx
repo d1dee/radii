@@ -259,6 +259,11 @@ export default function PackageFormPage() {
                 return;
             }
             const pkg = result.data;
+            if (pkg.archivedAt) {
+                setFetchError('Restore this package before editing it.');
+                setFetching(false);
+                return;
+            }
             form.setValues({
                 title: pkg.title,
                 type: pkg.type,

@@ -1088,6 +1088,7 @@ export async function getAdminSessionDetail(
                 title: packages.title,
                 type: packages.type,
                 category: packages.category,
+                archivedAt: packages.archivedAt,
             },
             serviceAccount: {
                 id: pppoeServiceAccounts.id,
@@ -1598,6 +1599,7 @@ export async function listPayments(opts: ListPaymentsOpts) {
                 status: packagePayments.status,
                 packageTitle: packages.title,
                 packageType: packages.type,
+                packageArchivedAt: packages.archivedAt,
                 nasDeviceName: nasDevice.name,
                 provider: transaction.provider,
                 providerTransactionId: transaction.providerTransactionId,
@@ -1715,6 +1717,7 @@ export async function getAdminPaymentDetail(
             status: packagePayments.status,
             packageTitle: packages.title,
             packageType: packages.type,
+            packageArchivedAt: packages.archivedAt,
             nasDeviceName: nasDevice.name,
             provider: transaction.provider,
             providerTransactionId: transaction.providerTransactionId,
@@ -1801,6 +1804,7 @@ export async function getUserPayments(
                 phoneNumber: packagePayments.phoneNumber,
                 packageTitle: packages.title,
                 packageType: packages.type,
+                packageArchivedAt: packages.archivedAt,
                 provider: transaction.provider,
                 providerTransactionId: transaction.providerTransactionId,
                 createdAt: packagePayments.createdAt,
@@ -1904,6 +1908,7 @@ export async function getAdminReports(
             packageId: packages.id,
             title: packages.title,
             type: packages.type,
+            archivedAt: packages.archivedAt,
             paid: count(packagePayments.id),
             revenue: sql<number>`coalesce(sum(${packagePayments.amount}), 0)::float8`,
         })
@@ -1911,7 +1916,12 @@ export async function getAdminReports(
         .innerJoin(packages, eq(packagePayments.packageId, packages.id))
         .innerJoin(nasDevice, eq(packagePayments.nasDeviceId, nasDevice.id))
         .where(and(inRange, eq(packagePayments.status, 'paid')))
-        .groupBy(packages.id, packages.title, packages.type)
+        .groupBy(
+            packages.id,
+            packages.title,
+            packages.type,
+            packages.archivedAt,
+        )
         .orderBy(
             desc(sql`sum(${packagePayments.amount})`),
             asc(packages.id),

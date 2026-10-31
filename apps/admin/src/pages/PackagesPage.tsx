@@ -17,7 +17,13 @@ import {
 } from '@mantine/core';
 import { useDebouncedValue } from '@mantine/hooks';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { MdAdd, MdDelete, MdEdit, MdSearch } from 'react-icons/md';
+import {
+    MdAdd,
+    MdArchive,
+    MdEdit,
+    MdRestore,
+    MdSearch,
+} from 'react-icons/md';
 import { useNavigate } from 'react-router-dom';
 
 import { PageLayout } from '@/components/Layout/PageLayout';
@@ -31,8 +37,9 @@ import { TablePagination } from '@/components/TablePagination';
 import { TableFilters } from '@/components/TableFilters';
 import { TableRowActions } from '@/components/TableRowActions';
 import {
-    deleteAdminPackage,
+    archiveAdminPackage,
     getAdminPackages,
+    restoreAdminPackage,
     type PackageRow,
     type PackageSortKey,
     type PackageType,
@@ -91,12 +98,14 @@ export default function PackagesPage() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [detailsId, setDetailsId] = useState<string | null>(null);
-    const [deleteTarget, setDeleteTarget] = useState<PackageRow | null>(null);
-    const [deleteBusy, setDeleteBusy] = useState(false);
+    const [archiveTarget, setArchiveTarget] = useState<PackageRow | null>(null);
+    const [actionBusyId, setActionBusyId] = useState<string | null>(null);
 
     const [search, setSearch] = useState('');
     const [debouncedSearch] = useDebouncedValue(search, 300);
-    const [status, setStatus] = useState<string | null>(null);
+    const [archived, setArchived] = useState<
+        'current' | 'archived' | 'all'
+    >('current');
     const [sortBy, setSortBy] = useState<PackageSortKey | null>(null);
     const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
     const loadRequest = useRef(0);
@@ -111,7 +120,7 @@ export default function PackagesPage() {
             const result = await getAdminPackages({
                 type: typeFilter ?? undefined,
                 q: debouncedSearch.trim() || undefined,
-                status: (status as 'active' | 'inactive') || undefined,
+                archived,
                 sortBy: sortBy ?? undefined,
                 sortDirection: sortBy ? sortDirection : undefined,
                 page: pageToLoad,
@@ -128,12 +137,26 @@ export default function PackagesPage() {
             setPackages(result.data?.packages ?? []);
             setTotal(result.data?.total ?? 0);
         },
-        [typeFilter, debouncedSearch, status, sortBy, sortDirection, perPage],
+        [
+            typeFilter,
+            debouncedSearch,
+            archived,
+            sortBy,
+            sortDirection,
+            perPage,
+        ],
     );
 
     useEffect(() => {
         setPage(1);
-    }, [typeFilter, debouncedSearch, status, sortBy, sortDirection, perPage]);
+    }, [
+        typeFilter,
+        debouncedSearch,
+        archived,
+        sortBy,
+        sortDirection,
+        perPage,
+    ]);
 
     const handleSort = (key: PackageSortKey, direction: SortDirection) => {
         setSortBy(key);
@@ -148,7 +171,7 @@ export default function PackagesPage() {
     useAutoRefresh(() => void load(page, true), loaded);
 
     const summary = useMemo(() => {
-        const active = packages.filter((p) => p.isActive).length;
+        const archivedCount = packages.filter((p) => p.archivedAt).length;
         const prices = packages.map((p) => Number(p.price));
         const avgPrice =
             prices.length > 0
@@ -156,8 +179,8 @@ export default function PackagesPage() {
                 : 0;
         return {
             total,
-            active,
-            inactive: packages.length - active,
+            current: packages.length - archivedCount,
+            archived: archivedCount,
             avgPrice,
         };
     }, [packages, total]);
@@ -166,22 +189,32 @@ export default function PackagesPage() {
         navigate(`/packages/${pkg.id}/edit`);
     };
 
-    const openDeleteModal = (pkg: PackageRow) => {
+    const openArchiveModal = (pkg: PackageRow) => {
         setDetailsId(null);
-        setDeleteTarget(pkg);
+        setArchiveTarget(pkg);
     };
 
-    const handleDelete = async () => {
-        if (!deleteTarget) return;
-        setDeleteBusy(true);
-        const result = await deleteAdminPackage(deleteTarget.id);
-        setDeleteBusy(false);
-        notifyResult(result, 'Package deleted');
+    const handleArchive = async () => {
+        if (!archiveTarget) return;
+        setActionBusyId(archiveTarget.id);
+        const result = await archiveAdminPackage(archiveTarget.id);
+        setActionBusyId(null);
+        notifyResult(result, 'Package archived');
         if (!result.success) return;
-        if (detailsId === deleteTarget.id) setDetailsId(null);
-        setDeleteTarget(null);
+        setArchiveTarget(null);
         if (page > 1 && packages.length === 1) setPage(page - 1);
         else await load(page, true);
+    };
+
+    const handleRestore = async (pkg: PackageRow) => {
+        setActionBusyId(pkg.id);
+        const result = await restoreAdminPackage(pkg.id);
+        setActionBusyId(null);
+        notifyResult(result, 'Package restored');
+        if (result.success) {
+            setDetailsId(null);
+            await load(page, true);
+        }
     };
 
     return (
@@ -217,12 +250,12 @@ export default function PackagesPage() {
                             value={String(summary.total)}
                         />
                         <SummaryCard
-                            label='Active on page'
-                            value={String(summary.active)}
+                            label='Current on page'
+                            value={String(summary.current)}
                         />
                         <SummaryCard
-                            label='Inactive on page'
-                            value={String(summary.inactive)}
+                            label='Archived on page'
+                            value={String(summary.archived)}
                         />
                         <SummaryCard
                             label='Avg price on page'
@@ -257,16 +290,21 @@ export default function PackagesPage() {
                         w={{ base: '100%', sm: 140 }}
                     />
                     <Select
-                        aria-label='Filter packages by status'
-                        placeholder='Status'
-                        clearable
-                        value={status}
-                        onChange={setStatus}
+                        aria-label='Filter packages by archive state'
+                        value={archived}
+                        onChange={(value) =>
+                            setArchived(
+                                (value as 'current' | 'archived' | 'all') ??
+                                    'current',
+                            )
+                        }
+                        allowDeselect={false}
                         data={[
-                            { value: 'active', label: 'Active' },
-                            { value: 'inactive', label: 'Inactive' },
+                            { value: 'current', label: 'Current' },
+                            { value: 'archived', label: 'Archived' },
+                            { value: 'all', label: 'All packages' },
                         ]}
-                        w={{ base: '100%', sm: 140 }}
+                        w={{ base: '100%', sm: 150 }}
                     />
                 </TableFilters>
 
@@ -278,7 +316,7 @@ export default function PackagesPage() {
                     <Text c='red'>{error}</Text>
                 ) : packages.length === 0 ? (
                     <Text c='dimmed' py='xl' ta='center'>
-                        {debouncedSearch || status || typeFilter
+                        {debouncedSearch || typeFilter || archived !== 'current'
                             ? 'No packages match.'
                             : 'No packages yet.'}
                     </Text>
@@ -416,36 +454,51 @@ export default function PackagesPage() {
                                         </Table.Td>
                                         <Table.Td>
                                             <Badge
-                                                color={
-                                                    pkg.isActive
-                                                        ? 'green'
-                                                        : 'gray'
-                                                }
+                                                color={pkg.archivedAt ? 'gray' : 'green'}
                                                 variant='light'
                                             >
-                                                {pkg.isActive
-                                                    ? 'Active'
-                                                    : 'Inactive'}
+                                                {pkg.archivedAt ? 'Archived' : 'Current'}
                                             </Badge>
                                         </Table.Td>
                                         <Table.Td className='admin-table-actions'>
                                             <TableRowActions
                                                 gap='xs'
-                                                actions={[
-                                                    {
-                                                        label: 'Edit package',
-                                                        ariaLabel: `Edit ${pkg.title}`,
-                                                        icon: <MdEdit size={16} />,
-                                                        onClick: () => handleEdit(pkg),
-                                                    },
-                                                    {
-                                                        label: 'Delete package',
-                                                        ariaLabel: `Delete ${pkg.title}`,
-                                                        icon: <MdDelete size={16} />,
-                                                        color: 'red',
-                                                        onClick: () => openDeleteModal(pkg),
-                                                    },
-                                                ]}
+                                                actions={
+                                                    pkg.archivedAt
+                                                        ? [
+                                                              {
+                                                                  label: 'Restore package',
+                                                                  ariaLabel: `Restore ${pkg.title}`,
+                                                                  icon: <MdRestore size={16} />,
+                                                                  loading:
+                                                                      actionBusyId ===
+                                                                      pkg.id,
+                                                                  onClick: () =>
+                                                                      handleRestore(
+                                                                          pkg,
+                                                                      ),
+                                                              },
+                                                          ]
+                                                        : [
+                                                              {
+                                                                  label: 'Edit package',
+                                                                  ariaLabel: `Edit ${pkg.title}`,
+                                                                  icon: <MdEdit size={16} />,
+                                                                  onClick: () =>
+                                                                      handleEdit(pkg),
+                                                              },
+                                                              {
+                                                                  label: 'Archive package',
+                                                                  ariaLabel: `Archive ${pkg.title}`,
+                                                                  icon: <MdArchive size={16} />,
+                                                                  color: 'red',
+                                                                  onClick: () =>
+                                                                      openArchiveModal(
+                                                                          pkg,
+                                                                      ),
+                                                              },
+                                                          ]
+                                                }
                                             />
                                         </Table.Td>
                                     </Table.Tr>
@@ -467,44 +520,47 @@ export default function PackagesPage() {
                 packageId={detailsId}
                 onClose={() => setDetailsId(null)}
                 onEdit={handleEdit}
-                onDelete={openDeleteModal}
+                onArchive={openArchiveModal}
+                onRestore={handleRestore}
+                actionBusyId={actionBusyId}
             />
 
             <Modal
-                opened={deleteTarget !== null}
-                onClose={() => setDeleteTarget(null)}
-                title='Delete package'
+                opened={archiveTarget !== null}
+                onClose={() => setArchiveTarget(null)}
+                title='Archive package'
                 centered
-                closeOnClickOutside={!deleteBusy}
-                closeOnEscape={!deleteBusy}
-                withCloseButton={!deleteBusy}
+                closeOnClickOutside={actionBusyId === null}
+                closeOnEscape={actionBusyId === null}
+                withCloseButton={actionBusyId === null}
             >
                 <Stack gap='md'>
                     <Text size='sm'>
-                        Delete{' '}
+                        Archive{' '}
                         <Text span fw={600}>
-                            {deleteTarget?.title}
+                            {archiveTarget?.title}
                         </Text>{' '}
-                        permanently?
+                        ?
                     </Text>
                     <Text size='sm' c='dimmed'>
-                        Packages with payment or activation history cannot be
-                        deleted.
+                        It will be hidden from customers. Payment and activation
+                        history will remain available, and the package can be
+                        restored later.
                     </Text>
                     <Group justify='flex-end'>
                         <Button
                             variant='default'
-                            onClick={() => setDeleteTarget(null)}
-                            disabled={deleteBusy}
+                            onClick={() => setArchiveTarget(null)}
+                            disabled={actionBusyId !== null}
                         >
                             Cancel
                         </Button>
                         <Button
                             color='red'
-                            loading={deleteBusy}
-                            onClick={handleDelete}
+                            loading={actionBusyId !== null}
+                            onClick={handleArchive}
                         >
-                            Delete package
+                            Archive package
                         </Button>
                     </Group>
                 </Stack>

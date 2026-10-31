@@ -496,6 +496,7 @@ export interface ActivationStatus {
 export interface AdminActivationStatus extends ActivationStatus {
     userId: string;
     packageType: 'hotspot' | 'pppoe';
+    packageArchivedAt: Date | null;
     noExpiry: boolean;
     maxDevices: number;
 }
@@ -2264,6 +2265,7 @@ export class RadiusClient {
                 ...status,
                 userId: row.activation.userId,
                 packageType: row.pkg.type,
+                packageArchivedAt: row.pkg.archivedAt,
                 noExpiry: row.pkg.noExpiry,
                 maxDevices: row.pkg.maxDevices,
             });

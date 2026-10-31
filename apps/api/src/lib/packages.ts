@@ -9,6 +9,8 @@ import {
     getTableColumns,
     ilike,
     inArray,
+    isNotNull,
+    isNull,
     or,
     sql,
 } from 'drizzle-orm';
@@ -49,6 +51,7 @@ export async function getPackagesGroupedByCategory(
         .where(
             and(
                 eq(packages.isActive, true),
+                isNull(packages.archivedAt),
                 eq(packages.type, type),
                 exists(
                     db
@@ -98,6 +101,7 @@ export async function getPackages(ownerId: string, type?: PackageType) {
         .where(
             and(
                 eq(packages.createdBy, ownerId),
+                isNull(packages.archivedAt),
                 type ? eq(packages.type, type) : undefined,
             ),
         )
@@ -109,17 +113,19 @@ export async function listAdminPackages(opts: {
     ownerId: string;
     type?: PackageType;
     q?: string;
-    status?: 'active' | 'inactive';
+    archived?: 'current' | 'archived' | 'all';
     sortBy?: AdminPackageSortBy;
     sortDirection?: 'asc' | 'desc';
     page: number;
     perPage: number;
 }) {
     const conditions = [eq(packages.createdBy, opts.ownerId)];
-    if (opts.type) conditions.push(eq(packages.type, opts.type));
-    if (opts.status) {
-        conditions.push(eq(packages.isActive, opts.status === 'active'));
+    if (opts.archived === 'archived') {
+        conditions.push(isNotNull(packages.archivedAt));
+    } else if (opts.archived !== 'all') {
+        conditions.push(isNull(packages.archivedAt));
     }
+    if (opts.type) conditions.push(eq(packages.type, opts.type));
     if (opts.q) {
         const q = `%${opts.q}%`;
         conditions.push(
@@ -215,6 +221,7 @@ export async function getOrderPackageForNas(
                 eq(packages.id, packageId),
                 eq(packages.type, type),
                 eq(packages.isActive, true),
+                isNull(packages.archivedAt),
                 eq(packages.createdBy, nasDevice.ownerId),
             ),
         )
@@ -252,7 +259,13 @@ export async function updatePackage(
         const [row] = await tx
             .update(packages)
             .set(data)
-            .where(and(eq(packages.id, id), eq(packages.createdBy, ownerId)))
+            .where(
+                and(
+                    eq(packages.id, id),
+                    eq(packages.createdBy, ownerId),
+                    isNull(packages.archivedAt),
+                ),
+            )
             .returning();
         if (!row) return row;
         await tx
@@ -270,39 +283,36 @@ export async function updatePackage(
     });
 }
 
-export type DeletePackageResult = 'deleted' | 'not_found' | 'in_use';
+export type PackageLifecycleResult = 'updated' | 'not_found';
 
-export async function deletePackage(
+export async function archivePackage(
     id: string,
     ownerId: string,
-): Promise<DeletePackageResult> {
-    return db.transaction(async (tx) => {
-        const [pkg] = await tx
-            .select({ id: packages.id })
-            .from(packages)
-            .where(and(eq(packages.id, id), eq(packages.createdBy, ownerId)))
-            .limit(1);
-        if (!pkg) return 'not_found';
+): Promise<PackageLifecycleResult> {
+    const [row] = await db
+        .update(packages)
+        .set({ archivedAt: new Date(), isActive: false })
+        .where(and(eq(packages.id, id), eq(packages.createdBy, ownerId)))
+        .returning({ id: packages.id });
+    return row ? 'updated' : 'not_found';
+}
 
-        const [payment, activation] = await Promise.all([
-            tx
-                .select({ id: packagePayments.id })
-                .from(packagePayments)
-                .where(eq(packagePayments.packageId, id))
-                .limit(1),
-            tx
-                .select({ id: activatedPackages.id })
-                .from(activatedPackages)
-                .where(eq(activatedPackages.packageId, id))
-                .limit(1),
-        ]);
-        if (payment.length > 0 || activation.length > 0) return 'in_use';
-
-        await tx
-            .delete(packages)
-            .where(and(eq(packages.id, id), eq(packages.createdBy, ownerId)));
-        return 'deleted';
-    });
+export async function restorePackage(
+    id: string,
+    ownerId: string,
+): Promise<PackageLifecycleResult> {
+    const [row] = await db
+        .update(packages)
+        .set({ archivedAt: null, isActive: true })
+        .where(
+            and(
+                eq(packages.id, id),
+                eq(packages.createdBy, ownerId),
+                isNotNull(packages.archivedAt),
+            ),
+        )
+        .returning({ id: packages.id });
+    return row ? 'updated' : 'not_found';
 }
 
 export async function getNasDeviceIdsForPackage(
@@ -456,16 +466,19 @@ export async function getNasDeviceAnalytics(
         })
         .from(packages)
         .where(
-            exists(
-                db
-                    .select()
-                    .from(packageNasDevice)
-                    .where(
-                        and(
-                            eq(packageNasDevice.packageId, packages.id),
-                            eq(packageNasDevice.nasDeviceId, nasDeviceId),
+            and(
+                isNull(packages.archivedAt),
+                exists(
+                    db
+                        .select()
+                        .from(packageNasDevice)
+                        .where(
+                            and(
+                                eq(packageNasDevice.packageId, packages.id),
+                                eq(packageNasDevice.nasDeviceId, nasDeviceId),
+                            ),
                         ),
-                    ),
+                ),
             ),
         );
 
@@ -529,6 +542,7 @@ export async function getNasDeviceAnalytics(
             amount: packagePayments.amount,
             status: packagePayments.status,
             packageTitle: packages.title,
+            packageArchivedAt: packages.archivedAt,
             createdAt: packagePayments.createdAt,
         })
         .from(packagePayments)

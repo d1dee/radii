@@ -42,7 +42,7 @@ import {
 } from '../lib/nas';
 import {
     createPackage,
-    deletePackage,
+    archivePackage,
     getNasDeviceAnalytics,
     getNasDeviceIdsByPackage,
     getNasDeviceIdsForPackage,
@@ -50,6 +50,7 @@ import {
     getPackageById,
     getPackages,
     listAdminPackages,
+    restorePackage,
     updatePackage,
 } from '../lib/packages';
 import { RadiusError, radiusClient } from '../lib/radius';
@@ -207,9 +208,12 @@ app.get('/packages', requireAdmin, async (c) => {
     ) {
         return jsonError(c, 400, 'Invalid package type filter');
     }
-    const statusParam = c.req.query('status');
-    if (statusParam && !['active', 'inactive'].includes(statusParam)) {
-        return jsonError(c, 400, 'Invalid package status filter');
+    const archivedParam = c.req.query('archived');
+    if (
+        archivedParam &&
+        !['current', 'archived', 'all'].includes(archivedParam)
+    ) {
+        return jsonError(c, 400, 'Invalid package archive filter');
     }
     const { page, perPage } = paginationParams(
         c.req.query('page'),
@@ -219,7 +223,11 @@ app.get('/packages', requireAdmin, async (c) => {
         ownerId: c.var.adminSession.userId,
         type: typeParam as 'hotspot' | 'pppoe' | undefined,
         q: c.req.query('q')?.trim() || undefined,
-        status: statusParam as 'active' | 'inactive' | undefined,
+        archived: archivedParam as
+            | 'current'
+            | 'archived'
+            | 'all'
+            | undefined,
         ...sort.data,
         page,
         perPage,
@@ -312,35 +320,30 @@ app.put('/packages/:id', requireAdmin, async (c) => {
     return c.json({ success: true, data: { ...row, nasDeviceIds } });
 });
 
+app.post('/packages/:id/restore', requireAdmin, async (c) => {
+    const packageId = c.req.param('id');
+    if (!packageId) return jsonError(c, 404, 'Package not found');
+    const result = await restorePackage(
+        packageId,
+        c.var.adminSession.userId,
+    );
+    if (result === 'not_found') {
+        return jsonError(c, 404, 'Archived package not found');
+    }
+    return c.json({ success: true, message: 'Package restored' });
+});
+
 app.delete('/packages/:id', requireAdmin, async (c) => {
     const packageId = c.req.param('id');
     if (!packageId) return jsonError(c, 404, 'Package not found');
-    try {
-        const result = await deletePackage(
-            packageId,
-            c.get('adminSession').userId,
-        );
-        if (result === 'not_found') {
-            return jsonError(c, 404, 'Package not found');
-        }
-        if (result === 'in_use') {
-            return jsonError(
-                c,
-                409,
-                'This package has payment or activation history and cannot be deleted',
-            );
-        }
-        return c.json({ success: true, message: 'Package deleted' });
-    } catch (e) {
-        if (isForeignKeyViolation(e)) {
-            return jsonError(
-                c,
-                409,
-                'This package is in use and cannot be deleted',
-            );
-        }
-        throw e;
+    const result = await archivePackage(
+        packageId,
+        c.get('adminSession').userId,
+    );
+    if (result === 'not_found') {
+        return jsonError(c, 404, 'Package not found');
     }
+    return c.json({ success: true, message: 'Package archived' });
 });
 
 app.get('/nas-devices', requireAdmin, async (c) => {

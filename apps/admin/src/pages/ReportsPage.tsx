@@ -19,6 +19,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { PageLayout } from '@/components/Layout/PageLayout';
 import { PageTableScrollContainer } from '@/components/PageTableScrollContainer';
+import { ArchivedPackageBadge } from '@/components/Packages/ArchivedPackageBadge';
 import { TablePagination } from '@/components/TablePagination';
 import { getAdminReports, type AdminReports } from '@/lib/api';
 import { useAutoRefresh } from '@/lib/autoRefresh';
@@ -399,7 +400,14 @@ export default function ReportsPage() {
                                                                         1}
                                                                 </Table.Td>
                                                                 <Table.Td>
-                                                                    {p.title}
+                                                                    <Group gap={4} wrap='nowrap'>
+                                                                        {p.title}
+                                                                        <ArchivedPackageBadge
+                                                                            archivedAt={
+                                                                                p.archivedAt
+                                                                            }
+                                                                        />
+                                                                    </Group>
                                                                 </Table.Td>
                                                                 <Table.Td>
                                                                     <Badge

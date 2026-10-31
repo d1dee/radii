@@ -46,6 +46,7 @@ import {
 import { useNavigate } from 'react-router-dom';
 
 import { PaymentRefCell } from '@/components/Payments/PaymentRefCell';
+import { ArchivedPackageBadge } from '@/components/Packages/ArchivedPackageBadge';
 import { TablePagination } from '@/components/TablePagination';
 import {
     activateActivation,
@@ -962,12 +963,19 @@ export function UserDetailsDrawer({
                                                             1}
                                                     </Table.Td>
                                                     <Table.Td>
-                                                        <Text
-                                                            size='sm'
-                                                            fw={500}
-                                                        >
-                                                            {a.packageTitle}
-                                                        </Text>
+                                                        <Group gap={4} wrap='nowrap'>
+                                                            <Text
+                                                                size='sm'
+                                                                fw={500}
+                                                            >
+                                                                {a.packageTitle}
+                                                            </Text>
+                                                            <ArchivedPackageBadge
+                                                                archivedAt={
+                                                                    a.packageArchivedAt
+                                                                }
+                                                            />
+                                                        </Group>
                                                         <Text
                                                             size='xs'
                                                             c='dimmed'
@@ -1280,9 +1288,16 @@ export function UserDetailsDrawer({
                                                         </Text>
                                                     </Table.Td>
                                                     <Table.Td>
-                                                        <Text size='sm'>
-                                                            {p.packageTitle}
-                                                        </Text>
+                                                        <Group gap={4} wrap='nowrap'>
+                                                            <Text size='sm'>
+                                                                {p.packageTitle}
+                                                            </Text>
+                                                            <ArchivedPackageBadge
+                                                                archivedAt={
+                                                                    p.packageArchivedAt
+                                                                }
+                                                            />
+                                                        </Group>
                                                         <Text
                                                             size='xs'
                                                             c='dimmed'

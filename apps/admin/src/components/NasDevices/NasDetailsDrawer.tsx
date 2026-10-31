@@ -14,6 +14,7 @@ import {
     Text,
     Title,
 } from '@mantine/core';
+import { ArchivedPackageBadge } from '@/components/Packages/ArchivedPackageBadge';
 import type { ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import { MdDelete, MdEdit, MdTerminal } from 'react-icons/md';
@@ -496,7 +497,14 @@ export function NasDetailsDrawer({
                                                     {p.phoneNumber}
                                                 </Table.Td>
                                                 <Table.Td>
-                                                    {p.packageTitle}
+                                                    <Group gap={4} wrap='nowrap'>
+                                                        {p.packageTitle}
+                                                        <ArchivedPackageBadge
+                                                            archivedAt={
+                                                                p.packageArchivedAt
+                                                            }
+                                                        />
+                                                    </Group>
                                                 </Table.Td>
                                                 <Table.Td>
                                                     {formatPaymentAmount(

@@ -14,6 +14,7 @@ import {
     Text,
     Title,
 } from '@mantine/core';
+import { ArchivedPackageBadge } from '@/components/Packages/ArchivedPackageBadge';
 import type { ReactNode } from 'react';
 import { useEffect, useState } from 'react';
 import { MdDelete, MdEdit } from 'react-icons/md';
@@ -460,6 +461,11 @@ export function SessionDetailsDrawer({
                                         <Badge size='xs' variant='light'>
                                             {detail.package.type.toUpperCase()}
                                         </Badge>
+                                        <ArchivedPackageBadge
+                                            archivedAt={
+                                                detail.package.archivedAt
+                                            }
+                                        />
                                     </Group>
                                     <Text size='sm' c='dimmed'>
                                         {detail.package.category}

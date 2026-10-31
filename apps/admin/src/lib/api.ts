@@ -179,6 +179,7 @@ export type PackageRow = {
     // NAS devices the package is available on; empty means hidden.
     nasDeviceIds: string[];
     isActive: boolean;
+    archivedAt: string | null;
     createdAt: string;
 };
 
@@ -220,7 +221,7 @@ export type AdminPackageList = {
 export type ListAdminPackagesQuery = PaginationQuery & {
     type?: PackageType;
     q?: string;
-    status?: 'active' | 'inactive';
+    archived?: 'current' | 'archived' | 'all';
     sortBy?: PackageSortKey;
     sortDirection?: SortDirection;
 };
@@ -237,7 +238,7 @@ export function getAdminPackages(query: ListAdminPackagesQuery = {}) {
     const params = new URLSearchParams();
     if (query.type) params.set('type', query.type);
     if (query.q) params.set('q', query.q);
-    if (query.status) params.set('status', query.status);
+    if (query.archived) params.set('archived', query.archived);
     if (query.sortBy) params.set('sortBy', query.sortBy);
     if (query.sortDirection) params.set('sortDirection', query.sortDirection);
     if (query.page) params.set('page', String(query.page));
@@ -325,10 +326,18 @@ export function updateAdminPackage(id: string, body: CreatePackageInput) {
     });
 }
 
-export function deleteAdminPackage(id: string) {
+export function archiveAdminPackage(id: string) {
     return request<{ message?: string }>(`/admin/packages/${id}`, undefined, {
         method: 'DELETE',
     });
+}
+
+export function restoreAdminPackage(id: string) {
+    return request<{ message?: string }>(
+        `/admin/packages/${id}/restore`,
+        undefined,
+        { method: 'POST' },
+    );
 }
 
 // Raw NAS device row as returned by the admin endpoints.
@@ -491,6 +500,7 @@ export type NasDeviceAnalytics = {
             amount: string;
             status: PackagePaymentStatus;
             packageTitle: string;
+            packageArchivedAt: string | null;
             createdAt: string;
         }>;
     };
@@ -716,6 +726,7 @@ export type AdminPaymentRow = {
     status: PackagePaymentStatus;
     packageTitle: string | null;
     packageType: PackageType | null;
+    packageArchivedAt: string | null;
     nasDeviceName: string;
     provider: string | null;
     providerTransactionId: string | null;
@@ -760,6 +771,7 @@ export type AdminPaymentDetail = {
     status: PackagePaymentStatus;
     packageTitle: string;
     packageType: PackageType;
+    packageArchivedAt: string | null;
     nasDeviceName: string;
     provider: string | null;
     providerTransactionId: string | null;
@@ -780,6 +792,7 @@ export type UserPaymentRow = {
     phoneNumber: string;
     packageTitle: string;
     packageType: PackageType;
+    packageArchivedAt: string | null;
     provider: string | null;
     providerTransactionId: string | null;
     createdAt: string;
@@ -809,6 +822,7 @@ export type AdminActivationRow = {
     packageId: string;
     packageTitle: string;
     packageType: PackageType;
+    packageArchivedAt: string | null;
     paymentId: string;
     activatedAt: string;
     expireAt: string;
@@ -1060,6 +1074,7 @@ export type AdminReports = {
         packageId: string;
         title: string;
         type: PackageType;
+        archivedAt: string | null;
         paid: number;
         revenue: number;
     }>;
@@ -1279,6 +1294,7 @@ export type AdminSessionDetail = {
         title: string;
         type: PackageType;
         category: string;
+        archivedAt: string | null;
     } | null;
 };
 

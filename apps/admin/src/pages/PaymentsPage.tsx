@@ -3,6 +3,7 @@ import {
     Badge,
     Card,
     Center,
+    Group,
     Loader,
     Select,
     SimpleGrid,
@@ -21,6 +22,7 @@ import { useSearchParams } from 'react-router-dom';
 
 import { PageLayout } from '@/components/Layout/PageLayout';
 import { PageTableScrollContainer } from '@/components/PageTableScrollContainer';
+import { ArchivedPackageBadge } from '@/components/Packages/ArchivedPackageBadge';
 import { PaymentDetailsDrawer } from '@/components/Payments/PaymentDetailsDrawer';
 import { PaymentRefCell } from '@/components/Payments/PaymentRefCell';
 import {
@@ -385,9 +387,16 @@ export default function PaymentsPage() {
                                             </Text>
                                         </Table.Td>
                                         <Table.Td className='admin-table-identity'>
-                                            <Text size='sm'>
-                                                {p.packageTitle ?? '—'}
-                                            </Text>
+                                            <Group gap={4} wrap='nowrap'>
+                                                <Text size='sm'>
+                                                    {p.packageTitle ?? '—'}
+                                                </Text>
+                                                <ArchivedPackageBadge
+                                                    archivedAt={
+                                                        p.packageArchivedAt
+                                                    }
+                                                />
+                                            </Group>
                                             <Text size='xs' c='dimmed'>
                                                 {p.packageType ?? ''}
                                             </Text>

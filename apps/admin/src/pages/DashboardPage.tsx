@@ -205,7 +205,7 @@ export default function DashboardPage() {
         : [];
 
     const packageChartData = (reports?.topPackages.items ?? []).map((p) => ({
-        package: p.title,
+        package: p.archivedAt ? `${p.title} (Archived)` : p.title,
         revenue: p.revenue,
         paid: p.paid,
     }));

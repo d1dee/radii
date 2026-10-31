@@ -15,7 +15,11 @@ import {
 } from '@mantine/core';
 import type { ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
-import { MdDelete, MdEdit } from 'react-icons/md';
+import {
+    MdArchive,
+    MdEdit,
+    MdRestore,
+} from 'react-icons/md';
 
 import { TablePagination } from '@/components/TablePagination';
 import {
@@ -89,12 +93,16 @@ export function PackageDetailsDrawer({
     packageId,
     onClose,
     onEdit,
-    onDelete,
+    onArchive,
+    onRestore,
+    actionBusyId,
 }: {
     packageId: string | null;
     onClose: () => void;
     onEdit: (pkg: PackageRow) => void;
-    onDelete: (pkg: PackageRow) => void;
+    onArchive: (pkg: PackageRow) => void;
+    onRestore: (pkg: PackageRow) => void;
+    actionBusyId: string | null;
 }) {
     const { settings } = useAdminSettings();
     const perPage = settings.dashboard.perPage;
@@ -187,23 +195,37 @@ export function PackageDetailsDrawer({
                     </Title>
                     {pkg ? (
                         <Group gap='xs' wrap='nowrap' style={{ flexShrink: 0 }}>
-                            <Button
-                                size='xs'
-                                variant='light'
-                                leftSection={<MdEdit size={16} />}
-                                onClick={() => onEdit(pkg)}
-                            >
-                                Edit
-                            </Button>
-                            <Button
-                                size='xs'
-                                variant='light'
-                                color='red'
-                                leftSection={<MdDelete size={16} />}
-                                onClick={() => onDelete(pkg)}
-                            >
-                                Delete
-                            </Button>
+                            {pkg.archivedAt ? (
+                                <Button
+                                    size='xs'
+                                    variant='light'
+                                    leftSection={<MdRestore size={16} />}
+                                    loading={actionBusyId === pkg.id}
+                                    onClick={() => onRestore(pkg)}
+                                >
+                                    Restore
+                                </Button>
+                            ) : (
+                                <>
+                                    <Button
+                                        size='xs'
+                                        variant='light'
+                                        leftSection={<MdEdit size={16} />}
+                                        onClick={() => onEdit(pkg)}
+                                    >
+                                        Edit
+                                    </Button>
+                                    <Button
+                                        size='xs'
+                                        variant='light'
+                                        color='red'
+                                        leftSection={<MdArchive size={16} />}
+                                        onClick={() => onArchive(pkg)}
+                                    >
+                                        Archive
+                                    </Button>
+                                </>
+                            )}
                         </Group>
                     ) : null}
                 </Group>
@@ -224,9 +246,9 @@ export function PackageDetailsDrawer({
                         <Badge variant='light'>{pkg.category}</Badge>
                         <Badge
                             variant='light'
-                            color={pkg.isActive ? 'green' : 'gray'}
+                            color={pkg.archivedAt ? 'gray' : 'green'}
                         >
-                            {pkg.isActive ? 'Active' : 'Inactive'}
+                            {pkg.archivedAt ? 'Archived' : 'Current'}
                         </Badge>
                     </Group>
 

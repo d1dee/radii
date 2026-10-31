@@ -68,6 +68,10 @@ export const packages = pgTable(
             .notNull(),
         burstTime: integer('burst_time').default(0).notNull(),
         isActive: boolean('is_active').default(true).notNull(),
+        archivedAt: timestamp('archived_at', {
+            withTimezone: true,
+            mode: 'date',
+        }),
         createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
             .defaultNow()
             .notNull(),
@@ -75,6 +79,7 @@ export const packages = pgTable(
     (table) => [
         index('packages_type_idx').on(table.type),
         index('packages_category_idx').on(table.category),
+        index('packages_archived_at_idx').on(table.archivedAt),
     ],
 );
 
