@@ -251,7 +251,8 @@ export function buildBootstrapScript(
     apiBase: string,
 ): string {
     const url = `${apiBase}/api/nas/${deviceId}/script?token=${bootstrapToken}`;
-    return `/tool fetch url="${url}" dst-path=radii-setup.rsc; /import radii-setup.rsc`;
+    const checkCertificate = env.isProduction ? 'yes' : 'no';
+    return `/tool fetch url="${url}" check-certificate=${checkCertificate} dst-path=radii-setup.rsc; /import radii-setup.rsc`;
 }
 
 export async function generateSetupScript(
@@ -430,6 +431,7 @@ export async function generateSetupScript(
             API_DOMAIN_IS_IP: /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(apiDomain)
                 ? '1'
                 : '',
+                CHECK_CERTIFICATE: env.isProduction ? 'yes' : 'no',
                 API_BASE_URL: env.apiUrl,
             },
             { ipLockdown: input.ipLockdown },

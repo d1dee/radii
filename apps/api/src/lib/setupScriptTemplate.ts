@@ -20,7 +20,9 @@ export function deriveNasPortalSecret(
     nasDeviceId: string,
 ): string {
     if (!radiusSecret || !nasDeviceId) {
-        throw new Error('deriveNasPortalSecret requires radiusSecret and nasDeviceId');
+        throw new Error(
+            'deriveNasPortalSecret requires radiusSecret and nasDeviceId',
+        );
     }
     return createHash('sha256')
         .update(`${PORTAL_SECRET_PREFIX}${radiusSecret}:${nasDeviceId}`)
@@ -727,7 +729,7 @@ $radiiLog "Read-only session monitoring configured (monitoring account WireGuard
 
     /tool/fetch \
         url="{{NAS_REPORT_URL}}" \
-        check-certificate=yes \
+        check-certificate={{CHECK_CERTIFICATE}} \
         http-method=post \
         output=none \
         http-data=("nasId={{NAS_ID}}" ."&token={{BOOTSTRAP_TOKEN}}" ."&publicKey=" . $encKey ."&model=" . $encModel ."&serialNumber=" . $encSerial ."&firmwareVersion=" . $encVersion ."&boardName=" . $encBoard . "&architecture=" . $encArch);
@@ -1582,7 +1584,7 @@ $radiiLog ("Expired PPPoE payment access configured for " . $pppPortalHost);
         };
         /tool/fetch \
             url=($hsBaseUrl . "/" . $hsPageName . "?token=" . $encHsToken) \
-            check-certificate=yes \
+            check-certificate={{CHECK_CERTIFICATE}} \
             dst-path=$hsTempPath;
         :if ([/file/get [find where name=$hsTempPath] size] = 0) do={
             :error "downloaded page is empty";
@@ -1640,14 +1642,16 @@ export function renderMikrotikSetupScript(
         vars.NAS_ID,
         deriveNasPortalSecret(vars.RADIUS_SECRET, vars.NAS_ID),
     );
-    let out = MIKROTIK_SETUP_SCRIPT_TEMPLATE.split('{{IP_LOCKDOWN_SECTION}}').join(
+    let out = MIKROTIK_SETUP_SCRIPT_TEMPLATE.split(
+        '{{IP_LOCKDOWN_SECTION}}',
+    ).join(
         options?.ipLockdown === false
             ? IP_LOCKDOWN_DISABLED_SECTION
             : IP_LOCKDOWN_SECTION,
     );
-    out = out.split('{{IP_LOCKDOWN_ENABLED}}').join(
-        options?.ipLockdown === false ? 'false' : 'true',
-    );
+    out = out
+        .split('{{IP_LOCKDOWN_ENABLED}}')
+        .join(options?.ipLockdown === false ? 'false' : 'true');
     for (const [key, value] of Object.entries(vars)) {
         // Route admin/device-controlled strings through the matching escaper
         // for their interpolation context so a crafted value can never break

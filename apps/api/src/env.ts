@@ -33,6 +33,7 @@ function requiredSecret(name: string): string {
 }
 
 export const env = {
+    isProduction: process.env.NODE_ENV === 'production',
     apiUrl: required('API_URL'),
     // BetterAuth signing secrets. Deliberately independent (no cross-fallback)
     // so a leak of one never forges sessions on the other instance.
