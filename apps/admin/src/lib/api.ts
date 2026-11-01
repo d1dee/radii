@@ -738,6 +738,7 @@ export type AdminPaymentRow = {
     userId: string;
     userName: string | null;
     phoneNumber: string;
+    customerLocation: string | null;
     amount: string;
     status: PackagePaymentStatus;
     packageTitle: string | null;
@@ -899,6 +900,12 @@ export type SessionTypeFilter = 'hotspot' | 'pppoe';
 export type AdminSessionRow = SessionInfo & {
     sessionType: SessionTypeFilter;
     nasName: string | null;
+    customer: {
+        id: string | null;
+        name: string | null;
+        phoneNumber: string | null;
+        location: string | null;
+    };
 };
 
 export type AdminActivationList = {
@@ -1098,11 +1105,16 @@ export type AdminReports = {
         userId: string;
         userName: string;
         phoneNumber: string;
+        location: string | null;
         paid: number;
         revenue: number;
     }>;
     heavyUsers: PaginatedItems<{
         username: string;
+        userId: string;
+        userName: string;
+        phoneNumber: string;
+        location: string | null;
         sessions: number;
         seconds: number;
         octets: number;

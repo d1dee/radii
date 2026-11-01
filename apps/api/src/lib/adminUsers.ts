@@ -1498,7 +1498,8 @@ export interface ListPaymentsOpts {
     adminId: string;
     status?: 'pending' | 'paid' | 'failed';
     type?: AdminUserTypeFilter;
-    // Matches payer phone, name, package, NAS name or provider references.
+    // Matches payer phone, customer/tag name or location, package, NAS name or
+    // provider references.
     q?: string;
     // Restrict to payments purchased through one PPPoE service account.
     pppoeAccountId?: string;
@@ -1532,6 +1533,8 @@ export async function listPayments(opts: ListPaymentsOpts) {
                 ilike(packagePayments.phoneNumber, q),
                 ilike(user.name, q),
                 ilike(user.username, q),
+                ilike(userAdminTag.name, q),
+                ilike(userAdminTag.location, q),
                 ilike(packages.title, q),
                 ilike(nasDevice.name, q),
                 ilike(transaction.providerTransactionId, q),
@@ -1541,7 +1544,11 @@ export async function listPayments(opts: ListPaymentsOpts) {
     }
     const where = and(...conditions);
     const direction = opts.sortDirection === 'asc' ? asc : desc;
-    const customer = sql<string>`coalesce(${user.name}, ${packagePayments.phoneNumber})`;
+    const customer = sql<string>`coalesce(
+        ${userAdminTag.name},
+        ${user.name},
+        ${packagePayments.phoneNumber}
+    )`;
     const paymentOrder = (() => {
         switch (opts.sortBy) {
             case 'createdAt':
@@ -1585,6 +1592,13 @@ export async function listPayments(opts: ListPaymentsOpts) {
             .innerJoin(packages, eq(packagePayments.packageId, packages.id))
             .leftJoin(user, eq(packagePayments.userId, user.id))
             .leftJoin(
+                userAdminTag,
+                and(
+                    eq(userAdminTag.userId, user.id),
+                    eq(userAdminTag.adminId, opts.adminId),
+                ),
+            )
+            .leftJoin(
                 transaction,
                 eq(packagePayments.transaction, transaction.id),
             )
@@ -1593,8 +1607,12 @@ export async function listPayments(opts: ListPaymentsOpts) {
             .select({
                 id: packagePayments.id,
                 userId: packagePayments.userId,
-                userName: user.name,
-                phoneNumber: packagePayments.phoneNumber,
+                userName: customer,
+                phoneNumber: sql<string>`coalesce(
+                    ${user.username},
+                    ${packagePayments.phoneNumber}
+                )`,
+                customerLocation: userAdminTag.location,
                 amount: packagePayments.amount,
                 status: packagePayments.status,
                 packageTitle: packages.title,
@@ -1610,6 +1628,13 @@ export async function listPayments(opts: ListPaymentsOpts) {
             .from(packagePayments)
             .innerJoin(nasDevice, eq(packagePayments.nasDeviceId, nasDevice.id))
             .leftJoin(user, eq(packagePayments.userId, user.id))
+            .leftJoin(
+                userAdminTag,
+                and(
+                    eq(userAdminTag.userId, user.id),
+                    eq(userAdminTag.adminId, opts.adminId),
+                ),
+            )
             .innerJoin(packages, eq(packagePayments.packageId, packages.id))
             .leftJoin(
                 transaction,
@@ -1939,19 +1964,37 @@ export async function getAdminReports(
         .where(and(inRange, eq(packagePayments.status, 'paid'))),
     ]);
 
+    const reportCustomerName = sql<string>`coalesce(
+        ${userAdminTag.name},
+        ${user.name}
+    )`;
     const [topUsers, [topUsersCount]] = await Promise.all([
         db.select({
             userId: packagePayments.userId,
-            userName: user.name,
+            userName: reportCustomerName,
             phoneNumber: user.username,
+            location: userAdminTag.location,
             paid: count(packagePayments.id),
             revenue: sql<number>`coalesce(sum(${packagePayments.amount}), 0)::float8`,
         })
         .from(packagePayments)
         .innerJoin(user, eq(packagePayments.userId, user.id))
+        .leftJoin(
+            userAdminTag,
+            and(
+                eq(userAdminTag.userId, user.id),
+                eq(userAdminTag.adminId, adminId),
+            ),
+        )
         .innerJoin(nasDevice, eq(packagePayments.nasDeviceId, nasDevice.id))
         .where(and(inRange, eq(packagePayments.status, 'paid')))
-        .groupBy(packagePayments.userId, user.name, user.username)
+        .groupBy(
+            packagePayments.userId,
+            user.name,
+            user.username,
+            userAdminTag.name,
+            userAdminTag.location,
+        )
         .orderBy(
             desc(sql`sum(${packagePayments.amount})`),
             asc(packagePayments.userId),
@@ -1981,6 +2024,10 @@ export async function getAdminReports(
     const [heavyUsers, [heavyUsersCount]] = await Promise.all([
         db.select({
             username: radacct.username,
+            userId: activatedPackages.userId,
+            userName: reportCustomerName,
+            phoneNumber: user.username,
+            location: userAdminTag.location,
             sessions: count(radacct.radacctid),
             seconds: sql<number>`coalesce(sum(${radacct.acctsessiontime}), 0)::float8`,
             octets: sql<number>`coalesce(sum(coalesce(${radacct.acctinputoctets}, 0) + coalesce(${radacct.acctoutputoctets}, 0)), 0)::float8`,
@@ -1990,13 +2037,28 @@ export async function getAdminReports(
             activatedPackages,
             sql`${radacct.class} = ${activatedPackages.id}::text`,
         )
+        .innerJoin(user, eq(activatedPackages.userId, user.id))
+        .leftJoin(
+            userAdminTag,
+            and(
+                eq(userAdminTag.userId, user.id),
+                eq(userAdminTag.adminId, adminId),
+            ),
+        )
         .innerJoin(
             packagePayments,
             eq(activatedPackages.packagePaymentId, packagePayments.id),
         )
         .innerJoin(nasDevice, eq(packagePayments.nasDeviceId, nasDevice.id))
         .where(heavyUsersWhere)
-        .groupBy(radacct.username)
+        .groupBy(
+            radacct.username,
+            activatedPackages.userId,
+            user.name,
+            user.username,
+            userAdminTag.name,
+            userAdminTag.location,
+        )
         .orderBy(
             desc(
                 sql`sum(coalesce(${radacct.acctinputoctets}, 0) + coalesce(${radacct.acctoutputoctets}, 0))`,
@@ -2057,6 +2119,7 @@ export async function getAdminReports(
                 userId: u.userId,
                 userName: u.userName,
                 phoneNumber: u.phoneNumber ?? '',
+                location: u.location,
                 paid: Number(u.paid),
                 revenue: Number(u.revenue),
             })),
@@ -2066,6 +2129,10 @@ export async function getAdminReports(
             ...pagination.heavyUsers,
             items: heavyUsers.map((u) => ({
                 username: u.username ?? '',
+                userId: u.userId,
+                userName: u.userName,
+                phoneNumber: u.phoneNumber ?? '',
+                location: u.location,
                 sessions: Number(u.sessions),
                 seconds: Number(u.seconds),
                 octets: Number(u.octets),

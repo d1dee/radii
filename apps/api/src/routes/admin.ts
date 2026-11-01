@@ -1416,6 +1416,7 @@ app.get('/radius/sessions', requireAdmin, async (c) => {
     );
     const addresses = await getAdminNasAddresses(c.get('adminSession').userId);
     const data = await radiusClient.getAdminSessions([...addresses], {
+        adminId: c.get('adminSession').userId,
         q: c.req.query('q')?.trim() || undefined,
         live:
             liveParam === undefined

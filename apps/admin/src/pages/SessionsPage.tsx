@@ -397,9 +397,11 @@ export default function SessionsPage() {
                                             <UnstyledButton
                                                 fz='sm'
                                                 fw={500}
-                                                aria-label={`View session details for ${s.username || s.acctSessionId}`}
+                                                aria-label={`View session details for ${s.customer.name || s.username || s.acctSessionId}`}
                                             >
-                                                {s.username || '—'}
+                                                {s.customer.name ||
+                                                    s.username ||
+                                                    '—'}
                                             </UnstyledButton>
                                             <Badge
                                                 variant='light'
@@ -416,7 +418,11 @@ export default function SessionsPage() {
                                             </Badge>
                                         </Group>
                                         <Text size='xs' c='dimmed'>
-                                            {s.acctSessionId}
+                                            {s.customer.phoneNumber ??
+                                                s.username}
+                                            {s.customer.location
+                                                ? ` · ${s.customer.location}`
+                                                : ''}
                                         </Text>
                                     </Table.Td>
                                     <Table.Td>

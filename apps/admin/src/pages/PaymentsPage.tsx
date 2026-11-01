@@ -308,13 +308,20 @@ export default function PaymentsPage() {
             ) : (
                 <>
                     <PageTableScrollContainer
-                        minWidth={1080}
+                        minWidth={0}
                         aria-label='Payments table'
                     >
                         <Table withRowBorders highlightOnHover stickyHeader>
                             <Table.Thead>
                                 <Table.Tr>
                                     <Table.Th>#</Table.Th>
+                                    <SortableTableHeader
+                                        label='Customer'
+                                        sortKey='customer'
+                                        sortBy={sortBy}
+                                        sortDirection={sortDirection}
+                                        onSort={handleSort}
+                                    />
                                     <SortableTableHeader
                                         label='Date'
                                         sortKey='createdAt'
@@ -324,22 +331,13 @@ export default function PaymentsPage() {
                                         initialDirection='desc'
                                     />
                                     <SortableTableHeader
-                                        label='Customer'
-                                        width={240}
-                                        sortKey='customer'
-                                        sortBy={sortBy}
-                                        sortDirection={sortDirection}
-                                        onSort={handleSort}
-                                    />
-                                    <SortableTableHeader
                                         label='Package'
-                                        width={220}
                                         sortKey='package'
                                         sortBy={sortBy}
                                         sortDirection={sortDirection}
                                         onSort={handleSort}
                                     />
-                                    <Table.Th w={180}>NAS</Table.Th>
+                                    <Table.Th>NAS</Table.Th>
                                     <SortableTableHeader
                                         label='Amount'
                                         sortKey='amount'
@@ -370,11 +368,6 @@ export default function PaymentsPage() {
                                             {(page - 1) * perPage + i + 1}
                                         </Table.Td>
                                         <Table.Td>
-                                            <Text size='sm'>
-                                                {formatDateTime(p.createdAt)}
-                                            </Text>
-                                        </Table.Td>
-                                        <Table.Td className='admin-table-identity'>
                                             <UnstyledButton
                                                 fz='sm'
                                                 fw={500}
@@ -384,9 +377,17 @@ export default function PaymentsPage() {
                                             </UnstyledButton>
                                             <Text size='xs' c='dimmed'>
                                                 {p.phoneNumber}
+                                                {p.customerLocation
+                                                    ? ` · ${p.customerLocation}`
+                                                    : ''}
                                             </Text>
                                         </Table.Td>
-                                        <Table.Td className='admin-table-identity'>
+                                        <Table.Td>
+                                            <Text size='sm'>
+                                                {formatDateTime(p.createdAt)}
+                                            </Text>
+                                        </Table.Td>
+                                        <Table.Td>
                                             <Group gap={4} wrap='nowrap'>
                                                 <Text size='sm'>
                                                     {p.packageTitle ?? '—'}
@@ -401,7 +402,7 @@ export default function PaymentsPage() {
                                                 {p.packageType ?? ''}
                                             </Text>
                                         </Table.Td>
-                                        <Table.Td className='admin-table-identity'>
+                                        <Table.Td>
                                             <Text size='sm'>
                                                 {p.nasDeviceName}
                                             </Text>

@@ -500,6 +500,9 @@ export default function ReportsPage() {
                                                                         {
                                                                             u.phoneNumber
                                                                         }
+                                                                        {u.location
+                                                                            ? ` · ${u.location}`
+                                                                            : ''}
                                                                     </Text>
                                                                 </Table.Td>
                                                                 <Table.Td ta='right'>
@@ -549,7 +552,7 @@ export default function ReportsPage() {
                                                     <Table.Tr>
                                                         <Table.Th>#</Table.Th>
                                                         <Table.Th>
-                                                            RADIUS user
+                                                            Customer
                                                         </Table.Th>
                                                         <Table.Th ta='right'>
                                                             Sessions
@@ -576,8 +579,21 @@ export default function ReportsPage() {
                                                                         1}
                                                                 </Table.Td>
                                                                 <Table.Td>
-                                                                    {u.username ||
-                                                                        '—'}
+                                                                    <Text size='sm'>
+                                                                        {u.userName ||
+                                                                            u.username ||
+                                                                            '—'}
+                                                                    </Text>
+                                                                    <Text
+                                                                        size='xs'
+                                                                        c='dimmed'
+                                                                    >
+                                                                        {u.phoneNumber ||
+                                                                            u.username}
+                                                                        {u.location
+                                                                            ? ` · ${u.location}`
+                                                                            : ''}
+                                                                    </Text>
                                                                 </Table.Td>
                                                                 <Table.Td ta='right'>
                                                                     {u.sessions}

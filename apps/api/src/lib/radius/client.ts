@@ -77,6 +77,8 @@ import {
     radreply,
     radiusUsageDelta,
     transaction,
+    user,
+    userAdminTag,
     userFlag,
 } from '../../db/schema';
 import {
@@ -432,6 +434,12 @@ export interface SessionInfo {
 export type AdminSessionInfo = SessionInfo & {
     sessionType: 'hotspot' | 'pppoe';
     nasName: string | null;
+    customer: {
+        id: string | null;
+        name: string | null;
+        phoneNumber: string | null;
+        location: string | null;
+    };
 };
 
 export type AdminSessionSortBy =
@@ -3033,6 +3041,7 @@ export class RadiusClient {
     async getAdminSessions(
         nasIpAddresses: string[],
         opts: {
+            adminId: string;
             q?: string;
             live?: boolean;
             sessionType?: 'hotspot' | 'pppoe';
@@ -3062,6 +3071,60 @@ export class RadiusClient {
             .where(eq(pppoeServiceAccounts.username, radacct.username));
         // Keep the subquery's outer username qualified in single-table selects.
         const pppoeFlag = exists(pppoeAccountMatch);
+        const customerId = sql<string | null>`coalesce(
+            (
+                select session_activation.user_id
+                from ${activatedPackages} session_activation
+                where session_activation.id::text = ${radacct.class}
+                limit 1
+            ),
+            (
+                select session_account.customer_user_id
+                from ${pppoeServiceAccounts} session_account
+                where session_account.username = ${radacct.username}
+                limit 1
+            )
+        )`;
+        const pppoePhone = sql<string | null>`(
+            select session_account.normalized_phone
+            from ${pppoeServiceAccounts} session_account
+            where session_account.username = ${radacct.username}
+            limit 1
+        )`;
+        const pppoeLabel = sql<string | null>`(
+            select session_account.label
+            from ${pppoeServiceAccounts} session_account
+            where session_account.username = ${radacct.username}
+            limit 1
+        )`;
+        const customerName = sql<string | null>`coalesce(
+            (
+                select coalesce(session_tag.name, session_customer.name)
+                from ${user} session_customer
+                left join ${userAdminTag} session_tag
+                    on session_tag.user_id = session_customer.id
+                    and session_tag.admin_id = ${opts.adminId}
+                where session_customer.id = ${customerId}
+                limit 1
+            ),
+            ${pppoeLabel}
+        )`;
+        const customerPhone = sql<string | null>`coalesce(
+            (
+                select session_customer.username
+                from ${user} session_customer
+                where session_customer.id = ${customerId}
+                limit 1
+            ),
+            ${pppoePhone}
+        )`;
+        const customerLocation = sql<string | null>`(
+            select session_tag.location
+            from ${userAdminTag} session_tag
+            where session_tag.user_id = ${customerId}
+                and session_tag.admin_id = ${opts.adminId}
+            limit 1
+        )`;
         const where = and(
             isNotNull(radacct.acctstarttime),
             inArray(radacct.nasipaddress, nasIpAddresses),
@@ -3082,6 +3145,9 @@ export class RadiusClient {
                       ilike(radacct.callingstationid, q),
                       ilike(sql`${radacct.framedipaddress}::text`, q),
                       ilike(sql`${radacct.nasipaddress}::text`, q),
+                      ilike(customerName, q),
+                      ilike(customerPhone, q),
+                      ilike(customerLocation, q),
                   )
                 : undefined,
         );
@@ -3110,7 +3176,12 @@ export class RadiusClient {
         const orderBy = (() => {
             switch (opts.sortBy) {
                 case 'username':
-                    return nullableOrder(radacct.username);
+                    return [
+                        direction(
+                            sql`coalesce(${customerName}, ${radacct.username})`,
+                        ),
+                        asc(radacct.radacctid),
+                    ];
                 case 'nasIpAddress':
                     return [
                         direction(radacct.nasipaddress),
@@ -3142,6 +3213,10 @@ export class RadiusClient {
                     ...getTableColumns(radacct),
                     pppoeFlag,
                     nasName,
+                    customerId,
+                    customerName,
+                    customerPhone,
+                    customerLocation,
                 })
                 .from(radacct)
                 .where(where)
@@ -3155,6 +3230,12 @@ export class RadiusClient {
                 ...this.sessionInfoFromRow(row),
                 sessionType: row.pppoeFlag ? 'pppoe' : 'hotspot',
                 nasName: row.nasName,
+                customer: {
+                    id: row.customerId,
+                    name: row.customerName,
+                    phoneNumber: row.customerPhone,
+                    location: row.customerLocation,
+                },
             })),
         };
     }
