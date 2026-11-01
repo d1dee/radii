@@ -32,6 +32,8 @@ export const packages = pgTable(
             .default('hotspot')
             .notNull(),
         category: text('category').notNull(),
+        categorySortOrder: integer('category_sort_order'),
+        sortOrder: integer('sort_order'),
         sessionLength: integer('session_length').notNull(),
         createdBy: text().references(() => adminUser.id),
         price: numeric('price', { precision: 10, scale: 2 }).notNull(),
@@ -79,6 +81,11 @@ export const packages = pgTable(
     (table) => [
         index('packages_type_idx').on(table.type),
         index('packages_category_idx').on(table.category),
+        index('packages_portal_order_idx').on(
+            table.type,
+            table.categorySortOrder,
+            table.sortOrder,
+        ),
         index('packages_archived_at_idx').on(table.archivedAt),
     ],
 );

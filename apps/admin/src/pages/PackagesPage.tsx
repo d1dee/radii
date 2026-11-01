@@ -21,6 +21,7 @@ import {
     MdAdd,
     MdArchive,
     MdEdit,
+    MdPreview,
     MdRestore,
     MdSearch,
 } from 'react-icons/md';
@@ -229,16 +230,29 @@ export default function PackagesPage() {
                             NAS devices.
                         </Text>
                     </Stack>
-                    <Button
-                        leftSection={<MdAdd />}
-                        onClick={() =>
-                            navigate(
-                                `/packages/add?type=${typeFilter ?? 'hotspot'}`,
-                            )
-                        }
-                    >
-                        Add Package
-                    </Button>
+                    <Group gap='sm'>
+                        <Button
+                            variant='default'
+                            leftSection={<MdPreview />}
+                            onClick={() =>
+                                navigate(
+                                    `/packages/portal?type=${typeFilter ?? 'hotspot'}`,
+                                )
+                            }
+                        >
+                            Edit portal
+                        </Button>
+                        <Button
+                            leftSection={<MdAdd />}
+                            onClick={() =>
+                                navigate(
+                                    `/packages/add?type=${typeFilter ?? 'hotspot'}`,
+                                )
+                            }
+                        >
+                            Add Package
+                        </Button>
+                    </Group>
                 </Group>
             }
         >

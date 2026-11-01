@@ -24,6 +24,7 @@ const DashboardPage = lazy(() => import('@/pages/DashboardPage'));
 const NasDeviceFormPage = lazy(() => import('@/pages/NasDeviceFormPage'));
 const NasDevicesPage = lazy(() => import('@/pages/NasDevicesPage'));
 const PackageFormPage = lazy(() => import('@/pages/PackageFormPage'));
+const PackagePortalPage = lazy(() => import('@/pages/PackagePortalPage'));
 const PackagesPage = lazy(() => import('@/pages/PackagesPage'));
 const PaymentsPage = lazy(() => import('@/pages/PaymentsPage'));
 const ReportsPage = lazy(() => import('@/pages/ReportsPage'));
@@ -63,6 +64,7 @@ const router = createBrowserRouter(
                 <Route path='sessions' element={<SessionsPage />} />
                 <Route path='reports' element={<ReportsPage />} />
                 <Route path='packages' element={<PackagesPage />} />
+                <Route path='packages/portal' element={<PackagePortalPage />} />
                 <Route path='packages/add' element={<PackageFormPage />} />
                 <Route path='packages/:id/edit' element={<PackageFormPage />} />
                 <Route path='nas-devices' element={<NasDevicesPage />} />

@@ -51,6 +51,7 @@ import {
     getPackages,
     listAdminPackages,
     restorePackage,
+    savePackageLayout,
     updatePackage,
 } from '../lib/packages';
 import { RadiusError, radiusClient } from '../lib/radius';
@@ -96,6 +97,15 @@ function isForeignKeyViolation(e: unknown): boolean {
 }
 
 const packageTypeSchema = z.enum(['hotspot', 'pppoe']);
+const packageLayoutSchema = z.object({
+    type: packageTypeSchema,
+    categories: z.array(
+        z.object({
+            name: z.string().trim().min(1),
+            packageIds: z.array(z.string().uuid()).min(1),
+        }),
+    ),
+});
 const sortDirectionSchema = z.enum(['asc', 'desc']);
 const packageSortSchema = z.object({
     sortBy: z
@@ -262,6 +272,26 @@ app.post('/packages', requireAdmin, async (c) => {
     );
 
     return c.json({ success: true, data: { ...row, nasDeviceIds } }, 201);
+});
+
+app.put('/packages/layout', requireAdmin, async (c) => {
+    const parsed = packageLayoutSchema.safeParse(await c.req.json());
+    if (!parsed.success) {
+        return jsonError(c, 400, 'Invalid package layout');
+    }
+    const saved = await savePackageLayout(
+        c.var.adminSession.userId,
+        parsed.data.type,
+        parsed.data.categories,
+    );
+    if (!saved) {
+        return jsonError(
+            c,
+            409,
+            'Packages changed while editing. Reload the layout and try again.',
+        );
+    }
+    return c.json({ success: true, data: { saved: true } });
 });
 
 app.get('/packages/:id', requireAdmin, async (c) => {

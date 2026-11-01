@@ -29,6 +29,10 @@ import {
 type InsertPackage = typeof packages.$inferInsert;
 export type PackageRow = typeof packages.$inferSelect;
 export type PackageType = 'hotspot' | 'pppoe';
+export type PackageLayoutCategory = {
+    name: string;
+    packageIds: string[];
+};
 export type AdminPackageSortBy =
     | 'title'
     | 'category'
@@ -66,7 +70,12 @@ export async function getPackagesGroupedByCategory(
                 ),
             ),
         )
-        .orderBy(packages.category, asc(packages.title));
+        .orderBy(
+            asc(packages.categorySortOrder),
+            asc(packages.category),
+            asc(packages.sortOrder),
+            asc(packages.title),
+        );
 
     const grouped = new Map<string, Package[]>();
     for (const row of rows) {
@@ -105,8 +114,70 @@ export async function getPackages(ownerId: string, type?: PackageType) {
                 type ? eq(packages.type, type) : undefined,
             ),
         )
-        .orderBy(packages.type, packages.category, asc(packages.title));
+        .orderBy(
+            packages.type,
+            asc(packages.categorySortOrder),
+            packages.category,
+            asc(packages.sortOrder),
+            asc(packages.title),
+        );
     return rows;
+}
+
+export async function savePackageLayout(
+    ownerId: string,
+    type: PackageType,
+    categories: PackageLayoutCategory[],
+) {
+    const rows = await db
+        .select({ id: packages.id, category: packages.category })
+        .from(packages)
+        .where(
+            and(
+                eq(packages.createdBy, ownerId),
+                eq(packages.type, type),
+                isNull(packages.archivedAt),
+            ),
+        );
+
+    const expectedIds = new Set(rows.map((row) => row.id));
+    const submittedIds = categories.flatMap((category) => category.packageIds);
+    const submittedIdSet = new Set(submittedIds);
+    const submittedCategories = new Set(
+        categories.map((category) => category.name),
+    );
+    const matchesCurrentLayout =
+        submittedIds.length === submittedIdSet.size &&
+        submittedIdSet.size === expectedIds.size &&
+        submittedCategories.size === categories.length &&
+        [...submittedIdSet].every((id) => expectedIds.has(id));
+
+    if (!matchesCurrentLayout) return false;
+
+    await db.transaction(async (tx) => {
+        for (const [categoryIndex, category] of categories.entries()) {
+            for (const [packageIndex, packageId] of
+                category.packageIds.entries()) {
+                await tx
+                    .update(packages)
+                    .set({
+                        category: category.name,
+                        categorySortOrder: categoryIndex,
+                        sortOrder: packageIndex,
+                    })
+                    .where(
+                        and(
+                            eq(packages.id, packageId),
+                            eq(packages.createdBy, ownerId),
+                            eq(packages.type, type),
+                            isNull(packages.archivedAt),
+                        ),
+                    );
+            }
+        }
+    });
+
+    return true;
 }
 
 export async function listAdminPackages(opts: {
@@ -256,9 +327,31 @@ export async function updatePackage(
     nasDeviceIds: string[],
 ) {
     return db.transaction(async (tx) => {
+        const [existing] = await tx
+            .select({
+                category: packages.category,
+                type: packages.type,
+            })
+            .from(packages)
+            .where(
+                and(
+                    eq(packages.id, id),
+                    eq(packages.createdBy, ownerId),
+                    isNull(packages.archivedAt),
+                ),
+            )
+            .limit(1);
+        if (!existing) return undefined;
+        const movedToAnotherGroup =
+            existing.category !== data.category || existing.type !== data.type;
         const [row] = await tx
             .update(packages)
-            .set(data)
+            .set({
+                ...data,
+                ...(movedToAnotherGroup
+                    ? { categorySortOrder: null, sortOrder: null }
+                    : {}),
+            })
             .where(
                 and(
                     eq(packages.id, id),

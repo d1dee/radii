@@ -156,6 +156,8 @@ export type PackageRow = {
     title: string;
     type: PackageType;
     category: string;
+    categorySortOrder: number | null;
+    sortOrder: number | null;
     sessionLength: number;
     price: string;
     maxDevices: number;
@@ -338,6 +340,20 @@ export function restoreAdminPackage(id: string) {
         undefined,
         { method: 'POST' },
     );
+}
+
+export type PackageLayoutCategory = {
+    name: string;
+    packageIds: string[];
+};
+
+export function savePackageLayout(body: {
+    type: PackageType;
+    categories: PackageLayoutCategory[];
+}) {
+    return request<{ saved: true }>('/admin/packages/layout', body, {
+        method: 'PUT',
+    });
 }
 
 // Raw NAS device row as returned by the admin endpoints.
