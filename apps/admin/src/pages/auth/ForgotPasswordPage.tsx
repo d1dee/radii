@@ -47,14 +47,15 @@ export default function ForgotPasswordPage() {
     // Step 1 only needs a valid email; the full schema (otp + password rules)
     // applies to step 2, so validate the single field manually here.
     async function handleRequest() {
-        if (!/^\S+@\S+\.\S+$/.test(form.values.email)) {
+        const email = form.values.email.trim();
+        if (!/^\S+@\S+\.\S+$/.test(email)) {
             form.setFieldError('email', 'Enter a valid email address');
             return;
         }
         setRequesting(true);
         try {
             const { error } = await authClient.emailOtp.requestPasswordReset({
-                email: form.values.email.trim(),
+                email,
             });
             if (error) {
                 notifications.show({
@@ -65,7 +66,7 @@ export default function ForgotPasswordPage() {
             }
             notifications.show({
                 color: 'blue',
-                message: `We sent a 6-digit reset code to ${form.values.email}`,
+                message: `We sent a 6-digit reset code to ${email}`,
             });
             setStep('reset');
         } catch (error) {
@@ -90,8 +91,8 @@ export default function ForgotPasswordPage() {
         setResetting(true);
         try {
             const { error } = await authClient.emailOtp.resetPassword({
-                email: values.email,
-                otp: values.otp,
+                email: values.email.trim(),
+                otp: values.otp.trim(),
                 password: values.password,
             });
             if (error) {

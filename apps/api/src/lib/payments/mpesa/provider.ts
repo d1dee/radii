@@ -52,15 +52,17 @@ export type MpesaCallbackEvent =
     (typeof MPESA_CALLBACK_EVENTS)[keyof typeof MPESA_CALLBACK_EVENTS];
 
 const mpesaConfigSchema = z.object({
-    consumerKey: z.string().min(1, 'consumerKey is required'),
+    consumerKey: z.string().trim().min(1, 'consumerKey is required'),
     consumerSecret: z.string().min(1, 'consumerSecret is required'),
     // Organization shortcode used for API authentication and STK signing.
     shortcode: z
         .string()
+        .trim()
         .regex(/^\d{5,7}$/, 'shortcode must be a 5-7 digit Safaricom number'),
     // Buy Goods sends the till number as PartyB; PayBill uses shortcode.
     tillNumber: z
         .string()
+        .trim()
         .regex(/^\d{5,7}$/, 'tillNumber must be a 5-7 digit Safaricom number')
         .optional(),
     passkey: z.string().min(1, 'passkey is required'),
@@ -71,12 +73,12 @@ const mpesaConfigSchema = z.object({
         .default('sandbox'),
     // Only needed for receipt verification (Transaction Status API); STK
     // push/query work without them.
-    initiatorName: z.string().min(1).optional(),
+    initiatorName: z.string().trim().min(1).optional(),
     initiatorPassword: z.string().min(1).optional(),
     // PEM or DER (.cer) certificate used to encrypt the initiator password.
     // Defaults to the Safaricom public certificate bundled with the vendored
     // deno-mpesa-api library for the selected environment.
-    certificatePath: z.string().min(1).optional(),
+    certificatePath: z.string().trim().min(1).optional(),
     transactionType: z
         .enum(['CustomerPayBillOnline', 'CustomerBuyGoodsOnline'])
         .default('CustomerPayBillOnline'),

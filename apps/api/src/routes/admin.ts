@@ -661,7 +661,7 @@ app.delete('/nas-devices/:id', requireAdmin, async (c) => {
     const parsed = z
         .object({
             warningAcknowledged: z.literal(true),
-            confirmationName: z.string().min(1),
+            confirmationName: z.string().trim().min(1),
         })
         .safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) {
@@ -812,8 +812,8 @@ app.put('/users/:id/tag', requireAdmin, async (c) => {
 });
 
 const flagSchema = z.object({
-    reason: z.string().min(1).max(100),
-    note: z.string().max(2000).optional(),
+    reason: z.string().trim().min(1).max(100),
+    note: z.string().trim().max(2000).optional(),
 });
 
 app.post('/users/:id/flags', requireAdmin, async (c) => {
@@ -848,7 +848,7 @@ app.delete('/users/:id/flags/:flagId', requireAdmin, async (c) => {
 });
 
 const banSchema = z.object({
-    reason: z.string().max(500).optional(),
+    reason: z.string().trim().max(500).optional(),
     expiresAt: z.iso.datetime().nullable().optional(),
 });
 
@@ -1496,7 +1496,10 @@ app.post('/radius/activations/:id/deactivate', requireAdmin, async (c) => {
 // Access-Request (provisioning diagnostics; requires RADIUS_SERVER/RADIUS_SECRET).
 app.post('/radius/check-credentials', requireAdmin, async (c) => {
     const parsed = z
-        .object({ username: z.string().min(1), password: z.string().min(1) })
+        .object({
+            username: z.string().trim().min(1),
+            password: z.string().min(1),
+        })
         .safeParse(await c.req.json().catch(() => ({})));
     if (!parsed.success) {
         return jsonError(c, 400, 'Invalid payload');

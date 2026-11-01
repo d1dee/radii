@@ -217,6 +217,13 @@ export default function PackageFormPage() {
             nasDeviceIds: [],
         },
         validate: schemaResolver(createPackageSchema),
+        transformValues: (values) => ({
+            ...values,
+            title: values.title.trim(),
+            category: values.category.trim(),
+            description: values.description?.trim(),
+            note: values.note?.trim(),
+        }),
     });
 
     const type = form.useWatchValue('type');

@@ -40,8 +40,9 @@ export default function LoginPage() {
     async function onSubmit(values: { email: string; password: string }) {
         setLoading(true);
         try {
+            const email = values.email.trim();
             const { error } = await authClient.signIn.email({
-                email: values.email,
+                email,
                 password: values.password,
             });
             if (error) {
@@ -55,7 +56,7 @@ export default function LoginPage() {
                             'Check your email — we sent you a 6-digit verification code',
                     });
                     navigate('/verify-email', {
-                        state: { email: values.email },
+                        state: { email },
                     });
                     return;
                 }

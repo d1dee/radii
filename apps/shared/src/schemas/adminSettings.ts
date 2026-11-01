@@ -23,9 +23,9 @@ export const adminAppearanceSettingsSchema = z.object({
     timeFormat: timeFormatSchema.default('24h'),
     dateFormat: dateFormatSchema.default('DD MMM YYYY'),
     // IANA timezone used to render dates/times in the admin console.
-    timezone: z.string().min(1).max(64).default('Africa/Nairobi'),
+    timezone: z.string().trim().min(1).max(64).default('Africa/Nairobi'),
     // Currency label prefix used by money formatting (e.g. "Ksh").
-    currencyLabel: z.string().min(1).max(12).default('Ksh'),
+    currencyLabel: z.string().trim().min(1).max(12).default('Ksh'),
 });
 
 export const adminDashboardSettingsSchema = z.object({
@@ -53,24 +53,24 @@ export const adminMpesaSettingsSchema = z
         // When false the server-wide M-Pesa configuration (env) is used for
         // this admin's payments; the fields below are ignored.
         useOwnCredentials: z.boolean().default(false),
-        consumerKey: z.string().max(255).default(''),
+        consumerKey: z.string().trim().max(255).default(''),
         consumerSecret: z.string().max(255).default(''),
         // Organization shortcode used for API authentication and STK signing.
-        shortcode: z.string().max(7).default(''),
+        shortcode: z.string().trim().max(7).default(''),
         // Buy Goods destination. PayBill payments use shortcode as PartyB.
-        tillNumber: z.string().max(7).default(''),
+        tillNumber: z.string().trim().max(7).default(''),
         passkey: z.string().max(255).default(''),
         environment: z.enum(['sandbox', 'production']).default('production'),
         // Only needed for receipt verification (Transaction Status API); STK
         // push/query work without them.
-        initiatorName: z.string().max(255).default(''),
+        initiatorName: z.string().trim().max(255).default(''),
         initiatorPassword: z.string().max(255).default(''),
         // Path to the certificate used to encrypt the initiator password.
         // Server-enforced: must resolve to a file inside the API's
         // MPESA_ALLOWED_CERT_DIR (default <api cwd>/certs); paths outside it
         // (including symlink escapes) are rejected. Empty = the Safaricom
         // certificate bundled with the provider for the selected environment.
-        certificatePath: z.string().max(512).default(''),
+        certificatePath: z.string().trim().max(512).default(''),
         transactionType: mpesaTransactionTypeSchema.default(
             'CustomerPayBillOnline',
         ),
@@ -117,8 +117,8 @@ export const adminMpesaSettingsSchema = z
 // the corresponding button in the portals.
 export const adminContactsSettingsSchema = z
     .object({
-        adminTel: z.string().max(32).default(''),
-        adminWhatsapp: z.string().max(32).default(''),
+        adminTel: z.string().trim().max(32).default(''),
+        adminWhatsapp: z.string().trim().max(32).default(''),
     })
     .superRefine((contacts, ctx) => {
         if (

@@ -39,7 +39,11 @@ export const zAdminPassword = z
             'Password must combine at least 2 of: lowercase letters, uppercase letters, numbers, symbols',
     });
 
-const zAdminEmail = z.email('Enter a valid email address');
+const zAdminEmail = z
+    .string()
+    .trim()
+    .pipe(z.email('Enter a valid email address'));
+const zAdminOtp = z.string().trim().regex(/^\d{6}$/, 'Enter the 6-digit code');
 
 export const adminRegisterSchema = z
     .object({
@@ -60,7 +64,7 @@ export const adminLoginSchema = z.object({
 
 export const adminVerifyOtpSchema = z.object({
     email: zAdminEmail,
-    otp: z.string().regex(/^\d{6}$/, 'Enter the 6-digit code'),
+    otp: zAdminOtp,
 });
 
 // Email-OTP password reset: the admin requests a 6-digit code by email, then
@@ -68,7 +72,7 @@ export const adminVerifyOtpSchema = z.object({
 export const adminResetPasswordSchema = z
     .object({
         email: zAdminEmail,
-        otp: z.string().regex(/^\d{6}$/, 'Enter the 6-digit code'),
+        otp: zAdminOtp,
         password: zAdminPassword,
         confirmPassword: z.string(),
     })

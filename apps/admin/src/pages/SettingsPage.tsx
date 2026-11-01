@@ -23,6 +23,7 @@ import {
 import { schemaResolver, useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
 import {
+    adminAppearanceSettingsSchema,
     adminContactsSettingsSchema,
     adminMpesaSettingsSchema,
     type AdminSettings,
@@ -291,6 +292,12 @@ function AppearanceSection() {
 
     const form = useForm<AdminSettings['appearance']>({
         initialValues: settings.appearance,
+        validate: schemaResolver(adminAppearanceSettingsSchema),
+        transformValues: (values) => ({
+            ...values,
+            timezone: values.timezone.trim(),
+            currencyLabel: values.currencyLabel.trim(),
+        }),
     });
     useSettingsDraft('appearance', form.isDirty(), saving);
 
@@ -519,6 +526,10 @@ function ContactsSection() {
     const form = useForm<ContactsFormValues>({
         initialValues: settings.contacts,
         validate: schemaResolver(adminContactsSettingsSchema),
+        transformValues: (values) => ({
+            adminTel: values.adminTel.trim(),
+            adminWhatsapp: values.adminWhatsapp.trim(),
+        }),
     });
     useSettingsDraft('contacts', form.isDirty(), saving);
 
@@ -742,6 +753,14 @@ function MpesaSection() {
     const form = useForm<MpesaFormValues>({
         initialValues: settings.mpesa,
         validate: schemaResolver(adminMpesaSettingsSchema),
+        transformValues: (values) => ({
+            ...values,
+            consumerKey: values.consumerKey.trim(),
+            shortcode: values.shortcode.trim(),
+            tillNumber: values.tillNumber.trim(),
+            initiatorName: values.initiatorName.trim(),
+            certificatePath: values.certificatePath.trim(),
+        }),
     });
     useSettingsDraft('mpesa', form.isDirty(), saving);
 

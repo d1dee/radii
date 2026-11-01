@@ -400,7 +400,7 @@ export function UserDetailsDrawer({
         setBusy(true);
         const res = await setPppoePassword(
             selectedPppoeAccountId,
-            pppoeNewPassword.trim() || undefined,
+            pppoeNewPassword || undefined,
         );
         setBusy(false);
         notifyResult(
@@ -1945,8 +1945,8 @@ export function UserDetailsDrawer({
                     <Button
                         onClick={() => void submitPppoePassword()}
                         disabled={
-                            pppoeNewPassword.trim().length > 0 &&
-                            pppoeNewPassword.trim().length < 6
+                            pppoeNewPassword.length > 0 &&
+                            pppoeNewPassword.length < 6
                         }
                         loading={busy}
                     >

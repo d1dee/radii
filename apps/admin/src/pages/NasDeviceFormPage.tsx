@@ -48,6 +48,16 @@ export default function NasDeviceFormPage() {
             status: 'active',
         },
         validate: schemaResolver(createNasDeviceSchema),
+        transformValues: (values) => ({
+            ...values,
+            name: values.name.trim(),
+            ipAddress: values.ipAddress.trim(),
+            macAddress: values.macAddress.trim(),
+            model: values.model.trim(),
+            serialNumber: values.serialNumber.trim(),
+            firmwareVersion: values.firmwareVersion.trim(),
+            location: values.location.trim(),
+        }),
     });
 
     useEffect(() => {

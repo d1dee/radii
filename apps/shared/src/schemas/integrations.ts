@@ -30,7 +30,10 @@ export const createNasDeviceSchema = z.object({
         .max(120, 'Name must be at most 120 characters')
         .regex(NO_CONTROL_CHARS, CONTROL_CHARS_MESSAGE),
     os: z.enum(nasDeviceOses),
-    ipAddress: z.ipv4().or(z.ipv6('Must be a valid IPv4 or IPv6 address')),
+    ipAddress: z
+        .string()
+        .trim()
+        .pipe(z.ipv4().or(z.ipv6('Must be a valid IPv4 or IPv6 address'))),
     macAddress: z.mac('Must be a valid MAC address').or(
         z
             .string()

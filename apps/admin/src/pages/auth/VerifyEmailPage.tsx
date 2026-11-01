@@ -42,14 +42,16 @@ export default function VerifyEmailPage() {
         }
     }, [session?.user.emailVerified, navigate]);
 
-    const emailValid = /^\S+@\S+\.\S+$/.test(email);
-    const canVerify = emailValid && otp.length === 6;
+    const normalizedEmail = email.trim();
+    const normalizedOtp = otp.trim();
+    const emailValid = /^\S+@\S+\.\S+$/.test(normalizedEmail);
+    const canVerify = emailValid && normalizedOtp.length === 6;
 
     async function resend() {
         setResending(true);
         try {
             const { error } = await authClient.emailOtp.sendVerificationOtp({
-                email,
+                email: normalizedEmail,
                 type: 'email-verification',
             });
             if (error) {
@@ -81,8 +83,8 @@ export default function VerifyEmailPage() {
         setVerifying(true);
         try {
             const { error } = await authClient.emailOtp.verifyEmail({
-                email,
-                otp,
+                email: normalizedEmail,
+                otp: normalizedOtp,
             });
             if (error) {
                 notifications.show({

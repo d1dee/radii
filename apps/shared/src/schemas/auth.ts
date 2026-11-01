@@ -61,7 +61,7 @@ export const forgotPinSchema = z.object({
 export const resetPinSchema = z
     .object({
         phoneNumber: zPhoneNumber,
-        otp: z.string().regex(/^\d{6}$/, 'Enter the 6-digit code'),
+        otp: z.string().trim().regex(/^\d{6}$/, 'Enter the 6-digit code'),
         pin: zPin,
         verifyPin: zPin,
     })

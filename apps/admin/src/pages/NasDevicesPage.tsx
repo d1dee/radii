@@ -140,6 +140,15 @@ export default function NasDevicesPage() {
             ipLockdown: true,
         },
         validate: schemaResolver(generateSetupScriptSchema),
+        transformValues: (values) => ({
+            ...values,
+            hotspotInterface: values.hotspotInterface.trim(),
+            hotspotNetwork: values.hotspotNetwork.trim(),
+            hotspotDnsName: values.hotspotDnsName?.trim(),
+            brandName: values.brandName?.trim(),
+            pppoeInterface: values.pppoeInterface.trim(),
+            pppoeNetwork: values.pppoeNetwork.trim(),
+        }),
     });
 
     const load = useCallback(
@@ -308,16 +317,17 @@ export default function NasDevicesPage() {
     };
 
     const handleDelete = async () => {
+        const confirmationName = deleteName.trim();
         if (
             !deleteTarget ||
             deleteBusy ||
             deleteStep !== 'confirm' ||
-            deleteName !== deleteTarget.name
+            confirmationName !== deleteTarget.name
         ) {
             return;
         }
         setDeleteBusy(true);
-        const result = await deleteNasDevice(deleteTarget.id, deleteName);
+        const result = await deleteNasDevice(deleteTarget.id, confirmationName);
         setDeleteBusy(false);
         notifyResult(result, 'NAS device deleted');
         if (!result.success) return;
@@ -899,7 +909,7 @@ export default function NasDevicesPage() {
                                 loading={deleteBusy}
                                 disabled={
                                     !deleteTarget ||
-                                    deleteName !== deleteTarget.name
+                                    deleteName.trim() !== deleteTarget.name
                                 }
                                 onClick={handleDelete}
                             >

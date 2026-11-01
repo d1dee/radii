@@ -46,9 +46,11 @@ export default function RegisterPage() {
     }) {
         setLoading(true);
         try {
+            const name = values.name.trim();
+            const email = values.email.trim();
             const { error } = await authClient.signUp.email({
-                name: values.name,
-                email: values.email,
+                name,
+                email,
                 password: values.password,
             });
             if (error) {
@@ -64,10 +66,10 @@ export default function RegisterPage() {
             // email is verified (requireEmailVerification).
             notifications.show({
                 color: 'blue',
-                message: `We sent a 6-digit verification code to ${values.email}`,
+                message: `We sent a 6-digit verification code to ${email}`,
             });
             navigate('/verify-email', {
-                state: { email: values.email },
+                state: { email },
             });
         } catch (error) {
             notifications.show({
