@@ -748,6 +748,8 @@ export type AdminPaymentRow = {
     provider: string | null;
     providerTransactionId: string | null;
     providerReference: string | null;
+    failureReason: string | null;
+    failureSummary: string | null;
     createdAt: string;
     updatedAt: string;
 };

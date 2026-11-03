@@ -22,6 +22,7 @@ import {
     inArray,
     isNotNull,
     isNull,
+    like,
     lte,
     or,
     sql,
@@ -1622,6 +1623,7 @@ export async function listPayments(opts: ListPaymentsOpts) {
                 provider: transaction.provider,
                 providerTransactionId: transaction.providerTransactionId,
                 providerReference: transaction.providerReference,
+                transactionId: transaction.id,
                 createdAt: packagePayments.createdAt,
                 updatedAt: packagePayments.updatedAt,
             })
@@ -1646,6 +1648,43 @@ export async function listPayments(opts: ListPaymentsOpts) {
             .offset((page - 1) * perPage),
     ]);
 
+    const failedTransactionIds = rows
+        .filter((row) => row.status === 'failed')
+        .map((row) => row.transactionId)
+        .filter((id): id is string => id !== null);
+    const failureLogs = failedTransactionIds.length
+        ? await db
+              .select({
+                  transactionId: transactionLog.transactionId,
+                  eventType: transactionLog.eventType,
+                  payload: transactionLog.payload,
+              })
+              .from(transactionLog)
+              .where(
+                  and(
+                      inArray(transactionLog.transactionId, failedTransactionIds),
+                      like(transactionLog.eventType, 'payment_failed_%'),
+                  ),
+              )
+              .orderBy(desc(transactionLog.createdAt))
+        : [];
+    const failureByTransactionId = new Map<
+        string,
+        { reason: string | null; summary: string }
+    >();
+    for (const log of failureLogs) {
+        if (failureByTransactionId.has(log.transactionId)) continue;
+        const root = record(log.payload);
+        const reason =
+            stringValue(root?.message)?.trim() ||
+            sanitizePaymentEvent(log.payload).message?.trim() ||
+            null;
+        failureByTransactionId.set(log.transactionId, {
+            reason,
+            summary: summarizePaymentFailure(log.eventType, log.payload),
+        });
+    }
+
     return {
         total: Number(stats.total),
         summary: {
@@ -1656,7 +1695,19 @@ export async function listPayments(opts: ListPaymentsOpts) {
         },
         page,
         perPage,
-        payments: rows,
+        payments: rows.map(({ transactionId, ...row }) => {
+            const failure =
+                row.status === 'failed' && transactionId
+                    ? failureByTransactionId.get(transactionId)
+                    : undefined;
+            return {
+                ...row,
+                failureReason: failure?.reason ?? null,
+                failureSummary:
+                    failure?.summary ??
+                    (row.status === 'failed' ? 'Payment failed' : null),
+            };
+        }),
     };
 }
 
@@ -1727,6 +1778,75 @@ function sanitizePaymentEvent(payload: unknown): PaymentEventDetails {
         ),
         transactionStatus: stringValue(resultParameters.TransactionStatus),
     };
+}
+
+function summarizePaymentFailure(eventType: string, payload: unknown): string {
+    const root = record(payload);
+    const event = sanitizePaymentEvent(payload);
+    const message = (
+        stringValue(root?.message) ??
+        event.message ??
+        ''
+    ).toLowerCase();
+    const clientFailure = stringValue(root?.clientFailure);
+
+    if (
+        clientFailure === 'insufficient_balance' ||
+        message.includes('insufficient')
+    )
+        return 'Insufficient balance';
+    if (
+        clientFailure === 'cancelled' ||
+        message.includes('cancelled') ||
+        message.includes('canceled')
+    )
+        return 'Customer cancelled';
+    if (
+        clientFailure === 'timeout' ||
+        message.includes('timed out') ||
+        message.includes('timeout')
+    )
+        return 'STK request timed out';
+    if (message.includes('amount mismatch')) return 'Amount mismatch';
+    if (message.includes('different phone number')) return 'Payer phone mismatch';
+    if (message.includes('invalid m-pesa amount')) return 'Invalid payment amount';
+    if (message.includes('not a valid safaricom')) return 'Invalid M-Pesa number';
+    if (
+        message.includes('invalid authentication') ||
+        message.includes('invalid grant type') ||
+        message.includes('access token')
+    )
+        return 'M-Pesa authentication failed';
+    if (message.includes('invalid m-pesa transaction code'))
+        return 'Invalid receipt code';
+    if (message.includes('receipt verification is not configured'))
+        return 'Receipt verification unavailable';
+    if (message.includes('receipt already assigned')) return 'Receipt already used';
+    if (message.includes('receipt number')) return 'Receipt number unavailable';
+    if (message.includes('transaction reports require'))
+        return 'Transaction reports unavailable';
+
+    if (eventType === 'payment_failed_initiation_exception')
+        return 'Payment provider error';
+    if (eventType === 'payment_failed_initiation')
+        return message.includes('rejected') || message.includes('not accepted')
+            ? 'STK push rejected'
+            : 'STK push failed';
+    if (eventType === 'payment_failed_status_poll') {
+        if (event.resultCode && ['2029', '2001', '2002'].includes(event.resultCode))
+            return `Payment failed (code ${event.resultCode})`;
+        return 'Payment failed';
+    }
+    if (eventType === 'payment_failed_callback_stk') {
+        if (event.resultCode && ['2029', '2001', '2002'].includes(event.resultCode))
+            return `Payment failed (code ${event.resultCode})`;
+        return 'STK push failed';
+    }
+    if (eventType === 'payment_failed_callback_status')
+        return 'Transaction verification failed';
+    if (eventType.includes('status')) return 'Status query failed';
+
+    return 'Payment failed';
 }
 
 export async function getAdminPaymentDetail(

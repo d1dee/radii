@@ -41,7 +41,12 @@ import {
 import { useAutoRefresh } from '@/lib/autoRefresh';
 import { warnBackgroundFailure } from '@/lib/clientError';
 import { dayjs } from '@/lib/dayjs';
-import { formatDateTime, formatMoney } from '@/lib/format';
+import {
+    formatDate,
+    formatDateTime,
+    formatMoney,
+    formatTime,
+} from '@/lib/format';
 import { useAdminSettings } from '@/lib/settings';
 
 const STATUS_BADGE: Record<
@@ -323,24 +328,23 @@ export default function PaymentsPage() {
                                         onSort={handleSort}
                                     />
                                     <SortableTableHeader
-                                        label='Date'
-                                        sortKey='createdAt'
-                                        sortBy={sortBy}
-                                        sortDirection={sortDirection}
-                                        onSort={handleSort}
-                                        initialDirection='desc'
-                                    />
-                                    <SortableTableHeader
                                         label='Package'
                                         sortKey='package'
                                         sortBy={sortBy}
                                         sortDirection={sortDirection}
                                         onSort={handleSort}
                                     />
-                                    <Table.Th>NAS</Table.Th>
                                     <SortableTableHeader
                                         label='Amount'
                                         sortKey='amount'
+                                        sortBy={sortBy}
+                                        sortDirection={sortDirection}
+                                        onSort={handleSort}
+                                        initialDirection='desc'
+                                    />
+                                    <SortableTableHeader
+                                        label='Time'
+                                        sortKey='createdAt'
                                         sortBy={sortBy}
                                         sortDirection={sortDirection}
                                         onSort={handleSort}
@@ -383,11 +387,6 @@ export default function PaymentsPage() {
                                             </Text>
                                         </Table.Td>
                                         <Table.Td>
-                                            <Text size='sm'>
-                                                {formatDateTime(p.createdAt)}
-                                            </Text>
-                                        </Table.Td>
-                                        <Table.Td>
                                             <Group gap={4} wrap='nowrap'>
                                                 <Text size='sm'>
                                                     {p.packageTitle ?? '—'}
@@ -402,13 +401,16 @@ export default function PaymentsPage() {
                                                 {p.packageType ?? ''}
                                             </Text>
                                         </Table.Td>
-                                        <Table.Td>
-                                            <Text size='sm'>
-                                                {p.nasDeviceName}
-                                            </Text>
-                                        </Table.Td>
                                         <Table.Td className='admin-table-value'>
                                             {formatMoney(p.amount)}
+                                        </Table.Td>
+                                        <Table.Td>
+                                            <Text size='sm'>
+                                                {formatTime(p.createdAt)}
+                                            </Text>
+                                            <Text size='xs' c='dimmed'>
+                                                {formatDate(p.createdAt)}
+                                            </Text>
                                         </Table.Td>
                                         <Table.Td>
                                             <Badge
@@ -424,12 +426,29 @@ export default function PaymentsPage() {
                                             </Badge>
                                         </Table.Td>
                                         <Table.Td>
-                                            <PaymentRefCell
-                                                provider={p.provider}
-                                                providerTransactionId={
-                                                    p.providerTransactionId
-                                                }
-                                            />
+                                            {p.status === 'failed' ? (
+                                                <Text
+                                                    size='xs'
+                                                    c='dimmed'
+                                                    truncate
+                                                    maw={180}
+                                                    title={
+                                                        p.failureReason ??
+                                                        p.failureSummary ??
+                                                        'Payment failed'
+                                                    }
+                                                >
+                                                    {p.failureSummary ??
+                                                        'Payment failed'}
+                                                </Text>
+                                            ) : (
+                                                <PaymentRefCell
+                                                    provider={p.provider}
+                                                    providerTransactionId={
+                                                        p.providerTransactionId
+                                                    }
+                                                />
+                                            )}
                                         </Table.Td>
                                     </Table.Tr>
                                 ))}
