@@ -51,6 +51,7 @@ import { useAutoRefresh } from '@/lib/autoRefresh';
 import { warnBackgroundFailure } from '@/lib/clientError';
 import { formatDayTime } from '@/lib/format';
 import { notifyResult } from '@/lib/notify';
+import { tableRowNumber, useTablePageSize } from '@/lib/pagination';
 import { useAdminSettings } from '@/lib/settings';
 import {
     nasDeviceOsLabel,
@@ -101,7 +102,10 @@ function SummaryCard({
 export default function NasDevicesPage() {
     const navigate = useNavigate();
     const { settings, loaded } = useAdminSettings();
-    const perPage = settings.dashboard.perPage;
+    const [perPage, setPerPage] = useTablePageSize(
+        settings.dashboard.perPage,
+        loaded,
+    );
     const [devices, setDevices] = useState<NasDeviceRow[]>([]);
     const [total, setTotal] = useState(0);
     const [onlineTotal, setOnlineTotal] = useState(0);
@@ -531,7 +535,7 @@ export default function NasDevicesPage() {
                                     style={{ cursor: 'pointer' }}
                                 >
                                     <Table.Td>
-                                        {(page - 1) * perPage + i + 1}
+                                         {tableRowNumber(page, perPage, i)}
                                     </Table.Td>
                                     <Table.Td
                                         fw={500}
@@ -640,6 +644,10 @@ export default function NasDevicesPage() {
                 perPage={perPage}
                 total={total}
                 onChange={setPage}
+                onPerPageChange={(value) => {
+                    setPerPage(value);
+                    setPage(1);
+                }}
                 loading={loading}
             />
 

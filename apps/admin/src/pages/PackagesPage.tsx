@@ -55,6 +55,7 @@ import {
     formatSeconds,
 } from '@/lib/format';
 import { notifyResult } from '@/lib/notify';
+import { tableRowNumber, useTablePageSize } from '@/lib/pagination';
 import { useAdminSettings } from '@/lib/settings';
 
 function SummaryCard({
@@ -91,7 +92,10 @@ function SummaryCard({
 export default function PackagesPage() {
     const navigate = useNavigate();
     const { settings, loaded } = useAdminSettings();
-    const perPage = settings.dashboard.perPage;
+    const [perPage, setPerPage] = useTablePageSize(
+        settings.dashboard.perPage,
+        loaded,
+    );
     const [typeFilter, setTypeFilter] = useState<PackageType | null>(null);
     const [packages, setPackages] = useState<PackageRow[]>([]);
     const [total, setTotal] = useState(0);
@@ -407,7 +411,7 @@ export default function PackagesPage() {
                                         style={{ cursor: 'pointer' }}
                                     >
                                         <Table.Td>
-                                            {(page - 1) * perPage + i + 1}
+                                            {tableRowNumber(page, perPage, i)}
                                         </Table.Td>
                                         <Table.Td
                                             fw={500}
@@ -526,6 +530,10 @@ export default function PackagesPage() {
                     perPage={perPage}
                     total={total}
                     onChange={setPage}
+                    onPerPageChange={(value) => {
+                        setPerPage(value);
+                        setPage(1);
+                    }}
                     loading={loading}
                 />
             </Stack>

@@ -4,6 +4,8 @@ import {
     createPackageSchema,
     generateSetupScriptSchema,
     maskAdminSettings,
+    TABLE_PAGE_SIZES,
+    type PageSize,
     zPhoneNumber,
 } from '@radii/shared';
 import { Hono } from 'hono';
@@ -170,7 +172,7 @@ const sessionSortSchema = z.object({
         .optional(),
     sortDirection: sortDirectionSchema.optional(),
 });
-const pageSizes = new Set([10, 25, 50, 100]);
+const pageSizes = new Set<number>(TABLE_PAGE_SIZES);
 
 function paginationParams(
     pageValue: string | undefined,
@@ -179,16 +181,21 @@ function paginationParams(
 ) {
     const rawPage = Number(pageValue ?? 1);
     const rawPerPage = Number(perPageValue ?? 25);
+    const perPage: PageSize =
+        perPageValue === 'all'
+            ? 'all'
+            : Number.isInteger(rawPerPage) &&
+                (pageSizes.has(rawPerPage) || extraPageSizes.includes(rawPerPage))
+              ? rawPerPage
+              : 25;
     return {
         page:
-            Number.isInteger(rawPage) && rawPage > 0
+            perPage === 'all'
+                ? 1
+                : Number.isInteger(rawPage) && rawPage > 0
                 ? rawPage
                 : 1,
-        perPage:
-            Number.isInteger(rawPerPage) &&
-            (pageSizes.has(rawPerPage) || extraPageSizes.includes(rawPerPage))
-                ? rawPerPage
-                : 25,
+        perPage,
     };
 }
 
@@ -941,8 +948,8 @@ app.get('/users/:id/activations', requireAdmin, async (c) => {
             userId: id,
             activationIds,
             nasIpAddresses: addresses,
-            limit: perPage,
-            offset: (page - 1) * perPage,
+            limit: perPage === 'all' ? null : perPage,
+            offset: perPage === 'all' ? undefined : (page - 1) * perPage,
         });
         return c.json({
             success: true,

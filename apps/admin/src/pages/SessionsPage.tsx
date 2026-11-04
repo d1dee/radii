@@ -49,6 +49,7 @@ import {
     formatSpeed,
 } from '@/lib/format';
 import { notifyResult } from '@/lib/notify';
+import { tableRowNumber, useTablePageSize } from '@/lib/pagination';
 import { useAdminSettings } from '@/lib/settings';
 import { TableRowActions } from '../components/TableRowActions';
 
@@ -75,7 +76,10 @@ export default function SessionsPage() {
     // search box via /sessions?q=<username>.
     const [searchParams] = useSearchParams();
     const { settings, loaded } = useAdminSettings();
-    const perPage = settings.dashboard.perPage;
+    const [perPage, setPerPage] = useTablePageSize(
+        settings.dashboard.perPage,
+        loaded,
+    );
     const [sessions, setSessions] = useState<AdminSessionRow[]>([]);
     const [total, setTotal] = useState(0);
     const [page, setPage] = useState(1);
@@ -390,7 +394,7 @@ export default function SessionsPage() {
                                     style={{ cursor: 'pointer' }}
                                 >
                                     <Table.Td>
-                                        {(page - 1) * perPage + i + 1}
+                                        {tableRowNumber(page, perPage, i)}
                                     </Table.Td>
                                     <Table.Td className='admin-table-identity'>
                                         <Group gap={6} wrap='nowrap'>
@@ -521,6 +525,10 @@ export default function SessionsPage() {
                 perPage={perPage}
                 total={total}
                 onChange={setPage}
+                onPerPageChange={(value) => {
+                    setPerPage(value);
+                    setPage(1);
+                }}
                 loading={loading}
             />
 

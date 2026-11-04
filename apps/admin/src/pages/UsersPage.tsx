@@ -67,6 +67,7 @@ import { warnBackgroundFailure } from '@/lib/clientError';
 import { dayjs } from '@/lib/dayjs';
 import { formatDate, formatMoney } from '@/lib/format';
 import { notifyResult } from '@/lib/notify';
+import { tableRowNumber, useTablePageSize } from '@/lib/pagination';
 import { useAdminSettings } from '@/lib/settings';
 import { TableRowActions } from '../components/TableRowActions';
 
@@ -117,7 +118,10 @@ function CredentialField({ label, value }: { label: string; value: string }) {
 
 export default function UsersPage() {
     const { settings, loaded } = useAdminSettings();
-    const perPage = settings.dashboard.perPage;
+    const [perPage, setPerPage] = useTablePageSize(
+        settings.dashboard.perPage,
+        loaded,
+    );
     const [data, setData] = useState<AdminUserList | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -652,7 +656,7 @@ export default function UsersPage() {
                                         style={{ cursor: 'pointer' }}
                                     >
                                         <Table.Td>
-                                            {(page - 1) * perPage + i + 1}
+                                            {tableRowNumber(page, perPage, i)}
                                         </Table.Td>
                                         <Table.Td className='admin-table-identity'>
                                             <UnstyledButton
@@ -835,6 +839,10 @@ export default function UsersPage() {
                         perPage={perPage}
                         total={data.total}
                         onChange={setPage}
+                        onPerPageChange={(value) => {
+                            setPerPage(value);
+                            setPage(1);
+                        }}
                         loading={loading}
                     />
                 </>

@@ -85,6 +85,7 @@ import {
     formatSeconds,
 } from '@/lib/format';
 import { notifyResult } from '@/lib/notify';
+import { tableRowNumber, useTablePageSize } from '@/lib/pagination';
 import { useAdminSettings } from '@/lib/settings';
 import { TableRowActions } from '../TableRowActions';
 
@@ -133,8 +134,15 @@ export function UserDetailsDrawer({
     userId: string | null;
     onClose: () => void;
 }) {
-    const { settings } = useAdminSettings();
-    const perPage = settings.dashboard.perPage;
+    const { settings, loaded } = useAdminSettings();
+    const [activationsPerPage, setActivationsPerPage] = useTablePageSize(
+        settings.dashboard.perPage,
+        loaded,
+    );
+    const [paymentsPerPage, setPaymentsPerPage] = useTablePageSize(
+        settings.dashboard.perPage,
+        loaded,
+    );
     const [detail, setDetail] = useState<AdminUserDetail | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [tab, setTab] = useState<string | null>('valuation');
@@ -212,7 +220,10 @@ export function UserDetailsDrawer({
         async (id: string, page: number) => {
             const requestId = ++activationsRequest.current;
             setActivationsLoading(true);
-            const res = await getUserActivations(id, { page, perPage });
+            const res = await getUserActivations(id, {
+                page,
+                perPage: activationsPerPage,
+            });
             if (requestId !== activationsRequest.current) return;
             setActivationsLoading(false);
             if (res.success && res.data) {
@@ -220,14 +231,17 @@ export function UserDetailsDrawer({
                 setActivationsTotal(res.data.total);
             } else warnBackgroundFailure('load user activations', res);
         },
-        [perPage],
+        [activationsPerPage],
     );
 
     const loadPayments = useCallback(
         async (id: string, page: number) => {
             const requestId = ++paymentsRequest.current;
             setPaymentsLoading(true);
-            const res = await getUserPayments(id, { page, perPage });
+            const res = await getUserPayments(id, {
+                page,
+                perPage: paymentsPerPage,
+            });
             if (requestId !== paymentsRequest.current) return;
             setPaymentsLoading(false);
             if (res.success && res.data) {
@@ -235,7 +249,7 @@ export function UserDetailsDrawer({
                 setPaymentsTotal(res.data.total);
             } else warnBackgroundFailure('load user payments', res);
         },
-        [perPage],
+        [paymentsPerPage],
     );
 
     useEffect(() => {
@@ -957,10 +971,11 @@ export function UserDetailsDrawer({
                                             {activations.map((a, i) => (
                                                 <Table.Tr key={a.activationId}>
                                                     <Table.Td>
-                                                        {(activationsPage - 1) *
-                                                            perPage +
-                                                            i +
-                                                            1}
+                                                        {tableRowNumber(
+                                                            activationsPage,
+                                                            activationsPerPage,
+                                                            i,
+                                                        )}
                                                     </Table.Td>
                                                     <Table.Td>
                                                         <Group gap={4} wrap='nowrap'>
@@ -1238,9 +1253,14 @@ export function UserDetailsDrawer({
                             )}
                             <TablePagination
                                 page={activationsPage}
-                                perPage={perPage}
+                                perPage={activationsPerPage}
                                 total={activationsTotal}
                                 onChange={setActivationsPage}
+                                onPerPageChange={(value) => {
+                                    setActivationsPerPage(value);
+                                    setActivationsPage(1);
+                                }}
+                                rowsLabel='Activations rows per page'
                                 loading={activationsLoading}
                             />
                         </Tabs.Panel>
@@ -1275,10 +1295,11 @@ export function UserDetailsDrawer({
                                             {payments.map((p, i) => (
                                                 <Table.Tr key={p.id}>
                                                     <Table.Td>
-                                                        {(paymentsPage - 1) *
-                                                            perPage +
-                                                            i +
-                                                            1}
+                                                        {tableRowNumber(
+                                                            paymentsPage,
+                                                            paymentsPerPage,
+                                                            i,
+                                                        )}
                                                     </Table.Td>
                                                     <Table.Td>
                                                         <Text size='xs'>
@@ -1345,9 +1366,14 @@ export function UserDetailsDrawer({
                             )}
                             <TablePagination
                                 page={paymentsPage}
-                                perPage={perPage}
+                                perPage={paymentsPerPage}
                                 total={paymentsTotal}
                                 onChange={setPaymentsPage}
+                                onPerPageChange={(value) => {
+                                    setPaymentsPerPage(value);
+                                    setPaymentsPage(1);
+                                }}
+                                rowsLabel='Payments rows per page'
                                 loading={paymentsLoading}
                             />
                         </Tabs.Panel>

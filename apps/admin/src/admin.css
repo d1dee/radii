@@ -241,9 +241,22 @@ th.admin-table-actions {
 }
 
 .admin-pagination {
-    width: 100%;
-    max-width: 420px;
-    min-width: 0;
+    width: max-content;
+    flex-shrink: 0;
+}
+
+.admin-table-pagination {
+    position: sticky;
+    bottom: 0;
+    z-index: 3;
+    min-height: 44px;
+    padding-block: var(--mantine-spacing-xs);
+    background: var(--admin-canvas);
+}
+
+.mantine-Card-root .admin-table-pagination,
+.mantine-Drawer-content .admin-table-pagination {
+    background: var(--admin-surface);
 }
 
 .admin-filter-search {
@@ -279,9 +292,6 @@ th.admin-table-actions {
         padding: 10px;
     }
 
-    .admin-pagination {
-        max-width: none;
-    }
 }
 
 @media (prefers-reduced-motion: reduce) {

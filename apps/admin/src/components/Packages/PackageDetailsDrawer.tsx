@@ -39,6 +39,7 @@ import {
     formatPaymentAmount,
     formatSeconds,
 } from '@/lib/format';
+import { tableRowNumber, useTablePageSize } from '@/lib/pagination';
 import { useAdminSettings } from '@/lib/settings';
 
 const STATUS_BADGE: Record<
@@ -104,8 +105,11 @@ export function PackageDetailsDrawer({
     onRestore: (pkg: PackageRow) => void;
     actionBusyId: string | null;
 }) {
-    const { settings } = useAdminSettings();
-    const perPage = settings.dashboard.perPage;
+    const { settings, loaded } = useAdminSettings();
+    const [perPage, setPerPage] = useTablePageSize(
+        settings.dashboard.perPage,
+        loaded,
+    );
     const [pkg, setPkg] = useState<PackageRow | null>(null);
     const [analytics, setAnalytics] = useState<PackageAnalytics | null>(null);
     const [error, setError] = useState<string | null>(null);
@@ -458,10 +462,11 @@ export function PackageDetailsDrawer({
                                         (p, i) => (
                                             <Table.Tr key={p.id}>
                                                 <Table.Td>
-                                                    {(paymentsPage - 1) *
-                                                        perPage +
-                                                        i +
-                                                        1}
+                                                    {tableRowNumber(
+                                                        paymentsPage,
+                                                        perPage,
+                                                        i,
+                                                    )}
                                                 </Table.Td>
                                                 <Table.Td>
                                                     {p.phoneNumber}
@@ -505,6 +510,10 @@ export function PackageDetailsDrawer({
                         perPage={perPage}
                         total={analytics.recentPayments.total}
                         onChange={setPaymentsPage}
+                        onPerPageChange={(value) => {
+                            setPerPage(value);
+                            setPaymentsPage(1);
+                        }}
                     />
                 </Stack>
             )}

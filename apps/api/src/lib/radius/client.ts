@@ -36,6 +36,7 @@
 //    lookup works for other NAS models as long as they expose their identity
 //    in the DB. Requests are identified by Acct-Session-Id + User-Name.
 
+import type { PageSize } from '@radii/shared';
 import dayjs from 'dayjs';
 import {
     and,
@@ -2236,12 +2237,12 @@ export class RadiusClient {
     async getAdminActivations(opts: {
         userId?: string;
         type?: 'hotspot' | 'pppoe';
-        limit?: number;
+        limit?: number | null;
         offset?: number;
         activationIds: string[];
         nasIpAddresses?: string[];
     }): Promise<AdminActivationStatus[]> {
-        const rows = await db
+        const rowsQuery = db
             .select({ activation: activatedPackages, pkg: packages })
             .from(activatedPackages)
             .innerJoin(packages, eq(activatedPackages.packageId, packages.id))
@@ -2256,9 +2257,12 @@ export class RadiusClient {
                         : sql`false`,
                 ),
             )
-            .orderBy(desc(activatedPackages.activatedAt))
-            .limit(opts.limit ?? 200)
-            .offset(opts.offset ?? 0);
+            .orderBy(desc(activatedPackages.activatedAt));
+        const rows = await (opts.limit === null
+            ? rowsQuery
+            : rowsQuery
+                  .limit(opts.limit ?? 200)
+                  .offset(opts.offset ?? 0));
 
         const out: AdminActivationStatus[] = [];
         for (const row of rows) {
@@ -3048,7 +3052,7 @@ export class RadiusClient {
             sortBy?: AdminSessionSortBy;
             sortDirection?: 'asc' | 'desc';
             page: number;
-            perPage: number;
+            perPage: PageSize;
         },
     ): Promise<{ total: number; sessions: AdminSessionInfo[] }> {
         if (nasIpAddresses.length === 0) return { total: 0, sessions: [] };
@@ -3206,23 +3210,26 @@ export class RadiusClient {
                     ];
             }
         })();
+        const rowsQuery = db
+            .select({
+                ...getTableColumns(radacct),
+                pppoeFlag,
+                nasName,
+                customerId,
+                customerName,
+                customerPhone,
+                customerLocation,
+            })
+            .from(radacct)
+            .where(where)
+            .orderBy(...orderBy);
         const [countRows, rows] = await Promise.all([
             db.select({ total: count(radacct.radacctid) }).from(radacct).where(where),
-            db
-                .select({
-                    ...getTableColumns(radacct),
-                    pppoeFlag,
-                    nasName,
-                    customerId,
-                    customerName,
-                    customerPhone,
-                    customerLocation,
-                })
-                .from(radacct)
-                .where(where)
-                .orderBy(...orderBy)
-                .limit(opts.perPage)
-                .offset((opts.page - 1) * opts.perPage),
+            opts.perPage === 'all'
+                ? rowsQuery
+                : rowsQuery
+                      .limit(opts.perPage)
+                      .offset((opts.page - 1) * opts.perPage),
         ]);
         return {
             total: Number(countRows[0]?.total ?? 0),

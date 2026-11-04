@@ -1,4 +1,4 @@
-import type { Package } from '@radii/shared';
+import type { Package, PageSize } from '@radii/shared';
 import {
     and,
     asc,
@@ -188,7 +188,7 @@ export async function listAdminPackages(opts: {
     sortBy?: AdminPackageSortBy;
     sortDirection?: 'asc' | 'desc';
     page: number;
-    perPage: number;
+    perPage: PageSize;
 }) {
     const conditions = [eq(packages.createdBy, opts.ownerId)];
     if (opts.archived === 'archived') {
@@ -233,15 +233,18 @@ export async function listAdminPackages(opts: {
                 ];
         }
     })();
+    const rowsQuery = db
+        .select()
+        .from(packages)
+        .where(where)
+        .orderBy(...orderBy);
     const [countRows, rows] = await Promise.all([
         db.select({ total: count(packages.id) }).from(packages).where(where),
-        db
-            .select()
-            .from(packages)
-            .where(where)
-            .orderBy(...orderBy)
-            .limit(opts.perPage)
-            .offset((opts.page - 1) * opts.perPage),
+        opts.perPage === 'all'
+            ? rowsQuery
+            : rowsQuery
+                  .limit(opts.perPage)
+                  .offset((opts.page - 1) * opts.perPage),
     ]);
     return { total: Number(countRows[0]?.total ?? 0), rows };
 }
@@ -442,7 +445,7 @@ export async function getPackageAnalytics(
     packageId: string,
     ownerId: string,
     page: number,
-    perPage: number,
+    perPage: PageSize,
 ) {
     const ownedPayments = and(
         eq(packagePayments.packageId, packageId),
@@ -497,7 +500,7 @@ export async function getPackageAnalytics(
             ),
         );
 
-    const recentPayments = await db
+    const recentPaymentsQuery = db
         .select({
             id: packagePayments.id,
             phoneNumber: packagePayments.phoneNumber,
@@ -508,9 +511,12 @@ export async function getPackageAnalytics(
         .from(packagePayments)
         .innerJoin(nasDevice, eq(packagePayments.nasDeviceId, nasDevice.id))
         .where(ownedPayments)
-        .orderBy(desc(packagePayments.createdAt), desc(packagePayments.id))
-        .limit(perPage)
-        .offset((page - 1) * perPage);
+        .orderBy(desc(packagePayments.createdAt), desc(packagePayments.id));
+    const recentPayments = await (perPage === 'all'
+        ? recentPaymentsQuery
+        : recentPaymentsQuery
+              .limit(perPage)
+              .offset((page - 1) * perPage));
 
     return {
         payments: {
@@ -544,7 +550,7 @@ export async function getNasDeviceAnalytics(
     nasDeviceId: string,
     nasIpAddresses: string[],
     page: number,
-    perPage: number,
+    perPage: PageSize,
 ) {
     const linkedPackageIds = () =>
         db
@@ -628,7 +634,7 @@ export async function getNasDeviceAnalytics(
                 : sql`false`,
         );
 
-    const recentPayments = await db
+    const recentPaymentsQuery = db
         .select({
             id: packagePayments.id,
             phoneNumber: packagePayments.phoneNumber,
@@ -641,9 +647,12 @@ export async function getNasDeviceAnalytics(
         .from(packagePayments)
         .innerJoin(packages, eq(packagePayments.packageId, packages.id))
         .where(eq(packagePayments.nasDeviceId, nasDeviceId))
-        .orderBy(desc(packagePayments.createdAt), desc(packagePayments.id))
-        .limit(perPage)
-        .offset((page - 1) * perPage);
+        .orderBy(desc(packagePayments.createdAt), desc(packagePayments.id));
+    const recentPayments = await (perPage === 'all'
+        ? recentPaymentsQuery
+        : recentPaymentsQuery
+              .limit(perPage)
+              .offset((page - 1) * perPage));
 
     return {
         packages: {

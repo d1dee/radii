@@ -47,6 +47,7 @@ import {
     formatMoney,
     formatTime,
 } from '@/lib/format';
+import { tableRowNumber, useTablePageSize } from '@/lib/pagination';
 import { useAdminSettings } from '@/lib/settings';
 
 const STATUS_BADGE: Record<
@@ -87,7 +88,10 @@ export default function PaymentsPage() {
         setSearchParams(next, { replace: true });
     };
     const { settings, loaded } = useAdminSettings();
-    const perPage = settings.dashboard.perPage;
+    const [perPage, setPerPage] = useTablePageSize(
+        settings.dashboard.perPage,
+        loaded,
+    );
     const [data, setData] = useState<AdminPaymentList | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -369,7 +373,7 @@ export default function PaymentsPage() {
                                         style={{ cursor: 'pointer' }}
                                     >
                                         <Table.Td>
-                                            {(page - 1) * perPage + i + 1}
+                                            {tableRowNumber(page, perPage, i)}
                                         </Table.Td>
                                         <Table.Td>
                                             <UnstyledButton
@@ -463,6 +467,10 @@ export default function PaymentsPage() {
                     perPage={perPage}
                     total={data.total}
                     onChange={setPage}
+                    onPerPageChange={(value) => {
+                        setPerPage(value);
+                        setPage(1);
+                    }}
                     loading={loading}
                 />
             ) : null}

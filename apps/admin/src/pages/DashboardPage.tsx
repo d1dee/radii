@@ -32,6 +32,7 @@ import { useAutoRefresh } from '@/lib/autoRefresh';
 import { warnBackgroundFailure } from '@/lib/clientError';
 import { dayjs } from '@/lib/dayjs';
 import { formatBytes, formatMoney, formatSpeed } from '@/lib/format';
+import { tableRowNumber, useTablePageSize } from '@/lib/pagination';
 import { useAdminSettings } from '@/lib/settings';
 
 const rangePresets = [
@@ -96,7 +97,7 @@ export default function DashboardPage() {
     const [to, setTo] = useState<Date>(() => presetRange(30).to);
 
     const [topUsersPage, setTopUsersPage] = useState(1);
-    const topUsersPerPage = 6;
+    const [topUsersPerPage, setTopUsersPerPage] = useTablePageSize(6);
     const reportsRequest = useRef(0);
 
     const loadReports = useCallback(
@@ -130,7 +131,7 @@ export default function DashboardPage() {
             }
             setReports(res.data);
         },
-        [topUsersPage],
+        [topUsersPage, topUsersPerPage],
     );
 
     const loadUsage = useCallback(async () => {
@@ -170,7 +171,7 @@ export default function DashboardPage() {
         if (!loaded || !reports) return;
         void loadReports(from, to);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [topUsersPage]);
+    }, [topUsersPage, topUsersPerPage]);
 
     const applyPreset = (label: string) => {
         setTopUsersPage(1);
@@ -471,11 +472,11 @@ export default function DashboardPage() {
                                                             key={u.userId}
                                                         >
                                                             <Table.Td w={30}>
-                                                                {(topUsersPage -
-                                                                    1) *
-                                                                    topUsersPerPage +
-                                                                    i +
-                                                                    1}
+                                                                {tableRowNumber(
+                                                                    topUsersPage,
+                                                                    topUsersPerPage,
+                                                                    i,
+                                                                )}
                                                             </Table.Td>
                                                             <Table.Td>
                                                                 <Text size='sm'>
@@ -516,6 +517,10 @@ export default function DashboardPage() {
                                     perPage={topUsersPerPage}
                                     total={reports.topUsers.total}
                                     onChange={setTopUsersPage}
+                                    onPerPageChange={(value) => {
+                                        setTopUsersPerPage(value);
+                                        setTopUsersPage(1);
+                                    }}
                                     loading={loading}
                                 />
                             </Card>

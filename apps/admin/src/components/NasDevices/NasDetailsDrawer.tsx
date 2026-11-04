@@ -37,6 +37,7 @@ import {
     formatPaymentAmount,
 } from '@/lib/format';
 import { nasDeviceOsLabel, nasDeviceStatusColors } from '@/lib/nas';
+import { tableRowNumber, useTablePageSize } from '@/lib/pagination';
 import { useAdminSettings } from '@/lib/settings';
 
 const STATUS_BADGE: Record<
@@ -106,8 +107,11 @@ export function NasDetailsDrawer({
     onEdit: (device: NasDeviceRow) => void;
     onDelete: (device: NasDeviceRow) => void;
 }) {
-    const { settings } = useAdminSettings();
-    const perPage = settings.dashboard.perPage;
+    const { settings, loaded } = useAdminSettings();
+    const [perPage, setPerPage] = useTablePageSize(
+        settings.dashboard.perPage,
+        loaded,
+    );
     const [device, setDevice] = useState<NasDeviceRow | null>(null);
     const [analytics, setAnalytics] = useState<NasDeviceAnalytics | null>(null);
     const [linkedPackages, setLinkedPackages] = useState<PackageRow[]>([]);
@@ -488,10 +492,11 @@ export function NasDetailsDrawer({
                                         (p, i) => (
                                             <Table.Tr key={p.id}>
                                                 <Table.Td>
-                                                    {(paymentsPage - 1) *
-                                                        perPage +
-                                                        i +
-                                                        1}
+                                                    {tableRowNumber(
+                                                        paymentsPage,
+                                                        perPage,
+                                                        i,
+                                                    )}
                                                 </Table.Td>
                                                 <Table.Td>
                                                     {p.phoneNumber}
@@ -545,6 +550,10 @@ export function NasDetailsDrawer({
                         perPage={perPage}
                         total={analytics.recentPayments.total}
                         onChange={setPaymentsPage}
+                        onPerPageChange={(value) => {
+                            setPerPage(value);
+                            setPaymentsPage(1);
+                        }}
                     />
                 </Stack>
             )}

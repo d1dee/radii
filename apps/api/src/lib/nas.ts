@@ -1,3 +1,4 @@
+import type { PageSize } from '@radii/shared';
 import {
     and,
     asc,
@@ -48,7 +49,7 @@ export async function listAdminNasDevices(opts: {
     sortBy?: AdminNasDeviceSortBy;
     sortDirection?: 'asc' | 'desc';
     page: number;
-    perPage: number;
+    perPage: PageSize;
 }) {
     const online = sql<boolean>`exists (
         select 1
@@ -115,6 +116,21 @@ export async function listAdminNasDevices(opts: {
                 return [desc(nasDevice.createdAt), asc(nasDevice.id)];
         }
     })();
+    const rowsQuery = db
+        .select({
+            ...getTableColumns(nasDevice),
+            online,
+            lastSeen,
+            wgClientIp: nasSetupScript.wgClientIp,
+            wgPublicKey: nasSetupScript.wgPublicKey,
+        })
+        .from(nasDevice)
+        .leftJoin(
+            nasSetupScript,
+            eq(nasSetupScript.nasDeviceId, nasDevice.id),
+        )
+        .where(where)
+        .orderBy(...orderBy);
     const [countRows, rows] = await Promise.all([
         db
             .select({
@@ -127,23 +143,11 @@ export async function listAdminNasDevices(opts: {
                 eq(nasSetupScript.nasDeviceId, nasDevice.id),
             )
             .where(where),
-        db
-            .select({
-                ...getTableColumns(nasDevice),
-                online,
-                lastSeen,
-                wgClientIp: nasSetupScript.wgClientIp,
-                wgPublicKey: nasSetupScript.wgPublicKey,
-            })
-            .from(nasDevice)
-            .leftJoin(
-                nasSetupScript,
-                eq(nasSetupScript.nasDeviceId, nasDevice.id),
-            )
-            .where(where)
-            .orderBy(...orderBy)
-            .limit(opts.perPage)
-            .offset((opts.page - 1) * opts.perPage),
+        opts.perPage === 'all'
+            ? rowsQuery
+            : rowsQuery
+                  .limit(opts.perPage)
+                  .offset((opts.page - 1) * opts.perPage),
     ]);
     return {
         total: Number(countRows[0]?.total ?? 0),

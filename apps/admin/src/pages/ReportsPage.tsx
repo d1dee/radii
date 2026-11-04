@@ -26,6 +26,7 @@ import { useAutoRefresh } from '@/lib/autoRefresh';
 import { warnBackgroundFailure } from '@/lib/clientError';
 import { dayjs } from '@/lib/dayjs';
 import { formatBytes, formatMoney, formatSeconds } from '@/lib/format';
+import { tableRowNumber, useTablePageSize } from '@/lib/pagination';
 import { useAdminSettings } from '@/lib/settings';
 
 function SummaryCard({
@@ -75,7 +76,18 @@ export default function ReportsPage() {
     const [topPackagesPage, setTopPackagesPage] = useState(1);
     const [topUsersPage, setTopUsersPage] = useState(1);
     const [heavyUsersPage, setHeavyUsersPage] = useState(1);
-    const perPage = settings.dashboard.perPage;
+    const [topPackagesPerPage, setTopPackagesPerPage] = useTablePageSize(
+        settings.dashboard.perPage,
+        loaded,
+    );
+    const [topUsersPerPage, setTopUsersPerPage] = useTablePageSize(
+        settings.dashboard.perPage,
+        loaded,
+    );
+    const [heavyUsersPerPage, setHeavyUsersPerPage] = useTablePageSize(
+        settings.dashboard.perPage,
+        loaded,
+    );
     const loadRequest = useRef(0);
 
     const load = useCallback(
@@ -99,9 +111,9 @@ export default function ReportsPage() {
                 rangeTo.toISOString(),
                 {
                     ...pages,
-                    topPackagesPerPage: perPage,
-                    topUsersPerPage: perPage,
-                    heavyUsersPerPage: perPage,
+                    topPackagesPerPage,
+                    topUsersPerPage,
+                    heavyUsersPerPage,
                 },
             );
             if (requestId !== loadRequest.current) return;
@@ -119,7 +131,14 @@ export default function ReportsPage() {
             setError(null);
             setReports(res.data);
         },
-        [topPackagesPage, topUsersPage, heavyUsersPage, perPage],
+        [
+            topPackagesPage,
+            topUsersPage,
+            heavyUsersPage,
+            topPackagesPerPage,
+            topUsersPerPage,
+            heavyUsersPerPage,
+        ],
     );
 
     // Waits once for settings so the admin's default range applies to the
@@ -173,7 +192,14 @@ export default function ReportsPage() {
         void load(from, to);
         // Each report pager reloads its requested ranked slice.
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [topPackagesPage, topUsersPage, heavyUsersPage, perPage]);
+    }, [
+        topPackagesPage,
+        topUsersPage,
+        heavyUsersPage,
+        topPackagesPerPage,
+        topUsersPerPage,
+        heavyUsersPerPage,
+    ]);
 
     const statusBreakdown = reports
         ? [
@@ -393,11 +419,11 @@ export default function ReportsPage() {
                                                                 }
                                                             >
                                                                 <Table.Td>
-                                                                    {(topPackagesPage -
-                                                                        1) *
-                                                                        perPage +
-                                                                        i +
-                                                                        1}
+                                                                    {tableRowNumber(
+                                                                        topPackagesPage,
+                                                                        topPackagesPerPage,
+                                                                        i,
+                                                                    )}
                                                                 </Table.Td>
                                                                 <Table.Td>
                                                                     <Group gap={4} wrap='nowrap'>
@@ -434,9 +460,14 @@ export default function ReportsPage() {
                                     )}
                                     <TablePagination
                                         page={topPackagesPage}
-                                        perPage={perPage}
+                                        perPage={topPackagesPerPage}
                                         total={reports.topPackages.total}
                                         onChange={setTopPackagesPage}
+                                        onPerPageChange={(value) => {
+                                            setTopPackagesPerPage(value);
+                                            setTopPackagesPage(1);
+                                        }}
+                                        rowsLabel='Top packages rows per page'
                                         loading={loading}
                                     />
                                 </Card>
@@ -481,11 +512,11 @@ export default function ReportsPage() {
                                                                 key={u.userId}
                                                             >
                                                                 <Table.Td>
-                                                                    {(topUsersPage -
-                                                                        1) *
-                                                                        perPage +
-                                                                        i +
-                                                                        1}
+                                                                    {tableRowNumber(
+                                                                        topUsersPage,
+                                                                        topUsersPerPage,
+                                                                        i,
+                                                                    )}
                                                                 </Table.Td>
                                                                 <Table.Td>
                                                                     <Text size='sm'>
@@ -522,9 +553,14 @@ export default function ReportsPage() {
                                     )}
                                     <TablePagination
                                         page={topUsersPage}
-                                        perPage={perPage}
+                                        perPage={topUsersPerPage}
                                         total={reports.topUsers.total}
                                         onChange={setTopUsersPage}
+                                        onPerPageChange={(value) => {
+                                            setTopUsersPerPage(value);
+                                            setTopUsersPage(1);
+                                        }}
+                                        rowsLabel='Top customers rows per page'
                                         loading={loading}
                                     />
                                 </Card>
@@ -572,11 +608,11 @@ export default function ReportsPage() {
                                                                 key={u.username}
                                                             >
                                                                 <Table.Td>
-                                                                    {(heavyUsersPage -
-                                                                        1) *
-                                                                        perPage +
-                                                                        i +
-                                                                        1}
+                                                                    {tableRowNumber(
+                                                                        heavyUsersPage,
+                                                                        heavyUsersPerPage,
+                                                                        i,
+                                                                    )}
                                                                 </Table.Td>
                                                                 <Table.Td>
                                                                     <Text size='sm'>
@@ -617,9 +653,14 @@ export default function ReportsPage() {
                                     )}
                                     <TablePagination
                                         page={heavyUsersPage}
-                                        perPage={perPage}
+                                        perPage={heavyUsersPerPage}
                                         total={reports.heavyUsers.total}
                                         onChange={setHeavyUsersPage}
+                                        onPerPageChange={(value) => {
+                                            setHeavyUsersPerPage(value);
+                                            setHeavyUsersPage(1);
+                                        }}
+                                        rowsLabel='Heaviest consumers rows per page'
                                         loading={loading}
                                     />
                                 </Card>

@@ -9,6 +9,7 @@
 // order time) or a hotspot portal login request on one. Admins never see
 // each other's customers, payments or reports.
 
+import type { PageSize } from '@radii/shared';
 import {
     and,
     asc,
@@ -272,7 +273,7 @@ export interface ListAdminUsersOpts {
     sortBy?: AdminUserSortBy;
     sortDirection?: 'asc' | 'desc';
     page?: number;
-    perPage?: number;
+    perPage?: PageSize;
 }
 
 async function userAggregates(userIds: string[], adminId: string) {
@@ -432,7 +433,9 @@ async function userAggregates(userIds: string[], adminId: string) {
 
 export async function listAdminUsers(opts: ListAdminUsersOpts) {
     const page = Math.max(1, opts.page ?? 1);
-    const perPage = Math.min(100, Math.max(1, opts.perPage ?? 50));
+    const perPage = opts.perPage === 'all'
+        ? 'all'
+        : Math.min(100, Math.max(1, opts.perPage ?? 50));
 
     // Tenant scope first: only customers who interacted with this admin's
     // NAS devices are ever listed, regardless of other filters.
@@ -640,16 +643,18 @@ export async function listAdminUsers(opts: ListAdminUsersOpts) {
                 ];
         }
     })();
+    const pageCandidatesQuery = candidates.orderBy(...candidateOrder);
     const [[stats], pendingCountRows, pageCandidates] = await Promise.all([
         db.select({ total: count(user.id) }).from(user).where(where),
         db
             .select({ total: count(pppoeServiceAccounts.id) })
             .from(pppoeServiceAccounts)
             .where(pendingWhere),
-        candidates
-            .orderBy(...candidateOrder)
-            .limit(perPage)
-            .offset((page - 1) * perPage),
+        perPage === 'all'
+            ? pageCandidatesQuery
+            : pageCandidatesQuery
+                  .limit(perPage)
+                  .offset((page - 1) * perPage),
     ]);
     const pendingTotal = Number(pendingCountRows[0]?.total ?? 0);
     const userIds = pageCandidates
@@ -1509,12 +1514,14 @@ export interface ListPaymentsOpts {
     sortBy?: 'createdAt' | 'customer' | 'package' | 'amount' | 'status';
     sortDirection?: 'asc' | 'desc';
     page?: number;
-    perPage?: number;
+    perPage?: PageSize;
 }
 
 export async function listPayments(opts: ListPaymentsOpts) {
     const page = Math.max(1, opts.page ?? 1);
-    const perPage = Math.min(100, Math.max(1, opts.perPage ?? 50));
+    const perPage = opts.perPage === 'all'
+        ? 'all'
+        : Math.min(100, Math.max(1, opts.perPage ?? 50));
 
     // Tenant scope: payments stamped with one of the admin's NAS devices.
     const conditions = [scopedToAdminNas(opts.adminId)];
@@ -1579,6 +1586,46 @@ export async function listPayments(opts: ListPaymentsOpts) {
         }
     })();
 
+    const rowsQuery = db
+        .select({
+            id: packagePayments.id,
+            userId: packagePayments.userId,
+            userName: customer,
+            phoneNumber: sql<string>`coalesce(
+                ${user.username},
+                ${packagePayments.phoneNumber}
+            )`,
+            customerLocation: userAdminTag.location,
+            amount: packagePayments.amount,
+            status: packagePayments.status,
+            packageTitle: packages.title,
+            packageType: packages.type,
+            packageArchivedAt: packages.archivedAt,
+            nasDeviceName: nasDevice.name,
+            provider: transaction.provider,
+            providerTransactionId: transaction.providerTransactionId,
+            providerReference: transaction.providerReference,
+            transactionId: transaction.id,
+            createdAt: packagePayments.createdAt,
+            updatedAt: packagePayments.updatedAt,
+        })
+        .from(packagePayments)
+        .innerJoin(nasDevice, eq(packagePayments.nasDeviceId, nasDevice.id))
+        .leftJoin(user, eq(packagePayments.userId, user.id))
+        .leftJoin(
+            userAdminTag,
+            and(
+                eq(userAdminTag.userId, user.id),
+                eq(userAdminTag.adminId, opts.adminId),
+            ),
+        )
+        .innerJoin(packages, eq(packagePayments.packageId, packages.id))
+        .leftJoin(
+            transaction,
+            eq(packagePayments.transaction, transaction.id),
+        )
+        .where(where)
+        .orderBy(...paymentOrder);
     const [[stats], rows] = await Promise.all([
         db
             .select({
@@ -1604,48 +1651,9 @@ export async function listPayments(opts: ListPaymentsOpts) {
                 eq(packagePayments.transaction, transaction.id),
             )
             .where(where),
-        db
-            .select({
-                id: packagePayments.id,
-                userId: packagePayments.userId,
-                userName: customer,
-                phoneNumber: sql<string>`coalesce(
-                    ${user.username},
-                    ${packagePayments.phoneNumber}
-                )`,
-                customerLocation: userAdminTag.location,
-                amount: packagePayments.amount,
-                status: packagePayments.status,
-                packageTitle: packages.title,
-                packageType: packages.type,
-                packageArchivedAt: packages.archivedAt,
-                nasDeviceName: nasDevice.name,
-                provider: transaction.provider,
-                providerTransactionId: transaction.providerTransactionId,
-                providerReference: transaction.providerReference,
-                transactionId: transaction.id,
-                createdAt: packagePayments.createdAt,
-                updatedAt: packagePayments.updatedAt,
-            })
-            .from(packagePayments)
-            .innerJoin(nasDevice, eq(packagePayments.nasDeviceId, nasDevice.id))
-            .leftJoin(user, eq(packagePayments.userId, user.id))
-            .leftJoin(
-                userAdminTag,
-                and(
-                    eq(userAdminTag.userId, user.id),
-                    eq(userAdminTag.adminId, opts.adminId),
-                ),
-            )
-            .innerJoin(packages, eq(packagePayments.packageId, packages.id))
-            .leftJoin(
-                transaction,
-                eq(packagePayments.transaction, transaction.id),
-            )
-            .where(where)
-            .orderBy(...paymentOrder)
-            .limit(perPage)
-            .offset((page - 1) * perPage),
+        perPage === 'all'
+            ? rowsQuery
+            : rowsQuery.limit(perPage).offset((page - 1) * perPage),
     ]);
 
     const failedTransactionIds = rows
@@ -1929,43 +1937,44 @@ export async function getUserPayments(
     userId: string,
     adminId: string,
     page: number,
-    perPage: number,
+    perPage: PageSize,
 ) {
     const where = and(
         eq(packagePayments.userId, userId),
         scopedToAdminNas(adminId),
     );
+    const rowsQuery = db
+        .select({
+            id: packagePayments.id,
+            amount: packagePayments.amount,
+            status: packagePayments.status,
+            phoneNumber: packagePayments.phoneNumber,
+            packageTitle: packages.title,
+            packageType: packages.type,
+            packageArchivedAt: packages.archivedAt,
+            provider: transaction.provider,
+            providerTransactionId: transaction.providerTransactionId,
+            createdAt: packagePayments.createdAt,
+            updatedAt: packagePayments.updatedAt,
+        })
+        .from(packagePayments)
+        .innerJoin(packages, eq(packagePayments.packageId, packages.id))
+        .innerJoin(nasDevice, eq(packagePayments.nasDeviceId, nasDevice.id))
+        .leftJoin(
+            transaction,
+            eq(packagePayments.transaction, transaction.id),
+        )
+        .where(where)
+        .orderBy(desc(packagePayments.createdAt), desc(packagePayments.id));
     const [countRows, rows] = await Promise.all([
         db
             .select({ total: count(packagePayments.id) })
             .from(packagePayments)
             .innerJoin(nasDevice, eq(packagePayments.nasDeviceId, nasDevice.id))
             .where(where),
-        db
-            .select({
-                id: packagePayments.id,
-                amount: packagePayments.amount,
-                status: packagePayments.status,
-                phoneNumber: packagePayments.phoneNumber,
-                packageTitle: packages.title,
-                packageType: packages.type,
-                packageArchivedAt: packages.archivedAt,
-                provider: transaction.provider,
-                providerTransactionId: transaction.providerTransactionId,
-                createdAt: packagePayments.createdAt,
-                updatedAt: packagePayments.updatedAt,
-            })
-            .from(packagePayments)
-            .innerJoin(packages, eq(packagePayments.packageId, packages.id))
-            .innerJoin(nasDevice, eq(packagePayments.nasDeviceId, nasDevice.id))
-            .leftJoin(
-                transaction,
-                eq(packagePayments.transaction, transaction.id),
-            )
-            .where(where)
-            .orderBy(desc(packagePayments.createdAt), desc(packagePayments.id))
-            .limit(perPage)
-            .offset((page - 1) * perPage),
+        perPage === 'all'
+            ? rowsQuery
+            : rowsQuery.limit(perPage).offset((page - 1) * perPage),
     ]);
     return {
         total: Number(countRows[0]?.total ?? 0),
@@ -1982,9 +1991,9 @@ export async function getAdminReports(
     from: Date,
     to: Date,
     pagination: {
-        topPackages: { page: number; perPage: number };
-        topUsers: { page: number; perPage: number };
-        heavyUsers: { page: number; perPage: number };
+        topPackages: { page: number; perPage: PageSize };
+        topUsers: { page: number; perPage: PageSize };
+        heavyUsers: { page: number; perPage: PageSize };
     },
 ) {
     // Every figure below covers only the admin's network: payments are
@@ -2048,8 +2057,7 @@ export async function getAdminReports(
             ),
         );
 
-    const [topPackages, [topPackagesCount]] = await Promise.all([
-        db.select({
+    const topPackagesQuery = db.select({
             packageId: packages.id,
             title: packages.title,
             type: packages.type,
@@ -2070,12 +2078,16 @@ export async function getAdminReports(
         .orderBy(
             desc(sql`sum(${packagePayments.amount})`),
             asc(packages.id),
-        )
-        .limit(pagination.topPackages.perPage)
-        .offset(
-            (pagination.topPackages.page - 1) *
-                pagination.topPackages.perPage,
-        ),
+        );
+    const [topPackages, [topPackagesCount]] = await Promise.all([
+        pagination.topPackages.perPage === 'all'
+            ? topPackagesQuery
+            : topPackagesQuery
+                  .limit(pagination.topPackages.perPage)
+                  .offset(
+                      (pagination.topPackages.page - 1) *
+                          pagination.topPackages.perPage,
+                  ),
         db.select({
             total: sql<number>`count(distinct ${packagePayments.packageId})`,
         })
@@ -2088,8 +2100,7 @@ export async function getAdminReports(
         ${userAdminTag.name},
         ${user.name}
     )`;
-    const [topUsers, [topUsersCount]] = await Promise.all([
-        db.select({
+    const topUsersQuery = db.select({
             userId: packagePayments.userId,
             userName: reportCustomerName,
             phoneNumber: user.username,
@@ -2118,11 +2129,16 @@ export async function getAdminReports(
         .orderBy(
             desc(sql`sum(${packagePayments.amount})`),
             asc(packagePayments.userId),
-        )
-        .limit(pagination.topUsers.perPage)
-        .offset(
-            (pagination.topUsers.page - 1) * pagination.topUsers.perPage,
-        ),
+        );
+    const [topUsers, [topUsersCount]] = await Promise.all([
+        pagination.topUsers.perPage === 'all'
+            ? topUsersQuery
+            : topUsersQuery
+                  .limit(pagination.topUsers.perPage)
+                  .offset(
+                      (pagination.topUsers.page - 1) *
+                          pagination.topUsers.perPage,
+                  ),
         db.select({
             total: sql<number>`count(distinct ${packagePayments.userId})`,
         })
@@ -2141,8 +2157,7 @@ export async function getAdminReports(
         scopedToAdminNas(adminId),
         scopedAccountingToAdminNas(adminId),
     );
-    const [heavyUsers, [heavyUsersCount]] = await Promise.all([
-        db.select({
+    const heavyUsersQuery = db.select({
             username: radacct.username,
             userId: activatedPackages.userId,
             userName: reportCustomerName,
@@ -2184,12 +2199,16 @@ export async function getAdminReports(
                 sql`sum(coalesce(${radacct.acctinputoctets}, 0) + coalesce(${radacct.acctoutputoctets}, 0))`,
             ),
             asc(radacct.username),
-        )
-        .limit(pagination.heavyUsers.perPage)
-        .offset(
-            (pagination.heavyUsers.page - 1) *
-                pagination.heavyUsers.perPage,
-        ),
+        );
+    const [heavyUsers, [heavyUsersCount]] = await Promise.all([
+        pagination.heavyUsers.perPage === 'all'
+            ? heavyUsersQuery
+            : heavyUsersQuery
+                  .limit(pagination.heavyUsers.perPage)
+                  .offset(
+                      (pagination.heavyUsers.page - 1) *
+                          pagination.heavyUsers.perPage,
+                  ),
         db.select({
             total: sql<number>`count(distinct coalesce(${radacct.username}, ''))`,
         })

@@ -6,6 +6,7 @@ import {
     type GenerateSetupScriptInput,
     type NasDeviceOs,
     type NasDeviceStatus,
+    type PageSize,
 } from '@shared/index';
 
 import { getErrorDiagnostic } from '@/lib/clientError';
@@ -140,7 +141,7 @@ export function login(body: { phoneNumber: string; pin: string }) {
 
 export type PackageType = 'hotspot' | 'pppoe';
 export type FairUsageWindowUnit = 'session' | 'days' | 'weeks' | 'months';
-export type PaginationQuery = { page?: number; perPage?: number };
+export type PaginationQuery = { page?: number; perPage?: PageSize };
 export type SortDirection = 'asc' | 'desc';
 
 function paginationSearchParams(query: PaginationQuery): URLSearchParams {
@@ -216,7 +217,7 @@ export type CreatePackageInput = {
 export type AdminPackageList = {
     total: number;
     page: number;
-    perPage: number;
+    perPage: PageSize;
     packages: PackageRow[];
 };
 
@@ -299,7 +300,7 @@ export type PackageAnalytics = {
     recentPayments: {
         total: number;
         page: number;
-        perPage: number;
+        perPage: PageSize;
         payments: Array<{
             id: string;
             phoneNumber: string;
@@ -395,7 +396,7 @@ export type AdminNasDeviceList = {
     total: number;
     onlineTotal: number;
     page: number;
-    perPage: number;
+    perPage: PageSize;
     nasDevices: NasDeviceRow[];
 };
 
@@ -509,7 +510,7 @@ export type NasDeviceAnalytics = {
     recentPayments: {
         total: number;
         page: number;
-        perPage: number;
+        perPage: PageSize;
         payments: Array<{
             id: string;
             phoneNumber: string;
@@ -590,7 +591,7 @@ export function setUserTag(
 export type AdminUserList = {
     total: number;
     page: number;
-    perPage: number;
+    perPage: PageSize;
     users: AdminUserRow[];
 };
 
@@ -661,7 +662,7 @@ export type ListAdminUsersQuery = {
     type?: PackageType;
     flagged?: boolean;
     page?: number;
-    perPage?: number;
+    perPage?: PageSize;
     sortBy?: AdminUserSortKey;
     sortDirection?: SortDirection;
 };
@@ -763,7 +764,7 @@ export type AdminPaymentList = {
         revenue: number;
     };
     page: number;
-    perPage: number;
+    perPage: PageSize;
     payments: AdminPaymentRow[];
 };
 
@@ -821,7 +822,7 @@ export type UserPaymentRow = {
 export type UserPaymentList = {
     total: number;
     page: number;
-    perPage: number;
+    perPage: PageSize;
     payments: UserPaymentRow[];
 };
 
@@ -913,7 +914,7 @@ export type AdminSessionRow = SessionInfo & {
 export type AdminActivationList = {
     total: number;
     page: number;
-    perPage: number;
+    perPage: PageSize;
     activations: AdminActivationRow[];
 };
 
@@ -1038,7 +1039,7 @@ export type ListPaymentsQuery = {
     from?: string;
     to?: string;
     page?: number;
-    perPage?: number;
+    perPage?: PageSize;
     sortBy?: PaymentSortKey;
     sortDirection?: SortDirection;
 };
@@ -1126,17 +1127,17 @@ export type AdminReports = {
 export type PaginatedItems<T> = {
     total: number;
     page: number;
-    perPage: number;
+    perPage: PageSize;
     items: T[];
 };
 
 export type AdminReportsQuery = {
     topPackagesPage?: number;
-    topPackagesPerPage?: number;
+    topPackagesPerPage?: PageSize;
     topUsersPage?: number;
-    topUsersPerPage?: number;
+    topUsersPerPage?: PageSize;
     heavyUsersPage?: number;
-    heavyUsersPerPage?: number;
+    heavyUsersPerPage?: PageSize;
 };
 
 export function getAdminReports(
@@ -1186,7 +1187,7 @@ export function updateActivation(
 export type AdminSessionList = {
     total: number;
     page: number;
-    perPage: number;
+    perPage: PageSize;
     sessions: AdminSessionRow[];
 };
 

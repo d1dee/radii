@@ -1,4 +1,5 @@
 export * from './consts/errors';
+export * from './consts/pagination';
 export * from './schemas/adminAuth';
 export * from './schemas/adminSettings';
 export * from './schemas/auth';
