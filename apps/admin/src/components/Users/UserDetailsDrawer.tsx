@@ -5,6 +5,7 @@ import {
     Button,
     Card,
     Center,
+    Checkbox,
     CopyButton,
     Divider,
     Drawer,
@@ -28,6 +29,7 @@ import type { ReactNode } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
     MdBlock,
+    MdAdd,
     MdCheckCircle,
     MdClose,
     MdContentCopy,
@@ -52,9 +54,11 @@ import {
     activateActivation,
     addUserFlag,
     banUser,
+    createAdminUserActivation,
     deactivateActivation,
     disconnectPppoeAccountSessions,
     getAdminUser,
+    getAllAdminPackages,
     getAllNasDevices,
     getUserActivations,
     getUserPayments,
@@ -67,9 +71,11 @@ import {
     unbanUser,
     updateActivation,
     type AdminActivationRow,
+    type AdminActivationPaymentMethod,
     type AdminPppoeAccount,
     type AdminUserDetail,
     type NasDeviceRow,
+    type PackageRow,
     type PppoeAccountStatus,
     type UserPaymentRow,
 } from '@/lib/api';
@@ -200,6 +206,21 @@ export function UserDetailsDrawer({
     const [pppoeLabelModal, setPppoeLabelModal] =
         useState<AdminPppoeAccount | null>(null);
     const [pppoeLabelValue, setPppoeLabelValue] = useState('');
+    const [activationModal, setActivationModal] = useState(false);
+    const [activationPackages, setActivationPackages] = useState<PackageRow[]>([]);
+    const [activationPackageId, setActivationPackageId] = useState<string | null>(null);
+    const [activationNasId, setActivationNasId] = useState<string | null>(null);
+    const [activationPppoeAccountId, setActivationPppoeAccountId] = useState<string | null>(null);
+    const [activationPaymentMethod, setActivationPaymentMethod] =
+        useState<AdminActivationPaymentMethod>('cash');
+    const [activationReference, setActivationReference] = useState('');
+    const [activationAmount, setActivationAmount] = useState<number | string>(0);
+    const [activationNote, setActivationNote] = useState('');
+    const [activationCustom, setActivationCustom] = useState(false);
+    const [activationExpiry, setActivationExpiry] = useState<Date | null>(null);
+    const [activationTime, setActivationTime] = useState<number | string>(0);
+    const [activationTimeUnit, setActivationTimeUnit] = useState('60');
+    const [activationLoadingOptions, setActivationLoadingOptions] = useState(false);
     const navigate = useNavigate();
 
     const loadDetail = useCallback(async (id: string) => {
@@ -270,6 +291,7 @@ export function UserDetailsDrawer({
         setPppoeStatusModal(null);
         setPppoeDisconnectModal(null);
         setPppoeLabelModal(null);
+        setActivationModal(false);
         void loadDetail(userId);
     }, [userId, loadDetail]);
 
@@ -523,6 +545,138 @@ export function UserDetailsDrawer({
         }
     };
 
+    const openActivationModal = async () => {
+        setActivationModal(true);
+        setActivationPackageId(null);
+        setActivationNasId(null);
+        setActivationPppoeAccountId(null);
+        setActivationPaymentMethod('cash');
+        setActivationReference('');
+        setActivationAmount(0);
+        setActivationNote('');
+        setActivationCustom(false);
+        setActivationExpiry(null);
+        setActivationTime(0);
+        setActivationTimeUnit('60');
+        if (activationPackages.length > 0 && nasDevices !== null) return;
+        setActivationLoadingOptions(true);
+        const [packagesResult, devicesResult] = await Promise.all([
+            getAllAdminPackages({ archived: 'all' }),
+            nasDevices === null ? getAllNasDevices() : Promise.resolve(null),
+        ]);
+        setActivationLoadingOptions(false);
+        if (packagesResult.success && packagesResult.data) {
+            setActivationPackages(packagesResult.data);
+        } else {
+            warnBackgroundFailure('load activation package options', packagesResult);
+        }
+        if (devicesResult?.success && devicesResult.data) {
+            setNasDevices(devicesResult.data);
+        } else if (devicesResult && !devicesResult.success) {
+            warnBackgroundFailure('load activation NAS options', devicesResult);
+        }
+    };
+
+    const selectedActivationPackage = activationPackages.find(
+        (pkg) => pkg.id === activationPackageId,
+    );
+    const activationNasOptions = (nasDevices ?? [])
+        .filter((device) =>
+            selectedActivationPackage?.nasDeviceIds.includes(device.id),
+        )
+        .map((device) => ({
+            value: device.id,
+            label: device.location
+                ? `${device.name} · ${device.location}`
+                : device.name,
+        }));
+    const activationPppoeOptions = detail?.pppoeAccounts
+        .filter(
+            (account) =>
+                account.status === 'active' &&
+                account.nasDeviceId === activationNasId,
+        )
+        .map((account) => ({
+            value: account.id,
+            label: account.label
+                ? `${account.label} · ${account.username}`
+                : account.username,
+        })) ?? [];
+
+    const selectActivationPackage = (packageId: string | null) => {
+        setActivationPackageId(packageId);
+        setActivationNasId(null);
+        setActivationPppoeAccountId(null);
+        const pkg = activationPackages.find((row) => row.id === packageId);
+        if (!pkg) return;
+        setActivationAmount(Number(pkg.price));
+        setActivationTime(pkg.sessionLength);
+        setActivationTimeUnit('60');
+        setActivationExpiry(
+            new Date(Date.now() + pkg.sessionLength * 60 * 1000),
+        );
+    };
+
+    const submitAdminActivation = async () => {
+        if (
+            !userId ||
+            !activationPackageId ||
+            !activationNasId ||
+            typeof activationAmount !== 'number' ||
+            (activationPaymentMethod !== 'free' && !activationReference.trim()) ||
+            (selectedActivationPackage?.type === 'pppoe' &&
+                !activationPppoeAccountId) ||
+            (activationCustom &&
+                (!activationExpiry ||
+                    typeof activationTime !== 'number' ||
+                    activationTime < 0))
+        ) {
+            return;
+        }
+        setBusy(true);
+        const result = await createAdminUserActivation(userId, {
+            packageId: activationPackageId,
+            nasDeviceId: activationNasId,
+            ...(activationPppoeAccountId
+                ? { pppoeServiceAccountId: activationPppoeAccountId }
+                : {}),
+            paymentMethod: activationPaymentMethod,
+            paymentReference:
+                activationPaymentMethod === 'free'
+                    ? undefined
+                    : activationReference.trim(),
+            amount:
+                activationPaymentMethod === 'free' ? 0 : activationAmount,
+            note: activationNote.trim() || undefined,
+            ...(activationCustom && activationExpiry
+                ? {
+                      expireAt: activationExpiry.toISOString(),
+                      remainingSeconds: Math.round(
+                          (activationTime as number) *
+                              Number(activationTimeUnit),
+                      ),
+                  }
+                : {}),
+        });
+        setBusy(false);
+        notifyResult(
+            result,
+            activationPaymentMethod === 'free'
+                ? 'Free package granted and recorded'
+                : 'Package activated and payment recorded',
+        );
+        if (!result.success) return;
+        setActivationModal(false);
+        setTab('activations');
+        void loadDetail(userId);
+        void loadActivations(userId, 1);
+        setActivationsPage(1);
+        if (payments.length > 0 || tab === 'payments') {
+            void loadPayments(userId, 1);
+            setPaymentsPage(1);
+        }
+    };
+
     // Deep-links into the payments / sessions logs pre-filtered to one
     // account; closes the drawer so the destination page is visible.
     const viewPppoePayments = (account: AdminPppoeAccount) => {
@@ -641,6 +795,14 @@ export function UserDetailsDrawer({
                     </Stack>
                     {detail ? (
                         <Group gap='xs' wrap='nowrap' style={{ flexShrink: 0 }}>
+                            <Button
+                                size='xs'
+                                px='xs'
+                                leftSection={<MdAdd size={14} />}
+                                onClick={() => void openActivationModal()}
+                            >
+                                Activate package
+                            </Button>
                             <Button
                                 size='xs'
                                 px='xs'
@@ -990,6 +1152,21 @@ export function UserDetailsDrawer({
                                                                     a.packageArchivedAt
                                                                 }
                                                             />
+                                                            {a.adminProvisioning ? (
+                                                                <Badge
+                                                                    color={
+                                                                        a.adminProvisioning.free
+                                                                            ? 'orange'
+                                                                            : 'violet'
+                                                                    }
+                                                                    variant='light'
+                                                                    size='xs'
+                                                                >
+                                                                    {a.adminProvisioning.free
+                                                                        ? 'Free grant'
+                                                                        : 'Admin issued'}
+                                                                </Badge>
+                                                            ) : null}
                                                         </Group>
                                                         <Text
                                                             size='xs'
@@ -998,6 +1175,20 @@ export function UserDetailsDrawer({
                                                             {a.packageType} ●{' '}
                                                             {a.username}
                                                         </Text>
+                                                        {a.adminProvisioning ? (
+                                                            <Text
+                                                                size='xs'
+                                                                c='dimmed'
+                                                            >
+                                                                {a.adminProvisioning.paymentMethod ===
+                                                                'mpesa'
+                                                                    ? 'M-Pesa'
+                                                                    : a.adminProvisioning.paymentMethod}
+                                                                {a.adminProvisioning.paymentReference
+                                                                    ? ` · ${a.adminProvisioning.paymentReference}`
+                                                                    : ''}
+                                                            </Text>
+                                                        ) : null}
                                                     </Table.Td>
                                                     <Table.Td>
                                                         <Group gap={4}>
@@ -1770,6 +1961,206 @@ export function UserDetailsDrawer({
             )}
 
             {/* --- Modals ------------------------------------------------------ */}
+
+            <Modal
+                opened={activationModal}
+                onClose={() => setActivationModal(false)}
+                title='Activate package for customer'
+                centered
+                size='lg'
+            >
+                {activationLoadingOptions ? (
+                    <Center py='xl'>
+                        <Loader />
+                    </Center>
+                ) : (
+                    <Stack gap='md'>
+                        <Text size='sm' c='dimmed'>
+                            The activation and its payment trail are recorded
+                            immediately. Free grants are marked separately and
+                            remain visible in payment and activation history.
+                        </Text>
+                        <Select
+                            label='Package'
+                            placeholder='Select any package'
+                            data={activationPackages.map((pkg) => ({
+                                value: pkg.id,
+                                label: `${pkg.title} · ${pkg.type}${pkg.archivedAt ? ' · archived' : ''}`,
+                            }))}
+                            value={activationPackageId}
+                            onChange={selectActivationPackage}
+                            searchable
+                            nothingFoundMessage='No packages found'
+                            required
+                        />
+                        <Select
+                            label='NAS device'
+                            description='Only networks explicitly linked to the selected package are available.'
+                            placeholder='Select the activation network'
+                            data={activationNasOptions}
+                            value={activationNasId}
+                            onChange={(value) => {
+                                setActivationNasId(value);
+                                setActivationPppoeAccountId(null);
+                            }}
+                            searchable
+                            disabled={!selectedActivationPackage}
+                            nothingFoundMessage='This package has no linked NAS devices'
+                            required
+                        />
+                        {selectedActivationPackage?.type === 'pppoe' ? (
+                            <Select
+                                label='PPPoE account'
+                                description='The package is applied to this customer line.'
+                                placeholder='Select an active PPPoE account'
+                                data={activationPppoeOptions}
+                                value={activationPppoeAccountId}
+                                onChange={setActivationPppoeAccountId}
+                                disabled={!activationNasId}
+                                nothingFoundMessage='No active PPPoE account exists on this network'
+                                required
+                            />
+                        ) : null}
+                        <Select
+                            label='Payment method'
+                            data={[
+                                { value: 'cash', label: 'Cash' },
+                                { value: 'mpesa', label: 'M-Pesa' },
+                                { value: 'cheque', label: 'Cheque' },
+                                { value: 'free', label: 'Free grant' },
+                            ]}
+                            value={activationPaymentMethod}
+                            onChange={(value) =>
+                                value &&
+                                setActivationPaymentMethod(
+                                    value as AdminActivationPaymentMethod,
+                                )
+                            }
+                            allowDeselect={false}
+                            required
+                        />
+                        {activationPaymentMethod === 'free' ? (
+                            <Card withBorder padding='sm' radius='md'>
+                                <Text size='sm' fw={600} c='orange'>
+                                    Free package grant
+                                </Text>
+                                <Text size='xs' c='dimmed'>
+                                    Amount is recorded as zero with the issuing
+                                    administrator and an automatic grant reference.
+                                </Text>
+                            </Card>
+                        ) : (
+                            <>
+                                <NumberInput
+                                    label='Amount received'
+                                    min={0}
+                                    decimalScale={2}
+                                    fixedDecimalScale
+                                    value={activationAmount}
+                                    onChange={setActivationAmount}
+                                    required
+                                />
+                                <TextInput
+                                    label='Payment reference'
+                                    description='Receipt, M-Pesa transaction code, or cheque number.'
+                                    value={activationReference}
+                                    onChange={(event) =>
+                                        setActivationReference(
+                                            event.currentTarget.value,
+                                        )
+                                    }
+                                    maxLength={120}
+                                    required
+                                />
+                            </>
+                        )}
+                        <Textarea
+                            label='Audit note (optional)'
+                            placeholder='Reason, collector, cheque bank, or other context'
+                            value={activationNote}
+                            onChange={(event) =>
+                                setActivationNote(event.currentTarget.value)
+                            }
+                            maxLength={1000}
+                            rows={2}
+                        />
+                        <Checkbox
+                            label='Use customer-specific activation limits'
+                            description='Override the package expiry and usable online-time balance for this customer only.'
+                            checked={activationCustom}
+                            onChange={(event) =>
+                                setActivationCustom(event.currentTarget.checked)
+                            }
+                        />
+                        {activationCustom ? (
+                            <>
+                                <DateTimePicker
+                                    label='Custom expiry'
+                                    value={activationExpiry}
+                                    onChange={(value) =>
+                                        setActivationExpiry(
+                                            value ? new Date(value) : null,
+                                        )
+                                    }
+                                    required
+                                />
+                                <NumberInput
+                                    label='Usable time balance'
+                                    min={0}
+                                    allowDecimal={false}
+                                    value={activationTime}
+                                    onChange={setActivationTime}
+                                    required
+                                />
+                                <Select
+                                    label='Balance unit'
+                                    data={[
+                                        { value: '60', label: 'Minutes' },
+                                        { value: '3600', label: 'Hours' },
+                                        { value: '86400', label: 'Days' },
+                                        { value: '604800', label: 'Weeks' },
+                                    ]}
+                                    value={activationTimeUnit}
+                                    onChange={(value) =>
+                                        value && setActivationTimeUnit(value)
+                                    }
+                                    allowDeselect={false}
+                                />
+                            </>
+                        ) : null}
+                        <Group justify='flex-end'>
+                            <Button
+                                variant='default'
+                                onClick={() => setActivationModal(false)}
+                            >
+                                Cancel
+                            </Button>
+                            <Button
+                                loading={busy}
+                                disabled={
+                                    !activationPackageId ||
+                                    !activationNasId ||
+                                    (selectedActivationPackage?.type ===
+                                        'pppoe' &&
+                                        !activationPppoeAccountId) ||
+                                    (activationPaymentMethod !== 'free' &&
+                                        (!activationReference.trim() ||
+                                            typeof activationAmount !==
+                                                'number')) ||
+                                    (activationCustom &&
+                                        (!activationExpiry ||
+                                            typeof activationTime !== 'number'))
+                                }
+                                onClick={() => void submitAdminActivation()}
+                            >
+                                {activationPaymentMethod === 'free'
+                                    ? 'Grant free package'
+                                    : 'Record payment and activate'}
+                            </Button>
+                        </Group>
+                    </Stack>
+                )}
+            </Modal>
 
             <Modal
                 opened={flagModal}

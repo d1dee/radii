@@ -815,6 +815,7 @@ export type UserPaymentRow = {
     packageArchivedAt: string | null;
     provider: string | null;
     providerTransactionId: string | null;
+    providerReference: string | null;
     createdAt: string;
     updatedAt: string;
 };
@@ -832,6 +833,36 @@ export function getUserPayments(id: string, query: PaginationQuery = {}) {
     return request<UserPaymentList>(
         `/admin/users/${id}/payments${qs ? `?${qs}` : ''}`,
     );
+}
+
+export type AdminActivationPaymentMethod =
+    | 'cash'
+    | 'mpesa'
+    | 'cheque'
+    | 'free';
+
+export type CreateAdminActivationInput = {
+    packageId: string;
+    nasDeviceId: string;
+    pppoeServiceAccountId?: string;
+    paymentMethod: AdminActivationPaymentMethod;
+    paymentReference?: string;
+    amount: number;
+    note?: string;
+    expireAt?: string;
+    remainingSeconds?: number;
+};
+
+export function createAdminUserActivation(
+    userId: string,
+    body: CreateAdminActivationInput,
+) {
+    return request<{
+        paymentId: string;
+        activationId: string;
+        expireAt: string | null;
+        free: boolean;
+    }>(`/admin/users/${userId}/activations`, body, { method: 'POST' });
 }
 
 // Mirrors the API's ActivationStatus (apps/api/src/lib/radius/client.ts).
@@ -857,6 +888,11 @@ export type AdminActivationRow = {
     octetsUsed: number;
     octetsLimit: number | null;
     remainingOctets: number | null;
+    adminProvisioning: {
+        free: boolean;
+        paymentMethod: string;
+        paymentReference: string | null;
+    } | null;
     fairUsage: {
         limitBytes: number;
         usedBytes: number;

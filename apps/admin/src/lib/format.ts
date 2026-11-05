@@ -87,8 +87,22 @@ export function formatPaymentReference(
     provider: string | null,
     providerTransactionId: string | null,
 ): { label: string; code: string | null } {
-    if (provider === 'internal' && providerTransactionId?.startsWith('free:'))
+    if (
+        (provider === 'internal' &&
+            providerTransactionId?.startsWith('free:')) ||
+        provider === 'admin-free'
+    )
         return { label: 'Free', code: null };
+    if (provider?.startsWith('admin-')) {
+        const method = provider.slice('admin-'.length);
+        return {
+            label:
+                method === 'mpesa'
+                    ? 'M-Pesa · Admin'
+                    : `${method.charAt(0).toUpperCase() + method.slice(1)} · Admin`,
+            code: providerTransactionId,
+        };
+    }
     const prefix = provider?.split('-')[0];
     return {
         label: prefix

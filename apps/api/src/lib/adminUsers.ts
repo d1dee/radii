@@ -1954,6 +1954,7 @@ export async function getUserPayments(
             packageArchivedAt: packages.archivedAt,
             provider: transaction.provider,
             providerTransactionId: transaction.providerTransactionId,
+            providerReference: transaction.providerReference,
             createdAt: packagePayments.createdAt,
             updatedAt: packagePayments.updatedAt,
         })

@@ -508,6 +508,11 @@ export interface AdminActivationStatus extends ActivationStatus {
     packageArchivedAt: Date | null;
     noExpiry: boolean;
     maxDevices: number;
+    adminProvisioning: {
+        free: boolean;
+        paymentMethod: string;
+        paymentReference: string | null;
+    } | null;
 }
 
 export interface NetworkUsage {
@@ -2243,9 +2248,22 @@ export class RadiusClient {
         nasIpAddresses?: string[];
     }): Promise<AdminActivationStatus[]> {
         const rowsQuery = db
-            .select({ activation: activatedPackages, pkg: packages })
+            .select({
+                activation: activatedPackages,
+                pkg: packages,
+                paymentProvider: transaction.provider,
+                paymentReference: transaction.providerReference,
+            })
             .from(activatedPackages)
             .innerJoin(packages, eq(activatedPackages.packageId, packages.id))
+            .innerJoin(
+                packagePayments,
+                eq(activatedPackages.packagePaymentId, packagePayments.id),
+            )
+            .leftJoin(
+                transaction,
+                eq(packagePayments.transaction, transaction.id),
+            )
             .where(
                 and(
                     opts.userId
@@ -2280,6 +2298,15 @@ export class RadiusClient {
                 packageArchivedAt: row.pkg.archivedAt,
                 noExpiry: row.pkg.noExpiry,
                 maxDevices: row.pkg.maxDevices,
+                adminProvisioning: row.paymentProvider?.startsWith('admin-')
+                    ? {
+                          free: row.paymentProvider === 'admin-free',
+                          paymentMethod: row.paymentProvider.slice(
+                              'admin-'.length,
+                          ),
+                          paymentReference: row.paymentReference,
+                      }
+                    : null,
             });
         }
         return out;

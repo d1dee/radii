@@ -11,6 +11,7 @@ import {
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { getAdminSettings, saveAdminSettings } from '../lib/adminSettings';
+import { createAdminActivation } from '../lib/adminActivations';
 import {
     addUserFlag,
     canAdminManageActivation,
@@ -963,6 +964,72 @@ app.get('/users/:id/activations', requireAdmin, async (c) => {
     } catch (err) {
         logger.error('RADIUS activation listing failed', { error: err });
         return jsonError(c, 502, 'Could not contact the RADIUS system');
+    }
+});
+
+const adminActivationSchema = z
+    .object({
+        packageId: z.uuid(),
+        nasDeviceId: z.uuid(),
+        pppoeServiceAccountId: z.uuid().optional(),
+        paymentMethod: z.enum(['cash', 'mpesa', 'cheque', 'free']),
+        paymentReference: z.string().trim().max(120).optional(),
+        amount: z.number().nonnegative().max(99999999.99),
+        note: z.string().trim().max(1000).optional(),
+        expireAt: z.iso.datetime().optional(),
+        remainingSeconds: z.number().int().nonnegative().optional(),
+    })
+    .refine(
+        (data) => data.paymentMethod === 'free' || Boolean(data.paymentReference),
+        { message: 'Payment reference is required', path: ['paymentReference'] },
+    )
+    .refine(
+        (data) =>
+            (data.expireAt === undefined) ===
+            (data.remainingSeconds === undefined),
+        {
+            message: 'Custom expiry and remaining time must be provided together',
+            path: ['expireAt'],
+        },
+    );
+
+app.post('/users/:id/activations', requireAdmin, async (c) => {
+    const userId = c.req.param('id');
+    if (!userId) return jsonError(c, 404, 'User not found');
+    const adminId = c.get('adminSession').userId;
+    if (!(await isAdminUserVisible(adminId, userId))) {
+        return jsonError(c, 404, 'User not found');
+    }
+    const parsed = adminActivationSchema.safeParse(
+        await c.req.json().catch(() => ({})),
+    );
+    if (!parsed.success) {
+        return jsonError(
+            c,
+            400,
+            parsed.error.issues[0]?.message || 'Invalid activation payload',
+        );
+    }
+    try {
+        const result = await createAdminActivation({
+            adminId,
+            userId,
+            ...parsed.data,
+            expireAt: parsed.data.expireAt
+                ? new Date(parsed.data.expireAt)
+                : undefined,
+        });
+        if ('error' in result) {
+            return jsonError(
+                c,
+                result.paymentId ? 502 : 400,
+                result.error,
+            );
+        }
+        return c.json({ success: true, data: result }, 201);
+    } catch (error) {
+        logger.error('Admin package activation failed', { error });
+        return jsonError(c, 502, 'Could not activate the package');
     }
 });
 
