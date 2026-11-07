@@ -11,6 +11,7 @@ import {
     Drawer,
     Grid,
     Group,
+    Input,
     Loader,
     Modal,
     NumberInput,
@@ -106,6 +107,24 @@ const PPPOE_STATUS_BADGE: Record<string, { color: string; label: string }> = {
     suspended: { color: 'orange', label: 'Suspended' },
     closed: { color: 'gray', label: 'Closed' },
 };
+
+const REMAINING_TIME_UNITS = [
+    { value: '60', label: 'Minutes', seconds: 60 },
+    { value: '3600', label: 'Hours', seconds: 3_600 },
+    { value: '86400', label: 'Days', seconds: 86_400 },
+    { value: '604800', label: 'Weeks', seconds: 604_800 },
+    { value: '2592000', label: 'Months (30 days)', seconds: 2_592_000 },
+] as const;
+
+function bestRemainingTimeUnit(totalSeconds: number) {
+    for (let index = REMAINING_TIME_UNITS.length - 1; index > 0; index -= 1) {
+        const unit = REMAINING_TIME_UNITS[index];
+        if (totalSeconds >= unit.seconds && totalSeconds % unit.seconds === 0) {
+            return unit;
+        }
+    }
+    return REMAINING_TIME_UNITS[0];
+}
 
 function StatCard({
     label,
@@ -435,6 +454,23 @@ export function UserDetailsDrawer({
             void loadActivations(userId, activationsPage);
             void loadDetail(userId);
         }
+    };
+
+    const updateRemainingTime = (
+        value: number | string,
+        unitValue = remainingTimeUnit,
+    ) => {
+        setRemainingTime(value);
+        if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+            return;
+        }
+        setExpiryValue(new Date(Date.now() + value * Number(unitValue) * 1000));
+    };
+
+    const updateRemainingTimeUnit = (unitValue: string | null) => {
+        if (!unitValue) return;
+        setRemainingTimeUnit(unitValue);
+        updateRemainingTime(remainingTime, unitValue);
     };
 
     const submitPppoePassword = async () => {
@@ -1435,13 +1471,18 @@ export function UserDetailsDrawer({
                                                                                 a.expireAt,
                                                                             ),
                                                                         );
-                                                                        setRemainingTimeUnit('60');
+                                                                        const unit =
+                                                                            bestRemainingTimeUnit(
+                                                                                a.remainingSeconds ??
+                                                                                    0,
+                                                                            );
+                                                                        setRemainingTimeUnit(
+                                                                            unit.value,
+                                                                        );
                                                                         setRemainingTime(
-                                                                            Math.ceil(
-                                                                                (a.remainingSeconds ??
-                                                                                    0) /
-                                                                                    60,
-                                                                            ),
+                                                                            (a.remainingSeconds ??
+                                                                                0) /
+                                                                                unit.seconds,
                                                                         );
                                                                     },
                                                                 },
@@ -2247,33 +2288,39 @@ export function UserDetailsDrawer({
                         label='New expiry'
                         value={expiryValue}
                         onChange={(v) => setExpiryValue(v ? new Date(v) : null)}
+                        valueFormat='DD MMM YYYY HH:mm'
                         clearable
                     />
-                    <NumberInput
+                    <Input.Wrapper
                         label='Time remaining'
                         description={
                             expiryEdit
                                 ? `Currently ${formatSeconds(expiryEdit.currentRemainingSeconds)}`
                                 : undefined
                         }
-                        min={0}
-                        allowDecimal={false}
-                        value={remainingTime}
-                        onChange={setRemainingTime}
-                    />
-                    <Select
-                        label='Time period'
-                        data={[
-                            { value: '60', label: 'Minutes' },
-                            { value: '3600', label: 'Hours' },
-                            { value: '86400', label: 'Days' },
-                            { value: '604800', label: 'Weeks' },
-                            { value: '2592000', label: 'Months (30 days)' },
-                        ]}
-                        value={remainingTimeUnit}
-                        onChange={(value) => value && setRemainingTimeUnit(value)}
-                        allowDeselect={false}
-                    />
+                    >
+                        <Group gap='xs' wrap='nowrap'>
+                            <NumberInput
+                                aria-label='Time remaining'
+                                min={0}
+                                allowDecimal={false}
+                                value={remainingTime}
+                                onChange={updateRemainingTime}
+                                style={{ flex: 1, minWidth: 0 }}
+                            />
+                            <Select
+                                aria-label='Time remaining unit'
+                                data={REMAINING_TIME_UNITS.map(
+                                    ({ value, label }) => ({ value, label }),
+                                )}
+                                value={remainingTimeUnit}
+                                onChange={updateRemainingTimeUnit}
+                                allowDeselect={false}
+                                w={165}
+                                style={{ flexShrink: 0 }}
+                            />
+                        </Group>
+                    </Input.Wrapper>
                     <Button
                         onClick={() => void submitExpiry()}
                         disabled={
