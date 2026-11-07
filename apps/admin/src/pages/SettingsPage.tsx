@@ -109,13 +109,6 @@ const TIMEZONE_OPTIONS = [
     'UTC',
 ];
 
-const DATE_FORMAT_OPTIONS = [
-    'DD MMM YYYY',
-    'DD/MM/YYYY',
-    'MM/DD/YYYY',
-    'YYYY-MM-DD',
-];
-
 export default function SettingsPage() {
     const { loaded } = useAdminSettings();
     const location = useLocation();
@@ -296,6 +289,7 @@ function AppearanceSection() {
         validate: schemaResolver(adminAppearanceSettingsSchema),
         transformValues: (values) => ({
             ...values,
+            dateFormat: 'DD MMM YYYY',
             timezone: values.timezone.trim(),
             currencyLabel: values.currencyLabel.trim(),
         }),
@@ -350,12 +344,12 @@ function AppearanceSection() {
                             </Stack>
                         </Grid.Col>
                         <Grid.Col span={{ base: 12, sm: 6 }}>
-                            <Select
+                            <TextInput
                                 label='Date format'
                                 description='How dates appear in tables and reports'
-                                data={DATE_FORMAT_OPTIONS}
-                                allowDeselect={false}
-                                {...form.getInputProps('dateFormat')}
+                                pb='xs'
+                                value='DD MMM YYYY'
+                                readOnly
                             />
                         </Grid.Col>
                     </Grid>

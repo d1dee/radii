@@ -33,6 +33,7 @@ import {
 } from '@/lib/api';
 import {
     formatDate,
+    formatDateTime,
     formatPackagePrice,
     formatPaymentAmount,
 } from '@/lib/format';
@@ -323,9 +324,10 @@ export function NasDetailsDrawer({
                             </Badge>
                             <Text size='sm' c='dimmed'>
                                 generated{' '}
-                                {new Date(
+                                {formatDateTime(
                                     scriptRow.generatedAt,
-                                ).toLocaleString()}
+                                    true,
+                                )}
                             </Text>
                         </Group>
                     ) : (
@@ -349,9 +351,10 @@ export function NasDetailsDrawer({
                                     label='Key reported'
                                     value={
                                         scriptRow?.wgKeyReportedAt
-                                            ? new Date(
+                                            ? formatDateTime(
                                                   scriptRow.wgKeyReportedAt,
-                                              ).toLocaleString()
+                                                  true,
+                                              )
                                             : 'Never'
                                     }
                                 />
@@ -534,9 +537,10 @@ export function NasDetailsDrawer({
                                                     </Badge>
                                                 </Table.Td>
                                                 <Table.Td>
-                                                    {new Date(
+                                                    {formatDateTime(
                                                         p.createdAt,
-                                                    ).toLocaleString()}
+                                                        true,
+                                                    )}
                                                 </Table.Td>
                                             </Table.Tr>
                                         ),

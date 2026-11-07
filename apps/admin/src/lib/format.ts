@@ -30,16 +30,16 @@ function timeToken(withSeconds = false): string {
     return withSeconds ? 'HH:mm:ss' : 'HH:mm';
 }
 
-// Date only, in the admin's chosen format and timezone.
+// Full dates use a fixed format; timezone and time format remain configurable.
 export function formatDate(value: ConfigType): string {
-    return dayjs(value).tz(appearance.timezone).format(appearance.dateFormat);
+    return dayjs(value).tz(appearance.timezone).format('DD MMM YYYY');
 }
 
 // Date + time of day (12h/24h per settings).
-export function formatDateTime(value: ConfigType): string {
+export function formatDateTime(value: ConfigType, withSeconds = false): string {
     return dayjs(value)
         .tz(appearance.timezone)
-        .format(`${appearance.dateFormat} ${timeToken()}`);
+        .format(`DD MMM YYYY ${timeToken(withSeconds)}`);
 }
 
 // Day + time without the year (compact table cells).
@@ -60,7 +60,7 @@ export function previewDateTime(
     return dayjs(value)
         .tz(candidate.timezone)
         .format(
-            `${candidate.dateFormat} ${candidate.timeFormat === '12h' ? 'h:mm A' : 'HH:mm'}`,
+            `DD MMM YYYY ${candidate.timeFormat === '12h' ? 'h:mm A' : 'HH:mm'}`,
         );
 }
 

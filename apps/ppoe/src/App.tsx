@@ -246,8 +246,9 @@ export default function App() {
                                             <>
                                                 {data?.session ? (
                                                     <PppoeAccountCard />
-                                                ) : null}
-                                                <CurrentPackage />
+                                                ) : (
+                                                    <CurrentPackage />
+                                                )}
                                             </>
                                         )}
 

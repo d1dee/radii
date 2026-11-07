@@ -1,11 +1,9 @@
 import {
     ActionIcon,
     Alert,
-    Anchor,
     Badge,
     Box,
     Button,
-    Code,
     Collapse,
     CopyButton,
     Group,
@@ -27,6 +25,8 @@ import {
     AiOutlineCopy,
     AiOutlineDown,
     AiOutlineEye,
+    AiOutlineEyeInvisible,
+    AiOutlineInfoCircle,
     AiOutlineReload,
     AiOutlineUp,
 } from 'react-icons/ai';
@@ -34,6 +34,7 @@ import { MdSettingsEthernet } from 'react-icons/md';
 import { deauthDevice, rotateClientPassword } from '../../lib/api.ts';
 import { useSession } from '../../lib/auth.ts';
 import { mutationLogger } from '../../lib/logging.ts';
+import { CurrentPackage } from '../Packages/CurrentPackage.tsx';
 import {
     refreshPppoeAccounts,
     refreshPppoeQuota,
@@ -41,10 +42,9 @@ import {
     useNasScope,
     usePppoeAccounts,
 } from '../../lib/store.ts';
+import classes from './PppoeAccountCard.module.css';
 
-// Single card for the selected PPPoE service account: the account switcher is
-// always visible, while credentials, live-session controls, and package
-// details live under an expandable section.
+// Keep line status and package details visible; router setup expands on demand.
 export function PppoeAccountCard() {
     const { data: session } = useSession();
     const {
@@ -159,13 +159,15 @@ export function PppoeAccountCard() {
     };
 
     return (
-        <Paper shadow='xl' radius='lg' p='md' withBorder>
-            <Stack gap='sm'>
+        <Paper radius='lg' withBorder className={classes.card}>
+            <Stack gap='md' p={{ base: 'md', sm: 'lg' }}>
                 <Group justify='space-between' align='center' wrap='nowrap'>
                     <Box>
-                        <Text fw={650}>Service account</Text>
+                        <Text fw={650} size='lg'>
+                            Service account
+                        </Text>
                         <Text size='xs' c='dimmed'>
-                            Choose the line you want to manage
+                            Your connection, package, and router settings
                         </Text>
                     </Box>
                     <Tooltip label='Refresh service accounts'>
@@ -175,7 +177,10 @@ export function PppoeAccountCard() {
                             size='lg'
                             aria-label='Refresh service accounts'
                             loading={loading}
-                            onClick={() => void refreshPppoeAccounts()}
+                            onClick={() => {
+                                void refreshPppoeAccounts();
+                                void refreshPppoeQuota();
+                            }}
                         >
                             <AiOutlineReload size={18} />
                         </ActionIcon>
@@ -240,66 +245,117 @@ export function PppoeAccountCard() {
                                 </Group>
                             </Alert>
                         ) : null}
-                        <Select
-                            aria-label='Select PPPoE service account'
-                            value={selectedAccountId}
-                            onChange={(value) =>
-                                value && selectPppoeAccount(value)
-                            }
-                            allowDeselect={false}
-                            data={accountOptions}
-                            leftSection={<MdSettingsEthernet size={20} />}
-                            leftSectionPointerEvents='none'
-                            leftSectionWidth={46}
-                            rightSection={
-                                selected ? (
-                                    <AccountStatus client={selected} />
-                                ) : undefined
-                            }
-                            rightSectionPointerEvents='none'
-                            rightSectionWidth={96}
-                            maxDropdownHeight={360}
-                            renderOption={({ option, checked }) => {
-                                const client = clients.find(
-                                    (value) => value.accountId === option.value,
-                                );
-                                return client ? (
-                                    <AccountOption
-                                        client={client}
-                                        selected={Boolean(checked)}
-                                    />
-                                ) : (
-                                    option.label
-                                );
-                            }}
-                            styles={{
-                                input: {
-                                    minHeight: 58,
-                                    paddingInlineStart: 46,
-                                    paddingInlineEnd: 96,
-                                    fontWeight: 600,
-                                },
-                            }}
-                        />
-
                         {selected ? (
-                            <Group gap={6} px={4} wrap='nowrap'>
-                                <Text size='xs' c='dimmed' truncate>
-                                    {selected.username}
-                                </Text>
-                                <Text size='xs' c='dimmed' aria-hidden='true'>
-                                    ·
-                                </Text>
-                                <Text size='xs' c='dimmed' truncate>
-                                    {selected.activeActivation?.packageTitle ??
-                                        'No active package'}
-                                </Text>
-                            </Group>
+                            <Box
+                                className={classes.connection}
+                                data-status-color={accountState(selected).color}
+                            >
+                                <Group justify='space-between' gap='sm'>
+                                    <Group
+                                        wrap='nowrap'
+                                        gap='sm'
+                                        style={{ minWidth: 0 }}
+                                    >
+                                        <Box className={classes.connectionIcon}>
+                                            <MdSettingsEthernet
+                                                size={25}
+                                                aria-hidden='true'
+                                            />
+                                        </Box>
+                                        <Box style={{ minWidth: 0 }}>
+                                            <Text
+                                                fw={650}
+                                                size='lg'
+                                                className={classes.accountName}
+                                            >
+                                                {accountName(selected)}
+                                            </Text>
+                                            <Group gap='xs' mt={4}>
+                                                <Text
+                                                    size='sm'
+                                                    c='dimmed'
+                                                    className={
+                                                        classes.accountName
+                                                    }
+                                                >
+                                                    {selected.nasName ||
+                                                        selected.tenantName}
+                                                </Text>
+                                                <AccountStatus
+                                                    client={selected}
+                                                />
+                                            </Group>
+                                        </Box>
+                                    </Group>
+                                    {selected.online &&
+                                    selected.activeActivation ? (
+                                        <Tooltip label='Disconnecting will interrupt internet access.'>
+                                            <Button
+                                                size='xs'
+                                                variant='light'
+                                                color='red'
+                                                bd='2'
+                                                loading={
+                                                    disconnecting ===
+                                                    selected.accountId
+                                                }
+                                                onClick={() =>
+                                                    void disconnect(
+                                                        selected.accountId,
+                                                    )
+                                                }
+                                            >
+                                                Disconnect session
+                                            </Button>
+                                        </Tooltip>
+                                    ) : null}
+                                </Group>
+                            </Box>
+                        ) : null}
+                        {clients.length > 1 || !selected ? (
+                            <Select
+                                label='Switch service line'
+                                pb='xs'
+                                aria-label='Select PPPoE service account'
+                                value={selectedAccountId}
+                                onChange={(value) =>
+                                    value && selectPppoeAccount(value)
+                                }
+                                allowDeselect={false}
+                                data={accountOptions}
+                                leftSection={<MdSettingsEthernet size={20} />}
+                                leftSectionPointerEvents='none'
+                                leftSectionWidth={40}
+                                maxDropdownHeight={360}
+                                renderOption={({ option, checked }) => {
+                                    const client = clients.find(
+                                        (value) =>
+                                            value.accountId === option.value,
+                                    );
+                                    return client ? (
+                                        <AccountOption
+                                            client={client}
+                                            selected={Boolean(checked)}
+                                        />
+                                    ) : (
+                                        option.label
+                                    );
+                                }}
+                                styles={{
+                                    input: {
+                                        minHeight: 44,
+                                        paddingInlineStart: 40,
+                                        fontWeight: 600,
+                                    },
+                                }}
+                            />
                         ) : null}
 
                         {selected ? (
                             <>
+                                <CurrentPackage key={selected.accountId} />
                                 <UnstyledButton
+                                    className={classes.detailsToggle}
                                     onClick={() => setExpanded((v) => !v)}
                                     aria-expanded={expanded}
                                     aria-controls='pppoe-account-details'
@@ -309,9 +365,15 @@ export function PppoeAccountCard() {
                                         wrap='nowrap'
                                         gap='xs'
                                     >
-                                        <Text size='sm' fw={500}>
-                                            Credentials & session details
-                                        </Text>
+                                        <Box>
+                                            <Text size='sm' fw={600}>
+                                                Router setup
+                                            </Text>
+                                            <Text size='xs' c='dimmed'>
+                                                Credentials and connection
+                                                settings
+                                            </Text>
+                                        </Box>
                                         {expanded ? (
                                             <AiOutlineUp size={16} />
                                         ) : (
@@ -324,93 +386,41 @@ export function PppoeAccountCard() {
                                     expanded={expanded}
                                     id='pppoe-account-details'
                                 >
-                                    <Stack gap='sm' pt='xs'>
-                                        {selected.online &&
-                                        selected.activeActivation ? (
-                                            <Group justify='flex-end'>
-                                                <Anchor
-                                                    component='button'
-                                                    type='button'
-                                                    size='sm'
-                                                    c='red'
-                                                    onClick={() =>
-                                                        disconnect(
-                                                            selected.accountId,
-                                                        )
-                                                    }
-                                                >
-                                                    {disconnecting ===
-                                                    selected.accountId ? (
-                                                        <Group
-                                                            gap='xs'
-                                                            wrap='nowrap'
-                                                        >
-                                                            <Loader size={14} />
-                                                            <Text
-                                                                size='sm'
-                                                                c='dimmed'
-                                                            >
-                                                                Disconnecting…
-                                                            </Text>
-                                                        </Group>
-                                                    ) : (
-                                                        'Disconnect session'
-                                                    )}
-                                                </Anchor>
-                                            </Group>
-                                        ) : null}
-
+                                    <Stack gap='md' pt='sm'>
                                         <CredentialsCard
+                                            key={selected.accountId}
                                             username={selected.username}
                                             password={selected.password}
                                             passwordVisible={
                                                 selected.passwordVisible
                                             }
                                             config={config}
-                                            packageTitle={
-                                                selected.activeActivation
-                                                    ?.packageTitle
-                                            }
                                         />
 
-                                        <Group justify='space-between'>
-                                            <Text size='xs' c='dimmed'>
-                                                {selected.activeActivation
-                                                    ? `Expires: ${new Date(
-                                                          selected
-                                                              .activeActivation
-                                                              .expireAt,
-                                                      ).toLocaleString()}`
-                                                    : selected.lastUsedAt
-                                                      ? `Last used: ${new Date(
-                                                            selected.lastUsedAt,
-                                                        ).toLocaleString()}`
-                                                      : 'No active package'}
-                                            </Text>
-                                            {selected.passwordVisible ? (
-                                                <Button
-                                                    size='xs'
-                                                    variant='light'
-                                                    color='orange'
-                                                    loading={
-                                                        rotating ===
-                                                        selected.accountId
-                                                    }
-                                                    disabled={
-                                                        selected.status !==
-                                                            'active' ||
-                                                        !selected.activeActivation
-                                                    }
-                                                    onClick={() =>
-                                                        rotate(
-                                                            selected.accountId,
-                                                        )
-                                                    }
-                                                >
-                                                    Rotate password
-                                                </Button>
-                                            ) : null}
-                                        </Group>
+                                        {selected.passwordVisible ? (
+                                            <Button
+                                                size='xs'
+                                                variant='light'
+                                                color='orange'
+                                                style={{
+                                                    alignSelf: 'flex-start',
+                                                }}
+                                                loading={
+                                                    rotating ===
+                                                    selected.accountId
+                                                }
+                                                disabled={
+                                                    selected.status !==
+                                                        'active' ||
+                                                    !selected.activeActivation
+                                                }
+                                                onClick={() =>
+                                                    rotate(selected.accountId)
+                                                }
+                                            >
+                                                Rotate password
+                                            </Button>
+                                        ) : null}
                                     </Stack>
                                 </Collapse>
                             </>
@@ -476,14 +486,25 @@ function accountState(client: PppoeClient) {
         return { color: 'orange', label: 'Suspended' };
     }
     if (client.status === 'closed') return { color: 'red', label: 'Closed' };
-    if (client.activeActivation) return { color: 'gray', label: 'Offline' };
-    return { color: 'gray', label: 'No package' };
+    if (client.activeActivation) return { color: 'red', label: 'Offline' };
+    return { color: 'orange', label: 'No package' };
 }
 
 function AccountStatus({ client }: { client: PppoeClient }) {
     const state = accountState(client);
     return (
-        <Badge color={state.color} variant='light' size='sm'>
+        <Badge
+            color={state.color}
+            variant='light'
+            size='md'
+            tt='none'
+            style={{ flexShrink: 0 }}
+            leftSection={
+                client.online ? (
+                    <span className={classes.statusDot} />
+                ) : undefined
+            }
+        >
             {state.label}
         </Badge>
     );
@@ -563,7 +584,12 @@ export function CredentialsCard({
             ) : null}
 
             <TextInput
-                label='PPPoE Username'
+                label='PPPoE username'
+                description='Use this username to identify your service line.'
+                inputWrapperOrder={['label', 'input', 'description', 'error']}
+                classNames={{ input: classes.credentialInput }}
+                size='md'
+                pb='xs'
                 value={username}
                 readOnly
                 rightSection={<CopyControl value={username} />}
@@ -571,7 +597,11 @@ export function CredentialsCard({
 
             {passwordVisible ? (
                 <TextInput
-                    label='PPPoE Password'
+                    label='PPPoE password'
+                    size='md'
+                    pb='xs'
+                    classNames={{ input: classes.credentialInput }}
+                    rightSectionWidth={76}
                     type={revealed ? 'text' : 'password'}
                     value={password ?? 'Not provisioned'}
                     readOnly
@@ -588,9 +618,19 @@ export function CredentialsCard({
                                     <ActionIcon
                                         variant='subtle'
                                         color='gray'
+                                        aria-label={
+                                            revealed
+                                                ? 'Hide password'
+                                                : 'Show password'
+                                        }
+                                        aria-pressed={revealed}
                                         onClick={() => setRevealed((v) => !v)}
                                     >
-                                        <AiOutlineEye size={16} />
+                                        {revealed ? (
+                                            <AiOutlineEyeInvisible size={16} />
+                                        ) : (
+                                            <AiOutlineEye size={16} />
+                                        )}
                                     </ActionIcon>
                                 </Tooltip>
                                 <CopyControl value={password} />
@@ -599,42 +639,48 @@ export function CredentialsCard({
                     }
                 />
             ) : (
-                <Alert color='gray' variant='light'>
-                    Your provider has disabled PPPoE password self-service.
-                    Contact support if you need help configuring your router.
+                <Alert
+                    color='blue'
+                    variant='light'
+                    icon={<AiOutlineInfoCircle size={19} />}
+                    title='Password managed by your provider'
+                    radius='md'
+                >
+                    Contact support to set up your router or change your PPPoE
+                    password.
                 </Alert>
             )}
 
             {config ? (
-                <Stack gap='xs'>
-                    <Group justify='space-between'>
-                        <Text size='xs' c='dimmed'>
-                            Service name
-                        </Text>
-                        <Code>{config.serviceName || '(any)'}</Code>
-                    </Group>
-                    <Group justify='space-between'>
-                        <Text size='xs' c='dimmed'>
-                            MTU / MRU
-                        </Text>
-                        <Code>
-                            {config.mtu} / {config.mru}
-                        </Code>
-                    </Group>
-                    <Group justify='space-between'>
-                        <Text size='xs' c='dimmed'>
-                            DNS
-                        </Text>
-                        <Code>{config.dns.join(', ')}</Code>
-                    </Group>
-                </Stack>
+                <Box mt='xs'>
+                    <Text size='sm' fw={600}>
+                        Connection settings
+                    </Text>
+                    <dl className={classes.settings}>
+                        <div>
+                            <dt>Service name</dt>
+                            <dd>{config.serviceName || 'Any service'}</dd>
+                        </div>
+                        <div>
+                            <dt>MTU / MRU</dt>
+                            <dd>
+                                {config.mtu} / {config.mru}
+                            </dd>
+                        </div>
+                        <div>
+                            <dt>DNS servers</dt>
+                            <dd>{config.dns.join(', ') || 'Automatic'}</dd>
+                        </div>
+                    </dl>
+                </Box>
             ) : null}
 
-            <Text size='xs' c='dimmed'>
-                {passwordVisible
-                    ? 'Configure these credentials on your router to connect.'
-                    : 'Use the username above when contacting support about this service line.'}
-            </Text>
+            {passwordVisible ? (
+                <Text size='xs' c='dimmed'>
+                    Choose PPPoE in your router's internet settings and enter
+                    these credentials to connect.
+                </Text>
+            ) : null}
         </Stack>
     );
 }
@@ -647,6 +693,7 @@ function CopyControl({ value }: { value: string }) {
                     <ActionIcon
                         variant='subtle'
                         color={copied ? 'teal' : 'gray'}
+                        aria-label={copied ? 'Copied' : 'Copy to clipboard'}
                         onClick={copy}
                     >
                         {copied ? (

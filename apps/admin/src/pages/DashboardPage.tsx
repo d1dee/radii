@@ -351,7 +351,12 @@ export default function DashboardPage() {
                                 ) : (
                                     <AreaChart
                                         h={280}
-                                        data={reports.daily}
+                                        data={reports.daily.map((entry) => ({
+                                            ...entry,
+                                            day: dayjs(entry.day).format(
+                                                'DD MMM YYYY',
+                                            ),
+                                        }))}
                                         dataKey='day'
                                         series={[
                                             {

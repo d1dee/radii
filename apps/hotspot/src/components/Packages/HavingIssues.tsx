@@ -15,6 +15,7 @@ import {
     verifyPaymentReceipt,
 } from '../../lib/api.ts';
 import { mutationLogger } from '../../lib/logging.ts';
+import { dayjs } from '../../lib/dayjs.ts';
 import { refreshHotspotQuota } from '../../lib/store.ts';
 
 interface Props {
@@ -252,12 +253,12 @@ export function HavingIssues({ adminContacts }: Props) {
                                             Network: {activationDetails.nasDeviceName}
                                         </Text>
                                         <Text size='sm'>
-                                            Activated: {new Date(activationDetails.activatedAt).toLocaleString()}
+                                            Activated: {dayjs(activationDetails.activatedAt).format('DD MMM YYYY HH:mm:ss')}
                                         </Text>
                                         <Text size='sm'>
                                             {activationDetails.noExpiry ? 'Validity ends' : 'Expires'}:{' '}
                                             {activationDetails.expireAt
-                                                ? new Date(activationDetails.expireAt).toLocaleString()
+                                                ? dayjs(activationDetails.expireAt).format('DD MMM YYYY HH:mm:ss')
                                                 : 'Unlimited'}
                                         </Text>
                                         <Text

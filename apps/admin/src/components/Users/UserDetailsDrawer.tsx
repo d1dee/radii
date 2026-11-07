@@ -2153,6 +2153,7 @@ export function UserDetailsDrawer({
                                 <DateTimePicker
                                     label='Custom expiry'
                                     value={activationExpiry}
+                                    valueFormat='DD MMM YYYY HH:mm'
                                     onChange={(value) =>
                                         setActivationExpiry(
                                             value ? new Date(value) : null,

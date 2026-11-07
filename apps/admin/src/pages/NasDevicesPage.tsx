@@ -49,7 +49,7 @@ import {
 } from '@/lib/api';
 import { useAutoRefresh } from '@/lib/autoRefresh';
 import { warnBackgroundFailure } from '@/lib/clientError';
-import { formatDayTime } from '@/lib/format';
+import { formatDateTime, formatDayTime } from '@/lib/format';
 import { notifyResult } from '@/lib/notify';
 import { tableRowNumber, useTablePageSize } from '@/lib/pagination';
 import { useAdminSettings } from '@/lib/settings';
@@ -679,9 +679,10 @@ export default function NasDevicesPage() {
                                 </Badge>
                                 <Text size='sm' c='dimmed'>
                                     generated{' '}
-                                    {new Date(
+                                    {formatDateTime(
                                         scriptRow.generatedAt,
-                                    ).toLocaleString()}
+                                        true,
+                                    )}
                                 </Text>
                             </Group>
                             <Group gap='xs'>

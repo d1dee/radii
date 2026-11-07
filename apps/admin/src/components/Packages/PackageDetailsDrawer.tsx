@@ -33,6 +33,7 @@ import {
 import { warnBackgroundFailure } from '@/lib/clientError';
 import {
     formatDate,
+    formatDateTime,
     formatPackagePrice,
     formatPackageQuota,
     formatPackageRate,
@@ -494,9 +495,10 @@ export function PackageDetailsDrawer({
                                                     </Badge>
                                                 </Table.Td>
                                                 <Table.Td>
-                                                    {new Date(
+                                                    {formatDateTime(
                                                         p.createdAt,
-                                                    ).toLocaleString()}
+                                                        true,
+                                                    )}
                                                 </Table.Td>
                                             </Table.Tr>
                                         ),
