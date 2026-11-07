@@ -66,6 +66,7 @@ import { useAutoRefresh } from '@/lib/autoRefresh';
 import { warnBackgroundFailure } from '@/lib/clientError';
 import { dayjs } from '@/lib/dayjs';
 import { formatDate, formatMoney } from '@/lib/format';
+import { fuseOptionsFilter } from '@/lib/fuseOptionsFilter';
 import { notifyResult } from '@/lib/notify';
 import { tableRowNumber, useTablePageSize } from '@/lib/pagination';
 import { useAdminSettings } from '@/lib/settings';
@@ -919,6 +920,7 @@ export default function UsersPage() {
                                 value={provisionNas}
                                 onChange={setProvisionNas}
                                 searchable
+                                filter={fuseOptionsFilter}
                                 clearable={false}
                                 nothingFoundMessage='No NAS devices — create one first'
                                 required
@@ -1017,6 +1019,7 @@ export default function UsersPage() {
                             value={migrateNas}
                             onChange={setMigrateNas}
                             searchable
+                            filter={fuseOptionsFilter}
                             nothingFoundMessage='No NAS devices — create one first'
                         />
                         <Group justify='flex-end'>

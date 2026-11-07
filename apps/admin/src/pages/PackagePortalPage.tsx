@@ -48,6 +48,7 @@ import {
     type PackageType,
 } from '@/lib/api';
 import { formatPackagePrice, formatPackageRate, formatSeconds } from '@/lib/format';
+import { fuseOptionsFilter } from '@/lib/fuseOptionsFilter';
 import { notifyResult } from '@/lib/notify';
 
 type LayoutCategory = {
@@ -481,6 +482,7 @@ export default function PackagePortalPage() {
                         label: device.name,
                     }))}
                     searchable
+                    filter={fuseOptionsFilter}
                     clearable
                     nothingFoundMessage='No NAS devices found'
                     w={{ base: '100%', sm: 280 }}

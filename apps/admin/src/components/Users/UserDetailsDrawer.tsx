@@ -82,6 +82,7 @@ import {
 } from '@/lib/api';
 import { warnBackgroundFailure } from '@/lib/clientError';
 import { dayjs } from '@/lib/dayjs';
+import { fuseOptionsFilter } from '@/lib/fuseOptionsFilter';
 import {
     formatBytes,
     formatDate,
@@ -2043,6 +2044,7 @@ export function UserDetailsDrawer({
                             value={activationPackageId}
                             onChange={selectActivationPackage}
                             searchable
+                            filter={fuseOptionsFilter}
                             nothingFoundMessage='No packages found'
                             required
                         />
@@ -2057,6 +2059,7 @@ export function UserDetailsDrawer({
                                 setActivationPppoeAccountId(null);
                             }}
                             searchable
+                            filter={fuseOptionsFilter}
                             disabled={!selectedActivationPackage}
                             nothingFoundMessage='This package has no linked NAS devices'
                             required
@@ -2467,6 +2470,7 @@ export function UserDetailsDrawer({
                         value={pppoeTargetNasId}
                         onChange={setPppoeTargetNasId}
                         searchable
+                        filter={fuseOptionsFilter}
                     />
                     <Group justify='flex-end'>
                         <Button

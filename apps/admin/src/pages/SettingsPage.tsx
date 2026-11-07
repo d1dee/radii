@@ -43,6 +43,7 @@ import {
 } from 'react-router-dom';
 
 import { previewDateTime } from '@/lib/format';
+import { fuseOptionsFilter } from '@/lib/fuseOptionsFilter';
 import { useAdminSettings } from '@/lib/settings';
 import { PageLayout } from '@/components/Layout/PageLayout';
 import { TbInfoTriangle } from 'react-icons/tb';
@@ -364,6 +365,7 @@ function AppearanceSection() {
                                 label='Timezone'
                                 data={TIMEZONE_OPTIONS}
                                 searchable
+                                filter={fuseOptionsFilter}
                                 allowDeselect={false}
                                 description='Used to render all dates and times'
                                 {...form.getInputProps('timezone')}

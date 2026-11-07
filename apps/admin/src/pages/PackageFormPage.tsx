@@ -36,6 +36,7 @@ import {
     type PackageType,
 } from '@/lib/api';
 import { warnBackgroundFailure } from '@/lib/clientError';
+import { fuseOptionsFilter } from '@/lib/fuseOptionsFilter';
 import { PageLayout } from '@/components/Layout/PageLayout';
 
 const ALL_NAS_VALUE = 'all';
@@ -547,6 +548,7 @@ export default function PackageFormPage() {
                                         description='Devices this package is available on'
                                         placeholder='Select NAS devices'
                                         searchable
+                                        filter={fuseOptionsFilter}
                                         required
                                         data={[
                                             {
