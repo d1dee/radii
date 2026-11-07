@@ -115,7 +115,11 @@ export function ResetPinForm({
                         in 5 minutes.
                     </Text>
 
-                    <Input.Wrapper label='Code:' error={resetForm.errors.otp}>
+                    <Input.Wrapper
+                        label='Code:'
+                        error={resetForm.errors.otp}
+                        descriptionProps={{ pb: 'xs' }}
+                    >
                         <PinInput
                             value={resetForm.values.otp}
                             onChange={(value) =>
@@ -136,6 +140,7 @@ export function ResetPinForm({
                     <Input.Wrapper
                         label='New PIN:'
                         error={resetForm.errors.pin}
+                        descriptionProps={{ pb: 'xs' }}
                     >
                         <PinInput
                             value={resetForm.values.pin}
@@ -156,6 +161,7 @@ export function ResetPinForm({
                     <Input.Wrapper
                         label='Verify new PIN:'
                         error={resetForm.errors.verifyPin}
+                        descriptionProps={{ pb: 'xs' }}
                     >
                         <PinInput
                             value={resetForm.values.verifyPin}

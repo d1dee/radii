@@ -154,6 +154,7 @@ export function BuyForm({
                 <Input.Wrapper
                     label='Saved Numbers'
                     description="Choose a number you've paid with before"
+                    descriptionProps={{ pb: 'xs' }}
                 >
                     <PrevPaymentMethods
                         selectedPhone={form.values.phoneNumber}

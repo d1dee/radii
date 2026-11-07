@@ -102,6 +102,7 @@ function MeasurementInput({
             label={label}
             description={description}
             error={error}
+            descriptionProps={{ pb: 'xs' }}
         >
             <Group gap='xs' wrap='nowrap'>
                 <NumberInput
@@ -462,6 +463,7 @@ export default function PackageFormPage() {
                                     <Input.Wrapper
                                         id='package-session-length'
                                         label='Session Length'
+                                        descriptionProps={{ pb: 'xs' }}
                                         description={
                                             !isPppoe && noExpiry
                                                 ? 'Time bank the client consumes across sessions'
@@ -676,6 +678,7 @@ export default function PackageFormPage() {
                                     <Input.Wrapper
                                         label='Calculation Window'
                                         description='Session, or recurring time from activation'
+                                        descriptionProps={{ pb: 'xs' }}
                                     >
                                         <Group gap='xs' wrap='nowrap'>
                                             <NumberInput

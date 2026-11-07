@@ -2293,6 +2293,7 @@ export function UserDetailsDrawer({
                     />
                     <Input.Wrapper
                         label='Time remaining'
+                        descriptionProps={{ pb: 'xs' }}
                         description={
                             expiryEdit
                                 ? `Currently ${formatSeconds(expiryEdit.currentRemainingSeconds)}`

@@ -101,7 +101,11 @@ export function LoginCard() {
                         error={form.errors.phoneNumber}
                     />
 
-                    <Input.Wrapper label='PIN:' error={form.errors.pin}>
+                    <Input.Wrapper
+                        label='PIN:'
+                        error={form.errors.pin}
+                        descriptionProps={{ pb: 'xs' }}
+                    >
                         <PinInput
                             value={form.values.pin}
                             onChange={(value) => form.setFieldValue('pin', value)}

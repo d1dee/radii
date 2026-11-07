@@ -100,7 +100,11 @@ export function RegisterForm({
                     error={form.errors.phoneNumber}
                 />
 
-                <Input.Wrapper label='PIN:' error={form.errors.pin}>
+                <Input.Wrapper
+                    label='PIN:'
+                    error={form.errors.pin}
+                    descriptionProps={{ pb: 'xs' }}
+                >
                     <PinInput
                         value={form.values.pin}
                         onChange={(value) => form.setFieldValue('pin', value)}
@@ -122,6 +126,7 @@ export function RegisterForm({
                     <Input.Wrapper
                         label='Verify PIN:'
                         error={form.errors.verifyPin}
+                        descriptionProps={{ pb: 'xs' }}
                     >
                         <PinInput
                             value={form.values.verifyPin}
