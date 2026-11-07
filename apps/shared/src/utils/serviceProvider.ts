@@ -64,7 +64,7 @@ export function parseServiceProvider(
 ): ParsedProvider | undefined {
     let normalized = phoneNumber;
     if (normalized.startsWith('+254') || normalized.startsWith('254')) {
-        normalized = normalized.replace(/^254|\+254(?=7)/, '0');
+        normalized = normalized.replace(/^\+?254(?=[17])/, '0');
     }
     if (normalized.length !== 10) return;
 
@@ -82,7 +82,7 @@ export function parseServiceProvider(
     }
 }
 
-// Format a Safaricom number to the M-Pesa 2547xxxxxxxx partyA format.
+// Format a Safaricom number to the M-Pesa 2547xxxxxxxx or 2541xxxxxxxx partyA format.
 export function formatMpesaNumber(phoneNumber: string): number {
     const provider = parseServiceProvider(phoneNumber);
     if (provider instanceof Error) throw provider;
