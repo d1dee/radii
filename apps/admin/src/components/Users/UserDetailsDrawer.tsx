@@ -180,9 +180,10 @@ export function UserDetailsDrawer({
         0,
     );
     const [remainingTimeUnit, setRemainingTimeUnit] = useState('60');
-    const [confirmDeactivate, setConfirmDeactivate] = useState<string | null>(
-        null,
-    );
+    const [confirmDeactivate, setConfirmDeactivate] = useState<{
+        activationId: string;
+        packageTitle: string;
+    } | null>(null);
     const [selectedPppoeAccountId, setSelectedPppoeAccountId] = useState<
         string | null
     >(null);
@@ -399,7 +400,12 @@ export function UserDetailsDrawer({
         const res = await deactivateActivation(activationId);
         setBusy(false);
         setConfirmDeactivate(null);
-        notifyResult(res, 'Activation deactivated');
+        notifyResult(
+            res,
+            res.success && res.data && res.data.sessionsDisconnected > 0
+                ? `Package deactivated; ${res.data.sessionsDisconnected} live session(s) disconnected`
+                : 'Package deactivated',
+        );
         if (res.success) {
             void loadActivations(userId, activationsPage);
             void loadDetail(userId);
@@ -1393,11 +1399,17 @@ export function UserDetailsDrawer({
                                                                       }]
                                                                     : !a.expired
                                                                       ? [{
-                                                                            label: 'Deactivate',
-                                                                            ariaLabel: 'Deactivate',
+                                                                            label: 'Deactivate client package',
+                                                                            ariaLabel: `Deactivate ${a.packageTitle}`,
                                                                             icon: <MdBlock size={16} />,
                                                                             color: 'red',
-                                                                            onClick: () => setConfirmDeactivate(a.activationId),
+                                                                            onClick: () =>
+                                                                                setConfirmDeactivate({
+                                                                                    activationId:
+                                                                                        a.activationId,
+                                                                                    packageTitle:
+                                                                                        a.packageTitle,
+                                                                                }),
                                                                         }]
                                                                       : []),
                                                                 {
@@ -2280,12 +2292,16 @@ export function UserDetailsDrawer({
             <Modal
                 opened={confirmDeactivate !== null}
                 onClose={() => setConfirmDeactivate(null)}
-                title='Deactivate activation'
+                title='Deactivate client package'
                 centered
             >
                 <Stack>
                     <Text size='sm'>
-                        This removes the RADIUS provisioning and terminates
+                        Deactivate{' '}
+                        <Text span fw={600}>
+                            {confirmDeactivate?.packageTitle}
+                        </Text>
+                        ? This removes the RADIUS provisioning and terminates
                         every live session of this activation. Expiry and
                         remaining time are preserved, but the package is hidden
                         from the customer until it is reactivated.
@@ -2303,10 +2319,12 @@ export function UserDetailsDrawer({
                             leftSection={<MdRefresh size={14} />}
                             onClick={() =>
                                 confirmDeactivate &&
-                                void doDeactivate(confirmDeactivate)
+                                void doDeactivate(
+                                    confirmDeactivate.activationId,
+                                )
                             }
                         >
-                            Deactivate
+                            Deactivate package
                         </Button>
                     </Group>
                 </Stack>
