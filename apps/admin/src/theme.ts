@@ -11,6 +11,7 @@ import {
     Table,
     TableScrollContainer,
 } from '@mantine/core';
+import { DatePickerInput, DateTimePicker } from '@mantine/dates';
 
 export const adminCssVariables: CSSVariablesResolver = () => ({
     variables: {},
@@ -46,6 +47,12 @@ export const adminTheme = createTheme({
         },
     },
     components: {
+        DatePickerInput: DatePickerInput.extend({
+            defaultProps: { highlightToday: true },
+        }),
+        DateTimePicker: DateTimePicker.extend({
+            defaultProps: { highlightToday: true },
+        }),
         Badge: Badge.extend({
             defaultProps: { radius: 'sm', tt: 'none', fw: 600 },
         }),
