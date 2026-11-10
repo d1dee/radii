@@ -56,6 +56,7 @@ import {
     restorePackage,
     savePackageLayout,
     updatePackage,
+    PackageAudienceReferenceError,
 } from '../lib/packages';
 import { RadiusError, radiusClient } from '../lib/radius';
 import { removePeer, wgManagementEnabled } from '../lib/wireguard';
@@ -277,7 +278,11 @@ app.post('/packages', requireAdmin, async (c) => {
     const row = await createPackage(
         { ...data, price: String(data.price), createdBy: c.var.admin.id },
         nasDeviceIds,
-    );
+    ).catch((error: unknown) => {
+        if (error instanceof PackageAudienceReferenceError) return null;
+        throw error;
+    });
+    if (!row) return jsonError(c, 400, 'Unknown customer audience');
 
     return c.json({ success: true, data: { ...row, nasDeviceIds } }, 201);
 });
@@ -351,7 +356,11 @@ app.put('/packages/:id', requireAdmin, async (c) => {
         c.var.adminSession.userId,
         { ...data, price: String(data.price) },
         nasDeviceIds,
-    );
+    ).catch((error: unknown) => {
+        if (error instanceof PackageAudienceReferenceError) return null;
+        throw error;
+    });
+    if (row === null) return jsonError(c, 400, 'Unknown customer audience');
     if (!row) {
         return jsonError(c, 404, 'Package not found');
     }

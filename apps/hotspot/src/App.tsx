@@ -78,6 +78,7 @@ function pkgPrice(
 export default function App() {
     const [havingIssues, setHavingIssues] = useState(false);
     const { data, isPending } = useSession();
+    const loginRequestId = localStorage.getItem(LOGIN_REQUEST_KEY);
     const {
         client: clientData,
         clientError,
@@ -86,8 +87,11 @@ export default function App() {
         packagesLoading,
         contacts: adminContacts,
         contactsError,
-    } = useHotspotPortal();
-    const loginRequestId = localStorage.getItem(LOGIN_REQUEST_KEY);
+    } = useHotspotPortal({
+        userId: data?.user.id ?? null,
+        loginRequestId,
+        pending: isPending,
+    });
 
     useEffect(() => {
         if (!isPending) {

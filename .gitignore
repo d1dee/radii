@@ -42,3 +42,8 @@ dist
 docs/
 _apps
 .VSCodeCounter
+
+# Tests
+*.cases.*
+*.test.*
+tests/

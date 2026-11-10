@@ -260,7 +260,15 @@ export async function request<T>(
                 : errorTypeForStatus(res.status),
             protocolMismatch: json.success,
         });
-        if (!json.success) return json;
+        if (!json.success) {
+            if (
+                (res.status === 401 || json.type === ApiErrorType.UNAUTHORIZED) &&
+                /^unauthorized\b/i.test(json.message.trim())
+            ) {
+                return { ...json, message: statusMessage(401) };
+            }
+            return json;
+        }
         return {
             success: false,
             message: statusMessage(res.status),

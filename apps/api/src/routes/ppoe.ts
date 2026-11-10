@@ -38,6 +38,7 @@ import {
     createPayment,
     getOrderPackageForNas,
     getPackagesGroupedByCategory,
+    PackageEligibilityError,
 } from '../lib/packages';
 import { paymentService } from '../lib/payments';
 import {
@@ -74,7 +75,8 @@ app.get('/packages', async (c) => {
     if (!device) {
         return jsonError(c, 404, 'Unknown NAS device');
     }
-    const data = await getPackagesGroupedByCategory(nasDeviceId, 'pppoe');
+    const data = await getPackagesGroupedByCategory(nasDeviceId, 'pppoe', c.get('user')?.id ?? null);
+    c.header('Cache-Control', 'private, no-store');
     return c.json({ success: true, data });
 });
 
@@ -450,7 +452,11 @@ app.post('/order', requireAuth, async (c) => {
         nasDeviceId,
         tenantAdminId,
         pppoeServiceAccountId: account.id,
+    }).catch((error: unknown) => {
+        if (error instanceof PackageEligibilityError) return null;
+        throw error;
     });
+    if (!row) return jsonError(c, 403, 'This package is not available for your account. Reload the available packages.');
 
     if (row.status === 'pending') {
         // Paid purchases retain the existing provider flow. Free purchases

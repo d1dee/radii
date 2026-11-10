@@ -1,8 +1,11 @@
 import { z } from 'zod';
+import { packageEligibilitySchema } from './packageAudience';
 
 export const createPackageSchema = z
     .object({
         title: z.string().trim().min(1, 'Title is required'),
+        audienceId: z.uuid().nullable().optional(),
+        eligibility: packageEligibilitySchema.nullable().optional(),
         type: z.enum(['hotspot', 'pppoe']),
         category: z.string().trim().min(1, 'Category is required'),
         sessionLength: z

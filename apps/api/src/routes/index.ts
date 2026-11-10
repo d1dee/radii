@@ -4,12 +4,14 @@ import admin from './admin';
 import hotspot from './hotspot';
 import nas from './nas';
 import payments from './payments';
+import packageAudiences from './packageAudiences';
 import pppoe from './ppoe';
 import radiusRest from './radiusRest';
 
 const routes = new Hono<{ Variables: AppVariables }>();
 
 routes.route('/admin', admin);
+routes.route('/admin', packageAudiences);
 routes.route('/hotspot', hotspot);
 routes.route('/nas', nas);
 routes.route('/payments', payments);

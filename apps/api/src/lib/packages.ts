@@ -16,10 +16,15 @@ import {
 } from 'drizzle-orm';
 import { db } from '../db';
 import {
+    createPackageAudienceContext,
+    evaluatePackageEligibility,
+} from './packageAudience';
+import {
     activatedPackages,
     nasDevice,
     packageNasDevice,
     packagePayments,
+    packageAudiences,
     packages,
     radacct,
     transaction,
@@ -47,8 +52,12 @@ export type AdminPackageSortBy =
 export async function getPackagesGroupedByCategory(
     nasDeviceId: string | null,
     type: PackageType = 'hotspot',
+    userId: string | null = null,
 ): Promise<Array<[string, Package[]]>> {
     if (!nasDeviceId) return [];
+    const [device] = await db.select({ ownerId: nasDevice.ownerId })
+        .from(nasDevice).where(eq(nasDevice.id, nasDeviceId)).limit(1);
+    if (!device) return [];
     const rows = await db
         .select()
         .from(packages)
@@ -57,6 +66,7 @@ export async function getPackagesGroupedByCategory(
                 eq(packages.isActive, true),
                 isNull(packages.archivedAt),
                 eq(packages.type, type),
+                eq(packages.createdBy, device.ownerId),
                 exists(
                     db
                         .select()
@@ -78,7 +88,13 @@ export async function getPackagesGroupedByCategory(
         );
 
     const grouped = new Map<string, Package[]>();
+    const audienceContext = createPackageAudienceContext({
+        executor: db,
+        providerId: device.ownerId,
+        userId,
+    });
     for (const row of rows) {
+        if (!(await evaluatePackageEligibility(audienceContext, row)).eligible) continue;
         const category = row.category;
         if (!grouped.has(category)) {
             grouped.set(category, []);
@@ -303,6 +319,20 @@ export async function getOrderPackageForNas(
     return row;
 }
 
+export class PackageEligibilityError extends Error {
+    constructor(message = 'This package is not available for your account.') {
+        super(message);
+        this.name = 'PackageEligibilityError';
+    }
+}
+
+export class PackageAudienceReferenceError extends Error {
+    constructor() {
+        super('Unknown customer audience');
+        this.name = 'PackageAudienceReferenceError';
+    }
+}
+
 // A package is available only on explicitly linked NAS devices. Without
 // join rows it remains hidden from customer portals.
 export async function createPackage(
@@ -310,6 +340,12 @@ export async function createPackage(
     nasDeviceIds: string[],
 ) {
     return db.transaction(async (tx) => {
+        if (data.audienceId) {
+            const [audience] = await tx.select({ id: packageAudiences.id }).from(packageAudiences)
+                .where(and(eq(packageAudiences.id, data.audienceId), eq(packageAudiences.ownerId, data.createdBy!)))
+                .limit(1).for('key share');
+            if (!audience) throw new PackageAudienceReferenceError();
+        }
         const [row] = await tx.insert(packages).values(data).returning();
         if (nasDeviceIds.length > 0) {
             await tx.insert(packageNasDevice).values(
@@ -330,6 +366,12 @@ export async function updatePackage(
     nasDeviceIds: string[],
 ) {
     return db.transaction(async (tx) => {
+        if (data.audienceId) {
+            const [audience] = await tx.select({ id: packageAudiences.id }).from(packageAudiences)
+                .where(and(eq(packageAudiences.id, data.audienceId), eq(packageAudiences.ownerId, ownerId)))
+                .limit(1).for('key share');
+            if (!audience) throw new PackageAudienceReferenceError();
+        }
         const [existing] = await tx
             .select({
                 category: packages.category,
@@ -743,22 +785,42 @@ export async function createPayment(data: {
         pppoeServiceAccountId: data.pppoeServiceAccountId ?? null,
     };
 
-    if (amount !== 0) {
-        const [row] = await db
-            .insert(packagePayments)
-            .values(values)
-            .returning();
-        return row;
-    }
-
     // Free purchases are settled entirely inside the database. The completed
     // internal transaction keeps the same audit/metadata shape that RADIUS
     // activation consumes, without resolving or invoking a payment provider.
     return db.transaction(async (tx) => {
+        if (!tenantAdminId || !nasDeviceId) throw new PackageEligibilityError();
+        // Serialize this customer's orders within the provider so concurrent
+        // requests cannot consume the same limited offer more than once.
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`${tenantAdminId}:${data.userId}`}, 0))`);
+        const [currentPackage] = await tx.select({ ...getTableColumns(packages) })
+            .from(packages)
+            .innerJoin(packageNasDevice, and(
+                eq(packageNasDevice.packageId, packages.id),
+                eq(packageNasDevice.nasDeviceId, nasDeviceId),
+            ))
+            .innerJoin(nasDevice, eq(nasDevice.id, packageNasDevice.nasDeviceId))
+            .where(and(
+                eq(packages.id, data.pkg.id),
+                eq(packages.createdBy, tenantAdminId),
+                eq(nasDevice.ownerId, tenantAdminId),
+                eq(packages.type, data.pkg.type),
+                eq(packages.isActive, true),
+                isNull(packages.archivedAt),
+            )).limit(1).for('share', { of: packages });
+        if (!currentPackage || currentPackage.price !== data.pkg.price) {
+            throw new PackageEligibilityError('This package changed. Reload the available packages and try again.');
+        }
+        const eligibility = await evaluatePackageEligibility(
+            createPackageAudienceContext({ executor: tx, providerId: tenantAdminId, userId: data.userId, reservePending: true }),
+            currentPackage,
+        );
+        if (!eligibility.eligible) throw new PackageEligibilityError();
         const [payment] = await tx
             .insert(packagePayments)
             .values(values)
             .returning();
+        if (amount !== 0) return payment;
         const internalReference = `free:${payment.id}`;
         const [internalTransaction] = await tx
             .insert(transaction)

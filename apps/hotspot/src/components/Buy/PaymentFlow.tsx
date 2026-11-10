@@ -1,6 +1,7 @@
 import { Modal, Paper, Stack, Text, Title } from '@mantine/core';
 import { useState } from 'react';
 import type { OrderResult } from '../../lib/api.ts';
+import { refreshHotspotPackages } from '../../lib/store.ts';
 import { BuyForm } from './Form.tsx';
 import { PaymentError } from './PaymentError.tsx';
 import { PendingPayment } from './PaymentPending.tsx';
@@ -93,6 +94,9 @@ export function PaymentFlow({
                                 );
                             }
                             setStatus(result.status);
+                            if (result.status === 'success') {
+                                void refreshHotspotPackages();
+                            }
                         }}
                     />
                 ) : null}
@@ -104,6 +108,9 @@ export function PaymentFlow({
                         onStatusChange={(next, data) => {
                             if (data) setPaymentData(data);
                             setStatus(next);
+                            if (next === 'success') {
+                                void refreshHotspotPackages();
+                            }
                         }}
                         onError={(message) => {
                             setErrorMessage(message);

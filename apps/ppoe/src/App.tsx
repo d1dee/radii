@@ -84,13 +84,18 @@ export default function App() {
     const { data, isPending } = useSession();
     // The session is only known once the pending check has settled.
     const signedOut = !isPending && !data?.session;
+    const { nasDeviceId } = useNasScope();
     const {
         client: clientData,
         packages,
         packagesError,
         packagesLoading,
         contacts: adminContacts,
-    } = usePppoePortal();
+    } = usePppoePortal({
+        userId: data?.user.id ?? null,
+        nasDeviceId,
+        pending: isPending,
+    });
     const { clients, selectedAccountId } = usePppoeAccounts();
     // Purchases land on the account the portal is currently showing (the
     // account switcher selection also sets the NAS scope). If that account is
@@ -102,7 +107,6 @@ export default function App() {
                 client.accountId === selectedAccountId &&
                 client.availableOnPortal,
         )?.accountId ?? null;
-    const { nasDeviceId } = useNasScope();
 
     useEffect(() => {
         if (!isPending) {

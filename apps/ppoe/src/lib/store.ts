@@ -67,7 +67,7 @@ const portalListeners = new Set<() => void>();
 const accountListeners = new Set<() => void>();
 const quotaListeners = new Set<() => void>();
 const scopeListeners = new Set<() => void>();
-let publicScope: string | null | undefined;
+let publicScope: { userId: string | null; nasDeviceId: string | null } | undefined;
 let publicFlight: Promise<void> | null = null;
 let clientUserId: string | null | undefined;
 let clientFlight: Promise<void> | null = null;
@@ -178,9 +178,14 @@ export function loadPppoePortal(
     nasDeviceId: string | null,
     force = false,
 ) {
-    if (publicScope !== nasDeviceId || (force && !publicFlight)) {
-        const scopeChanged = publicScope !== nasDeviceId;
-        publicScope = nasDeviceId;
+    const scopeChanged =
+        !publicScope ||
+        publicScope.userId !== userId ||
+        publicScope.nasDeviceId !== nasDeviceId;
+    if (scopeChanged || (force && !publicFlight)) {
+        // Identity also rejects old responses after switching away and back.
+        const scope = { userId, nasDeviceId };
+        publicScope = scope;
         publishPortal({
             ...(scopeChanged
                 ? {
@@ -198,7 +203,7 @@ export function loadPppoePortal(
                     getContacts(nasDeviceId),
                     getPackages(nasDeviceId),
                 ]);
-                if (publicScope !== nasDeviceId) return;
+                if (publicScope !== scope) return;
                 // The scoped NAS does not exist (deleted by the admin, or an
                 // id left behind in storage): drop it instead of showing an
                 // empty portal. A signed-in customer falls back to the
@@ -234,7 +239,7 @@ export function loadPppoePortal(
                     errorName:
                         error instanceof Error ? error.name : 'UnknownError',
                 });
-                if (publicScope === nasDeviceId) {
+                if (publicScope === scope) {
                     publishPortal({
                         packagesError:
                             'Could not load PPPoE packages. Try again.',
@@ -303,6 +308,14 @@ export function loadPppoePortal(
     }
 
     return Promise.all([publicFlight, clientFlight]);
+}
+
+export function refreshPppoePackages() {
+    const scope = publicScope;
+    if (!scope) return Promise.resolve();
+    // Eligibility may have changed during a purchase; supersede any older load.
+    publicScope = undefined;
+    return loadPppoePortal(scope.userId, scope.nasDeviceId);
 }
 
 export function refreshPppoeAccounts() {
@@ -469,11 +482,31 @@ export function selectPppoeAccount(accountId: string) {
     }
 }
 
-export function usePppoePortal() {
-    return useSyncExternalStore(
+export function usePppoePortal(scope?: {
+    userId: string | null;
+    nasDeviceId: string | null;
+    pending: boolean;
+}) {
+    const snapshot = useSyncExternalStore(
         (listener) => subscribe(portalListeners, listener),
         () => portalSnapshot,
     );
+    // Hide the previous customer's/network's offers in the render before the
+    // session-change effect invalidates the store, including pending sessions.
+    if (
+        scope &&
+        (scope.pending ||
+            publicScope?.userId !== scope.userId ||
+            publicScope?.nasDeviceId !== scope.nasDeviceId)
+    ) {
+        return {
+            ...snapshot,
+            packages: undefined,
+            packagesError: null,
+            packagesLoading: true,
+        };
+    }
+    return snapshot;
 }
 
 export function usePppoeAccounts() {

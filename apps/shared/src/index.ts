@@ -11,4 +11,5 @@ export * from './utils/duration';
 export * from './utils/serviceProvider';
 
 export * from './schemas/packages';
+export * from './schemas/packageAudience';
 export * from './schemas/pppoe';

@@ -1,4 +1,5 @@
 import { relations } from 'drizzle-orm';
+import type { PackageEligibility } from '@radii/shared';
 import {
     bigint,
     bigserial,
@@ -22,12 +23,15 @@ import { nasDevice } from './integrations';
 import { transaction } from './payments';
 import { pppoeServiceAccounts } from './pppoe-accounts';
 import { radacct } from './radius';
+import { packageAudiences } from './package-audiences';
 
 export const packages = pgTable(
     'packages',
     {
         id: uuid('id').defaultRandom().primaryKey(),
         title: text('title').notNull(),
+        audienceId: uuid('audience_id').references(() => packageAudiences.id, { onDelete: 'restrict' }),
+        eligibility: jsonb('eligibility').$type<PackageEligibility>(),
         type: text('type', { enum: ['hotspot', 'pppoe'] })
             .default('hotspot')
             .notNull(),
@@ -87,6 +91,7 @@ export const packages = pgTable(
             table.sortOrder,
         ),
         index('packages_archived_at_idx').on(table.archivedAt),
+        index('packages_audience_id_idx').on(table.audienceId),
     ],
 );
 

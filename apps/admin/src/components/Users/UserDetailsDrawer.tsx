@@ -50,6 +50,7 @@ import { useNavigate } from 'react-router-dom';
 
 import { PaymentRefCell } from '@/components/Payments/PaymentRefCell';
 import { ArchivedPackageBadge } from '@/components/Packages/ArchivedPackageBadge';
+import { CustomerAudienceTags } from './CustomerAudienceTags';
 import { TablePagination } from '@/components/TablePagination';
 import {
     activateActivation,
@@ -852,8 +853,8 @@ export function UserDetailsDrawer({
                                 variant='light'
                                 aria-label={
                                     detail.tag?.name || detail.tag?.location
-                                        ? 'Edit name / location'
-                                        : 'Add name / location'
+                                        ? 'Edit customer labels and audience tags'
+                                        : 'Add customer labels and audience tags'
                                 }
                                 leftSection={<MdEdit size={14} />}
                                 onClick={openTagModal}
@@ -2385,7 +2386,7 @@ export function UserDetailsDrawer({
             <Modal
                 opened={tagModal}
                 onClose={() => setTagModal(false)}
-                title='Customer name / location'
+                title='Customer labels and audience tags'
                 centered
             >
                 <Stack>
@@ -2409,8 +2410,10 @@ export function UserDetailsDrawer({
                         maxLength={120}
                     />
                     <Button onClick={() => void submitTag()} loading={busy}>
-                        Save tag
+                        Save name / location
                     </Button>
+                    <Divider />
+                    {tagModal && userId ? <CustomerAudienceTags key={userId} userId={userId} /> : null}
                 </Stack>
             </Modal>
 

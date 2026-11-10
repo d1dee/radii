@@ -44,6 +44,7 @@ import {
     createPayment,
     getOrderPackageForNas,
     getPackagesGroupedByCategory,
+    PackageEligibilityError,
 } from '../lib/packages';
 import { paymentService } from '../lib/payments';
 import { radiusClient, type ActivationRedirect } from '../lib/radius';
@@ -100,7 +101,10 @@ app.get('/packages', async (c) => {
     }
     const packages = await getPackagesGroupedByCategory(
         loginRequest.nasDeviceId,
+        'hotspot',
+        c.get('user')?.id ?? null,
     );
+    c.header('Cache-Control', 'private, no-store');
     return c.json({ success: true, data: packages });
 });
 
@@ -346,7 +350,11 @@ app.post('/order', requireAuth, async (c) => {
         phoneNumber,
         loginRequestId,
         nasDeviceId,
+    }).catch((error: unknown) => {
+        if (error instanceof PackageEligibilityError) return null;
+        throw error;
     });
+    if (!row) return jsonError(c, 403, 'This package is not available for your account. Reload the available packages.');
 
     if (row.status === 'pending') {
         // Paid purchases retain the existing provider flow. Free purchases

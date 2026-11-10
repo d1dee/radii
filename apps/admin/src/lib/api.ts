@@ -7,6 +7,8 @@ import {
     type NasDeviceOs,
     type NasDeviceStatus,
     type PageSize,
+    type PackageAudienceConditions,
+    type PackageEligibility,
 } from '@shared/index';
 
 import { getErrorDiagnostic } from '@/lib/clientError';
@@ -181,6 +183,8 @@ export type PackageRow = {
     burstTime: number;
     // NAS devices the package is available on; empty means hidden.
     nasDeviceIds: string[];
+    audienceId: string | null;
+    eligibility: PackageEligibility | null;
     isActive: boolean;
     archivedAt: string | null;
     createdAt: string;
@@ -212,6 +216,24 @@ export type CreatePackageInput = {
     burstTime: number;
     // NAS devices the package is available on; at least one is required.
     nasDeviceIds: string[];
+    audienceId?: string | null;
+    eligibility?: PackageEligibility | null;
+};
+
+export type PackageAudienceRow = {
+    id: string;
+    ownerId: string;
+    name: string;
+    description: string | null;
+    conditions: PackageAudienceConditions;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type PackageAudienceInput = {
+    name: string;
+    description?: string;
+    conditions: PackageAudienceConditions;
 };
 
 export type AdminPackageList = {
@@ -277,6 +299,36 @@ export async function getAllAdminPackages(
 
 export function getAdminPackage(id: string) {
     return request<PackageRow>(`/admin/packages/${id}`);
+}
+
+export function getPackageAudiences() {
+    return request<{ audiences: PackageAudienceRow[] }>('/admin/package-audiences');
+}
+
+export function createPackageAudience(body: PackageAudienceInput) {
+    return request<{ audience: PackageAudienceRow }>('/admin/package-audiences', body, {
+        method: 'POST',
+    });
+}
+
+export function updatePackageAudience(id: string, body: PackageAudienceInput) {
+    return request<{ audience: PackageAudienceRow }>(`/admin/package-audiences/${id}`, body, {
+        method: 'PUT',
+    });
+}
+
+export function deletePackageAudience(id: string) {
+    return request<{ ok: true }>(`/admin/package-audiences/${id}`, undefined, {
+        method: 'DELETE',
+    });
+}
+
+export function previewPackageEligibility(id: string, userId: string) {
+    return request<{ eligible: boolean; reasons: string[] }>(
+        `/admin/packages/${id}/eligibility`,
+        { userId },
+        { method: 'POST' },
+    );
 }
 
 export type PackagePaymentStatus = 'pending' | 'paid' | 'failed';

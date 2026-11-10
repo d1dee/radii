@@ -85,7 +85,7 @@ let quotaSnapshot: QuotaSnapshot = { quota: [], loading: true, error: null };
 
 const portalListeners = new Set<() => void>();
 const quotaListeners = new Set<() => void>();
-let publicScope: string | null | undefined;
+let publicScope: { userId: string | null; loginRequestId: string | null } | undefined;
 let publicFlight: Promise<void> | null = null;
 let clientUserId: string | null | undefined;
 let clientFlight: Promise<void> | null = null;
@@ -121,10 +121,15 @@ export function loadHotspotPortal(
     loginRequestId: string | null,
     force = false,
 ) {
-    if (publicScope !== loginRequestId || (force && !publicFlight)) {
-        const scopeChanged = publicScope !== loginRequestId;
+    const scopeChanged =
+        !publicScope ||
+        publicScope.userId !== userId ||
+        publicScope.loginRequestId !== loginRequestId;
+    if (scopeChanged || (force && !publicFlight)) {
         const cachedUnknown = isCachedUnknownLoginRequest(loginRequestId);
-        publicScope = loginRequestId;
+        // Identity also rejects old responses after switching away and back.
+        const scope = { userId, loginRequestId };
+        publicScope = scope;
         publishPortal({
             ...(scopeChanged
                 ? {
@@ -144,7 +149,7 @@ export function loadHotspotPortal(
                     getContacts(loginRequestId),
                     loginRequestId ? getPackages(loginRequestId) : null,
                 ]);
-                if (publicScope !== loginRequestId) return;
+                if (publicScope !== scope) return;
                 if (packages?.success) {
                     cacheUnknownLoginRequest(loginRequestId, false);
                 } else if (packages?.message === UNKNOWN_LOGIN_REQUEST) {
@@ -169,7 +174,7 @@ export function loadHotspotPortal(
                     errorName:
                         error instanceof Error ? error.name : 'UnknownError',
                 });
-                if (publicScope === loginRequestId) {
+                if (publicScope === scope) {
                     publishPortal({
                         packagesError: 'Could not load hotspot packages. Try again.',
                         contactsError: 'Could not load support contacts.',
@@ -229,6 +234,14 @@ export function loadHotspotPortal(
     return Promise.all([publicFlight, clientFlight]);
 }
 
+export function refreshHotspotPackages() {
+    const scope = publicScope;
+    if (!scope) return Promise.resolve();
+    // Eligibility may have changed during a purchase; supersede any older load.
+    publicScope = undefined;
+    return loadHotspotPortal(scope.userId, scope.loginRequestId);
+}
+
 export function refreshHotspotQuota(loginRequestId: string | null) {
     if (quotaFlight && quotaScope === loginRequestId) return quotaFlight;
     if (quotaScope !== loginRequestId) {
@@ -269,8 +282,28 @@ export function refreshHotspotQuota(loginRequestId: string | null) {
     return quotaFlight;
 }
 
-export function useHotspotPortal() {
-    return useSyncExternalStore(subscribePortal, () => portalSnapshot);
+export function useHotspotPortal(scope?: {
+    userId: string | null;
+    loginRequestId: string | null;
+    pending: boolean;
+}) {
+    const snapshot = useSyncExternalStore(subscribePortal, () => portalSnapshot);
+    // Render must not expose the previous customer's offers while the effect
+    // that invalidates and reloads the store is still waiting to run.
+    if (
+        scope &&
+        (scope.pending ||
+            publicScope?.userId !== scope.userId ||
+            publicScope?.loginRequestId !== scope.loginRequestId)
+    ) {
+        return {
+            ...snapshot,
+            packages: undefined,
+            packagesError: null,
+            packagesLoading: true,
+        };
+    }
+    return snapshot;
 }
 
 export function useHotspotQuota(

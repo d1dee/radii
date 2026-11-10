@@ -7,3 +7,4 @@ export * from './payments';
 export * from './pppoe-accounts';
 export * from './radius';
 export * from './user-tags';
+export * from './package-audiences';
