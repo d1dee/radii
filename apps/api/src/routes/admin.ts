@@ -74,8 +74,10 @@ import {
 } from '../lib/setupScript';
 import { requireAdmin } from '../middleware/auth';
 import type { AppVariables } from '../types';
+import commissionRoutes from './commissions';
 
 const app = new Hono<{ Variables: AppVariables }>();
+app.route('/agents', commissionRoutes);
 const logger = apiLogger.getChild('admin');
 
 // Postgres unique-violation SQLSTATE, which bun:sql surfaces as `errno` on

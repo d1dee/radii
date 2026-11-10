@@ -27,6 +27,7 @@ const PackageFormPage = lazy(() => import('@/pages/PackageFormPage'));
 const PackagePortalPage = lazy(() => import('@/pages/PackagePortalPage'));
 const PackagesPage = lazy(() => import('@/pages/PackagesPage'));
 const PaymentsPage = lazy(() => import('@/pages/PaymentsPage'));
+const AgentAccountingPage = lazy(() => import('@/pages/AgentAccountingPage'));
 const ReportsPage = lazy(() => import('@/pages/ReportsPage'));
 const SessionsPage = lazy(() => import('@/pages/SessionsPage'));
 const SettingsPage = lazy(() => import('@/pages/SettingsPage'));
@@ -61,6 +62,8 @@ const router = createBrowserRouter(
                 <Route index element={<DashboardPage />} />
                 <Route path='users' element={<UsersPage />} />
                 <Route path='payments' element={<PaymentsPage />} />
+                <Route path='agent-accounting' element={<AgentAccountingPage />} />
+                <Route path='agent-accounting/:agentId' element={<AgentAccountingPage />} />
                 <Route path='sessions' element={<SessionsPage />} />
                 <Route path='reports' element={<ReportsPage />} />
                 <Route path='packages' element={<PackagesPage />} />

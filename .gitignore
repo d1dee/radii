@@ -47,3 +47,4 @@ _apps
 *.cases.*
 *.test.*
 tests/
+*.spec.*

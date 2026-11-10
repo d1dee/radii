@@ -38,6 +38,7 @@ import {
     resolveProviderByName,
 } from './adminProviders';
 import { newCallbackNonce } from './callbackToken';
+import { recordConfirmedCollection } from './collections';
 import { paymentLogError, paymentLogInfo, paymentLogWarn } from './log';
 import {
     MPESA_CALLBACK_EVENTS,
@@ -1616,6 +1617,10 @@ export class PaymentService {
                                 ? inArray(packagePayments.status, ['pending', 'failed']) : eq(packagePayments.status, 'pending'),
                         ),
                     );
+            }
+
+            if (transitioned && outcome === 'completed') {
+                await recordConfirmedCollection(trx, txRow.id, 'gateway', details.source);
             }
 
             await trx.insert(transactionLog).values({

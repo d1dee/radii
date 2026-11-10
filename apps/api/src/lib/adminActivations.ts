@@ -13,6 +13,7 @@ import {
     user,
 } from '../db/schema';
 import { radiusClient } from './radius';
+import { recordConfirmedCollection } from './payments/collections';
 
 export type AdminActivationPaymentMethod =
     | 'cash'
@@ -150,6 +151,9 @@ export async function createAdminActivation(input: {
             .update(packagePayments)
             .set({ transaction: createdTransaction!.id })
             .where(eq(packagePayments.id, createdPayment!.id));
+        if (!isFree) {
+            await recordConfirmedCollection(tx, createdTransaction!.id, 'admin_activation', input.paymentMethod);
+        }
         await tx.insert(transactionLog).values({
             transactionId: createdTransaction!.id,
             provider,

@@ -4,6 +4,8 @@ export * from './auth-schema';
 export * from './packages';
 export * from './integrations';
 export * from './payments';
+export * from './collections';
+export * from './commissions';
 export * from './pppoe-accounts';
 export * from './radius';
 export * from './user-tags';

@@ -24,6 +24,7 @@ const links = [
     { to: '/packages', label: 'Packages', icon: MdRouter },
     { to: '/sessions', label: 'Sessions', icon: MdWifiTethering },
     { to: '/payments', label: 'Payments', icon: MdReceiptLong },
+    { to: '/agent-accounting', label: 'Agent Accounting', icon: MdPeople },
     { to: '/nas-devices', label: 'NAS Devices', icon: MdStorage },
     { to: '/reports', label: 'Reports', icon: MdBarChart },
 ];
