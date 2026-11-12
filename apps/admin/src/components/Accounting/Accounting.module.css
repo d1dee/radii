@@ -1,0 +1,58 @@
+.row {
+    cursor: pointer;
+}
+
+.row:focus-visible {
+    outline: 2px solid var(--mantine-color-blue-6);
+    outline-offset: -2px;
+}
+
+.row[aria-selected='true'] {
+    background: var(--mantine-primary-color-light);
+}
+
+.table th,
+.table td {
+    padding: var(--mantine-spacing-sm) var(--mantine-spacing-md);
+    white-space: nowrap;
+}
+
+.identity {
+    display: block;
+    max-width: 24rem;
+    color: var(--mantine-color-text);
+    font-weight: 600;
+    text-decoration: none;
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
+.identity:hover {
+    color: var(--mantine-primary-color-filled);
+}
+
+.tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+}
+
+.tabs > button {
+    flex-shrink: 0;
+}
+
+.detail {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+@media (max-width: 48em) {
+    .table th,
+    .table td {
+        padding: var(--mantine-spacing-xs);
+    }
+
+    .identity {
+        max-width: 12rem;
+        min-width: 8rem;
+    }
+}

@@ -48,3 +48,4 @@ _apps
 *.test.*
 tests/
 *.spec.*
+*.py

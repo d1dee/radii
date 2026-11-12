@@ -10,43 +10,23 @@ import {
     Textarea,
     TextInput,
 } from '@mantine/core';
-import { useState } from 'react';
-import { ApiErrorType } from '@shared/index';
+import { useEffect, useState } from 'react';
 import {
+    acknowledgeWithdrawalIntent,
+    cancelWithdrawalIntent,
     createWithdrawal,
+    createWithdrawalIntent,
     decideWithdrawal,
+    getWithdrawalIntent,
     type AgentBalance,
     type AgentWithdrawal,
+    type WithdrawalIntent,
 } from '@/lib/accountingApi';
 import { accountingMoney, positiveAmountError } from '@/lib/accountingMoney';
-
-type PendingWithdrawal = {
-    key: string;
-    currency: string;
-    amount: string;
-    note: string;
-};
-// Agent UUIDs are globally unique and tenant-owned. Retain the same intent even
-// when browser storage is unavailable or auth temporarily fails during retry.
-const pendingRequests = new Map<string, PendingWithdrawal>();
-export function pendingWithdrawal(agentId: string): PendingWithdrawal | null {
-    const retained = pendingRequests.get(agentId);
-    if (retained) return retained;
-    try {
-        const value = JSON.parse(
-            sessionStorage.getItem(`radii:withdrawal:v1:${agentId}`) ?? 'null',
-        );
-        return value &&
-            typeof value.key === 'string' &&
-            typeof value.currency === 'string' &&
-            typeof value.amount === 'string' &&
-            typeof value.note === 'string'
-            ? value
-            : null;
-    } catch {
-        return null;
-    }
-}
+import {
+    matchesWithdrawalReceipt,
+    matchesWithdrawalValues,
+} from '@/lib/withdrawalIntent';
 
 export function WithdrawalForm({
     agentId,
@@ -63,25 +43,56 @@ export function WithdrawalForm({
     onClose: () => void;
     onSaved: () => void;
 }) {
-    const [pending] = useState(() =>
-        action === 'request' ? pendingWithdrawal(agentId) : null,
-    );
+    const [intent, setIntent] = useState<WithdrawalIntent | null>(null);
+    const [previousIntentId, setPreviousIntentId] = useState<string | null>(null);
     const [currency, setCurrency] = useState<string | null>(
-        pending?.currency ??
-            withdrawal?.currency ??
-            balances[0]?.currency ??
-            null,
+        withdrawal?.currency ?? balances[0]?.currency ?? null,
     );
-    const [amount, setAmount] = useState(pending?.amount ?? '');
-    const [note, setNote] = useState(pending?.note ?? '');
+    const [amount, setAmount] = useState('');
+    const [note, setNote] = useState('');
     const [reference, setReference] = useState('');
     const [evidence, setEvidence] = useState('');
     const [confirmed, setConfirmed] = useState(false);
-    const [key] = useState(() => pending?.key ?? crypto.randomUUID());
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
-    const [submitted, setSubmitted] = useState(!!pending);
-    const [uncertain, setUncertain] = useState(!!pending);
+    const [submitted, setSubmitted] = useState(false);
+    const [recovering, setRecovering] = useState(action === 'request');
+    const [recoveryReady, setRecoveryReady] = useState(action !== 'request');
+    const [recoveryRevision, setRecoveryRevision] = useState(0);
+    function restoreIntent(value: WithdrawalIntent) {
+        setIntent(value);
+        setCurrency(value.currency);
+        setAmount(value.amount);
+        setNote(value.note ?? '');
+        setConfirmed(false);
+    }
+    useEffect(() => {
+        if (action !== 'request') return;
+        let cancelled = false;
+        setRecovering(true);
+        setRecoveryReady(false);
+        void getWithdrawalIntent(agentId).then((result) => {
+            if (cancelled) return;
+            setRecovering(false);
+            if (!result.success || !result.data) {
+                setError(
+                    result.success
+                        ? 'The server returned no intent result.'
+                        : result.message,
+                );
+                return;
+            }
+            if (result.data.intent) restoreIntent(result.data.intent);
+            else setIntent(null);
+            setPreviousIntentId(result.data.previousIntentId);
+            setConfirmed(false);
+            setError('');
+            setRecoveryReady(true);
+        });
+        return () => {
+            cancelled = true;
+        };
+    }, [agentId, action, recoveryRevision]);
     const title = {
         request: 'Request manual withdrawal',
         approve: 'Approve withdrawal',
@@ -91,10 +102,10 @@ export function WithdrawalForm({
     const balance = balances.find((item) => item.currency === currency);
     async function submit(event: React.FormEvent) {
         event.preventDefault();
-        if (busy) return;
+        if (busy || recovering || !recoveryReady) return;
         let validation: string | null = null;
         if (action === 'request')
-            validation = submitted
+            validation = intent
                 ? positiveAmountError(amount)
                 : !balance
                   ? 'Choose a currency with an available balance.'
@@ -112,87 +123,106 @@ export function WithdrawalForm({
             setError(validation);
             return;
         }
-        if (action === 'request') {
-            const intent = {
-                key,
-                currency: currency!,
-                amount: amount.trim(),
-                note: note.trim(),
-            };
-            // A reservation must be recoverable even if its response is lost.
-            // Fail before POST when the browser cannot retain the request.
-            try {
-                const storageKey = `radii:withdrawal:v1:${agentId}`;
-                const serialized = JSON.stringify(intent);
-                sessionStorage.setItem(storageKey, serialized);
-                if (sessionStorage.getItem(storageKey) !== serialized)
-                    throw new Error('Storage did not retain request');
-            } catch {
-                setError(
-                    'Withdrawal not submitted. Enable session storage for this admin site, then retry. Radii must preserve the request identity before reserving funds.',
-                );
-                return;
-            }
-            pendingRequests.set(agentId, intent);
-        }
         setBusy(true);
         setError('');
-        setSubmitted(true);
-        const result =
-            action === 'request'
-                ? await createWithdrawal(agentId, {
-                      amount: amount.trim(),
-                      currency: currency!,
-                      idempotencyKey: key,
-                      note: note.trim() || undefined,
-                  })
-                : await decideWithdrawal(
-                      agentId,
-                      withdrawal!.id,
-                      action,
-                      action === 'reject'
-                          ? { reason: note.trim() }
-                          : action === 'paid'
-                            ? {
-                                  reference: reference.trim(),
-                                  evidence: evidence.trim(),
-                              }
-                            : {},
-                  );
-        setBusy(false);
-        if (!result.success || !result.data) {
-            const unknown =
-                result.success ||
-                result.type === ApiErrorType.NETWORK_ERROR ||
-                result.type === ApiErrorType.INTERNAL_ERROR;
-            if (unknown) setUncertain(true);
-            if (!uncertain && !unknown) {
-                setSubmitted(false);
-                if (action === 'request') {
-                    pendingRequests.delete(agentId);
-                    try {
-                        sessionStorage.removeItem(
-                            `radii:withdrawal:v1:${agentId}`,
-                        );
-                    } catch {
-                        /* Storage may be disabled. */
+        try {
+            if (action === 'request') {
+                let current = intent;
+                if (!current) {
+                    const values = {
+                        amount: amount.trim(),
+                        currency: currency!,
+                        note: note.trim() || undefined,
+                        previousIntentId,
+                    };
+                    const prepared = await createWithdrawalIntent(agentId, values);
+                    if (!prepared.success || !prepared.data?.intent) {
+                        setRecoveryReady(false);
+                        setConfirmed(false);
+                        setError(`${prepared.success ? 'The server returned no intent result.' : prepared.message} Recover the latest server-backed request and review its details before confirming again.`);
+                        return;
+                    }
+                    current = prepared.data.intent;
+                    setIntent(current);
+                    if (!matchesWithdrawalValues(current, values)) {
+                        restoreIntent(current);
+                        setError('An existing request has different details. Review the restored amount, currency, and note, then confirm again. No new reservation was submitted.');
+                        return;
                     }
                 }
+                const result = await createWithdrawal(agentId, {
+                    intentId: current.id,
+                });
+                if (!result.success || !result.data) {
+                    setError(`${result.success ? 'The server returned no withdrawal receipt.' : result.message} Retry this same server-backed request to recover its result.`);
+                    return;
+                }
+                if (!matchesWithdrawalReceipt(agentId, current, result.data)) {
+                    setError('The receipt does not match this request. The server-backed identity has been retained. Refresh and retry to recover the matching receipt.');
+                    return;
+                }
+                setIntent({ ...current, withdrawalId: result.data.id });
+                const acknowledged = await acknowledgeWithdrawalIntent(
+                    agentId, current.id,
+                );
+                if (!acknowledged.success) {
+                    setError(`${acknowledged.message} The withdrawal receipt was confirmed, but acknowledgement is incomplete. Retry to safely recover and acknowledge the same request.`);
+                    return;
+                }
+            } else {
+                setSubmitted(true);
+                const result = await decideWithdrawal(
+                    agentId,
+                    withdrawal!.id,
+                    action,
+                    action === 'reject'
+                        ? { reason: note.trim() }
+                        : action === 'paid'
+                          ? {
+                                reference: reference.trim(),
+                                evidence: evidence.trim(),
+                            }
+                          : {},
+                );
+                if (!result.success || !result.data) {
+                    setError(`${result.success ? 'The server returned no withdrawal result.' : result.message} Refresh the account before starting a separate action.`);
+                    return;
+                }
             }
-            setError(
-                `${result.success ? 'The server returned no withdrawal result.' : result.message} Refresh the account before starting a separate request. Retrying here keeps the same request identity.`,
-            );
-            return;
-        }
-        if (action === 'request') {
-            pendingRequests.delete(agentId);
-            try {
-                sessionStorage.removeItem(`radii:withdrawal:v1:${agentId}`);
-            } catch {
-                /* Storage may be disabled. */
+            onSaved();
+        } catch {
+            if (action === 'request' && !intent) {
+                setRecoveryReady(false);
+                setConfirmed(false);
             }
+            setError('The action could not be confirmed. Reopen this form to recover the server-backed request before starting a separate withdrawal.');
+        } finally {
+            setBusy(false);
         }
-        onSaved();
+    }
+    async function cancelIntent() {
+        if (!intent || intent.withdrawalId || busy) return;
+        setBusy(true);
+        try {
+            const result = await cancelWithdrawalIntent(agentId, intent.id);
+            if (!result.success) {
+                setError(`${result.message} The request is retained; recover it before continuing.`);
+                setRecoveryReady(false);
+                return;
+            }
+            setIntent(null);
+            setAmount('');
+            setNote('');
+            setConfirmed(false);
+            setError('');
+            setRecoveryReady(false);
+            setRecoveryRevision((value) => value + 1);
+        } catch {
+            setError('Cancellation could not be confirmed. Recover the server-backed request before continuing.');
+            setRecoveryReady(false);
+        } finally {
+            setBusy(false);
+        }
     }
     return (
         <Modal
@@ -209,12 +239,20 @@ export function WithdrawalForm({
                             {error}
                         </Alert>
                     )}
-                    {pending && (
+                    {action === 'request' && !recoveryReady && (
+                        <Button
+                            variant='light'
+                            loading={recovering}
+                            onClick={() => setRecoveryRevision((value) => value + 1)}
+                        >
+                            Recover withdrawal request
+                        </Button>
+                    )}
+                    {intent && (
                         <Alert color='orange'>
-                            An earlier submission has an uncertain result. Retry
-                            this same request to recover its result without
-                            reserving twice. Its amount and request identity are
-                            preserved.
+                            A server-backed request is preserved. Review its
+                            details and confirm to recover or submit the same
+                            request without reserving twice.
                         </Alert>
                     )}
                     <Alert color={action === 'paid' ? 'orange' : 'blue'}>
@@ -243,10 +281,15 @@ export function WithdrawalForm({
                                 pb='xs'
                                 label='Currency'
                                 required
-                                data={balances.map((item) => item.currency)}
+                                data={Array.from(new Set([
+                                    ...balances.map((item) => item.currency),
+                                    ...(intent ? [intent.currency] : []),
+                                ]))}
                                 value={currency}
                                 onChange={setCurrency}
-                                disabled={busy || submitted}
+                                disabled={
+                                    busy || recovering || !recoveryReady || !!intent
+                                }
                             />
                             <TextInput
                                 pb='xs'
@@ -263,7 +306,9 @@ export function WithdrawalForm({
                                 onChange={(event) =>
                                     setAmount(event.currentTarget.value)
                                 }
-                                disabled={busy || submitted}
+                                disabled={
+                                    busy || recovering || !recoveryReady || !!intent
+                                }
                                 maxLength={21}
                             />
                         </>
@@ -283,7 +328,8 @@ export function WithdrawalForm({
                                 setNote(event.currentTarget.value)
                             }
                             disabled={
-                                busy || (action === 'request' && submitted)
+                                busy || (action === 'request' &&
+                                    (recovering || !recoveryReady || !!intent))
                             }
                         />
                     )}
@@ -326,9 +372,19 @@ export function WithdrawalForm({
                         onChange={(event) =>
                             setConfirmed(event.currentTarget.checked)
                         }
-                        disabled={busy}
+                        disabled={busy || recovering || !recoveryReady}
                     />
                     <Group justify='flex-end'>
+                        {intent && !intent.withdrawalId && (
+                            <Button
+                                variant='light'
+                                color='red'
+                                onClick={cancelIntent}
+                                disabled={busy || recovering || !recoveryReady}
+                            >
+                                Discard unreserved request
+                            </Button>
+                        )}
                         <Button
                             variant='default'
                             onClick={onClose}
@@ -340,6 +396,7 @@ export function WithdrawalForm({
                             type='submit'
                             color={action === 'reject' ? 'red' : undefined}
                             loading={busy}
+                            disabled={recovering || !recoveryReady}
                         >
                             {title}
                         </Button>

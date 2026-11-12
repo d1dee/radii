@@ -39,6 +39,8 @@ export const env = {
     // so a leak of one never forges sessions on the other instance.
     betterAuthSecret: requiredSecret('BETTER_AUTH_SECRET'),
     adminBetterAuthSecret: requiredSecret('ADMIN_BETTER_AUTH_SECRET'),
+    agentBetterAuthSecret: requiredSecret('AGENT_BETTER_AUTH_SECRET'),
+    agentFrontendUrls: (process.env.AGENT_FRONTEND_URLS || '').split(',').map(s => s.trim()).filter(Boolean),
     // Escape hatch for the globally scoped better-auth admin-plugin endpoints
     // (/api/admin/auth/admin/*). They are blocked with a 404 in index.ts
     // unless this variable is exactly 'true'.
@@ -226,8 +228,8 @@ export const env = {
     },
     // Admin-console transactional email (Resend HTTP API). Optional: without
     // RESEND_API_KEY admin OTP delivery is skipped with a warning log (the
-    // code itself is never logged). Only the admin BetterAuth instance sends
-    // email; portal customers authenticate with phone+PIN only.
+    // code itself is never logged). Admin and external-agent BetterAuth use
+    // this delivery infrastructure; customers remain phone+PIN only.
     resend: {
         apiKey: process.env.RESEND_API_KEY || '',
         from: process.env.RESEND_FROM || 'Radii Admin <onboarding@resend.dev>',

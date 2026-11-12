@@ -3,6 +3,7 @@ import { honoLogger } from '@logtape/hono';
 import { Hono, type Context, type MiddlewareHandler } from 'hono';
 import { cors } from 'hono/cors';
 import { adminAuth } from './adminAuth';
+import { agentAuth } from './agentAuth';
 import { auth } from './auth';
 import { closeDb } from './db';
 import { env } from './env';
@@ -55,7 +56,7 @@ app.use(
 app.use(
     '/api/*',
     cors({
-        origin: [...env.frontendUrls, ...env.adminFrontendUrls],
+        origin: [...env.frontendUrls, ...env.adminFrontendUrls, ...env.agentFrontendUrls],
         allowHeaders: ['Content-Type', 'Authorization'],
         allowMethods: ['POST', 'GET', 'OPTIONS', 'PUT', 'DELETE'],
         exposeHeaders: ['Content-Length', 'X-Request-Id'],
@@ -131,6 +132,7 @@ app.on(['POST', 'GET'], '/api/auth/*', (c) => auth.handler(c.req.raw));
 app.on(['POST', 'GET'], '/api/admin/auth/*', (c) =>
     adminAuth.handler(c.req.raw),
 );
+app.on(['POST', 'GET'], '/api/agents/auth/*', c => agentAuth.handler(c.req.raw));
 
 // Hotspot REST routes (mounted at /api/hotspot).
 app.route('/api', routes);

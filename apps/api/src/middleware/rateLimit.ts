@@ -91,12 +91,13 @@ function tierForPath(path: string, method: string): Tier | null {
     if (
         method === 'GET' &&
         (path === '/api/auth/get-session' ||
-            path === '/api/admin/auth/get-session')
+            path === '/api/admin/auth/get-session' || path === '/api/agents/auth/get-session')
     ) {
         return 'default';
     }
     if (path.startsWith('/api/auth/')) return 'auth';
     if (path.startsWith('/api/admin/auth/')) return 'auth';
+    if (path.startsWith('/api/agents/auth/')) return 'auth';
     if (path.startsWith('/api/hotspot/')) return 'portal';
     if (path.startsWith('/api/ppoe/')) return 'portal';
     return 'default';

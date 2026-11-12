@@ -14,25 +14,27 @@ import {
 } from '@mantine/core';
 import Fuse from 'fuse.js';
 import { useDeferredValue, useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
-import { AccountingTable } from '@/components/Accounting/AccountingTable';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import {
+    AccountingRow,
+    AccountingTable,
+} from '@/components/Accounting/AccountingTable';
+import classes from '@/components/Accounting/Accounting.module.css';
 import { AgentForm } from '@/components/Accounting/AgentForm';
 import { AgentAccountingDetail } from '@/components/Accounting/AgentAccountingDetail';
 import { PageLayout } from '@/components/Layout/PageLayout';
 import { listAgents, type Agent } from '@/lib/accountingApi';
 import { formatDateTime } from '@/lib/format';
-import { tableRowNumber } from '@/lib/pagination';
+import { tableRowNumber, useTablePageSize } from '@/lib/pagination';
+import { useAdminSettings } from '@/lib/settings';
 
 export default function AgentAccountingPage() {
-    const { agentId } = useParams();
-    return agentId ? (
-        <AgentAccountingDetail key={agentId} id={agentId} />
-    ) : (
-        <AgentDirectory />
-    );
+    return <AgentDirectory />;
 }
 
 function AgentDirectory() {
+    const { agentId } = useParams();
+    const navigate = useNavigate();
     const [agents, setAgents] = useState<Agent[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
@@ -42,6 +44,11 @@ function AgentDirectory() {
     const query = useDeferredValue(search.trim());
     const [status, setStatus] = useState<string | null>(null);
     const [page, setPage] = useState(1);
+    const { settings, loaded } = useAdminSettings();
+    const [pageSize, setPageSize] = useTablePageSize(
+        settings.dashboard.perPage,
+        loaded,
+    );
     useEffect(() => {
         let cancelled = false;
         setLoading(true);
@@ -88,7 +95,9 @@ function AgentDirectory() {
     );
     const currentPage = Math.min(
         page,
-        Math.max(1, Math.ceil(filtered.length / 10)),
+        pageSize === 'all'
+            ? 1
+            : Math.max(1, Math.ceil(filtered.length / pageSize)),
     );
     return (
         <PageLayout
@@ -98,8 +107,8 @@ function AgentDirectory() {
                     <Stack gap={4}>
                         <Title order={3}>Agent accounting</Title>
                         <Text c='dimmed' size='sm'>
-                            External agents and landlords, commission
-                            agreements, and audited manual withdrawals.
+                            Manage agents, commission agreements and manual
+                            withdrawals.
                         </Text>
                     </Stack>
                     <Button onClick={() => setCreating(true)}>
@@ -113,6 +122,31 @@ function AgentDirectory() {
                 agreements. Payouts are recorded manually; this area never sends
                 money.
             </Alert>
+            {!loading && !error && (
+                <Group gap='xs'>
+                    <Text size='sm' fw={600}>
+                        {agents.length} agents
+                    </Text>
+                    <Badge color='green' variant='light'>
+                        {
+                            agents.filter((agent) => agent.status === 'active')
+                                .length
+                        }{' '}
+                        active
+                    </Badge>
+                    <Badge color='orange' variant='light'>
+                        {
+                            agents.filter(
+                                (agent) => agent.status === 'archived',
+                            ).length
+                        }{' '}
+                        archived
+                    </Badge>
+                    <Text size='xs' c='dimmed'>
+                        Select a row to view the account.
+                    </Text>
+                </Group>
+            )}
             <Group align='flex-start'>
                 <TextInput
                     pb='xs'
@@ -166,26 +200,48 @@ function AgentDirectory() {
                 <AccountingTable
                     headers={['#', 'Agent', 'Contact', 'Status', 'Created']}
                     total={filtered.length}
+                    pageSize={pageSize}
+                    onPageSize={(value) => {
+                        setPageSize(value);
+                        setPage(1);
+                    }}
                     page={currentPage}
                     onPage={setPage}
                     empty='No agents match. Create an agent to begin.'
                     label='Agents table'
                 >
                     {filtered
-                        .slice((currentPage - 1) * 10, currentPage * 10)
+                        .slice(
+                            pageSize === 'all'
+                                ? 0
+                                : (currentPage - 1) * pageSize,
+                            pageSize === 'all'
+                                ? undefined
+                                : currentPage * pageSize,
+                        )
                         .map((agent, index) => (
-                            <Table.Tr key={agent.id}>
+                            <AccountingRow
+                                key={agent.id}
+                                label={`Open ${agent.name}`}
+                                selected={agent.id === agentId}
+                                onOpen={() =>
+                                    navigate(`/agent-accounting/${agent.id}`)
+                                }
+                            >
                                 <Table.Td>
-                                    {tableRowNumber(currentPage, 10, index)}
+                                    {tableRowNumber(
+                                        currentPage,
+                                        pageSize,
+                                        index,
+                                    )}
                                 </Table.Td>
                                 <Table.Td>
-                                    <Button
-                                        variant='subtle'
-                                        component={Link}
+                                    <Link
+                                        className={classes.identity}
                                         to={`/agent-accounting/${agent.id}`}
                                     >
                                         {agent.name}
-                                    </Button>
+                                    </Link>
                                 </Table.Td>
                                 <Table.Td>
                                     {agent.phone || 'Not provided'}
@@ -206,7 +262,7 @@ function AgentDirectory() {
                                 <Table.Td>
                                     {formatDateTime(agent.createdAt)}
                                 </Table.Td>
-                            </Table.Tr>
+                            </AccountingRow>
                         ))}
                 </AccountingTable>
             )}
@@ -217,6 +273,20 @@ function AgentDirectory() {
                         setCreating(false);
                         setRevision((value) => value + 1);
                     }}
+                />
+            )}
+            {agentId && (
+                <AgentAccountingDetail
+                    key={agentId}
+                    id={agentId}
+                    onClose={() => navigate('/agent-accounting')}
+                    onAgentUpdated={(updated) =>
+                        setAgents((items) =>
+                            items.map((agent) =>
+                                agent.id === updated.id ? updated : agent,
+                            ),
+                        )
+                    }
                 />
             )}
         </PageLayout>

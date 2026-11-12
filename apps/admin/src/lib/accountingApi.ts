@@ -31,6 +31,12 @@ export type AgreementInput = Pick<
     AgentAgreement,
     'scopeType' | 'scopeId' | 'rateBps' | 'basis'
 > & { effectiveFrom?: string };
+export type AgentAgreementDetail = AgentAgreement & {
+    scopeLabel: string | null;
+    scopeDetail: string | null;
+    actorName: string | null;
+    actorEmail: string | null;
+};
 export type AgentScope = {
     id: string;
     scopeType: AgentAgreement['scopeType'];
@@ -54,6 +60,26 @@ export type AgentJournal = {
     withdrawalId: string | null;
     snapshot: Record<string, unknown>;
     createdAt: string;
+    collection: {
+        amount: string;
+        currency: string;
+        provider: string;
+        reference: string | null;
+        recordedAt: string;
+        customerName: string | null;
+        customerPhone: string | null;
+        nasName: string | null;
+        serviceLabel: string | null;
+        serviceUsername: string | null;
+    } | null;
+    withdrawal: {
+        amount: string;
+        currency: string;
+        status: AgentWithdrawal['status'];
+        reference: string | null;
+        createdAt: string;
+        note: string | null;
+    } | null;
 };
 export type AgentStatement = AccountingPage<AgentJournal> & {
     balances: AgentBalance[];
@@ -70,11 +96,20 @@ export type AgentWithdrawal = {
     evidence: string | null;
     createdAt: string;
     updatedAt: string;
+    payoutSnapshot?: {
+        profileId: string;
+        method: 'mpesa' | 'bank';
+        accountName: string;
+        destination: string;
+        verifiedAt: string;
+        verifiedBy: string;
+    } | null;
 };
 export type WithdrawalEvent = {
     id: string;
     status: AgentWithdrawal['status'];
     actorAdminId?: string | null;
+    actorAgentUserId?: string | null;
     reason: string | null;
     reference: string | null;
     evidence: string | null;
@@ -83,6 +118,13 @@ export type WithdrawalEvent = {
 export type WithdrawalDetail = {
     withdrawal: AgentWithdrawal;
     events: WithdrawalEvent[];
+};
+export type WithdrawalIntent = {
+    id: string;
+    amount: string;
+    currency: string;
+    note: string | null;
+    withdrawalId: string | null;
 };
 
 const root = '/admin/agents';
@@ -104,7 +146,7 @@ export const updateAgent = (
     body: Partial<AgentInput> & { status?: Agent['status'] },
 ) => request<Agent>(agentPath(id), body, { method: 'PUT' });
 export const listAgreements = (id: string, page: number) =>
-    request<AccountingPage<AgentAgreement>>(
+    request<AccountingPage<AgentAgreementDetail>>(
         `${agentPath(id)}/agreements?page=${page}&perPage=10`,
     );
 export const createAgreement = (id: string, body: AgreementInput) =>
@@ -121,16 +163,37 @@ export const listWithdrawals = (id: string, page: number) =>
     );
 export const createWithdrawal = (
     id: string,
-    body: {
-        amount: string;
-        currency: string;
-        idempotencyKey: string;
-        note?: string;
-    },
+    body: { intentId: string },
 ) =>
     request<AgentWithdrawal>(`${agentPath(id)}/withdrawals`, body, {
         method: 'POST',
     });
+export const getWithdrawalIntent = (id: string) =>
+    request<{ intent: WithdrawalIntent | null; previousIntentId: string | null }>(
+        `${agentPath(id)}/withdrawal-intent`,
+    );
+export const createWithdrawalIntent = (
+    id: string,
+    body: {
+        amount: string;
+        currency: string;
+        note?: string;
+        previousIntentId: string | null;
+    },
+) =>
+    request<{ intent: WithdrawalIntent; previousIntentId: string | null }>(
+        `${agentPath(id)}/withdrawal-intent`, body, { method: 'POST' },
+    );
+export const acknowledgeWithdrawalIntent = (id: string, intentId: string) =>
+    request(
+        `${agentPath(id)}/withdrawal-intent/${encodeURIComponent(intentId)}/acknowledge`,
+        {}, { method: 'POST' },
+    );
+export const cancelWithdrawalIntent = (id: string, intentId: string) =>
+    request(
+        `${agentPath(id)}/withdrawal-intent/${encodeURIComponent(intentId)}/cancel`,
+        {}, { method: 'POST' },
+    );
 export const getWithdrawal = (id: string, withdrawalId: string) =>
     request<WithdrawalDetail>(
         `${agentPath(id)}/withdrawals/${encodeURIComponent(withdrawalId)}`,
@@ -144,5 +207,56 @@ export const decideWithdrawal = (
     request<AgentWithdrawal>(
         `${agentPath(id)}/withdrawals/${encodeURIComponent(withdrawalId)}/${action}`,
         body,
+        { method: 'POST' },
+    );
+
+export type AgentPortalMembership = {
+    id: string;
+    agentId: string;
+    tenantAdminId: string;
+    userId: string;
+    status: 'active' | 'revoked';
+    email: string;
+    name: string;
+    createdAt: string;
+    updatedAt: string;
+};
+export type AgentPayoutProfile = {
+    id: string;
+    membershipId: string;
+    method: 'mpesa' | 'bank';
+    accountName: string;
+    destination: string;
+    verifiedAt: string | null;
+    verifiedBy: string | null;
+    verificationEvidence: string | null;
+    createdAt: string;
+};
+export type AgentPortalAccess = {
+    membership: AgentPortalMembership | null;
+    payoutProfile: AgentPayoutProfile | null;
+};
+export const getAgentPortalAccess = (id: string) =>
+    request<AgentPortalAccess>(`${agentPath(id)}/portal-membership`);
+export const linkAgentPortalAccess = (id: string, email: string) =>
+    request<Omit<AgentPortalMembership, 'email' | 'name'>>(
+        `${agentPath(id)}/portal-membership`,
+        { email },
+        { method: 'POST' },
+    );
+export const revokeAgentPortalAccess = (id: string) =>
+    request<Omit<AgentPortalMembership, 'email' | 'name'>>(
+        `${agentPath(id)}/portal-membership/revoke`,
+        {},
+        { method: 'POST' },
+    );
+export const verifyAgentPayoutProfile = (
+    id: string,
+    profileId: string,
+    evidence: string,
+) =>
+    request<AgentPayoutProfile>(
+        `${agentPath(id)}/portal-membership/payout-profiles/${encodeURIComponent(profileId)}/verify`,
+        { evidence },
         { method: 'POST' },
     );

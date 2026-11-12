@@ -1,0 +1,239 @@
+:root {
+    --portal-canvas: #f5f7fa;
+    --portal-surface: #fff;
+    --portal-rule: #e1e6ed;
+    --portal-table-header: #eef2f6;
+}
+body {
+    margin: 0;
+    background: var(--portal-canvas);
+}
+.portal-shell .mantine-AppShell-header,
+.portal-shell .mantine-AppShell-navbar {
+    background: var(--portal-surface);
+    border-color: var(--portal-rule);
+}
+.portal-brand {
+    color: inherit;
+    text-decoration: none;
+    white-space: nowrap;
+}
+.portal-account-button {
+    border-radius: var(--mantine-radius-sm);
+    padding: 4px;
+    min-height: 44px;
+}
+.portal-account-button:hover {
+    background: var(--mantine-color-gray-0);
+}
+.portal-nav-link {
+    border-radius: var(--mantine-radius-sm);
+    min-height: 44px;
+    font-weight: 500;
+}
+.portal-skip-link {
+    position: fixed;
+    top: 8px;
+    left: 8px;
+    transform: translateY(-200%);
+    background: var(--portal-surface);
+    padding: 8px 16px;
+    z-index: 300;
+}
+.portal-skip-link:focus {
+    transform: none;
+}
+.portal-main {
+    height: 100dvh;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: auto;
+}
+.portal-main-account {
+    overflow: hidden;
+}
+.portal-main > * {
+    flex-shrink: 0;
+    min-width: 0;
+}
+.portal-main > .portal-memberships {
+    flex: 1 1 0;
+    min-height: 0;
+}
+.portal-page {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    flex: 1 1 0;
+}
+.portal-page-header {
+    flex-shrink: 0;
+    max-height: 45%;
+    overflow-y: auto;
+    padding-bottom: var(--mantine-spacing-md);
+}
+.portal-page-scroll {
+    flex: 1 1 0;
+    min-height: 0;
+    min-width: 0;
+}
+.portal-page-scroll .mantine-ScrollArea-viewport:focus-visible,
+.portal-account-button:focus-visible {
+    outline: 2px solid var(--mantine-color-blue-6);
+    outline-offset: -2px;
+}
+.auth-panel {
+    width: 100%;
+    max-width: 450px;
+    margin: 6vh auto;
+}
+.money {
+    font-variant-numeric: tabular-nums;
+    overflow-wrap: anywhere;
+}
+.balance-strip {
+    background: var(--portal-surface);
+}
+.portal-main .mantine-Paper-root {
+    border-color: var(--portal-rule);
+}
+.balance-metric {
+    min-width: 0;
+}
+.payout-summary {
+    overflow: hidden;
+}
+.table-scroll {
+    max-width: 100%;
+    min-width: 0;
+    overflow-x: auto;
+    border: 1px solid var(--portal-rule);
+    border-radius: var(--mantine-radius-sm);
+    background: var(--portal-surface);
+    scrollbar-width: thin;
+}
+.table-scroll table {
+    width: 100%;
+    min-width: 100%;
+}
+.mantine-InputWrapper-description {
+    margin-bottom: 8px;
+}
+.table-scroll th {
+    background: var(--portal-table-header);
+    font-weight: 600;
+}
+.table-scroll th,
+.table-scroll td {
+    padding: var(--mantine-spacing-sm) var(--mantine-spacing-md);
+    white-space: nowrap;
+    vertical-align: middle;
+    font-size: var(--mantine-font-size-sm);
+}
+.page-table .mantine-Table-thead[data-sticky] {
+    position: relative;
+    top: auto;
+    z-index: 2;
+    transform: translateY(var(--table-header-offset, 0px));
+}
+.page-table .mantine-Table-thead[data-sticky] th {
+    background: var(--portal-table-header);
+}
+.table-scroll th:first-child,
+.table-scroll td:first-child {
+    width: 44px;
+}
+.mantine-Modal-title {
+    font-size: var(--mantine-font-size-md);
+    font-weight: 600;
+}
+.audit-item {
+    border-left: 2px solid #dce3ec;
+    padding-left: 16px;
+}
+.ledger-footer {
+    position: sticky;
+    bottom: 0;
+    z-index: 3;
+    min-height: 44px;
+    padding-block: var(--mantine-spacing-xs);
+    background: var(--portal-canvas);
+}
+.ledger-controls {
+    max-width: 100%;
+}
+.ledger-pagination-scroll {
+    max-width: 100%;
+    min-width: 0;
+    overflow-x: auto;
+}
+.ledger-pagination-scroll .mantine-Pagination-root {
+    width: max-content;
+}
+@media (max-width: 600px) {
+    .auth-panel {
+        margin: 24px auto;
+    }
+    .account-heading > .mantine-Group-root,
+    .account-heading button {
+        width: 100%;
+    }
+    .account-heading button,
+    .payout-summary button {
+        min-height: 44px;
+    }
+    .balance-strip {
+        padding: 12px;
+    }
+    .payout-summary button {
+        width: 100%;
+    }
+    .balance-metric {
+        min-width: 0;
+    }
+    .balance-metric:first-child,
+    .balance-metric:last-child {
+        grid-column: 1 / -1;
+    }
+    .balance-metric .money {
+        font-size: 16px;
+    }
+    .balance-metric:first-child .money {
+        font-size: 22px;
+    }
+    .balance-metric:last-child {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 4px 12px;
+        border-top: 1px solid var(--mantine-color-default-border);
+        padding-top: 8px;
+    }
+    .table-scroll button {
+        min-height: 44px;
+    }
+    .ledger-footer {
+        gap: 8px;
+    }
+    .ledger-controls {
+        width: 100%;
+        justify-content: space-between;
+        gap: 8px;
+    }
+    .ledger-controls .mantine-Pagination-control {
+        min-width: 40px;
+        min-height: 44px;
+    }
+    .ledger-controls input {
+        min-height: 44px;
+    }
+}
+@media (max-width: 48em) {
+    .table-scroll th,
+    .table-scroll td {
+        padding: var(--mantine-spacing-xs);
+    }
+}

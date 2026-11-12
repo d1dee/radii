@@ -4,20 +4,22 @@ import type { AnyPgColumn, PgTable } from 'drizzle-orm/pg-core';
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { db } from '../db';
-import { commissionAgents, commissionAgreements, commissionJournal, commissionWithdrawalEvents, commissionWithdrawals, nasDevice, pppoeServiceAccounts } from '../db/schema';
+import { adminUser, commissionAgents, commissionAgreements, commissionJournal, commissionWithdrawalEvents, commissionWithdrawals, confirmedCollections, nasDevice, pppoeServiceAccounts, user } from '../db/schema';
 import { env } from '../env';
-import { addAgreement, agentBalances, CommissionError, ownedAgent, reserveWithdrawal, transitionWithdrawal, updateAgent } from '../lib/commissions';
+import { addAgreement, agentBalances, CommissionError, ownedAgent, reserveWithdrawal, resolveWithdrawalIntent, transitionWithdrawal, updateAgent, withdrawalIntent } from '../lib/commissions';
 import { jsonError } from '../lib/error';
 import { apiLogger } from '../logging';
 import { requireAdmin } from '../middleware/auth';
 import type { AppVariables } from '../types';
+import adminAgentPortal from './adminAgentPortal';
 
 const app = new Hono<{ Variables: AppVariables }>();
 const uuid = z.string().uuid();
 const agentFields = z.object({ name: z.string().trim().min(1).max(200), phone: z.string().trim().max(40).nullable().optional(), notes: z.string().trim().max(4000).nullable().optional() }).strict();
 const agreementSchema = z.object({ scopeType: z.enum(['nas', 'service_account']), scopeId: uuid,
     rateBps: z.number().int().min(0).max(10000), basis: z.literal('confirmed_collection_gross'), effectiveFrom: z.iso.datetime({ offset: true }).optional() }).strict();
-const withdrawalSchema = z.object({ amount: z.string().regex(/^(0|[1-9][0-9]{0,17})(\.[0-9]{1,2})?$/), currency: z.string().regex(/^[A-Z]{3}$/), idempotencyKey: uuid, note: z.string().trim().max(2000).optional() }).strict();
+const withdrawalSchema = z.object({ intentId: uuid }).strict();
+const intentSchema = z.object({ amount: z.string().regex(/^(0|[1-9][0-9]{0,17})(\.[0-9]{1,2})?$/), currency: z.string().regex(/^[A-Z]{3}$/), previousIntentId: uuid.nullable(), note: z.string().trim().max(2000).optional() }).strict();
 const decisions = {
     approve: z.object({}).strict(),
     reject: z.object({ reason: z.string().trim().min(1).max(2000) }).strict(),
@@ -28,6 +30,7 @@ const pageSchema = z.object({ page: z.coerce.number().int().min(1).max(1000000).
 
 app.use('*', requireAdmin);
 app.use('*', async (c, next) => {
+    c.header('Cache-Control', 'no-store');
     if (!['GET', 'HEAD', 'OPTIONS'].includes(c.req.method)) {
         const origin = c.req.header('Origin');
         // No-Origin requests support intentional server/API clients. Browser
@@ -85,7 +88,21 @@ app.put('/:agentId', async c => {
 app.get('/:agentId/agreements', async c => {
     const tenant = c.var.adminSession.userId, agentId = c.req.param('agentId');
     await ownedAgent(db, tenant, agentId);
-    return c.json({ success: true, data: await pageRows(commissionAgreements, and(eq(commissionAgreements.tenantAdminId, tenant), eq(commissionAgreements.agentId, agentId))!, commissionAgreements.effectiveFrom, c.req.query()) });
+    const { page, perPage } = pageSchema.parse(c.req.query());
+    const where = and(eq(commissionAgreements.tenantAdminId, tenant), eq(commissionAgreements.agentId, agentId));
+    const [total] = await db.select({ value: count() }).from(commissionAgreements).where(where);
+    const agreements = db.select().from(commissionAgreements).where(where).orderBy(desc(commissionAgreements.effectiveFrom), desc(commissionAgreements.id)).limit(perPage).offset((page - 1) * perPage).as('agreements');
+    const items = await db.select({ id: agreements.id, tenantAdminId: agreements.tenantAdminId, agentId: agreements.agentId, actorAdminId: agreements.actorAdminId,
+        scopeType: agreements.scopeType, scopeId: agreements.scopeId, rateBps: agreements.rateBps, basis: agreements.basis, effectiveFrom: agreements.effectiveFrom, createdAt: agreements.createdAt,
+        scopeLabel: sql<string | null>`coalesce(${nasDevice.name},${pppoeServiceAccounts.label},${pppoeServiceAccounts.username})`,
+        scopeDetail: sql<string | null>`coalesce(${nasDevice.ipAddress}::text,${pppoeServiceAccounts.username})`,
+        actorName: adminUser.name, actorEmail: adminUser.email,
+    }).from(agreements)
+        .leftJoin(nasDevice, and(eq(agreements.scopeType, 'nas'), eq(nasDevice.id, agreements.scopeId), eq(nasDevice.ownerId, tenant)))
+        .leftJoin(pppoeServiceAccounts, and(eq(agreements.scopeType, 'service_account'), eq(pppoeServiceAccounts.id, agreements.scopeId), eq(pppoeServiceAccounts.tenantAdminId, tenant)))
+        .leftJoin(adminUser, and(eq(adminUser.id, agreements.actorAdminId), eq(adminUser.id, tenant)))
+        .orderBy(desc(agreements.effectiveFrom), desc(agreements.id));
+    return c.json({ success: true, data: { items, total: total!.value, page, perPage } });
 });
 app.post('/:agentId/agreements', async c => c.json({ success: true, data: await addAgreement(c.var.adminSession.userId, c.req.param('agentId'), agreementSchema.parse(await c.req.json())) }, 201));
 app.get('/:agentId/statement', async c => {
@@ -97,7 +114,25 @@ app.get('/:agentId/statement', async c => {
         const { page, perPage } = pageSchema.parse(c.req.query());
         const where = and(eq(commissionJournal.tenantAdminId, tenant), eq(commissionJournal.agentId, agentId));
         const [total] = await tx.select({ value: count() }).from(commissionJournal).where(where);
-        const items = await tx.select().from(commissionJournal).where(where).orderBy(desc(commissionJournal.createdAt), desc(commissionJournal.id)).limit(perPage).offset((page - 1) * perPage);
+        const journal = tx.select().from(commissionJournal).where(where).orderBy(desc(commissionJournal.createdAt), desc(commissionJournal.id)).limit(perPage).offset((page - 1) * perPage).as('journal');
+        const rows = await tx.select({ journal: { id: journal.id, tenantAdminId: journal.tenantAdminId, agentId: journal.agentId, currency: journal.currency,
+            kind: journal.kind, amount: journal.amount, debitAccount: journal.debitAccount, creditAccount: journal.creditAccount,
+            collectionId: journal.collectionId, withdrawalId: journal.withdrawalId, snapshot: journal.snapshot, createdAt: journal.createdAt },
+            collection: { amount: confirmedCollections.amount, currency: confirmedCollections.currency, provider: confirmedCollections.provider,
+                reference: sql<string | null>`coalesce(${confirmedCollections.providerTransactionId},${confirmedCollections.providerReference})`, recordedAt: confirmedCollections.recordedAt },
+            customerName: user.name, customerPhone: user.username, nasName: nasDevice.name, serviceLabel: pppoeServiceAccounts.label, serviceUsername: pppoeServiceAccounts.username,
+            withdrawal: { amount: commissionWithdrawals.amount, currency: commissionWithdrawals.currency, status: commissionWithdrawals.status,
+                reference: commissionWithdrawals.reference, createdAt: commissionWithdrawals.createdAt, note: commissionWithdrawals.note },
+        }).from(journal)
+            .leftJoin(confirmedCollections, and(eq(confirmedCollections.id, journal.collectionId), eq(confirmedCollections.tenantAdminId, tenant)))
+            .leftJoin(user, eq(user.id, confirmedCollections.customerUserId))
+            .leftJoin(nasDevice, and(eq(nasDevice.id, confirmedCollections.nasDeviceId), eq(nasDevice.ownerId, tenant)))
+            .leftJoin(pppoeServiceAccounts, and(eq(pppoeServiceAccounts.id, confirmedCollections.pppoeServiceAccountId), eq(pppoeServiceAccounts.tenantAdminId, tenant)))
+            .leftJoin(commissionWithdrawals, and(eq(commissionWithdrawals.id, journal.withdrawalId), eq(commissionWithdrawals.tenantAdminId, tenant), eq(commissionWithdrawals.agentId, agentId)))
+            .orderBy(desc(journal.createdAt), desc(journal.id));
+        const items = rows.map(({ journal, collection, withdrawal, customerName, customerPhone, nasName, serviceLabel, serviceUsername }) => ({
+            ...journal, collection: collection ? { ...collection, customerName, customerPhone, nasName, serviceLabel, serviceUsername } : null, withdrawal,
+        }));
         return { items, total: total!.value, page, perPage, balances: await agentBalances(tx, tenant, agentId) };
     }, { isolationLevel: 'repeatable read', accessMode: 'read only' });
     return c.json({ success: true, data });
@@ -107,6 +142,18 @@ app.get('/:agentId/withdrawals', async c => {
     await ownedAgent(db, tenant, agentId);
     return c.json({ success: true, data: await pageRows(commissionWithdrawals, and(eq(commissionWithdrawals.tenantAdminId, tenant), eq(commissionWithdrawals.agentId, agentId))!, commissionWithdrawals.createdAt, c.req.query()) });
 });
+app.get('/:agentId/withdrawal-intent', async c => c.json({ success: true, data: await withdrawalIntent(c.var.adminSession.userId, c.req.param('agentId')) }));
+app.post('/:agentId/withdrawal-intent', async c => {
+    const input = intentSchema.parse(await c.req.json());
+    return c.json({ success: true, data: await withdrawalIntent(c.var.adminSession.userId, c.req.param('agentId'), undefined, { ...input, previousIntentId: input.previousIntentId }) });
+});
+for (const action of ['acknowledge', 'cancel'] as const) {
+    app.post(`/:agentId/withdrawal-intent/:intentId/${action}`, async c => {
+        z.object({}).strict().parse(await c.req.json());
+        await resolveWithdrawalIntent(c.var.adminSession.userId, c.req.param('agentId'), c.req.param('intentId'), action === 'acknowledge' ? 'acknowledged' : 'cancelled');
+        return c.json({ success: true, data: null });
+    });
+}
 app.post('/:agentId/withdrawals', async c => c.json({ success: true, data: await reserveWithdrawal(c.var.adminSession.userId, c.req.param('agentId'), withdrawalSchema.parse(await c.req.json())) }, 201));
 app.get('/:agentId/withdrawals/:withdrawalId', async c => {
     const tenant = c.var.adminSession.userId, agentId = c.req.param('agentId');
@@ -122,4 +169,5 @@ for (const action of ['approve', 'reject', 'paid'] as const) {
     }));
 }
 
+app.route('/:agentId/portal-membership', adminAgentPortal);
 export default app;

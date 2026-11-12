@@ -1,7 +1,7 @@
 import { and, desc, eq, lte, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '../db';
-import { adminUser, commissionAgents, commissionAgreements, commissionJournal, commissionWithdrawalEvents, commissionWithdrawals, confirmedCollections, nasDevice, pppoeServiceAccounts } from '../db/schema';
+import { adminUser, commissionAgents, commissionAgreements, commissionJournal, commissionWithdrawalEvents, commissionWithdrawalIntents, commissionWithdrawals, confirmedCollections, nasDevice, pppoeServiceAccounts } from '../db/schema';
 
 export type CommissionTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 export class CommissionError extends Error {
@@ -115,25 +115,92 @@ export async function agentBalances(tx: CommissionTx | typeof db, tenant: string
     return rows;
 }
 
-export async function reserveWithdrawal(tenant: string, agentId: string, input: { amount: string; currency: string; idempotencyKey: string; note?: string }) {
-    const amount = money(cents(input.amount));
-    if (cents(amount) === 0n) throw new CommissionError(400, 'Withdrawal amount must be positive');
+type WithdrawalActor = {
+    userId: string;
+    authorize: (tx: CommissionTx) => Promise<unknown>;
+    payout: (tx: CommissionTx) => Promise<Record<string, unknown>>;
+};
+
+function intentScope(tenant: string, agentId: string, actor?: WithdrawalActor) {
+    return and(eq(commissionWithdrawalIntents.tenantAdminId, tenant), eq(commissionWithdrawalIntents.agentId, agentId),
+        eq(commissionWithdrawalIntents.actorType, actor ? 'AGENT' : 'ADMIN'), eq(commissionWithdrawalIntents.actorUserId, actor?.userId ?? tenant));
+}
+
+function publicIntent(row: typeof commissionWithdrawalIntents.$inferSelect) {
+    return { id: row.id, amount: row.amount, currency: row.currency, note: row.note, withdrawalId: row.withdrawalId };
+}
+
+// All intent and ledger mutations share the tenant -> agent -> membership lock
+// order. The unresolved uniqueness constraint is a second line of defense.
+export async function withdrawalIntent(tenant: string, agentId: string, actor?: WithdrawalActor, input?: {
+    amount: string; currency: string; note?: string; previousIntentId: string | null;
+}) {
     return db.transaction(async tx => {
         await lockTenant(tx, tenant);
         const agent = await ownedAgent(tx, tenant, agentId, true);
-        const [existing] = await tx.select().from(commissionWithdrawals).where(and(eq(commissionWithdrawals.tenantAdminId, tenant), eq(commissionWithdrawals.idempotencyKey, input.idempotencyKey)));
-        if (existing) {
-            if (existing.agentId !== agentId || existing.amount !== amount || existing.currency !== input.currency || existing.note !== (input.note ?? null)) throw new CommissionError(409, 'Idempotency key already used for a different request');
+        if (actor) await actor.authorize(tx);
+        const [latest] = await tx.select().from(commissionWithdrawalIntents).where(intentScope(tenant, agentId, actor))
+            .orderBy(desc(commissionWithdrawalIntents.sequence)).limit(1);
+        if (latest && !latest.resolution) return { intent: publicIntent(latest), previousIntentId: latest.id };
+        if (!input) return { intent: null, previousIntentId: latest?.id ?? null };
+        if (input.previousIntentId !== (latest?.id ?? null)) throw new CommissionError(409, 'Withdrawal request changed in another tab. Reload and review before starting a new request');
+        if (agent.status !== 'active') throw new CommissionError(409, 'Archived agents cannot request withdrawals');
+        const amount = money(cents(input.amount));
+        if (cents(amount) === 0n) throw new CommissionError(400, 'Withdrawal amount must be positive');
+        const payoutSnapshot = actor ? await actor.payout(tx) : undefined;
+        const [row] = await tx.insert(commissionWithdrawalIntents).values({ tenantAdminId: tenant, agentId,
+            actorType: actor ? 'AGENT' : 'ADMIN', actorUserId: actor?.userId ?? tenant,
+            amount, currency: input.currency, note: input.note,
+            ...(payoutSnapshot ? { payoutSnapshot: journalSnapshot(payoutSnapshot) } : {}) }).returning();
+        return { intent: publicIntent(row!), previousIntentId: row!.id };
+    });
+}
+
+async function ownedIntent(tx: CommissionTx, tenant: string, agentId: string, id: string, actor?: WithdrawalActor) {
+    const [row] = await tx.select().from(commissionWithdrawalIntents).where(and(intentScope(tenant, agentId, actor), eq(commissionWithdrawalIntents.id, z.uuid().parse(id)))).for('update');
+    if (!row) throw new CommissionError(404, 'Withdrawal intent not found');
+    return row;
+}
+
+export async function resolveWithdrawalIntent(tenant: string, agentId: string, id: string, resolution: 'acknowledged' | 'cancelled', actor?: WithdrawalActor) {
+    return db.transaction(async tx => {
+        await lockTenant(tx, tenant);
+        await ownedAgent(tx, tenant, agentId, true);
+        if (actor) await actor.authorize(tx);
+        const row = await ownedIntent(tx, tenant, agentId, id, actor);
+        if (row.resolution === resolution) return;
+        if (row.resolution || (resolution === 'acknowledged' ? !row.withdrawalId : !!row.withdrawalId))
+            throw new CommissionError(409, 'Only confirmed requests can be acknowledged and only unreserved requests can be cancelled');
+        await tx.update(commissionWithdrawalIntents).set({ resolution }).where(eq(commissionWithdrawalIntents.id, row.id));
+    });
+}
+
+export async function reserveWithdrawal(tenant: string, agentId: string, input: { intentId: string }, actor?: WithdrawalActor) {
+    return db.transaction(async tx => {
+        await lockTenant(tx, tenant);
+        const agent = await ownedAgent(tx, tenant, agentId, true);
+        if (actor) await actor.authorize(tx);
+        const intent = await ownedIntent(tx, tenant, agentId, input.intentId, actor);
+        if (intent.withdrawalId) {
+            const [existing] = await tx.select().from(commissionWithdrawals).where(and(eq(commissionWithdrawals.id, intent.withdrawalId), eq(commissionWithdrawals.tenantAdminId, tenant), eq(commissionWithdrawals.agentId, agentId)));
+            if (!existing) throw new CommissionError(409, 'Withdrawal receipt is unavailable');
             return existing;
         }
+        if (intent.resolution) throw new CommissionError(409, 'Withdrawal intent is cancelled');
         if (agent.status !== 'active') throw new CommissionError(409, 'Archived agents cannot request withdrawals');
-        const balance = (await agentBalances(tx, tenant, agentId)).find(b => b.currency === input.currency);
+        const payoutSnapshot = actor ? await actor.payout(tx) : undefined;
+        if (actor && payoutSnapshot?.profileId !== intent.payoutSnapshot?.profileId) throw new CommissionError(409, 'Payout destination changed. Cancel this unreserved intent and review a new request');
+        const { amount, currency, note } = intent;
+        const balance = (await agentBalances(tx, tenant, agentId)).find(b => b.currency === currency);
         if (!balance || cents(balance.available) < cents(amount)) throw new CommissionError(409, 'Insufficient available commission');
-        const [row] = await tx.insert(commissionWithdrawals).values({ ...input, amount, tenantAdminId: tenant, agentId }).returning();
-        await tx.insert(commissionJournal).values({ tenantAdminId: tenant, agentId, currency: input.currency, amount,
+        const [row] = await tx.insert(commissionWithdrawals).values({ amount, currency, note, idempotencyKey: intent.id, tenantAdminId: tenant, agentId,
+            ...(payoutSnapshot ? { payoutSnapshot: journalSnapshot(payoutSnapshot) } : {}) }).returning();
+        await tx.insert(commissionJournal).values({ tenantAdminId: tenant, agentId, currency, amount,
             kind: 'reserve', debitAccount: 'available', creditAccount: 'reserved', withdrawalId: row!.id,
-            snapshot: journalSnapshot({ actorAdminId: tenant, note: input.note ?? null }) });
-        await tx.insert(commissionWithdrawalEvents).values({ withdrawalId: row!.id, status: 'reserved', actorAdminId: tenant });
+            snapshot: journalSnapshot({ ...(actor ? { actorType: 'AGENT', actorAgentUserId: actor.userId } : { actorAdminId: tenant }), intentId: intent.id, note, ...(payoutSnapshot ? { payoutSnapshot } : {}) }) });
+        await tx.insert(commissionWithdrawalEvents).values({ withdrawalId: row!.id, status: 'reserved',
+            ...(actor ? { actorType: 'AGENT' as const, actorAgentUserId: actor.userId } : { actorAdminId: tenant }) });
+        await tx.update(commissionWithdrawalIntents).set({ withdrawalId: row!.id }).where(eq(commissionWithdrawalIntents.id, intent.id));
         return row!;
     });
 }

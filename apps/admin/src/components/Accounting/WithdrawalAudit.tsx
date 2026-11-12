@@ -78,6 +78,54 @@ export function WithdrawalAudit({
                     {data.withdrawal.note && (
                         <Text size='sm'>{data.withdrawal.note}</Text>
                     )}
+                    {data.withdrawal.payoutSnapshot && (
+                        <Paper withBorder p='sm'>
+                            <Stack gap='xs'>
+                                <Text fw={600}>
+                                    Reserved payout destination
+                                </Text>
+                                <Text size='sm'>
+                                    Use this immutable destination for this
+                                    request, not a newer payout profile. No
+                                    transfer is initiated here.
+                                </Text>
+                                <Text size='sm'>
+                                    Method:{' '}
+                                    {data.withdrawal.payoutSnapshot.method ===
+                                    'mpesa'
+                                        ? 'M-Pesa'
+                                        : 'Bank'}
+                                </Text>
+                                <Text size='sm'>
+                                    Account holder:{' '}
+                                    {data.withdrawal.payoutSnapshot.accountName}
+                                </Text>
+                                <Text
+                                    size='sm'
+                                    style={{ overflowWrap: 'anywhere' }}
+                                >
+                                    Destination:{' '}
+                                    {data.withdrawal.payoutSnapshot.destination}
+                                </Text>
+                                <Text
+                                    size='xs'
+                                    style={{ overflowWrap: 'anywhere' }}
+                                >
+                                    Version:{' '}
+                                    {data.withdrawal.payoutSnapshot.profileId}
+                                </Text>
+                                <Text size='xs'>
+                                    Verified{' '}
+                                    {formatDateTime(
+                                        data.withdrawal.payoutSnapshot
+                                            .verifiedAt,
+                                    )}{' '}
+                                    by{' '}
+                                    {data.withdrawal.payoutSnapshot.verifiedBy}
+                                </Text>
+                            </Stack>
+                        </Paper>
+                    )}
                     {data.events.length === 0 && (
                         <Text c='dimmed'>No audit events returned.</Text>
                     )}
@@ -90,6 +138,11 @@ export function WithdrawalAudit({
                             {event.actorAdminId && (
                                 <Text size='xs'>
                                     Admin: {event.actorAdminId}
+                                </Text>
+                            )}
+                            {event.actorAgentUserId && (
+                                <Text size='xs'>
+                                    Agent identity: {event.actorAgentUserId}
                                 </Text>
                             )}
                             {event.reason && (

@@ -1,0 +1,15 @@
+{
+    "compilerOptions": {
+        "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.server.tsbuildinfo",
+        "target": "ES2023",
+        "lib": ["ES2023"],
+        "types": ["node", "bun"],
+        "module": "NodeNext",
+        "moduleResolution": "NodeNext",
+        "skipLibCheck": true,
+        "allowImportingTsExtensions": true,
+        "noEmit": true,
+        "strict": true
+    },
+    "include": ["server.ts"]
+}

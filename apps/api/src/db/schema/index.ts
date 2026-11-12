@@ -6,6 +6,7 @@ export * from './integrations';
 export * from './payments';
 export * from './collections';
 export * from './commissions';
+export * from './agent-portal';
 export * from './pppoe-accounts';
 export * from './radius';
 export * from './user-tags';

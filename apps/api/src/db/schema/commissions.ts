@@ -1,10 +1,10 @@
 import { sql } from 'drizzle-orm';
-import { check, index, integer, jsonb, numeric, pgTable, text, timestamp, unique, uuid } from 'drizzle-orm/pg-core';
+import { bigserial, check, index, integer, jsonb, numeric, pgTable, text, timestamp, unique, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 import { adminUser } from './admin-auth-schema';
 
 const createdAt = () => timestamp('created_at', { withTimezone: true, mode: 'date' }).default(sql`clock_timestamp()`).notNull();
 
-// External personnel only: deliberately no auth user/session relationship.
+// Accounting identity; portal login links are separately admin-authorized.
 export const commissionAgents = pgTable('commission_agent', {
     id: uuid('id').defaultRandom().primaryKey(),
     tenantAdminId: text('tenant_admin_id').notNull().references(() => adminUser.id, { onDelete: 'restrict' }),
@@ -47,6 +47,7 @@ export const commissionWithdrawals = pgTable('commission_withdrawal', {
     status: text('status', { enum: ['reserved', 'approved', 'rejected', 'paid'] }).default('reserved').notNull(),
     reference: text('reference'),
     evidence: text('evidence'),
+    payoutSnapshot: jsonb('payout_snapshot').$type<Record<string, unknown>>(),
     createdAt: createdAt(),
     updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).defaultNow().notNull(),
 }, t => [unique('commission_withdrawal_idempotency_key').on(t.tenantAdminId, t.idempotencyKey),
@@ -57,16 +58,44 @@ export const commissionWithdrawals = pgTable('commission_withdrawal', {
     check('commission_withdrawal_paid_evidence_check', sql`${t.status} <> 'paid' or (length(trim(${t.reference})) > 0 and length(trim(${t.evidence})) > 0 and ${t.reference} is not null and ${t.evidence} is not null)`),
 ]);
 
+// Payload and requester identity never change. Resolution retains the intent so
+// stale tabs cannot reuse an earlier scope version to create another request.
+export const commissionWithdrawalIntents = pgTable('commission_withdrawal_intent', {
+    id: uuid('id').defaultRandom().primaryKey(),
+    sequence: bigserial('sequence', { mode: 'bigint' }).notNull(),
+    tenantAdminId: text('tenant_admin_id').notNull().references(() => adminUser.id, { onDelete: 'restrict' }),
+    agentId: uuid('agent_id').notNull().references(() => commissionAgents.id, { onDelete: 'restrict' }),
+    actorType: text('actor_type', { enum: ['ADMIN', 'AGENT'] }).notNull(),
+    actorUserId: text('actor_user_id').notNull(),
+    amount: numeric('amount', { precision: 20, scale: 2 }).notNull(),
+    currency: text('currency').notNull(),
+    note: text('note'),
+    payoutSnapshot: jsonb('payout_snapshot').$type<Record<string, unknown>>(),
+    withdrawalId: uuid('withdrawal_id').unique().references(() => commissionWithdrawals.id, { onDelete: 'restrict' }),
+    resolution: text('resolution', { enum: ['acknowledged', 'cancelled'] }),
+    createdAt: createdAt(),
+}, t => [
+    index('commission_withdrawal_intent_scope_idx').on(t.tenantAdminId, t.agentId, t.actorType, t.actorUserId, t.sequence),
+    uniqueIndex('commission_withdrawal_intent_unresolved_key').on(t.tenantAdminId, t.agentId, t.actorType, t.actorUserId).where(sql`${t.resolution} is null`),
+    check('commission_withdrawal_intent_amount_check', sql`${t.amount} > 0`),
+    check('commission_withdrawal_intent_currency_check', sql`${t.currency} ~ '^[A-Z]{3}$'`),
+    check('commission_withdrawal_intent_actor_check', sql`${t.actorType} in ('ADMIN','AGENT') and (${t.actorType} <> 'ADMIN' or ${t.actorUserId} = ${t.tenantAdminId})`),
+    check('commission_withdrawal_intent_resolution_check', sql`${t.resolution} is null or (${t.resolution} = 'acknowledged' and ${t.withdrawalId} is not null) or (${t.resolution} = 'cancelled' and ${t.withdrawalId} is null)`),
+]);
+
 export const commissionWithdrawalEvents = pgTable('commission_withdrawal_event', {
     id: uuid('id').defaultRandom().primaryKey(),
     withdrawalId: uuid('withdrawal_id').notNull().references(() => commissionWithdrawals.id, { onDelete: 'restrict' }),
     status: text('status', { enum: ['reserved', 'approved', 'rejected', 'paid'] }).notNull(),
-    actorAdminId: text('actor_admin_id').notNull(),
+    actorAdminId: text('actor_admin_id'),
+    actorType: text('actor_type', { enum: ['ADMIN', 'AGENT'] }).default('ADMIN').notNull(),
+    actorAgentUserId: text('actor_agent_user_id'),
     reason: text('reason'),
     reference: text('reference'),
     evidence: text('evidence'),
     createdAt: createdAt(),
-}, t => [unique('commission_withdrawal_event_status_key').on(t.withdrawalId, t.status)]);
+}, t => [unique('commission_withdrawal_event_status_key').on(t.withdrawalId, t.status),
+    check('commission_withdrawal_actor_check', sql`(${t.actorType} = 'ADMIN' and ${t.actorAdminId} is not null and ${t.actorAgentUserId} is null) or (${t.actorType} = 'AGENT' and ${t.actorAdminId} is null and ${t.actorAgentUserId} is not null)`)]);
 
 // Each immutable row is a complete balanced two-account posting, not a mutable
 // balance. Equal debit/credit amount is structural, so partial journals cannot

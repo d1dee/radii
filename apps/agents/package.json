@@ -1,0 +1,34 @@
+{
+    "name": "agents",
+    "private": true,
+    "version": "0.0.0",
+    "type": "module",
+    "scripts": {
+        "dev": "vite",
+        "build": "tsc -b && vite build",
+        "typecheck": "tsc -b",
+        "serve": "bun run server.ts",
+        "test:browser": "python3 src/portal.browser.py",
+        "test:unit": "bun test ./financial.regression.ts"
+    },
+    "dependencies": {
+        "@mantine/core": "^9.6.0",
+        "@mantine/hooks": "^9.6.0",
+        "@radii/shared": "workspace:*",
+        "@radii/ui": "workspace:*",
+        "better-auth": "^1.7.3",
+        "libphonenumber-js": "^1.13.12",
+        "react": "^19.2.8",
+        "react-dom": "^19.2.8",
+        "react-icons": "^5.7.0"
+    },
+    "devDependencies": {
+        "@types/bun": "^1.4.2",
+        "@types/node": "^24.13.3",
+        "@types/react": "^19.2.18",
+        "@types/react-dom": "^19.2.7",
+        "@vitejs/plugin-react": "^6.1.1",
+        "typescript": "~6.0.3",
+        "vite": "^8.2.2"
+    }
+}
