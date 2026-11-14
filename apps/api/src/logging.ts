@@ -1,12 +1,13 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { fstatSync } from 'node:fs';
 import { inspect } from 'node:util';
+import { honoLogger } from '@logtape/hono';
 import {
     configure,
     dispose,
-    getAnsiColorFormatter,
     getConsoleSink,
-    getJsonLinesFormatter,
     getLogger,
+    getTextFormatter,
     parseLogLevel,
     type LogLevel,
 } from '@logtape/logtape';
@@ -40,8 +41,11 @@ const globalRef = globalThis as unknown as {
 
 const journalOutput =
     process.env.LOG_FORMAT === 'journal'
-    || (!process.env.LOG_FORMAT && !!process.env.JOURNAL_STREAM);
-const jsonOutput = journalOutput || process.env.LOG_FORMAT === 'json';
+    || !!process.env.JOURNAL_STREAM;
+const stdoutStat = process.env.JOURNAL_STREAM ? fstatSync(1) : undefined;
+// A workspace runner forwards through a pipe: journald cannot parse prefixes there.
+const directJournal = journalOutput && stdoutStat !== undefined
+    && process.env.JOURNAL_STREAM === `${stdoutStat.dev}:${stdoutStat.ino}`;
 // systemd consumes these prefixes when SyslogLevelPrefix=yes.
 const journalPriorities: Record<LogLevel, number> = {
     trace: 7,
@@ -51,30 +55,20 @@ const journalPriorities: Record<LogLevel, number> = {
     error: 3,
     fatal: 2,
 };
-const jsonFormatter = getJsonLinesFormatter();
+const httpSummaryFields = new Set(['method', 'url', 'path', 'status', 'responseTime']);
 
 globalRef.__apiLoggingConfigured ??= configure({
     sinks: {
         console: redactByField(
             getConsoleSink({
-                formatter: jsonOutput ? (record) => {
-                        // Redact decoded values so patterns cannot consume JSON delimiters.
-                        const line = JSON.stringify(JSON.parse(jsonFormatter(record)), (_key, value) =>
-                            typeof value === 'string'
-                                ? sensitiveValuePatterns.reduce(
-                                    (text, { pattern, replacement }) => typeof replacement === 'string'
-                                        ? text.replace(pattern, replacement)
-                                        : text.replace(pattern, replacement),
-                                    value,
-                                )
-                                : value,
-                        );
-                        return journalOutput
-                            ? `<${journalPriorities[record.level]}>${line}`
-                            : line;
-                    } : redactByPattern(getAnsiColorFormatter({
-                        timestamp: 'rfc3339',
-                        timestampStyle: null,
+                // Keep direct journal output on the stream identified by JOURNAL_STREAM.
+                levelMap: directJournal ? {
+                    trace: 'log', debug: 'log', info: 'log',
+                    warning: 'log', error: 'log', fatal: 'log',
+                } : undefined,
+                formatter: redactByPattern(
+                    getTextFormatter({
+                        timestamp: journalOutput ? 'disabled' : 'rfc3339',
                         level: (level) =>
                             level === 'warning' ? 'WARN' : level.toUpperCase(),
                         value: (value) =>
@@ -83,18 +77,30 @@ globalRef.__apiLoggingConfigured ??= configure({
                                 : inspect(value, {
                                       colors: false,
                                       compact: true,
+                                      depth: 6,
                                       breakLength: Infinity,
                                   }),
                         format: ({ timestamp, level, message, record }) => {
-                            const details =
-                                Object.keys(record.properties).length > 0
-                                    ? ` ${inspect(record.properties, {
+                            const isHttp = record.category.join('.') === 'radii.api.http';
+                            const details = Object.entries(record.properties)
+                                .filter(([key, value]) => value !== undefined
+                                    && !(isHttp && httpSummaryFields.has(key)))
+                                .map(([key, value]) => {
+                                    const rendered = typeof value === 'string'
+                                        ? value
+                                        : inspect(value, {
                                           colors: false,
                                           compact: true,
+                                          depth: 6,
                                           breakLength: Infinity,
-                                      })}`
-                                    : '';
-                            return `${timestamp} ${level} ${record.category.join('.')} ${message}${details}`.replace(
+                                        });
+                                    return `${key}=${rendered}`;
+                                })
+                                .join(' ');
+                            const prefix = directJournal ? `<${journalPriorities[record.level]}>` : '';
+                            const line = [timestamp, level, record.category.join('.'), message, details]
+                                .filter(Boolean).join(' ');
+                            return `${prefix}${line}`.replace(
                                 /\r?\n/g,
                                 '\\n',
                             );
@@ -140,3 +146,24 @@ await globalRef.__apiLoggingConfigured;
 
 export const apiLogger = getLogger(['radii', 'api']);
 export { dispose as disposeLogging };
+
+export const httpLogger = honoLogger({
+    category: ['radii', 'api', 'http'],
+    format: (c, responseTime) => ({
+        method: c.req.method,
+        // The adapter's message template uses url; omit query strings and origins.
+        url: c.req.path,
+        path: c.req.path,
+        status: c.res.status,
+        responseTime,
+    }),
+    context: {
+        requestId: {
+            headerNames: ['x-correlation-id', 'x-request-id'],
+            responseHeader: 'x-request-id',
+            normalize: (value) => /^[A-Za-z0-9._:-]{1,128}$/.test(value) ? value : null,
+        },
+        include: ['requestId', 'method'],
+        enrich: (c) => ({ path: c.req.path }),
+    },
+});

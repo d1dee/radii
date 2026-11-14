@@ -1,5 +1,4 @@
 import { ApiErrorType } from '@radii/shared';
-import { honoLogger } from '@logtape/hono';
 import { Hono, type Context, type MiddlewareHandler } from 'hono';
 import { cors } from 'hono/cors';
 import { adminAuth } from './adminAuth';
@@ -9,7 +8,7 @@ import { env } from './env';
 import { radiusClient } from './lib/radius';
 import { startNasSessionReconciliation } from './lib/radius/sessionReconcile';
 import { reconcileWireGuardPeers } from './lib/wgReconcile';
-import { apiLogger, disposeLogging } from './logging';
+import { apiLogger, disposeLogging, httpLogger } from './logging';
 import { rateLimit } from './middleware/rateLimit';
 import routes from './routes';
 import type { AppVariables } from './types';
@@ -26,30 +25,7 @@ if (!env.frontendUrls.length) {
     throw new Error('FRONTEND_URLS must contain at least one origin');
 }
 
-app.use(
-    honoLogger({
-        category: ['radii', 'api', 'http'],
-        format: (c, responseTime) => ({
-            method: c.req.method,
-            path: c.req.matchedRoutes.at(-1)?.path ?? '<unmatched>',
-            status: c.res.status,
-            responseTime,
-            contentLength: c.res.headers.get('content-length') ?? undefined,
-        }),
-        context: {
-            requestId: {
-                headerNames: ['x-correlation-id', 'x-request-id'],
-                responseHeader: 'x-request-id',
-                normalize: (value) =>
-                    /^[A-Za-z0-9._:-]{1,128}$/.test(value) ? value : null,
-            },
-            include: ['requestId', 'method'],
-            enrich: (c) => ({
-                path: c.req.matchedRoutes.at(-1)?.path ?? '<unmatched>',
-            }),
-        },
-    }) as unknown as MiddlewareHandler<{ Variables: AppVariables }>,
-);
+app.use(httpLogger as unknown as MiddlewareHandler<{ Variables: AppVariables }>);
 
 // CORS — applied to all API routes (auth + REST).
 app.use(
