@@ -200,24 +200,40 @@ app.get('/client', requireAuth, async (c) => {
 // matched route and request id; no local try/catch to avoid double logging.
 app.get('/status', requireAuth, async (c) => {
     const currentUser = c.get('user');
-
-    // Identify the calling device: the portal carries the login-request id in localstorage
+    c.header('Cache-Control', 'private, no-store');
+    // The login request identifies both the calling device and its tenant.
+    // Never fall back to an unscoped customer-wide list.
     const loginRequestId = c.req.query('login_request');
-    let clientMac = '';
-    // Optional param: an id that is not a uuid is treated as absent rather
-    // than letting the uuid cast surface as a 500.
-    if (loginRequestId && UUID_RE.test(loginRequestId)) {
-        const [loginRequest] = await db
-            .select({ mac: hotspotLoginRequest.mac })
-            .from(hotspotLoginRequest)
-            .where(eq(hotspotLoginRequest.id, loginRequestId))
-            .limit(1);
-        clientMac = normalizeMac(loginRequest?.mac);
+    if (!loginRequestId || !UUID_RE.test(loginRequestId)) {
+        return c.json({ success: true, data: [] });
     }
+    const [loginRequest] = await db
+        .select({
+            mac: hotspotLoginRequest.mac,
+            nasDeviceId: hotspotLoginRequest.nasDeviceId,
+        })
+        .from(hotspotLoginRequest)
+        .where(
+            and(
+                eq(hotspotLoginRequest.id, loginRequestId),
+                or(
+                    isNull(hotspotLoginRequest.userId),
+                    eq(hotspotLoginRequest.userId, currentUser!.id),
+                ),
+            ),
+        )
+        .limit(1);
+    const tenantAdminId = await getAdminIdForNasDevice(
+        loginRequest?.nasDeviceId,
+    );
+    if (!tenantAdminId) return c.json({ success: true, data: [] });
+    const clientMac = normalizeMac(loginRequest?.mac);
 
     const activations = await radiusClient.getUserPackageStatuses(
         currentUser!.id,
         'hotspot',
+        undefined,
+        tenantAdminId,
     );
     const data = activations
         .filter((v) => v)
@@ -919,6 +935,10 @@ app.post('/login-request/:id/complete', requireAuth, async (c) => {
             'This hotspot sign-in session has expired — reconnect to the wifi network to start a new one.',
         );
     }
+    const tenantAdminId = await getAdminIdForNasDevice(loginRequest.nasDeviceId);
+    if (!tenantAdminId) {
+        return jsonError(c, 400, 'A valid hotspot login request is required');
+    }
 
     const body = (await c.req.json().catch(() => ({}))) as {
         activationId?: unknown;
@@ -931,8 +951,12 @@ app.post('/login-request/:id/complete', requireAuth, async (c) => {
             ? radiusClient.getActivationCredentials(
                   requestedActivationId,
                   currentUser.id,
+                  tenantAdminId,
               )
-            : radiusClient.getActiveActivationCredentials(currentUser.id)
+            : radiusClient.getActiveActivationCredentials(
+                  currentUser.id,
+                  tenantAdminId,
+              )
     ).catch(() => null);
 
     if (requestedActivationId && !active) {
