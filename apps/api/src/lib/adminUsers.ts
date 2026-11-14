@@ -1684,8 +1684,8 @@ export async function listPayments(opts: ListPaymentsOpts) {
         if (failureByTransactionId.has(log.transactionId)) continue;
         const root = record(log.payload);
         const reason =
-            stringValue(root?.message)?.trim() ||
             sanitizePaymentEvent(log.payload).message?.trim() ||
+            stringValue(root?.message)?.trim() ||
             null;
         failureByTransactionId.set(log.transactionId, {
             reason,
@@ -1791,13 +1791,11 @@ function sanitizePaymentEvent(payload: unknown): PaymentEventDetails {
 function summarizePaymentFailure(eventType: string, payload: unknown): string {
     const root = record(payload);
     const event = sanitizePaymentEvent(payload);
-    const message = (
-        stringValue(root?.message) ??
-        event.message ??
-        ''
-    ).toLowerCase();
+    const providerMessage = event.message?.trim();
+    const message = (providerMessage || '').toLowerCase();
     const clientFailure = stringValue(root?.clientFailure);
 
+    if (message.includes('no response from user')) return 'No response from user';
     if (
         clientFailure === 'insufficient_balance' ||
         message.includes('insufficient')
@@ -1840,18 +1838,19 @@ function summarizePaymentFailure(eventType: string, payload: unknown): string {
         return message.includes('rejected') || message.includes('not accepted')
             ? 'STK push rejected'
             : 'STK push failed';
-    if (eventType === 'payment_failed_status_poll') {
-        if (event.resultCode && ['2029', '2001', '2002'].includes(event.resultCode))
-            return `Payment failed (code ${event.resultCode})`;
-        return 'Payment failed';
+    if (
+        eventType === 'payment_failed_status_poll' ||
+        eventType === 'payment_failed_callback_stk' ||
+        eventType === 'payment_failed_callback_status'
+    ) {
+        return providerMessage
+            ? providerMessage.length > 80
+                ? `${providerMessage.slice(0, 77)}...`
+                : providerMessage
+            : event.resultCode
+              ? `Payment failed (code ${event.resultCode})`
+              : 'Payment failed';
     }
-    if (eventType === 'payment_failed_callback_stk') {
-        if (event.resultCode && ['2029', '2001', '2002'].includes(event.resultCode))
-            return `Payment failed (code ${event.resultCode})`;
-        return 'STK push failed';
-    }
-    if (eventType === 'payment_failed_callback_status')
-        return 'Transaction verification failed';
     if (eventType.includes('status')) return 'Status query failed';
 
     return 'Payment failed';
