@@ -1,15 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# radii-api service setup: installs the systemd unit + sudoers fallback.
+# radii-api service setup: installs the unit, persistent journal, and sudoers fallback.
 # Run as root (or via sudo). Idempotent — safe to re-run.
 #
 # Usage:
 #   curl … | sudo bash            # from anywhere
 #   sudo bash scripts/setup-service.sh           # from repo root
 
-REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SERVICE_FILE="$REPO_ROOT/apps/api/radii-api.service"
+JOURNAL_CONFIG="$REPO_ROOT/scripts/radii-journald.conf"
+JOURNAL_DROPIN_DIR="/etc/systemd/journald@radii.conf.d"
 WG_BIN="${WG_BIN:-/usr/bin/wg}"
 WG_IFACE="${WG_IFACE:-wg0}"
 API_USER="radii-api"
@@ -45,6 +47,7 @@ PORT=3000
 WG_MANAGE_PEERS=true
 WG_IFACE=$WG_IFACE
 WG_BIN=$WG_BIN
+LOG_LEVEL=info
 # WG_USE_SUDO=false   # set true if running outside systemd without ambient caps
 EOF
     chmod 644 "$DEFAULTS_FILE"
@@ -70,8 +73,23 @@ fi
 systemctl daemon-reload
 echo "→ reloaded systemd"
 
+echo "→ configuring persistent Radii journal (systemd 245+ required)"
+install -d -m 755 "$JOURNAL_DROPIN_DIR"
+install -m 644 "$JOURNAL_CONFIG" "$JOURNAL_DROPIN_DIR/60-radii.conf"
+systemctl restart systemd-journald@radii.service
+journalctl --namespace=radii --flush
+
 echo ""
 echo "Setup complete."
 echo "  Edit $DEFAULTS_FILE, then:"
 echo "    systemctl enable --now radii-api"
-echo "    journalctl -u radii-api -f"
+echo "  If already running, apply the updated unit with:"
+echo "    systemctl restart radii-api"
+echo "  Follow logs:"
+echo "    journalctl --namespace=radii -u radii-api -f"
+echo "  Inspect warnings and errors (including previous boots):"
+echo "    journalctl --namespace=radii -u radii-api -p warning --since '7 days ago'"
+echo "  Inspect structured messages:"
+echo "    journalctl --namespace=radii -u radii-api -o cat"
+echo "  Retention: up to 30 days, bounded by 512 MiB and 1 GiB free disk space."
+echo "  Set LOG_LEVEL=debug in $DEFAULTS_FILE and restart radii-api for debug logs."

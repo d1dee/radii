@@ -5,8 +5,10 @@ import {
     dispose,
     getAnsiColorFormatter,
     getConsoleSink,
+    getJsonLinesFormatter,
     getLogger,
     parseLogLevel,
+    type LogLevel,
 } from '@logtape/logtape';
 import {
     CREDIT_CARD_NUMBER_PATTERN,
@@ -36,12 +38,41 @@ const globalRef = globalThis as unknown as {
     __apiLoggingConfigured?: Promise<void>;
 };
 
+const journalOutput =
+    process.env.LOG_FORMAT === 'journal'
+    || (!process.env.LOG_FORMAT && !!process.env.JOURNAL_STREAM);
+const jsonOutput = journalOutput || process.env.LOG_FORMAT === 'json';
+// systemd consumes these prefixes when SyslogLevelPrefix=yes.
+const journalPriorities: Record<LogLevel, number> = {
+    trace: 7,
+    debug: 7,
+    info: 6,
+    warning: 4,
+    error: 3,
+    fatal: 2,
+};
+const jsonFormatter = getJsonLinesFormatter();
+
 globalRef.__apiLoggingConfigured ??= configure({
     sinks: {
         console: redactByField(
             getConsoleSink({
-                formatter: redactByPattern(
-                    getAnsiColorFormatter({
+                formatter: jsonOutput ? (record) => {
+                        // Redact decoded values so patterns cannot consume JSON delimiters.
+                        const line = JSON.stringify(JSON.parse(jsonFormatter(record)), (_key, value) =>
+                            typeof value === 'string'
+                                ? sensitiveValuePatterns.reduce(
+                                    (text, { pattern, replacement }) => typeof replacement === 'string'
+                                        ? text.replace(pattern, replacement)
+                                        : text.replace(pattern, replacement),
+                                    value,
+                                )
+                                : value,
+                        );
+                        return journalOutput
+                            ? `<${journalPriorities[record.level]}>${line}`
+                            : line;
+                    } : redactByPattern(getAnsiColorFormatter({
                         timestamp: 'rfc3339',
                         timestampStyle: null,
                         level: (level) =>
@@ -55,18 +86,15 @@ globalRef.__apiLoggingConfigured ??= configure({
                                       breakLength: Infinity,
                                   }),
                         format: ({ timestamp, level, message, record }) => {
-                            const showDetails = ['warning', 'error', 'fatal'].includes(
-                                record.level,
-                            );
                             const details =
-                                showDetails && Object.keys(record.properties).length > 0
+                                Object.keys(record.properties).length > 0
                                     ? ` ${inspect(record.properties, {
                                           colors: false,
                                           compact: true,
                                           breakLength: Infinity,
                                       })}`
                                     : '';
-                            return `${timestamp} ${level} ${message}${details}`.replace(
+                            return `${timestamp} ${level} ${record.category.join('.')} ${message}${details}`.replace(
                                 /\r?\n/g,
                                 '\\n',
                             );
