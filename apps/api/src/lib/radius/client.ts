@@ -985,7 +985,8 @@ export class RadiusClient {
         }
     }
 
-    // Credentials of the user's most recent active (non-expired) activation,
+    // Credentials of the user's most recent active (non-expired) activation
+    // attributed to the current NAS admin,
     // used by the portal login-complete flow to send a returning customer back
     // to the NAS with their package login instead of a fresh one-off hotspot
     // user. Bank activations are reconciled first so the login they receive
@@ -993,7 +994,9 @@ export class RadiusClient {
     // skipped. Null when nothing usable is active.
     async getActiveActivationCredentials(
         userId: string,
+        tenantAdminId: string,
     ): Promise<ProvisionedCredentials | null> {
+        if (!tenantAdminId || tenantAdminId === 'system') return null;
         const rows = await db
             .select({ activation: activatedPackages, pkg: packages })
             .from(activatedPackages)
@@ -1002,6 +1005,7 @@ export class RadiusClient {
                 and(
                     eq(activatedPackages.userId, userId),
                     eq(packages.type, 'hotspot'),
+                    activationOwnedByAdmin(tenantAdminId),
                     activeActivationCondition(),
                 ),
             )
@@ -1032,11 +1036,13 @@ export class RadiusClient {
     // login carries the current balance; an exhausted bank refuses. A damaged
     // activation whose password row vanished gets one re-provisioned rather
     // than stranding a paid customer. Null when the activation is not this
-    // user's, is expired, or is unusable.
+    // user's, belongs to a different NAS admin, is expired, or is unusable.
     async getActivationCredentials(
         activationId: string,
         userId: string,
+        tenantAdminId: string,
     ): Promise<ProvisionedCredentials | null> {
+        if (!tenantAdminId || tenantAdminId === 'system') return null;
         const [row] = await db
             .select({ activation: activatedPackages, pkg: packages })
             .from(activatedPackages)
@@ -1046,6 +1052,7 @@ export class RadiusClient {
                     eq(activatedPackages.id, activationId),
                     eq(activatedPackages.userId, userId),
                     eq(packages.type, 'hotspot'),
+                    activationOwnedByAdmin(tenantAdminId),
                     activeActivationCondition(),
                 ),
             )
@@ -1077,11 +1084,17 @@ export class RadiusClient {
     // The payload carries remaining time/bytes and live RADIUS usage. The
     // optional type restricts the result to one package type so the hotspot
     // and PPPoE portals only see their own activations.
+    // Hotspot additionally requires a tenant, preserving same-admin roaming
+    // without exposing purchases attributed to another admin's NAS.
     async getUserPackageStatuses(
         userId: string,
         type?: 'hotspot' | 'pppoe',
         pppoeServiceAccountId?: string,
+        tenantAdminId?: string,
     ) {
+        if (type === 'hotspot' && (!tenantAdminId || tenantAdminId === 'system')) {
+            return [];
+        }
         const now = new Date();
         const rows = await db
             .select({
@@ -1093,6 +1106,9 @@ export class RadiusClient {
             .where(
                 and(
                     eq(activatedPackages.userId, userId),
+                    type === 'hotspot'
+                        ? activationOwnedByAdmin(tenantAdminId!)
+                        : undefined,
                     or(
                         activeActivationCondition(),
                         and(

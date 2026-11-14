@@ -47,3 +47,5 @@ _apps
 *.cases.*
 *.test.*
 tests/
+*.py
+*.*.ts
