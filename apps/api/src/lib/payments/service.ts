@@ -410,6 +410,8 @@ export class PaymentService {
         payment: PackagePaymentRow, txRow: TransactionRow, provider: PaymentProvider,
         localStatus: PackagePaymentRow['status'],
     ): Promise<PackagePaymentRow['status']> {
+        const reference = txRow.providerReference;
+        if (!reference) return localStatus;
 
         // Give callbacks time to arrive before the first fallback query, then
         // throttle subsequent queries. Portal polls still read local status.
@@ -419,7 +421,7 @@ export class PaymentService {
 
         let result;
         try {
-            result = await provider.getPaymentStatus(txRow.providerReference);
+            result = await provider.getPaymentStatus(reference);
         } catch (err) {
             paymentLogError(
                 'status_poll_threw',
@@ -874,7 +876,7 @@ export class PaymentService {
             status: 'pending', paymentId: target.payment.id, error: true, errorStatus: 409,
             message: 'The receipt could not be verified for this purchase. Check the code or contact support.',
         };
-        if (!('nonce' in attempt)) return {
+        if (!('nonce' in attempt) || !attempt.id) return {
             status: 'pending', paymentId: target.payment.id,
             message: 'exhausted' in attempt
                 ? 'Receipt verification could not finish. Contact support before trying again.'
@@ -882,6 +884,7 @@ export class PaymentService {
             ...('exhausted' in attempt ? { error: true, errorStatus: 409 as const } : {}),
         };
         const statusCallbackNonce = attempt.nonce;
+        const attemptId = attempt.id;
 
         let result;
         try {
@@ -983,7 +986,7 @@ export class PaymentService {
 
         if (result.conversationId) {
             await db.update(transactionLog).set({ providerConversationId: result.conversationId })
-                .where(eq(transactionLog.id, attempt.id));
+                .where(eq(transactionLog.id, attemptId));
         }
 
         return {
@@ -994,7 +997,7 @@ export class PaymentService {
 
         async function trxAttemptPhase(phase: string) {
             await db.update(transactionLog).set({ payload: sql`${transactionLog.payload} || ${JSON.stringify({ phase })}::jsonb` })
-                .where(eq(transactionLog.id, attempt!.id!));
+                .where(eq(transactionLog.id, attemptId));
         }
     }
 

@@ -1163,8 +1163,8 @@ export async function getAdminSessionDetail(
           )
         : Number(row.accounting.acctsessiontime ?? 0);
 
-    let activationDetail = null;
-    if (row.activation?.id) {
+    const activationDetail = await (async () => {
+        if (!row.activation?.id) return null;
         const activationId = row.activation.id;
         const nasAddresses = [...(await getAdminNasAddresses(adminId))];
         const [events, accountingRows] = await Promise.all([
@@ -1267,7 +1267,7 @@ export async function getAdminSessionDetail(
             now: new Date(),
         });
 
-        activationDetail = {
+        return {
             ...row.activation,
             balance: {
                 mode: cumulative
@@ -1297,7 +1297,7 @@ export async function getAdminSessionDetail(
             })),
             consumption,
         };
-    }
+    })();
 
     return {
         session: {

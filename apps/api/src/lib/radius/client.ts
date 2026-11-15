@@ -864,7 +864,7 @@ export class RadiusClient {
         // Credentials must exist before creating immutable activation history.
         // A failed first-password setup must leave the paid purchase recoverable.
         const initialPassword = await this.ensurePppoePassword(account.username);
-        let activation = existing;
+        let activation: typeof activatedPackages.$inferSelect | null = existing;
         if (!activation) {
             try {
                 const provisioned = await this.provisionPppoeActivation(
@@ -1145,7 +1145,10 @@ export class RadiusClient {
             )
             .orderBy(desc(activatedPackages.activatedAt));
 
-        const out = [];
+        const out: (ActivationStatus & Pick<
+            typeof packages.$inferSelect,
+            'maxDevices' | 'uploadRate' | 'downloadRate' | 'sessionLength' | 'noExpiry' | 'category'
+        > & { price: number })[] = [];
         for (const row of rows) {
             const status = await this.activationStatusFromRows(
                 row.activation.id,
@@ -1219,7 +1222,20 @@ export class RadiusClient {
     // healed re-provisioning them if their radcheck row vanished.
     async getPppoeClients(userId: string, tenantAdminId?: string | null) {
         const accounts = await listPppoeServiceAccounts(userId, tenantAdminId);
-        const result = [];
+        const result: {
+            accountId: string;
+            tenantId: string;
+            tenantName: string;
+            nasDeviceId: string | null;
+            nasName: string | null;
+            label: string | null;
+            status: typeof pppoeServiceAccounts.$inferSelect.status;
+            username: string;
+            password: string | null;
+            online: boolean;
+            lastUsedAt: Date | null;
+            activations: ActivationStatus[];
+        }[] = [];
         for (const { account, tenantName, nas } of accounts) {
             const rows = await db
                 .select({ activation: activatedPackages, pkg: packages })
@@ -1424,6 +1440,7 @@ export class RadiusClient {
                     ),
                 );
             for (const row of rows) {
+                if (row.username === null) continue;
                 const session = this.sessionInfoFromRow(row);
                 try {
                     const target = await this.nasTargetForSession(
