@@ -53,6 +53,7 @@ import { calculateActivationTime } from './radius/activationLimits';
 import { manualFairUsageAvailable } from './radius/fairUsage';
 import { bankSessionUsage } from './radius/bankUsage';
 import { paymentService } from './payments';
+import { concisePaymentFailure } from './payments/types';
 import {
     nasAddressClaims,
     scopedNasHistoryAddress,
@@ -1795,24 +1796,8 @@ function summarizePaymentFailure(eventType: string, payload: unknown): string {
     const message = (providerMessage || '').toLowerCase();
     const clientFailure = stringValue(root?.clientFailure);
 
-    if (message.includes('no response from user')) return 'No response from user';
-    if (
-        clientFailure === 'insufficient_balance' ||
-        message.includes('insufficient')
-    )
-        return 'Insufficient balance';
-    if (
-        clientFailure === 'cancelled' ||
-        message.includes('cancelled') ||
-        message.includes('canceled')
-    )
-        return 'Customer cancelled';
-    if (
-        clientFailure === 'timeout' ||
-        message.includes('timed out') ||
-        message.includes('timeout')
-    )
-        return 'STK request timed out';
+    const conciseFailure = concisePaymentFailure(clientFailure, providerMessage);
+    if (conciseFailure) return conciseFailure;
     if (message.includes('amount mismatch')) return 'Amount mismatch';
     if (message.includes('different phone number')) return 'Payer phone mismatch';
     if (message.includes('invalid m-pesa amount')) return 'Invalid payment amount';
