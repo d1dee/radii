@@ -53,6 +53,7 @@ import { calculateActivationTime } from './radius/activationLimits';
 import { manualFairUsageAvailable } from './radius/fairUsage';
 import { bankSessionUsage } from './radius/bankUsage';
 import { paymentService } from './payments';
+import { concisePaymentFailure } from './payments/types';
 import {
     nasAddressClaims,
     scopedNasHistoryAddress,
@@ -1162,8 +1163,8 @@ export async function getAdminSessionDetail(
           )
         : Number(row.accounting.acctsessiontime ?? 0);
 
-    let activationDetail = null;
-    if (row.activation?.id) {
+    const activationDetail = await (async () => {
+        if (!row.activation?.id) return null;
         const activationId = row.activation.id;
         const nasAddresses = [...(await getAdminNasAddresses(adminId))];
         const [events, accountingRows] = await Promise.all([
@@ -1266,7 +1267,7 @@ export async function getAdminSessionDetail(
             now: new Date(),
         });
 
-        activationDetail = {
+        return {
             ...row.activation,
             balance: {
                 mode: cumulative
@@ -1296,7 +1297,7 @@ export async function getAdminSessionDetail(
             })),
             consumption,
         };
-    }
+    })();
 
     return {
         session: {
@@ -1684,8 +1685,8 @@ export async function listPayments(opts: ListPaymentsOpts) {
         if (failureByTransactionId.has(log.transactionId)) continue;
         const root = record(log.payload);
         const reason =
-            stringValue(root?.message)?.trim() ||
             sanitizePaymentEvent(log.payload).message?.trim() ||
+            stringValue(root?.message)?.trim() ||
             null;
         failureByTransactionId.set(log.transactionId, {
             reason,
@@ -1791,30 +1792,12 @@ function sanitizePaymentEvent(payload: unknown): PaymentEventDetails {
 function summarizePaymentFailure(eventType: string, payload: unknown): string {
     const root = record(payload);
     const event = sanitizePaymentEvent(payload);
-    const message = (
-        stringValue(root?.message) ??
-        event.message ??
-        ''
-    ).toLowerCase();
+    const providerMessage = event.message?.trim();
+    const message = (providerMessage || '').toLowerCase();
     const clientFailure = stringValue(root?.clientFailure);
 
-    if (
-        clientFailure === 'insufficient_balance' ||
-        message.includes('insufficient')
-    )
-        return 'Insufficient balance';
-    if (
-        clientFailure === 'cancelled' ||
-        message.includes('cancelled') ||
-        message.includes('canceled')
-    )
-        return 'Customer cancelled';
-    if (
-        clientFailure === 'timeout' ||
-        message.includes('timed out') ||
-        message.includes('timeout')
-    )
-        return 'STK request timed out';
+    const conciseFailure = concisePaymentFailure(clientFailure, providerMessage);
+    if (conciseFailure) return conciseFailure;
     if (message.includes('amount mismatch')) return 'Amount mismatch';
     if (message.includes('different phone number')) return 'Payer phone mismatch';
     if (message.includes('invalid m-pesa amount')) return 'Invalid payment amount';
@@ -1840,18 +1823,19 @@ function summarizePaymentFailure(eventType: string, payload: unknown): string {
         return message.includes('rejected') || message.includes('not accepted')
             ? 'STK push rejected'
             : 'STK push failed';
-    if (eventType === 'payment_failed_status_poll') {
-        if (event.resultCode && ['2029', '2001', '2002'].includes(event.resultCode))
-            return `Payment failed (code ${event.resultCode})`;
-        return 'Payment failed';
+    if (
+        eventType === 'payment_failed_status_poll' ||
+        eventType === 'payment_failed_callback_stk' ||
+        eventType === 'payment_failed_callback_status'
+    ) {
+        return providerMessage
+            ? providerMessage.length > 80
+                ? `${providerMessage.slice(0, 77)}...`
+                : providerMessage
+            : event.resultCode
+              ? `Payment failed (code ${event.resultCode})`
+              : 'Payment failed';
     }
-    if (eventType === 'payment_failed_callback_stk') {
-        if (event.resultCode && ['2029', '2001', '2002'].includes(event.resultCode))
-            return `Payment failed (code ${event.resultCode})`;
-        return 'STK push failed';
-    }
-    if (eventType === 'payment_failed_callback_status')
-        return 'Transaction verification failed';
     if (eventType.includes('status')) return 'Status query failed';
 
     return 'Payment failed';

@@ -13,6 +13,13 @@ Restart=on-failure
 RestartSec=5
 
 EnvironmentFile=/etc/default/radii-api
+Environment=LOG_FORMAT=journal
+
+LogNamespace=radii
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=radii-api
+SyslogLevelPrefix=yes
 
 AmbientCapabilities=CAP_NET_ADMIN
 CapabilityBoundingSet=CAP_NET_ADMIN

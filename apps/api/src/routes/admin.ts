@@ -605,8 +605,10 @@ app.post('/nas-devices/:id/setup-script', requireAdmin, async (c) => {
 
 // Opening the setup modal renews only a consumed/expired bootstrap capability.
 app.post('/nas-devices/:id/setup-script/bootstrap', requireAdmin, async (c) => {
+    const id = c.req.param('id');
+    if (!id) return jsonError(c, 406, 'missing NAS id');
     const device = await getNasDeviceById(
-        c.req.param('id'), c.get('adminSession').userId,
+        id, c.get('adminSession').userId,
     );
     if (!device) return jsonError(c, 404, 'NAS device not found');
     const row = await getNasBootstrapScript(device.id);
@@ -1034,7 +1036,7 @@ app.post('/users/:id/activations', requireAdmin, async (c) => {
             return jsonError(
                 c,
                 result.paymentId ? 502 : 400,
-                result.error,
+                result.error ?? 'Could not activate the package',
             );
         }
         return c.json({ success: true, data: result }, 201);
@@ -1688,7 +1690,7 @@ app.put('/radius/sessions/:radacctId', requireAdmin, async (c) => {
 app.post('/radius/sessions/:radacctId/bonus', requireAdmin, async (c) => {
     const radacctId = c.req.param('radacctId');
     const adminId = c.get('adminSession').userId;
-    if (!/^\d+$/.test(radacctId) || !(await isAdminRadacctVisible(adminId, radacctId))) {
+    if (!radacctId || !/^\d+$/.test(radacctId) || !(await isAdminRadacctVisible(adminId, radacctId))) {
         return jsonError(c, 404, 'Unknown session');
     }
     const parsed = z.object({ additionalSeconds: z.number().int().positive().max(0xffffffff) })
@@ -1705,6 +1707,7 @@ app.post('/radius/sessions/:radacctId/fup', requireAdmin, async (c) => {
     const radacctId = c.req.param('radacctId');
     const adminId = c.get('adminSession').userId;
     if (
+        !radacctId ||
         !/^\d+$/.test(radacctId) ||
         !(await isAdminRadacctVisible(adminId, radacctId))
     ) {

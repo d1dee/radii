@@ -451,7 +451,7 @@ export async function getPppoeAccountForPayment(
         if (account.nasDeviceId !== payment.nasDeviceId) return null;
         return account;
     }
-    if (!payment.tenantAdminId) return null;
+    if (!payment.tenantAdminId || !payment.nasDeviceId) return null;
     const account = await ensurePppoeServiceAccount(
         payment.userId,
         payment.tenantAdminId,
@@ -572,4 +572,3 @@ export async function bondPppoeAccountToNas(
         .returning();
     return bonded ?? null;
 }
-

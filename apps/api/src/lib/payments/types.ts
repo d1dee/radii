@@ -14,18 +14,40 @@ export type PaymentOutcome = 'pending' | 'completed' | 'failed';
 
 export type ClientPaymentFailure = 'cancelled' | 'timeout' | 'insufficient_balance';
 
+// Match known failures without exposing arbitrary provider diagnostics.
+export function concisePaymentFailure(
+    failure: unknown,
+    description: unknown,
+): string | null {
+    const message =
+        typeof description === 'string' ? description.toLowerCase() : '';
+    if (message.includes('no response from user')) return 'No response from user';
+    if (failure === 'insufficient_balance' || message.includes('insufficient'))
+        return 'Insufficient balance';
+    if (
+        failure === 'cancelled' ||
+        message.includes('cancelled') ||
+        message.includes('canceled')
+    )
+        return 'Customer cancelled';
+    if (
+        failure === 'timeout' ||
+        message.includes('timed out') ||
+        message.includes('timeout')
+    )
+        return 'STK request timed out';
+    return null;
+}
+
 // Only allowlisted outcomes can become a specific customer-facing message.
-export function paymentFailureMessage(failure: unknown): string {
-    switch (failure) {
-        case 'cancelled':
-            return 'You cancelled the M-Pesa payment. Please try again when ready.';
-        case 'timeout':
-            return 'The M-Pesa payment request timed out. Please try again.';
-        case 'insufficient_balance':
-            return 'Your M-Pesa balance is insufficient. Top up and try again.';
-        default:
-            return 'Payment could not be completed. Please try again.';
-    }
+export function paymentFailureMessage(
+    failure: unknown,
+    description?: unknown,
+): string {
+    return (
+        concisePaymentFailure(failure, description) ??
+        'Payment could not be completed. Please try again.'
+    );
 }
 
 // Normalized request to initiate a payment. Amounts are whole units of the
