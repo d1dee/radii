@@ -41,6 +41,7 @@ import {
 import { useAutoRefresh } from '@/lib/autoRefresh';
 import { warnBackgroundFailure } from '@/lib/clientError';
 import { dayjs } from '@/lib/dayjs';
+import { useDrawerHistory } from '@/lib/drawerHistory';
 import {
     formatDate,
     formatDateTime,
@@ -95,7 +96,7 @@ export default function PaymentsPage() {
     const [data, setData] = useState<AdminPaymentList | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
-    const [detailsId, setDetailsId] = useState<string | null>(null);
+    const [detailsId, setDetailsId] = useDrawerHistory();
 
     const [status, setStatus] = useState<string | null>(null);
     const [packageType, setPackageType] = useState<string | null>(null);

@@ -102,6 +102,7 @@ import {
 } from './fairUsage';
 import { portalStatusIsVisible, sessionRemainingSeconds } from './sessionStatus';
 import { additionalBankTime, bankSessionTimeout, bankSessionUsage } from './bankUsage';
+import { summarizeOpenSessions } from './networkUsage';
 
 const logger = apiLogger.getChild('radius');
 const PPPOE_EXPIRED_PROFILE = 'radii-ppp-expired';
@@ -520,11 +521,9 @@ export interface NetworkUsage {
     liveSessions: number;
     liveUsers: number;
     liveOctets: number;
-    // Sum of per-live-session throughput: what the currently online user base is
-    // transferring right now, averaged over the window (radacct interim
-    // updates keep the counters current between Start/Stop records).
+    // Sum of lifetime average speeds for open sessions, NOT current throughput.
     aggregateThroughputBps: number;
-    // Mean of the per-session averages over the window.
+    // Mean of lifetime average speeds for open sessions.
     avgSpeedPerSessionBps: number;
     sessionsStartedInWindow: number;
     avgSessionSeconds: number;
@@ -2991,17 +2990,14 @@ export class RadiusClient {
     // Metrics
     // =========================================================================
 
-    // Admin-facing aggregate usage over a trailing window: live session/user
-    // counts, current throughput and per-session average speed, sessions
-    // started inside the window, and the heaviest users.
+    // Open-session lifetime totals and averages. The trailing window applies
+    // only to session starts and the start-time-based top-user ranking.
     async getNetworkUsage(
         windowMinutes: number,
         nasIpAddresses: string[],
     ): Promise<NetworkUsage> {
         const windowMs = Math.max(1, windowMinutes) * 60_000;
         const windowStart = new Date(Date.now() - windowMs);
-        const windowSeconds = windowMs / 1000;
-        const now = Date.now();
 
         const liveRows = await db
             .select()
@@ -3016,34 +3012,11 @@ export class RadiusClient {
                 ),
             );
 
-        let liveOctets = 0;
-        let aggregateBps = 0;
-        const sessionRates: number[] = [];
-        const liveUsers = new Set<string>();
-        for (const row of liveRows) {
-            const octets =
-                Number(row.acctinputoctets ?? 0) +
-                Number(row.acctoutputoctets ?? 0);
-            liveOctets += octets;
-            if (row.username) liveUsers.add(row.username);
-            const elapsed = row.acctstarttime
-                ? Math.max(
-                      1,
-                      Math.min(
-                          windowSeconds,
-                          (now - row.acctstarttime.getTime()) / 1000,
-                      ),
-                  )
-                : windowSeconds;
-            const bps = (octets * 8) / elapsed;
-            aggregateBps += bps;
-            sessionRates.push(bps);
-        }
+        const liveStats = summarizeOpenSessions(liveRows);
 
         const [windowStats] = await db
             .select({
                 sessions: sql<number>`count(*)`,
-                avgSeconds: sql<number>`coalesce(avg(${radacct.acctsessiontime}), 0)::float8`,
             })
             .from(radacct)
             .where(
@@ -3055,10 +3028,11 @@ export class RadiusClient {
                 ),
             );
 
+        const totalOctets = sql<number>`coalesce(sum(coalesce(${radacct.acctinputoctets}, 0) + coalesce(${radacct.acctoutputoctets}, 0)), 0)::float8`;
         const topUsers = await db
             .select({
                 username: radacct.username,
-                octets: sql<number>`coalesce(sum(${radacct.acctinputoctets} + ${radacct.acctoutputoctets}), 0)::float8`,
+                octets: totalOctets,
                 sessions: sql<number>`count(*)`,
             })
             .from(radacct)
@@ -3071,27 +3045,13 @@ export class RadiusClient {
                 ),
             )
             .groupBy(radacct.username)
-            .orderBy(
-                desc(
-                    sql`sum(${radacct.acctinputoctets} + ${radacct.acctoutputoctets})`,
-                ),
-            )
+            .orderBy(desc(totalOctets))
             .limit(10);
 
         return {
             windowMinutes,
-            liveSessions: liveRows.length,
-            liveUsers: liveUsers.size,
-            liveOctets,
-            aggregateThroughputBps: Math.round(aggregateBps),
-            avgSpeedPerSessionBps: sessionRates.length
-                ? Math.round(
-                      sessionRates.reduce((a, b) => a + b, 0) /
-                          sessionRates.length,
-                  )
-                : 0,
+            ...liveStats,
             sessionsStartedInWindow: Number(windowStats?.sessions ?? 0),
-            avgSessionSeconds: Number(windowStats?.avgSeconds ?? 0),
             topUsers: topUsers.map((u) => ({
                 username: u.username ?? '',
                 octets: Number(u.octets),

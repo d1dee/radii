@@ -65,6 +65,7 @@ import {
 import { useAutoRefresh } from '@/lib/autoRefresh';
 import { warnBackgroundFailure } from '@/lib/clientError';
 import { dayjs } from '@/lib/dayjs';
+import { useDrawerHistory } from '@/lib/drawerHistory';
 import { formatDate, formatMoney } from '@/lib/format';
 import { fuseOptionsFilter } from '@/lib/fuseOptionsFilter';
 import { notifyResult } from '@/lib/notify';
@@ -135,7 +136,7 @@ export default function UsersPage() {
     const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
     const [page, setPage] = useState(1);
     const loadRequest = useRef(0);
-    const [detailsId, setDetailsId] = useState<string | null>(null);
+    const [detailsId, setDetailsId] = useDrawerHistory();
     const [nasDevices, setNasDevices] = useState<NasDeviceRow[]>([]);
     const [provisionOpened, setProvisionOpened] = useState(false);
     const [provisionPhone, setProvisionPhone] = useState('');

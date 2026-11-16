@@ -1427,6 +1427,7 @@ export type NetworkUsage = {
     liveSessions: number;
     liveUsers: number;
     liveOctets: number;
+    // Sum and mean of open sessions' lifetime averages, not current throughput.
     aggregateThroughputBps: number;
     avgSpeedPerSessionBps: number;
     sessionsStartedInWindow: number;

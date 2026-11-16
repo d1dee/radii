@@ -47,6 +47,7 @@ import {
 } from '@/lib/api';
 import { useAutoRefresh } from '@/lib/autoRefresh';
 import { warnBackgroundFailure } from '@/lib/clientError';
+import { useDrawerHistory } from '@/lib/drawerHistory';
 import {
     formatMoney,
     formatPackagePrice,
@@ -102,7 +103,7 @@ export default function PackagesPage() {
     const [page, setPage] = useState(1);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
-    const [detailsId, setDetailsId] = useState<string | null>(null);
+    const [detailsId, setDetailsId] = useDrawerHistory();
     const [archiveTarget, setArchiveTarget] = useState<PackageRow | null>(null);
     const [actionBusyId, setActionBusyId] = useState<string | null>(null);
 

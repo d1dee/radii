@@ -49,6 +49,7 @@ import {
 } from '@/lib/api';
 import { useAutoRefresh } from '@/lib/autoRefresh';
 import { warnBackgroundFailure } from '@/lib/clientError';
+import { useDrawerHistory } from '@/lib/drawerHistory';
 import { formatDateTime, formatDayTime } from '@/lib/format';
 import { notifyResult } from '@/lib/notify';
 import { tableRowNumber, useTablePageSize } from '@/lib/pagination';
@@ -112,7 +113,7 @@ export default function NasDevicesPage() {
     const [page, setPage] = useState(1);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
-    const [detailsId, setDetailsId] = useState<string | null>(null);
+    const [detailsId, setDetailsId] = useDrawerHistory();
     const [deleteTarget, setDeleteTarget] = useState<NasDeviceRow | null>(null);
     const [deleteBusy, setDeleteBusy] = useState(false);
     const [deleteStep, setDeleteStep] = useState<'warning' | 'confirm'>('warning');
