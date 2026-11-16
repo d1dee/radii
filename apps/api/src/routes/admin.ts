@@ -1461,9 +1461,8 @@ app.put('/activations/:id', requireAdmin, async (c) => {
 
 // --- RADIUS -----------------------------------------------------------------
 
-// Aggregate network usage from RADIUS accounting over a trailing window:
-// live sessions/users, current throughput, average speed per session, and
-// the heaviest users. ?windowMinutes=<n> (default 60).
+// Open-session accounting totals and lifetime average speeds. The window
+// scopes session starts/top users only. ?windowMinutes=<n> (default 60).
 app.get('/radius/summary', requireAdmin, async (c) => {
     const raw = Number(c.req.query('windowMinutes') ?? 60);
     const windowMinutes =
