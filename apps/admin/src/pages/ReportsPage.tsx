@@ -76,18 +76,9 @@ export default function ReportsPage() {
     const [topPackagesPage, setTopPackagesPage] = useState(1);
     const [topUsersPage, setTopUsersPage] = useState(1);
     const [heavyUsersPage, setHeavyUsersPage] = useState(1);
-    const [topPackagesPerPage, setTopPackagesPerPage] = useTablePageSize(
-        settings.dashboard.perPage,
-        loaded,
-    );
-    const [topUsersPerPage, setTopUsersPerPage] = useTablePageSize(
-        settings.dashboard.perPage,
-        loaded,
-    );
-    const [heavyUsersPerPage, setHeavyUsersPerPage] = useTablePageSize(
-        settings.dashboard.perPage,
-        loaded,
-    );
+    const [topPackagesPerPage, setTopPackagesPerPage] = useTablePageSize(10);
+    const [topUsersPerPage, setTopUsersPerPage] = useTablePageSize(10);
+    const [heavyUsersPerPage, setHeavyUsersPerPage] = useTablePageSize(10);
     const loadRequest = useRef(0);
 
     const load = useCallback(

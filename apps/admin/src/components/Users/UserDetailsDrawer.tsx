@@ -724,12 +724,10 @@ export function UserDetailsDrawer({
     // Deep-links into the payments / sessions logs pre-filtered to one
     // account; closes the drawer so the destination page is visible.
     const viewPppoePayments = (account: AdminPppoeAccount) => {
-        onClose();
         navigate(`/payments?pppoeAccountId=${account.id}`);
     };
 
     const viewPppoeSessions = (account: AdminPppoeAccount) => {
-        onClose();
         navigate(`/sessions?q=${encodeURIComponent(account.username)}`);
     };
 

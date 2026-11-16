@@ -269,7 +269,7 @@ export default function DashboardPage() {
                         </ActionIcon>
                     </Tooltip>
                 </Group>
-                {!usage ? (
+                {!reports ? (
                     <SimpleGrid cols={{ base: 2, lg: 5 }}>
                         {Array.from({ length: 5 }).map((_, i) => (
                             <Skeleton key={i} height={48} radius='sm' />
@@ -321,33 +321,41 @@ export default function DashboardPage() {
                 </Center>
             ) : !reports ? null : (
                 <>
-                    <SimpleGrid cols={{ base: 2, lg: 5 }}>
-                        <StatCard
-                            label='Open sessions'
-                            value={String(usage.liveSessions)}
-                            sub={`${usage.sessionsStartedInWindow} started in last ${usage.windowMinutes} minutes`}
-                        />
-                        <StatCard
-                            label='Users with open sessions'
-                            value={String(usage.liveUsers)}
-                            sub='Distinct usernames across open sessions'
-                        />
-                        <StatCard
-                            label='Combined avg speed'
-                            value={formatSpeed(usage.aggregateThroughputBps)}
-                            sub={`Lifetime avg ${formatSpeed(usage.avgSpeedPerSessionBps)}/session, not current throughput`}
-                        />
-                        <StatCard
-                            label='Open-session data'
-                            value={formatBytes(usage.liveOctets)}
-                            sub='Upload + download since session start'
-                        />
-                        <StatCard
-                            label='Avg open session age'
-                            value={formatSeconds(usage.avgSessionSeconds)}
-                            sub='Average elapsed time since session start'
-                        />
-                    </SimpleGrid>
+                    {!usage ? (
+                        <SimpleGrid cols={{ base: 2, lg: 5 }}>
+                            {Array.from({ length: 5 }).map((_, i) => (
+                                <Skeleton key={i} height={48} radius='sm' />
+                            ))}
+                        </SimpleGrid>
+                    ) : (
+                        <SimpleGrid cols={{ base: 2, lg: 5 }}>
+                            <StatCard
+                                label='Open sessions'
+                                value={String(usage.liveSessions)}
+                                sub={`${usage.sessionsStartedInWindow} started in last ${usage.windowMinutes} minutes`}
+                            />
+                            <StatCard
+                                label='Users with open sessions'
+                                value={String(usage.liveUsers)}
+                                sub='Distinct usernames across open sessions'
+                            />
+                            <StatCard
+                                label='Combined avg speed'
+                                value={formatSpeed(usage.aggregateThroughputBps)}
+                                sub={`Lifetime avg ${formatSpeed(usage.avgSpeedPerSessionBps)}/session, not current throughput`}
+                            />
+                            <StatCard
+                                label='Open-session data'
+                                value={formatBytes(usage.liveOctets)}
+                                sub='Upload + download since session start'
+                            />
+                            <StatCard
+                                label='Avg open session age'
+                                value={formatSeconds(usage.avgSessionSeconds)}
+                                sub='Average elapsed time since session start'
+                            />
+                        </SimpleGrid>
+                    )}
 
                     <Grid>
                         <Grid.Col span={{ base: 12, lg: 8 }}>
