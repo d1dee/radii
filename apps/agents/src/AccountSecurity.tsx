@@ -15,7 +15,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { authClient } from './auth';
 import { PageTableScrollContainer } from './components/PageTableScrollContainer';
-import { RecordDetails } from './RecordDetails';
+import { ExpandableTableRow, RecordFields } from './RecordDetails';
 
 type Session = NonNullable<
     Awaited<ReturnType<typeof authClient.listSessions>>['data']
@@ -372,7 +372,84 @@ export function AccountSecurity() {
                                 </Table.Thead>
                                 <Table.Tbody>
                                     {sessions.map((session) => (
-                                        <Table.Tr key={session.id}>
+                                        <ExpandableTableRow
+                                            key={session.id}
+                                            id={`session-${session.id}`}
+                                            title='Session details'
+                                            colSpan={5}
+                                            details={
+                                                <RecordFields
+                                                    columns={2}
+                                                    fields={[
+                                                        [
+                                                            'Device / browser',
+                                                            session.userAgent,
+                                                        ],
+                                                        [
+                                                            'IP address',
+                                                            session.ipAddress,
+                                                        ],
+                                                        [
+                                                            'Signed in',
+                                                            sessionDate(
+                                                                session.createdAt,
+                                                            ),
+                                                        ],
+                                                        [
+                                                            'Updated',
+                                                            sessionDate(
+                                                                session.updatedAt,
+                                                            ),
+                                                        ],
+                                                        [
+                                                            'Expires',
+                                                            sessionDate(
+                                                                session.expiresAt,
+                                                            ),
+                                                        ],
+                                                        [
+                                                            'Session',
+                                                            session.id ===
+                                                            currentId
+                                                                ? 'Current session'
+                                                                : 'Other signed-in session',
+                                                        ],
+                                                    ]}
+                                                />
+                                            }
+                                            actions={
+                                                <Table.Td
+                                                    onClick={(event) =>
+                                                        event.stopPropagation()
+                                                    }
+                                                >
+                                                    {session.id === currentId ? (
+                                                        <Text size='sm' c='dimmed'>
+                                                            This device
+                                                        </Text>
+                                                    ) : (
+                                                        <Button
+                                                            size='xs'
+                                                            color='red'
+                                                            variant='light'
+                                                            loading={
+                                                                busy === session.id
+                                                            }
+                                                            disabled={
+                                                                busy !== null ||
+                                                                !currentId
+                                                            }
+                                                            onClick={() =>
+                                                                void revoke(session)
+                                                            }
+                                                            aria-label={`Sign out session from ${session.ipAddress || 'unknown IP address'}`}
+                                                        >
+                                                            Sign out
+                                                        </Button>
+                                                    )}
+                                                </Table.Td>
+                                            }
+                                        >
                                             <Table.Td maw={320}>
                                                 <Text
                                                     size='sm'
@@ -420,73 +497,7 @@ export function AccountSecurity() {
                                                     )}
                                                 </Text>
                                             </Table.Td>
-                                            <Table.Td>
-                                                <RecordDetails
-                                                    title='Session details'
-                                                    fields={[
-                                                        [
-                                                            'Device / browser',
-                                                            session.userAgent,
-                                                        ],
-                                                        [
-                                                            'IP address',
-                                                            session.ipAddress,
-                                                        ],
-                                                        [
-                                                            'Signed in',
-                                                            sessionDate(
-                                                                session.createdAt,
-                                                            ),
-                                                        ],
-                                                        [
-                                                            'Updated',
-                                                            sessionDate(
-                                                                session.updatedAt,
-                                                            ),
-                                                        ],
-                                                        [
-                                                            'Expires',
-                                                            sessionDate(
-                                                                session.expiresAt,
-                                                            ),
-                                                        ],
-                                                        [
-                                                            'Session',
-                                                            session.id ===
-                                                            currentId
-                                                                ? 'Current session'
-                                                                : 'Other signed-in session',
-                                                        ],
-                                                    ]}
-                                                />
-                                            </Table.Td>
-                                            <Table.Td>
-                                                {session.id === currentId ? (
-                                                    <Text size='sm' c='dimmed'>
-                                                        This device
-                                                    </Text>
-                                                ) : (
-                                                    <Button
-                                                        size='xs'
-                                                        color='red'
-                                                        variant='light'
-                                                        loading={
-                                                            busy === session.id
-                                                        }
-                                                        disabled={
-                                                            busy !== null ||
-                                                            !currentId
-                                                        }
-                                                        onClick={() =>
-                                                            void revoke(session)
-                                                        }
-                                                        aria-label={`Sign out session from ${session.ipAddress || 'unknown IP address'}`}
-                                                    >
-                                                        Sign out
-                                                    </Button>
-                                                )}
-                                            </Table.Td>
-                                        </Table.Tr>
+                                        </ExpandableTableRow>
                                     ))}
                                 </Table.Tbody>
                             </Table>

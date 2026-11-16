@@ -34,6 +34,9 @@ export async function request<T>(
             'Cannot reach the agent service. Check your connection and retry.',
         );
     }
+    if (response.status === 401 && typeof window !== 'undefined') {
+        window.location.replace('/login');
+    }
     let result;
     try {
         result = await response.json();

@@ -1,9 +1,11 @@
-import { Alert, Button, Paper, Stack, Table, Text, Title } from '@mantine/core';
+import { Alert, Paper, Stack, Table, Text, Title } from '@mantine/core';
 import type { Balance, Page, PayoutProfile } from './api';
-import { dateTime, type Paging } from './AccountingViews';
+import { dateTime, type Paging, type WithdrawalRow } from './AccountingViews';
 import { LedgerTable } from './LedgerTable';
 import { money } from './money';
-import { RecordDetails } from './RecordDetails';
+import { ExpandableTableRow, RecordFields } from './RecordDetails';
+import { WithdrawalAuditContent, type AuditEvent } from './WithdrawalAudit';
+import { useEffect, useState } from 'react';
 
 export type EarningsRow = {
     id: string;
@@ -55,33 +57,14 @@ export function EarningsBreakdown({
                 {...paging}
             >
                 {data.items.map((row, index) => (
-                    <Table.Tr key={row.id}>
-                        <Table.Td>
-                            {(paging.page - 1) * paging.perPage + index + 1}
-                        </Table.Td>
-                        <Table.Td>{row.month}</Table.Td>
-                        <Table.Td>
-                            {row.scopeType === 'nas'
-                                ? 'NAS'
-                                : row.scopeType === 'service_account'
-                                  ? 'PPPoE service account'
-                                  : 'Not recorded'}
-                        </Table.Td>
-                        <Table.Td>
-                            {row.rateBps === null
-                                ? 'Not recorded'
-                                : `${(row.rateBps / 100).toFixed(2)}%`}
-                        </Table.Td>
-                        <Table.Td>{row.collections.toLocaleString()}</Table.Td>
-                        <Table.Td className='money'>
-                            {money(row.collectionAmount, row.currency)}
-                        </Table.Td>
-                        <Table.Td className='money'>
-                            {money(row.earned, row.currency)}
-                        </Table.Td>
-                        <Table.Td>
-                            <RecordDetails
-                                title='Earnings group details'
+                    <ExpandableTableRow
+                        key={`${paging.page}:${paging.perPage}:${row.id}`}
+                        id={row.id}
+                        title='Earnings group details'
+                        colSpan={8}
+                        details={
+                            <RecordFields
+                                columns={2}
                                 fields={[
                                     ['Month (UTC)', row.month],
                                     [
@@ -128,8 +111,32 @@ export function EarningsBreakdown({
                                     ],
                                 ]}
                             />
+                        }
+                    >
+                        <Table.Td>
+                            {(paging.page - 1) * paging.perPage + index + 1}
                         </Table.Td>
-                    </Table.Tr>
+                        <Table.Td>{row.month}</Table.Td>
+                        <Table.Td>
+                            {row.scopeType === 'nas'
+                                ? 'NAS'
+                                : row.scopeType === 'service_account'
+                                  ? 'PPPoE service account'
+                                  : 'Not recorded'}
+                        </Table.Td>
+                        <Table.Td>
+                            {row.rateBps === null
+                                ? 'Not recorded'
+                                : `${(row.rateBps / 100).toFixed(2)}%`}
+                        </Table.Td>
+                        <Table.Td>{row.collections.toLocaleString()}</Table.Td>
+                        <Table.Td className='money'>
+                            {money(row.collectionAmount, row.currency)}
+                        </Table.Td>
+                        <Table.Td className='money'>
+                            {money(row.earned, row.currency)}
+                        </Table.Td>
+                    </ExpandableTableRow>
                 ))}
             </LedgerTable>
         </Stack>
@@ -139,12 +146,19 @@ export function EarningsBreakdown({
 export function NotificationsView({
     data,
     paging,
+    withdrawalDetail,
     onWithdrawal,
 }: {
     data: Page<NotificationRow>;
     paging: Paging;
-    onWithdrawal: (id: string) => void;
+    withdrawalDetail: {
+        withdrawal: WithdrawalRow;
+        events: AuditEvent[];
+    } | null;
+    onWithdrawal: (id: string | null) => void;
 }) {
+    const [expanded, setExpanded] = useState<string | null>(null);
+    useEffect(() => setExpanded(null), [paging.page, paging.perPage]);
     return (
         <Stack gap='sm'>
             <Text size='sm' c='dimmed'>
@@ -158,7 +172,43 @@ export function NotificationsView({
                 {...paging}
             >
                 {data.items.map((row, index) => (
-                    <Table.Tr key={row.id}>
+                    <ExpandableTableRow
+                        key={`${paging.page}:${paging.perPage}:${row.id}`}
+                        id={row.id}
+                        title='Notification details'
+                        colSpan={5}
+                        expanded={expanded === row.id}
+                        onToggle={(opened) => {
+                            setExpanded(opened ? row.id : null);
+                            onWithdrawal(opened ? row.withdrawalId : null);
+                        }}
+                        details={
+                            <Stack gap='sm'>
+                                <RecordFields
+                                    columns={2}
+                                    fields={[
+                                        ['Reference', row.id],
+                                        ['Date', dateTime(row.createdAt)],
+                                        ['Update', row.title],
+                                        ['Message', row.message],
+                                    ]}
+                                />
+                                {row.withdrawalId &&
+                                    (withdrawalDetail?.withdrawal.id ===
+                                    row.withdrawalId ? (
+                                        <WithdrawalAuditContent
+                                            withdrawal={withdrawalDetail.withdrawal}
+                                            events={withdrawalDetail.events}
+                                            compact
+                                        />
+                                    ) : (
+                                        <Text size='sm' c='dimmed' role='status'>
+                                            Loading withdrawal audit
+                                        </Text>
+                                    ))}
+                            </Stack>
+                        }
+                    >
                         <Table.Td>
                             {(paging.page - 1) * paging.perPage + index + 1}
                         </Table.Td>
@@ -176,30 +226,7 @@ export function NotificationsView({
                                 {row.message}
                             </Text>
                         </Table.Td>
-                        <Table.Td>
-                            {row.withdrawalId ? (
-                                <Button
-                                    size='xs'
-                                    variant='subtle'
-                                    onClick={() =>
-                                        onWithdrawal(row.withdrawalId!)
-                                    }
-                                >
-                                    View withdrawal
-                                </Button>
-                            ) : (
-                                <RecordDetails
-                                    title='Notification details'
-                                    fields={[
-                                        ['Reference', row.id],
-                                        ['Date', dateTime(row.createdAt)],
-                                        ['Update', row.title],
-                                        ['Message', row.message],
-                                    ]}
-                                />
-                            )}
-                        </Table.Td>
-                    </Table.Tr>
+                    </ExpandableTableRow>
                 ))}
             </LedgerTable>
         </Stack>

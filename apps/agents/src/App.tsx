@@ -43,14 +43,14 @@ export default function App() {
         () =>
             accountViews.find(
                 (item) => `#${item.value}` === window.location.hash,
-            )?.value || 'statement',
+            )?.value || 'overview',
     );
     useEffect(() => {
         const updateView = () =>
             setView(
                 accountViews.find(
                     (item) => `#${item.value}` === window.location.hash,
-                )?.value || 'statement',
+                )?.value || 'overview',
             );
         window.addEventListener('hashchange', updateView);
         return () => window.removeEventListener('hashchange', updateView);
@@ -67,8 +67,13 @@ export default function App() {
         | 'register'
         | 'verify-email'
         | 'forgot-password'
-        | 'reset-password'
-        | undefined;
+         | 'reset-password'
+         | undefined;
+    useEffect(() => {
+        if (!isPending && !session && !sessionError && !authMode) {
+            window.location.replace('/login');
+        }
+    }, [isPending, session, sessionError, authMode]);
     async function logout() {
         setLoggingOut(true);
         setLogoutError('');
@@ -133,7 +138,7 @@ export default function App() {
                     <Anchor href='/login'>Sign in</Anchor>
                 </Alert>
             ) : !session ? (
-                <AuthPage mode='login' />
+                <Loader aria-label='Redirecting to sign in' />
             ) : !session.user.emailVerified ? (
                 <Paper p='xl' withBorder>
                     <Stack>

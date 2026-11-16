@@ -13,18 +13,22 @@ import {
     Title,
     Tooltip,
 } from '@mantine/core';
-import type { Balance, Page, PayoutProfile } from './api';
-import { maskedPhone } from './lib/maskedPhone';
+import { Fragment, useEffect, useState } from 'react';
 import {
     MdAccountBalance,
     MdCheckCircle,
+    MdExpandLess,
+    MdExpandMore,
     MdPhoneAndroid,
     MdSchedule,
     MdWallet,
 } from 'react-icons/md';
+import type { Balance, Page, PayoutProfile } from './api';
 import { LedgerTable } from './LedgerTable';
+import { maskedBankAccount, maskedPhone } from './lib/maskedPhone';
 import { money } from './money';
-import { RecordDetails } from './RecordDetails';
+import { ExpandableTableRow, RecordFields } from './RecordDetails';
+import { WithdrawalAuditContent, type AuditEvent } from './WithdrawalAudit';
 
 export const dateTime = (value: string) =>
     new Date(value).toLocaleString(undefined, {
@@ -61,6 +65,7 @@ export type AgreementRow = {
     rateBps: number;
     basis: string;
     effectiveFrom: string;
+    effectiveTo: string | null;
     isCurrent: boolean;
     createdAt?: string;
 };
@@ -108,18 +113,14 @@ export function AccountActivityView({
                 {...paging}
             >
                 {data.items.map((event, index) => (
-                    <Table.Tr key={event.id}>
-                        <Table.Td>
-                            {(paging.page - 1) * paging.perPage + index + 1}
-                        </Table.Td>
-                        <Table.Td>{dateTime(event.createdAt)}</Table.Td>
-                        <Table.Td>{event.action.replaceAll('_', ' ')}</Table.Td>
-                        <Table.Td>
-                            {event.actorType === 'ADMIN' ? 'Operator' : 'Agent'}
-                        </Table.Td>
-                        <Table.Td>
-                            <RecordDetails
-                                title='Account activity details'
+                    <ExpandableTableRow
+                        key={`${paging.page}:${paging.perPage}:${event.id}`}
+                        id={`activity-${event.id}`}
+                        title='Account activity details'
+                        colSpan={5}
+                        details={
+                            <RecordFields
+                                columns={2}
                                 fields={[
                                     ['Event reference', event.id],
                                     ['Recorded', dateTime(event.createdAt)],
@@ -135,8 +136,17 @@ export function AccountActivityView({
                                     ],
                                 ]}
                             />
+                        }
+                    >
+                        <Table.Td>
+                            {(paging.page - 1) * paging.perPage + index + 1}
                         </Table.Td>
-                    </Table.Tr>
+                        <Table.Td>{dateTime(event.createdAt)}</Table.Td>
+                        <Table.Td>{event.action.replaceAll('_', ' ')}</Table.Td>
+                        <Table.Td>
+                            {event.actorType === 'ADMIN' ? 'Operator' : 'Agent'}
+                        </Table.Td>
+                    </ExpandableTableRow>
                 ))}
             </LedgerTable>
         </Stack>
@@ -239,7 +249,7 @@ export function PayoutProfileView({
                                 : 'Bank account',
                             profile.method === 'mpesa'
                                 ? maskedPhone(profile.destination)
-                                : `Ending in ${profile.destination.slice(-4)}`,
+                                : maskedBankAccount(profile.destination),
                         ],
                         ['Submitted', dateTime(profile.createdAt)],
                         [
@@ -315,19 +325,23 @@ export function BalanceSummary({ balances }: { balances: Balance[] }) {
                     >
                         {(
                             [
-                                ['Available', balance.available],
-                                ['Reserved for withdrawal', balance.reserved],
-                                ['Recorded paid', balance.paid],
-                                ['Total earned', balance.earned],
+                                ['Available', balance.available, 'green'],
+                                [
+                                    'Reserved for withdrawal',
+                                    balance.reserved,
+                                    'orange',
+                                ],
+                                ['Recorded paid', balance.paid, 'blue'],
+                                ['Total earned', balance.earned, 'violet'],
                             ] as const
-                        ).map(([label, value]) => (
+                        ).map(([label, value, color]) => (
                             <div key={label} className='balance-metric'>
                                 <Text c='dimmed' size='xs'>
                                     {label}
                                 </Text>
                                 <Text
                                     className='money'
-                                    fw={700}
+                                    c={color}
                                     size='lg'
                                     mt={2}
                                 >
@@ -342,25 +356,113 @@ export function BalanceSummary({ balances }: { balances: Balance[] }) {
     );
 }
 
+type WithdrawalDetail = { withdrawal: WithdrawalRow; events: AuditEvent[] };
+
+function StatementDetails({
+    row,
+    detail,
+}: {
+    row: StatementRow;
+    detail: WithdrawalDetail | null;
+}) {
+    const { source } = row;
+    const rules: [string, string | null | undefined][] = source
+        ? [
+              [
+                  'Commission basis',
+                  source.basis === 'confirmed_collection_gross'
+                      ? 'Confirmed gross collections'
+                      : source.basis,
+              ],
+              [
+                  'Agreement effective from',
+                  source.agreementEffectiveFrom
+                      ? dateTime(source.agreementEffectiveFrom)
+                      : null,
+              ],
+              [
+                  'Rounding',
+                  source.rounding === 'half_up_minor_unit'
+                      ? 'Rounded half up to the nearest currency minor unit'
+                      : source.rounding,
+              ],
+              [
+                  'Earned when',
+                  source.entitlementRule === 'collection_recorded_at'
+                      ? 'The collection is recorded'
+                      : source.entitlementRule,
+              ],
+          ]
+        : [];
+
+    return (
+        <Stack gap='md'>
+            {source && (
+                <>
+                    <Title order={4} size='sm'>
+                        Commission rules
+                    </Title>
+                    <RecordFields
+                        columns={2}
+                        fields={rules.filter(([, value]) => value != null)}
+                    />
+                </>
+            )}
+            {row.withdrawalId &&
+                (detail?.withdrawal.id === row.withdrawalId ? (
+                    <WithdrawalAuditContent
+                        {...detail}
+                        compact
+                        entryId={row.id}
+                    />
+                ) : (
+                    <Text role='status' size='sm'>
+                        Loading withdrawal audit...
+                    </Text>
+                ))}
+            {!row.withdrawalId && (
+                <Text size='xs' c='dimmed' style={{ overflowWrap: 'anywhere' }}>
+                    Entry: {row.id}
+                </Text>
+            )}
+        </Stack>
+    );
+}
+
 export function StatementView({
     data,
     paging,
+    onWithdrawal,
+    withdrawalDetail,
 }: {
     data: Page<StatementRow>;
     paging: Paging;
+    onWithdrawal: (id: string | null) => void;
+    withdrawalDetail: WithdrawalDetail | null;
 }) {
+    const [expanded, setExpanded] = useState<string | null>(null);
+    useEffect(() => setExpanded(null), [paging.page, paging.perPage]);
+    function toggle(row: StatementRow) {
+        const opening = expanded !== row.id;
+        setExpanded(opening ? row.id : null);
+        onWithdrawal(opening ? (row.withdrawalId ?? null) : null);
+    }
     const kinds: Record<string, string> = {
         accrual: 'Commission earned',
-        reserve: 'Reserved for withdrawal',
-        release: 'Reservation released',
-        paid: 'External payment recorded',
+        reserve: 'Withdrawal requested',
+        release: 'Withdrawal funds returned',
+        paid: 'Withdrawal paid',
     };
     return (
         <Stack>
             <div>
                 <Title order={3} size='h4'>
-                    Commission statement
+                    Earnings & withdrawals
                 </Title>
+                <Text size='sm' c='dimmed' mt={4}>
+                    Requests reserve funds; payments settle those reservations.
+                    These are movements, not separate charges.
+                </Text>
             </div>
             <LedgerTable
                 label='Statement entries'
@@ -376,132 +478,119 @@ export function StatementView({
                 {...paging}
             >
                 {data.items.map((row, index) => (
-                    <Table.Tr key={row.id}>
-                        <Table.Td>
-                            {(paging.page - 1) * paging.perPage + index + 1}
-                        </Table.Td>
-                        <Table.Td style={{ whiteSpace: 'nowrap' }}>
-                            {dateTime(row.createdAt)}
-                        </Table.Td>
-                        <Table.Td>{kinds[row.kind] || row.kind}</Table.Td>
-                        <Table.Td
-                            className='money'
-                            style={{ whiteSpace: 'nowrap' }}
+                    <Fragment key={row.id}>
+                        <Table.Tr
+                            className='statement-row'
+                            onClick={() => toggle(row)}
+                            data-expanded={expanded === row.id || undefined}
                         >
-                            {money(row.amount, row.currency)}
-                        </Table.Td>
-                        <Table.Td>
-                            {row.source ? (
-                                <Stack gap={2}>
-                                    <Text size='sm'>
-                                        {money(
-                                            row.source.collectionAmount,
-                                            row.currency,
-                                        )}{' '}
-                                        at{' '}
-                                        {Math.trunc(row.source.rateBps / 100)}.
-                                        {String(
-                                            row.source.rateBps % 100,
-                                        ).padStart(2, '0')}
-                                        %
+                            <Table.Td>
+                                {(paging.page - 1) * paging.perPage + index + 1}
+                            </Table.Td>
+                            <Table.Td style={{ whiteSpace: 'nowrap' }}>
+                                {dateTime(row.createdAt)}
+                            </Table.Td>
+                            <Table.Td>
+                                <Badge
+                                    variant='light'
+                                    color={
+                                        row.kind === 'accrual'
+                                            ? 'blue'
+                                            : row.kind === 'paid'
+                                              ? 'green'
+                                              : 'gray'
+                                    }
+                                >
+                                    {kinds[row.kind] || row.kind}
+                                </Badge>
+                            </Table.Td>
+                            <Table.Td
+                                className={`money ${row.kind === 'accrual' ? 'statement-credit' : ''}`}
+                                style={{ whiteSpace: 'nowrap' }}
+                            >
+                                {money(row.amount, row.currency)}
+                            </Table.Td>
+                            <Table.Td>
+                                {row.source ? (
+                                    <Stack gap={2}>
+                                        <Text size='sm'>
+                                            {money(
+                                                row.source.collectionAmount,
+                                                row.currency,
+                                            )}{' '}
+                                            at{' '}
+                                            {Math.trunc(
+                                                row.source.rateBps / 100,
+                                            )}
+                                            .
+                                            {String(
+                                                row.source.rateBps % 100,
+                                            ).padStart(2, '0')}
+                                            %
+                                        </Text>
+                                        <Text size='xs' c='dimmed'>
+                                            {row.source.scopeType === 'nas'
+                                                ? 'NAS'
+                                                : 'PPPoE service account'}
+                                            ; confirmed{' '}
+                                            {dateTime(
+                                                row.source.collectionRecordedAt,
+                                            )}
+                                        </Text>
+                                    </Stack>
+                                ) : (
+                                    <Text c='dimmed' size='sm'>
+                                        {row.kind === 'reserve'
+                                            ? 'Available balance reserved'
+                                            : row.kind === 'release'
+                                              ? 'Returned to available balance'
+                                              : 'Paid from reserved balance'}
                                     </Text>
-                                    <Text size='xs' c='dimmed'>
-                                        {row.source.scopeType === 'nas'
-                                            ? 'NAS'
-                                            : 'PPPoE service account'}
-                                        ; confirmed{' '}
-                                        {dateTime(
-                                            row.source.collectionRecordedAt,
-                                        )}
-                                    </Text>
-                                </Stack>
-                            ) : (
-                                <Text c='dimmed' size='sm'>
-                                    Not a collection entry
-                                </Text>
-                            )}
-                        </Table.Td>
-                        <Table.Td>
-                            <RecordDetails
-                                title={
-                                    row.source
-                                        ? 'Commission details'
-                                        : 'Statement movement details'
-                                }
-                                fields={[
-                                    ['Entry reference', row.id],
-                                    ['Recorded', dateTime(row.createdAt)],
-                                    ['Movement', kinds[row.kind] || row.kind],
-                                    ['Amount', money(row.amount, row.currency)],
-                                    ['Withdrawal reference', row.withdrawalId],
-                                    ...(row.source
-                                        ? ([
-                                              [
-                                                  'Source',
-                                                  row.source.scopeType === 'nas'
-                                                      ? 'NAS'
-                                                      : 'PPPoE service account',
-                                              ],
-                                              [
-                                                  'Confirmed collection',
-                                                  money(
-                                                      row.source
-                                                          .collectionAmount,
-                                                      row.currency,
-                                                  ),
-                                              ],
-                                              [
-                                                  'Collection confirmed',
-                                                  dateTime(
-                                                      row.source
-                                                          .collectionRecordedAt,
-                                                  ),
-                                              ],
-                                              [
-                                                  'Historical rate',
-                                                  `${(row.source.rateBps / 100).toFixed(2)}%`,
-                                              ],
-                                              [
-                                                  'Basis',
-                                                  row.source.basis ===
-                                                  'confirmed_collection_gross'
-                                                      ? 'Confirmed gross collections'
-                                                      : row.source.basis,
-                                              ],
-                                              [
-                                                  'Agreement effective from',
-                                                  row.source
-                                                      .agreementEffectiveFrom
-                                                      ? dateTime(
-                                                            row.source
-                                                                .agreementEffectiveFrom,
-                                                        )
-                                                      : undefined,
-                                              ],
-                                              [
-                                                  'Rounding rule',
-                                                  row.source.rounding ===
-                                                  'half_up_minor_unit'
-                                                      ? 'Rounded half up to the nearest currency minor unit'
-                                                      : row.source.rounding,
-                                              ],
-                                              [
-                                                  'Entitlement rule',
-                                                  row.source.entitlementRule ===
-                                                  'collection_recorded_at'
-                                                      ? 'Commission earned when the collection is recorded'
-                                                      : row.source
-                                                            .entitlementRule,
-                                              ],
-                                          ] as [
-                                              string,
-                                              string | null | undefined,
-                                          ][])
-                                        : []),
-                                ]}
-                            />
-                        </Table.Td>
-                    </Table.Tr>
+                                )}
+                            </Table.Td>
+                            <Table.Td>
+                                <Button
+                                    variant='subtle'
+                                    size='xs'
+                                    aria-expanded={expanded === row.id}
+                                    aria-controls={`statement-details-${row.id}`}
+                                    aria-label={`${expanded === row.id ? 'Hide' : 'View'} details for statement ${row.id}`}
+                                    rightSection={
+                                        expanded === row.id ? (
+                                            <MdExpandLess />
+                                        ) : (
+                                            <MdExpandMore />
+                                        )
+                                    }
+                                    onClick={(event) => {
+                                        event.stopPropagation();
+                                        toggle(row);
+                                    }}
+                                >
+                                    {expanded === row.id
+                                        ? 'Hide details'
+                                        : 'View details'}
+                                </Button>
+                            </Table.Td>
+                        </Table.Tr>
+                        {expanded === row.id && (
+                            <Table.Tr className='statement-expanded-row'>
+                                <Table.Td colSpan={6}>
+                                    <Stack
+                                        id={`statement-details-${row.id}`}
+                                        role='region'
+                                        aria-label={`Details for statement ${row.id}`}
+                                        p='md'
+                                    >
+                                        <StatementDetails
+                                            row={row}
+                                            detail={withdrawalDetail}
+                                        />
+                                    </Stack>
+                                </Table.Td>
+                            </Table.Tr>
+                        )}
+                    </Fragment>
                 ))}
             </LedgerTable>
         </Stack>
@@ -525,7 +614,9 @@ export function AgreementsView({
                     'Rate',
                     'Basis',
                     'Effective from',
+                    'Effective to',
                     'Status',
+                    'How it applies',
                     'Details',
                 ]}
                 total={data.total}
@@ -537,7 +628,7 @@ export function AgreementsView({
                     const status = !row.isCurrent
                         ? scheduled
                             ? 'Scheduled'
-                            : 'Superseded'
+                            : 'Overridden'
                         : row.rateBps === 0
                           ? 'Stopped'
                           : row.scopeType === 'nas'
@@ -546,14 +637,57 @@ export function AgreementsView({
                     const explanation = !row.isCurrent
                         ? scheduled
                             ? 'Starts at the effective date.'
-                            : 'Replaced by a newer agreement for the same scope.'
+                            : 'Replaced by a newer effective agreement for the same scope. This rate no longer applies to new collections.'
                         : row.scopeType === 'nas'
                           ? row.rateBps === 0
                               ? 'No NAS commission. PPPoE account overrides still take precedence.'
                               : 'Applies unless a PPPoE account agreement overrides it, including a 0% override.'
                           : 'Overrides the NAS rate for this PPPoE account, including when set to 0%.';
                     return (
-                        <Table.Tr key={row.id}>
+                        <ExpandableTableRow
+                            key={`${paging.page}:${paging.perPage}:${row.id}`}
+                            id={`agreement-${row.id}`}
+                            title='Commission agreement details'
+                            colSpan={9}
+                            details={
+                                <RecordFields
+                                    columns={2}
+                                    fields={[
+                                        [
+                                            'Rate',
+                                            `${(row.rateBps / 100).toFixed(2)}%`,
+                                        ],
+                                        ['Status', status],
+                                        [
+                                            'Effective from',
+                                            dateTime(row.effectiveFrom),
+                                        ],
+                                        [
+                                            'Effective to',
+                                            row.effectiveTo
+                                                ? dateTime(row.effectiveTo)
+                                                : 'Present',
+                                        ],
+                                        [
+                                            'Scope',
+                                            row.scopeType === 'nas'
+                                                ? 'NAS'
+                                                : 'PPPoE service account',
+                                        ],
+                                        [
+                                            'Basis',
+                                            row.basis ===
+                                            'confirmed_collection_gross'
+                                                ? 'Confirmed gross collections'
+                                                : row.basis,
+                                        ],
+
+                                        ['How this applies', explanation],
+                                        ['Agreement reference', row.id],
+                                    ]}
+                                />
+                            }
+                        >
                             <Table.Td>
                                 {(paging.page - 1) * paging.perPage + index + 1}
                             </Table.Td>
@@ -574,6 +708,11 @@ export function AgreementsView({
                             <Table.Td style={{ whiteSpace: 'nowrap' }}>
                                 {dateTime(row.effectiveFrom)}
                             </Table.Td>
+                            <Table.Td style={{ whiteSpace: 'nowrap' }}>
+                                {row.effectiveTo
+                                    ? dateTime(row.effectiveTo)
+                                    : 'Present'}
+                            </Table.Td>
                             <Table.Td>
                                 <Tooltip
                                     label={explanation}
@@ -590,11 +729,10 @@ export function AgreementsView({
                                         tabIndex={0}
                                         variant='light'
                                         color={
-                                            scheduled
+                                            scheduled || !row.isCurrent
                                                 ? 'orange'
-                                                : !row.isCurrent ||
-                                                    row.rateBps === 0
-                                                  ? 'gray'
+                                                : row.rateBps === 0
+                                                  ? 'red'
                                                   : row.scopeType === 'nas'
                                                     ? 'blue'
                                                     : 'green'
@@ -604,44 +742,16 @@ export function AgreementsView({
                                     </Badge>
                                 </Tooltip>
                             </Table.Td>
-                            <Table.Td>
-                                <RecordDetails
-                                    title='Commission agreement details'
-                                    fields={[
-                                        ['Agreement reference', row.id],
-                                        [
-                                            'Scope',
-                                            row.scopeType === 'nas'
-                                                ? 'NAS'
-                                                : 'PPPoE service account',
-                                        ],
-                                        [
-                                            'Rate',
-                                            `${(row.rateBps / 100).toFixed(2)}%`,
-                                        ],
-                                        [
-                                            'Basis',
-                                            row.basis ===
-                                            'confirmed_collection_gross'
-                                                ? 'Confirmed gross collections'
-                                                : row.basis,
-                                        ],
-                                        [
-                                            'Effective from',
-                                            dateTime(row.effectiveFrom),
-                                        ],
-                                        [
-                                            'Recorded',
-                                            row.createdAt
-                                                ? dateTime(row.createdAt)
-                                                : undefined,
-                                        ],
-                                        ['Status', status],
-                                        ['How this applies', explanation],
-                                    ]}
-                                />
+                            <Table.Td
+                                style={{
+                                    whiteSpace: 'normal',
+                                    minWidth: 260,
+                                    maxWidth: 360,
+                                }}
+                            >
+                                <Text size='sm'>{explanation}</Text>
                             </Table.Td>
-                        </Table.Tr>
+                        </ExpandableTableRow>
                     );
                 })}
             </LedgerTable>
@@ -653,11 +763,15 @@ export function WithdrawalsView({
     data,
     paging,
     onDetail,
+    withdrawalDetail,
 }: {
     data: Page<WithdrawalRow>;
     paging: Paging;
-    onDetail: (id: string) => void;
+    onDetail: (id: string | null) => void;
+    withdrawalDetail: WithdrawalDetail | null;
 }) {
+    const [expanded, setExpanded] = useState<string | null>(null);
+    useEffect(() => setExpanded(null), [paging.page, paging.perPage]);
     return (
         <Stack>
             <div>
@@ -681,7 +795,29 @@ export function WithdrawalsView({
                 {...paging}
             >
                 {data.items.map((row, index) => (
-                    <Table.Tr key={row.id}>
+                    <ExpandableTableRow
+                        key={`${paging.page}:${paging.perPage}:${row.id}`}
+                        id={`withdrawal-${row.id}`}
+                        title='Withdrawal details'
+                        colSpan={8}
+                        expanded={expanded === row.id}
+                        onToggle={(opened) => {
+                            setExpanded(opened ? row.id : null);
+                            onDetail(opened ? row.id : null);
+                        }}
+                        details={
+                            withdrawalDetail?.withdrawal.id === row.id ? (
+                                <WithdrawalAuditContent
+                                    {...withdrawalDetail}
+                                    compact
+                                />
+                            ) : (
+                                <Text size='sm' role='status'>
+                                    Loading withdrawal audit...
+                                </Text>
+                            )
+                        }
+                    >
                         <Table.Td>
                             {(paging.page - 1) * paging.perPage + index + 1}
                         </Table.Td>
@@ -704,7 +840,7 @@ export function WithdrawalsView({
                         </Table.Td>
                         <Table.Td>
                             {row.payout
-                                ? `${row.payout.method === 'mpesa' ? 'M-Pesa' : 'Bank'}: ${row.payout.method === 'mpesa' ? maskedPhone(row.payout.destination) : `Ending in ${row.payout.destination.slice(-4)}`}`
+                                ? `${row.payout.method === 'mpesa' ? 'M-Pesa' : 'Bank'}: ${row.payout.method === 'mpesa' ? maskedPhone(row.payout.destination) : maskedBankAccount(row.payout.destination)}`
                                 : 'Not recorded'}
                         </Table.Td>
                         <Table.Td>
@@ -713,16 +849,7 @@ export function WithdrawalsView({
                                 : 'Not recorded'}
                         </Table.Td>
                         <Table.Td>{row.reference || 'Not recorded'}</Table.Td>
-                        <Table.Td>
-                            <Button
-                                size='xs'
-                                variant='subtle'
-                                onClick={() => onDetail(row.id)}
-                            >
-                                View details
-                            </Button>
-                        </Table.Td>
-                    </Table.Tr>
+                    </ExpandableTableRow>
                 ))}
             </LedgerTable>
         </Stack>

@@ -1,4 +1,5 @@
-import { and, count, desc, eq, sql } from 'drizzle-orm';
+import { and, count, desc, eq, gt, gte, lt, lte, min, notExists, sql } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { agentAuth } from '../agentAuth';
@@ -121,6 +122,23 @@ app.get('/:agentId/earnings', async c => {
     }, { isolationLevel: 'repeatable read', accessMode: 'read only' });
     return c.json({ success: true, data });
 });
+app.get('/:agentId/earnings-chart', async c => {
+    const data = await db.transaction(async tx => {
+        const m = await portalMembership(tx, c.var.agentIdentity.user.id, z.uuid().parse(c.req.param('agentId')));
+        const now = new Date();
+        const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+        const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
+        const day = sql<string>`to_char(${commissionJournal.createdAt} at time zone 'UTC', 'YYYY-MM-DD')`;
+        // Aggregate every accrual in the UTC month; keep numeric sums out of JS numbers.
+        const items = await tx.select({ day, currency: commissionJournal.currency,
+            earned: sql<string>`sum(${commissionJournal.amount})::text`,
+        }).from(commissionJournal).where(and(eq(commissionJournal.tenantAdminId, m.tenantAdminId), eq(commissionJournal.agentId, m.agentId),
+            eq(commissionJournal.kind, 'accrual'), gte(commissionJournal.createdAt, start), lt(commissionJournal.createdAt, end)))
+            .groupBy(day, commissionJournal.currency).orderBy(day, commissionJournal.currency);
+        return { month: start.toISOString().slice(0, 7), items };
+    }, { isolationLevel: 'repeatable read', accessMode: 'read only' });
+    return c.json({ success: true, data });
+});
 app.get('/:agentId/notifications', async c => {
     const data = await db.transaction(async tx => {
         const m = await portalMembership(tx, c.var.agentIdentity.user.id, z.uuid().parse(c.req.param('agentId')));
@@ -161,10 +179,21 @@ app.get('/:agentId/agreements', async c => {
     const { page, perPage } = pagination.parse(c.req.query());
     const where = and(eq(commissionAgreements.tenantAdminId, m.tenantAdminId), eq(commissionAgreements.agentId, m.agentId));
     const [total] = await db.select({ value: count() }).from(commissionAgreements).where(where);
+    const newer = alias(commissionAgreements, 'newer');
+    // Keep correlated columns inside a subquery so Drizzle preserves their table qualifiers.
+    const sameTargetSuccessor = and(
+        eq(newer.tenantAdminId, commissionAgreements.tenantAdminId),
+        eq(newer.scopeType, commissionAgreements.scopeType),
+        eq(newer.scopeId, commissionAgreements.scopeId),
+        gt(newer.effectiveFrom, commissionAgreements.effectiveFrom),
+    );
+    const replacement = db.select({ id: newer.id }).from(newer).where(and(sameTargetSuccessor, lte(newer.effectiveFrom, sql`now()`)));
+    const effectiveTo = db.select({ value: min(newer.effectiveFrom) }).from(newer).where(sameTargetSuccessor);
     const items = await db.select({ id: commissionAgreements.id, scopeType: commissionAgreements.scopeType, rateBps: commissionAgreements.rateBps, basis: commissionAgreements.basis,
         effectiveFrom: commissionAgreements.effectiveFrom, createdAt: commissionAgreements.createdAt,
-        isCurrent: sql<boolean>`${commissionAgreements.effectiveFrom} <= now() and not exists (select 1 from commission_agreement newer where newer.tenant_admin_id = ${commissionAgreements.tenantAdminId} and newer.scope_type = ${commissionAgreements.scopeType} and newer.scope_id = ${commissionAgreements.scopeId} and newer.effective_from <= now() and newer.effective_from > ${commissionAgreements.effectiveFrom})`,
-    }).from(commissionAgreements).where(where).orderBy(desc(commissionAgreements.effectiveFrom), desc(commissionAgreements.id)).limit(perPage).offset((page - 1) * perPage);
+        effectiveTo: sql<string | null>`${effectiveTo}`,
+        isCurrent: sql<boolean>`${commissionAgreements.effectiveFrom} <= now() and ${notExists(replacement)}`,
+    }).from(commissionAgreements).where(where).orderBy(desc(sql`${effectiveTo} is null`), desc(commissionAgreements.effectiveFrom), desc(commissionAgreements.id)).limit(perPage).offset((page - 1) * perPage);
     return c.json({ success: true, data: { items, total: total!.value, page, perPage } });
 });
 app.get('/:agentId/payout-profile', async c => {

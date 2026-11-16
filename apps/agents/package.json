@@ -8,7 +8,7 @@
         "build": "tsc -b && vite build",
         "typecheck": "tsc -b",
         "serve": "bun run server.ts",
-        "test:browser": "python3 src/portal.browser.py",
+        "test:browser": "python3 portal.browser.py",
         "test:unit": "bun test ./financial.regression.ts"
     },
     "dependencies": {

@@ -1,80 +1,46 @@
 import {
-    AppShell,
     Avatar,
     Burger,
     Group,
     Menu,
-    NavLink,
-    Overlay,
-    Stack,
     Text,
     UnstyledButton,
 } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import type { ReactNode } from 'react';
 import {
-    MdAccountBalanceWallet,
+    MdArrowOutward,
+    MdDashboard,
     MdDescription,
-    MdHistory,
     MdLogout,
-    MdPayments,
-    MdVerifiedUser,
-    MdNotifications,
+    MdReceiptLong,
     MdSecurity,
-    MdTrendingUp,
 } from 'react-icons/md';
 
 export const accountViews = [
     {
-        value: 'statement',
-        label: 'Earnings and statement',
-        title: 'Commission account',
-        description: 'Track your balances, earnings and withdrawal movements.',
-        icon: MdAccountBalanceWallet,
+        value: 'overview',
+        label: 'Overview',
+        title: 'Your account at a glance',
+        description:
+            'Earnings, withdrawals and the details that keep you moving.',
+        icon: MdDashboard,
     },
     {
-        value: 'earnings',
-        label: 'Earnings breakdown',
-        title: 'Earnings breakdown',
+        value: 'statement',
+        label: 'Statements',
+        title: 'Account statements',
         description:
-            'Understand recorded commissions by month, source and rate.',
-        icon: MdTrendingUp,
+            'Earnings and withdrawal movements, together in one traceable record.',
+        icon: MdReceiptLong,
     },
     {
         value: 'agreements',
         label: 'Agreements',
         title: 'Commission agreements',
-        description: 'Review commission rates, scope and effective dates.',
-        icon: MdDescription,
-    },
-    {
-        value: 'withdrawals',
-        label: 'Withdrawals',
-        title: 'Withdrawals',
         description:
-            'Track withdrawal requests and payments recorded by your operator.',
-        icon: MdPayments,
-    },
-    {
-        value: 'audit',
-        label: 'Account activity',
-        title: 'Account activity',
-        description: 'Review changes and activity on your commission account.',
-        icon: MdHistory,
-    },
-    {
-        value: 'payout',
-        label: 'Payout destination',
-        title: 'Payout destination',
-        description: 'Manage where your operator sends withdrawal payments.',
-        icon: MdVerifiedUser,
-    },
-    {
-        value: 'notifications',
-        label: 'Notifications',
-        title: 'Notifications',
-        description: 'Keep track of account and withdrawal updates.',
-        icon: MdNotifications,
+            'Your rates, when they apply and when another agreement takes precedence.',
+        icon: MdDescription,
     },
     {
         value: 'security',
@@ -110,63 +76,77 @@ export function PortalLayout({
         .slice(0, 2)
         .map((part) => part[0])
         .join('');
+    const links = accountViews.filter((item) => item.value !== 'security');
     return (
-        <AppShell
+        <div
             className='portal-shell'
-            header={{ height: 60 }}
-            navbar={{
-                width: 250,
-                breakpoint: 'md',
-                collapsed: {
-                    mobile: !hasAccount || !opened,
-                    desktop: !hasAccount,
-                },
-            }}
-            padding={{ base: 'sm', sm: 'lg', xl: 'xl' }}
             onKeyDown={(event) => {
                 if (event.key === 'Escape') close();
             }}
         >
-            <a className='portal-skip-link' href='#portal-content'>
+            <a
+                className='portal-skip-link'
+                href='#portal-content'
+                onClick={(event) => {
+                    event.preventDefault();
+                    document.getElementById('portal-content')?.focus();
+                }}
+            >
                 Skip to content
             </a>
-            <AppShell.Header>
-                <Group
-                    h='100%'
-                    px={{ base: 'sm', sm: 'lg' }}
-                    justify='space-between'
-                    wrap='nowrap'
-                >
-                    <Group gap='sm' wrap='nowrap'>
-                        {hasAccount && (
-                            <Burger
-                                hiddenFrom='md'
-                                size='sm'
-                                opened={opened}
-                                onClick={toggle}
-                                aria-label={
-                                    opened
-                                        ? 'Close navigation'
-                                        : 'Open navigation'
-                                }
-                                aria-expanded={opened}
-                                aria-controls='portal-navigation'
-                            />
-                        )}
-                        <Text
-                            component='a'
-                            href='/'
-                            fw={700}
-                            size='md'
-                            className='portal-brand'
+            <header className='portal-topbar'>
+                <Group gap='xl' wrap='nowrap' className='portal-topbar-left'>
+                    <Text component='a' href='/' className='portal-brand'>
+                        <span className='portal-brand-mark' aria-hidden>
+                            <MdArrowOutward size={22} />
+                        </span>
+                        radii
+                        <span className='portal-brand-caption'> / agents</span>
+                    </Text>
+                    {hasAccount && (
+                        <nav
+                            id='portal-navigation'
+                            className={`portal-navigation${opened ? ' is-open' : ''}`}
+                            aria-label='Agent accounting views'
                         >
-                            Radii Agents
-                        </Text>
-                    </Group>
+                            {links.map((item) => (
+                                <a
+                                    key={item.value}
+                                    href={`#${item.value}`}
+                                    className={`portal-nav-link${view === item.value ? ' is-active' : ''}`}
+                                    aria-current={
+                                        view === item.value ? 'page' : undefined
+                                    }
+                                    onClick={() => {
+                                        onView(item.value);
+                                        close();
+                                    }}
+                                >
+                                    <item.icon size={16} />
+                                    {item.label}
+                                </a>
+                            ))}
+                        </nav>
+                    )}
+                </Group>
+                <Group gap='sm' wrap='nowrap'>
+                    {hasAccount && (
+                        <Burger
+                            className='portal-mobile-toggle'
+                            size='sm'
+                            opened={opened}
+                            onClick={toggle}
+                            aria-label={
+                                opened ? 'Close navigation' : 'Open navigation'
+                            }
+                            aria-expanded={opened}
+                            aria-controls='portal-navigation'
+                        />
+                    )}
                     {user && (
                         <Menu
                             shadow='md'
-                            width={240}
+                            width={250}
                             position='bottom-end'
                             withinPortal
                         >
@@ -175,43 +155,32 @@ export function PortalLayout({
                                     className='portal-account-button'
                                     aria-label='Agent account menu'
                                 >
-                                    <Group gap='xs' wrap='nowrap'>
-                                        <Avatar
-                                            color='blue'
-                                            radius='xl'
-                                            size='md'
-                                        >
-                                            {initials}
-                                        </Avatar>
-                                        <Stack
-                                            gap={0}
-                                            visibleFrom='sm'
-                                            miw={0}
-                                            maw={220}
-                                        >
-                                            <Text size='sm' fw={500} truncate>
-                                                {user.name}
-                                            </Text>
-                                            <Text size='xs' c='dimmed' truncate>
-                                                {user.email}
-                                            </Text>
-                                        </Stack>
-                                    </Group>
+                                    <Avatar
+                                        color='blue'
+                                        radius='xl'
+                                        size={36}
+                                    >
+                                        {initials}
+                                    </Avatar>
                                 </UnstyledButton>
                             </Menu.Target>
                             <Menu.Dropdown>
                                 <Menu.Label
                                     style={{ overflowWrap: 'anywhere' }}
                                 >
+                                    {user.name}
+                                    <br />
                                     {user.email}
                                 </Menu.Label>
                                 <Menu.Item
                                     component='a'
                                     href='/#security'
                                     leftSection={<MdSecurity size={16} />}
+                                    onClick={close}
                                 >
                                     Account security
                                 </Menu.Item>
+                                <Menu.Divider />
                                 <Menu.Item
                                     color='red'
                                     leftSection={<MdLogout size={16} />}
@@ -224,59 +193,14 @@ export function PortalLayout({
                         </Menu>
                     )}
                 </Group>
-            </AppShell.Header>
-            {hasAccount && (
-                <>
-                    {opened && (
-                        <Overlay
-                            hiddenFrom='md'
-                            fixed
-                            zIndex={99}
-                            backgroundOpacity={0.25}
-                            onClick={close}
-                            aria-hidden
-                        />
-                    )}
-                    <AppShell.Navbar
-                        id='portal-navigation'
-                        w={250}
-                        style={{ overflowY: 'auto' }}
-                    >
-                        <Stack
-                            component='nav'
-                            aria-label='Agent accounting views'
-                            p='sm'
-                            gap={4}
-                        >
-                            {accountViews.map((item) => (
-                                <NavLink
-                                    key={item.value}
-                                    component='a'
-                                    href={`#${item.value}`}
-                                    label={item.label}
-                                    leftSection={<item.icon size={20} />}
-                                    active={view === item.value}
-                                    aria-current={
-                                        view === item.value ? 'page' : undefined
-                                    }
-                                    className='portal-nav-link'
-                                    onClick={() => {
-                                        onView(item.value);
-                                        close();
-                                    }}
-                                />
-                            ))}
-                        </Stack>
-                    </AppShell.Navbar>
-                </>
-            )}
-            <AppShell.Main
+            </header>
+            <main
                 id='portal-content'
                 tabIndex={-1}
                 className={`portal-main${hasAccount ? ' portal-main-account' : ''}`}
             >
                 {children}
-            </AppShell.Main>
-        </AppShell>
+            </main>
+        </div>
     );
 }

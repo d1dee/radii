@@ -8,8 +8,10 @@ import type {
 } from '../AccountingViews';
 import { readIntent, type WithdrawalIntent } from '../withdrawalIntent';
 import type { EarningsRow, NotificationRow } from '../PortalInsights';
+import type { EarningsChartData } from '../PortalOverview';
 
 type Statement = Page<StatementRow> & { balances: Balance[] };
+export type ReportPaging = { page: number; perPage: number };
 type AccountingData = {
     statement: Statement;
     profile: PayoutProfile | null;
@@ -19,6 +21,7 @@ type AccountingData = {
     intent: WithdrawalIntent | null;
     earnings: Page<EarningsRow> | null;
     notifications: Page<NotificationRow> | null;
+    chart: EarningsChartData | null;
 };
 
 export function useAgentAccounting(
@@ -27,6 +30,8 @@ export function useAgentAccounting(
     page: number,
     perPage: number,
     paused: boolean,
+    earningsPaging: ReportPaging,
+    activityPaging: ReportPaging,
 ) {
     const [revision, setRevision] = useState(0);
     const [data, setData] = useState<AccountingData | null>(null);
@@ -66,31 +71,38 @@ export function useAgentAccounting(
                           controller.signal,
                       )
                     : Promise.resolve(null),
-                tab === 'withdrawals'
+                tab === 'overview'
                     ? request<Page<WithdrawalRow>>(
-                          `${root}/withdrawals${query}`,
+                          `${root}/withdrawals?page=1&perPage=5`,
                           undefined,
                           controller.signal,
                       )
                     : Promise.resolve(null),
-                tab === 'audit'
+                tab === 'statement'
                     ? request<Page<AccessEvent>>(
-                          `${root}/audit${query}`,
+                          `${root}/audit?page=${activityPaging.page}&perPage=${activityPaging.perPage}`,
                           undefined,
                           controller.signal,
                       )
                     : Promise.resolve(null),
                 readIntent(agentId, controller.signal),
-                tab === 'earnings'
+                tab === 'statement'
                     ? request<Page<EarningsRow>>(
-                          `${root}/earnings${query}`,
+                          `${root}/earnings?page=${earningsPaging.page}&perPage=${earningsPaging.perPage}`,
                           undefined,
                           controller.signal,
                       )
                     : Promise.resolve(null),
-                tab === 'notifications'
+                tab === 'overview'
                     ? request<Page<NotificationRow>>(
-                          `${root}/notifications${query}`,
+                          `${root}/notifications?page=1&perPage=5`,
+                          undefined,
+                          controller.signal,
+                      )
+                    : Promise.resolve(null),
+                tab === 'overview'
+                    ? request<EarningsChartData>(
+                          `${root}/earnings-chart`,
                           undefined,
                           controller.signal,
                       )
@@ -106,6 +118,7 @@ export function useAgentAccounting(
                         recovery,
                         earnings,
                         notifications,
+                        chart,
                     ]) => {
                         if (!controller.signal.aborted) {
                             if (background && shouldPause()) {
@@ -121,6 +134,7 @@ export function useAgentAccounting(
                                 intent: recovery.intent,
                                 earnings,
                                 notifications,
+                                chart,
                             });
                             setError('');
                             schedule();
@@ -139,7 +153,17 @@ export function useAgentAccounting(
             clearTimeout(timer);
             controller.abort();
         };
-    }, [agentId, tab, page, perPage, revision]);
+    }, [
+        agentId,
+        tab,
+        page,
+        perPage,
+        revision,
+        earningsPaging.page,
+        earningsPaging.perPage,
+        activityPaging.page,
+        activityPaging.perPage,
+    ]);
 
     return {
         data,

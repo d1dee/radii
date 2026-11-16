@@ -5,15 +5,15 @@ import {
     Checkbox,
     Group,
     Modal,
+    NumberInput,
     PasswordInput,
     Select,
     Stack,
     Text,
     Textarea,
-    TextInput,
 } from '@mantine/core';
 import { useEffect, useState } from 'react';
-import { request, type Balance, PortalError } from './api';
+import { PortalError, request, type Balance } from './api';
 import { amountError, money } from './money';
 import {
     acknowledgeReceipt,
@@ -39,7 +39,9 @@ export function WithdrawalForm({
     onSaved: () => void;
 }) {
     const [intent, setIntent] = useState<WithdrawalIntent | null>(null);
-    const [previousIntentId, setPreviousIntentId] = useState<string | null>(null);
+    const [previousIntentId, setPreviousIntentId] = useState<string | null>(
+        null,
+    );
     const [loaded, setLoaded] = useState(false);
     const [revision, setRevision] = useState(0);
     const [currency, setCurrency] = useState<string | null>(
@@ -78,7 +80,11 @@ export function WithdrawalForm({
             })
             .catch((err) => {
                 if (controller.signal.aborted) return;
-                setError(err instanceof Error ? err.message : 'Cannot recover the saved intent.');
+                setError(
+                    err instanceof Error
+                        ? err.message
+                        : 'Cannot recover the saved intent.',
+                );
                 setNeedsLogin(err instanceof PortalError && err.status === 401);
             });
         return () => controller.abort();
@@ -112,12 +118,17 @@ export function WithdrawalForm({
         setError('');
         setNeedsLogin(false);
         try {
-            await request(`/${agentId}/withdrawal-intent/${intent.id}/cancel`, {});
+            await request(
+                `/${agentId}/withdrawal-intent/${intent.id}/cancel`,
+                {},
+            );
             setIntent(null);
             setAmount('');
             setNote('');
         } catch (err) {
-            setError(`${err instanceof Error ? err.message : 'Cannot cancel intent.'} Reopen this form to recover its current server state.`);
+            setError(
+                `${err instanceof Error ? err.message : 'Cannot cancel intent.'} Reopen this form to recover its current server state.`,
+            );
             setNeedsLogin(err instanceof PortalError && err.status === 401);
         } finally {
             setPassword('');
@@ -156,8 +167,16 @@ export function WithdrawalForm({
         setBusy(true);
         try {
             if (!pending) {
-                const draft = { amount: amount.trim(), currency, note: note.trim() };
-                const result = await createIntent(agentId, draft, previousIntentId);
+                const draft = {
+                    amount: amount.trim(),
+                    currency,
+                    note: note.trim(),
+                };
+                const result = await createIntent(
+                    agentId,
+                    draft,
+                    previousIntentId,
+                );
                 pending = result.intent;
                 setIntent(pending);
                 setPreviousIntentId(result.previousIntentId);
@@ -177,7 +196,10 @@ export function WithdrawalForm({
                 setLoaded(false);
                 setConfirmed(false);
             }
-            const detail = err instanceof Error ? err.message : 'Withdrawal result is unknown.';
+            const detail =
+                err instanceof Error
+                    ? err.message
+                    : 'Withdrawal result is unknown.';
             setError(
                 `${detail} Recover the server intent or retry the same saved request, not a new withdrawal.`,
             );
@@ -196,19 +218,29 @@ export function WithdrawalForm({
             closeOnClickOutside={!busy}
             closeOnEscape={!busy}
             title='Request manual withdrawal'
+            aria-describedby='withdrawal-description'
             size='lg'
         >
             <form onSubmit={submit}>
                 <Stack>
-                    <Alert color='blue'>
-                        This reserves commission for review by your operator. It
-                        does not send money. Approval and external payment are
-                        separate steps.
-                    </Alert>
+                    <Text id='withdrawal-description' size='sm' c='dimmed'>
+                        Request a withdrawal from your available commission
+                        balance. Funds are reserved while your operator reviews
+                        and processes the payout manually.
+                    </Text>
                     {!loaded && (
                         <Stack gap='xs'>
-                            <Text role='status'>Server recovery is required before submitting a withdrawal.</Text>
-                            <Button variant='default' disabled={busy} onClick={() => setRevision((value) => value + 1)}>
+                            <Text role='status'>
+                                Server recovery is required before submitting a
+                                withdrawal.
+                            </Text>
+                            <Button
+                                variant='default'
+                                disabled={busy}
+                                onClick={() =>
+                                    setRevision((value) => value + 1)
+                                }
+                            >
                                 Check server intent
                             </Button>
                         </Stack>
@@ -218,7 +250,8 @@ export function WithdrawalForm({
                             A withdrawal intent is saved on the server. Review
                             the locked amount, currency and note below. Retrying
                             uses the same identity even after signing in again.
-                            {intent.withdrawalId && ' A withdrawal is already linked; recover its result rather than starting another request.'}
+                            {intent.withdrawalId &&
+                                ' A withdrawal is already linked; recover its result rather than starting another request.'}
                             <Text
                                 size='xs'
                                 mt='xs'
@@ -238,7 +271,12 @@ export function WithdrawalForm({
                         </Button>
                     )}
                     {intent && !intent.withdrawalId && (
-                        <Button variant='subtle' color='red' disabled={busy || !loaded} onClick={() => void cancel()}>
+                        <Button
+                            variant='subtle'
+                            color='red'
+                            disabled={busy || !loaded}
+                            onClick={() => void cancel()}
+                        >
                             Cancel unreserved intent
                         </Button>
                     )}
@@ -255,14 +293,19 @@ export function WithdrawalForm({
                     <Select
                         pb='xs'
                         label='Currency'
-                        data={[...new Set([...balances.map((item) => item.currency), ...(intent ? [intent.currency] : [])])]}
+                        data={[
+                            ...new Set([
+                                ...balances.map((item) => item.currency),
+                                ...(intent ? [intent.currency] : []),
+                            ]),
+                        ]}
                         value={currency}
                         onChange={setCurrency}
                         allowDeselect={false}
                         disabled={busy || !loaded || !!intent}
                         required
                     />
-                    <TextInput
+                    <NumberInput
                         pb='xs'
                         label='Amount'
                         description={
@@ -271,11 +314,18 @@ export function WithdrawalForm({
                                 : 'Choose a currency with an available balance.'
                         }
                         inputMode='decimal'
-                        maxLength={21}
+                        thousandSeparator=','
+                        decimalScale={2}
+                        allowedDecimalSeparators={['.']}
+                        allowNegative={false}
+                        allowLeadingZeros={false}
+                        hideControls
+                        withKeyboardEvents={false}
+                        clampBehavior='none'
+                        valueIsNumericString
+                        isAllowed={({ value }) => /^\d{0,18}(\.\d{0,2})?$/.test(value)}
                         value={amount}
-                        onChange={(event) =>
-                            setAmount(event.currentTarget.value)
-                        }
+                        onValueChange={({ value }) => setAmount(value)}
                         disabled={busy || !loaded || !!intent}
                         required
                     />
@@ -320,10 +370,7 @@ export function WithdrawalForm({
                         <Button
                             type='submit'
                             loading={busy}
-                            disabled={
-                                !loaded ||
-                                (!canRequest && !intent)
-                            }
+                            disabled={!loaded || (!canRequest && !intent)}
                         >
                             {intent
                                 ? 'Retry saved request'

@@ -1,5 +1,6 @@
 import {
     Alert,
+    Accordion,
     Anchor,
     Button,
     Center,
@@ -14,21 +15,20 @@ import {
     AccountActivityView,
     AgreementsView,
     BalanceSummary,
-    PayoutProfileView,
     StatementView,
-    WithdrawalsView,
     type WithdrawalRow,
 } from './AccountingViews';
 import { request, type Membership } from './api';
 import { PageLayout } from './components/PageLayout';
 import { accountViews, type AccountView } from './components/PortalLayout';
-import { useAgentAccounting } from './lib/useAgentAccounting';
-import { WithdrawalAuditView, type AuditEvent } from './WithdrawalAudit';
 import {
-    EarningsBreakdown,
-    NotificationsView,
-    WithdrawalGuidance,
-} from './PortalInsights';
+    useAgentAccounting,
+    type ReportPaging,
+} from './lib/useAgentAccounting';
+import { type AuditEvent } from './WithdrawalAudit';
+import { EarningsBreakdown } from './PortalInsights';
+import { PortalOverview } from './PortalOverview';
+import { MdArrowOutward } from 'react-icons/md';
 
 const WithdrawalForm = lazy(() =>
     import('./WithdrawalForm').then((module) => ({
@@ -50,13 +50,21 @@ export function Dashboard({
 }) {
     const [page, setPage] = useState(1);
     const [perPage, setPerPage] = useState(10);
+    const [earningsPaging, setEarningsPaging] = useState<ReportPaging>({
+        page: 1,
+        perPage: 10,
+    });
+    const [activityPaging, setActivityPaging] = useState<ReportPaging>({
+        page: 1,
+        perPage: 10,
+    });
+    const [report, setReport] = useState<string | null>(null);
     const [form, setForm] = useState<'withdrawal' | 'payout' | null>(null);
     const [detailId, setDetailId] = useState<string | null>(null);
     const [detail, setDetail] = useState<{
         withdrawal: WithdrawalRow;
         events: AuditEvent[];
     } | null>(null);
-    const [detailError, setDetailError] = useState('');
     const agentId = membership.agentId;
     const { data, error, revision, refresh, fail } = useAgentAccounting(
         agentId,
@@ -64,6 +72,8 @@ export function Dashboard({
         page,
         perPage,
         form !== null || detailId !== null,
+        earningsPaging,
+        activityPaging,
     );
     const failAccount = useEffectEvent(fail);
     useEffect(() => {
@@ -74,7 +84,6 @@ export function Dashboard({
         if (!detailId) return;
         const controller = new AbortController();
         setDetail(null);
-        setDetailError('');
         request<{ withdrawal: WithdrawalRow; events: AuditEvent[] }>(
             `/${agentId}/withdrawals/${detailId}`,
             undefined,
@@ -85,7 +94,6 @@ export function Dashboard({
             })
             .catch((err) => {
                 if (!controller.signal.aborted) {
-                    setDetailError(err.message);
                     failAccount(err.message);
                 }
             });
@@ -117,14 +125,20 @@ export function Dashboard({
                     className='account-heading'
                 >
                     <Stack gap={4}>
-                        <Title order={3}>{view.title}</Title>
+                        <Title order={1}>
+                            {tab === 'overview'
+                                ? `Welcome back, ${membership.name.split(' ')[0]}.`
+                                : view.title}
+                        </Title>
                         <Text size='sm' c='dimmed'>
                             {view.description}
                         </Text>
                     </Stack>
-                    {tab !== 'payout' && tab !== 'security' && (
+                    {tab !== 'security' && (
                         <Group gap='xs'>
                             <Button
+                                className='withdrawal-button'
+                                rightSection={<MdArrowOutward size={18} />}
                                 disabled={
                                     !data ||
                                     (!data.profile?.verifiedAt && !pending)
@@ -159,23 +173,16 @@ export function Dashboard({
                     {tab === 'statement' && (
                         <BalanceSummary balances={data.statement.balances} />
                     )}
-                    {tab === 'earnings' && data.earnings && (
-                        <EarningsBreakdown
-                            data={data.earnings}
-                            paging={paging}
-                        />
-                    )}
-                    {tab === 'notifications' && data.notifications && (
-                        <NotificationsView
-                            data={data.notifications}
-                            paging={paging}
-                            onWithdrawal={setDetailId}
-                        />
-                    )}
-                    {tab === 'withdrawals' && (
-                        <WithdrawalGuidance
+                    {tab === 'overview' && (
+                        <PortalOverview
                             profile={data.profile}
                             balances={data.statement.balances}
+                            chart={data.chart}
+                            withdrawals={data.withdrawals}
+                            notifications={data.notifications}
+                            onPayout={() => setForm('payout')}
+                            onWithdrawal={setDetailId}
+                            withdrawalDetail={detail}
                         />
                     )}
                     {pending && (
@@ -184,16 +191,19 @@ export function Dashboard({
                             another.
                         </Alert>
                     )}
-                    {tab !== 'payout' &&
-                        tab !== 'security' &&
-                        !data.profile?.verifiedAt && (
-                            <Alert color='orange' role='note'>
-                                Your operator must verify your payout
-                                destination before new withdrawals.
-                            </Alert>
-                        )}
+                    {tab !== 'security' && !data.profile?.verifiedAt && (
+                        <Alert color='orange' role='note'>
+                            Your operator must verify your payout destination
+                            before new withdrawals.
+                        </Alert>
+                    )}
                     {tab === 'statement' && (
-                        <StatementView data={data.statement} paging={paging} />
+                        <StatementView
+                            data={data.statement}
+                            paging={paging}
+                            onWithdrawal={setDetailId}
+                            withdrawalDetail={detail}
+                        />
                     )}
                     {tab === 'agreements' && data.agreements && (
                         <AgreementsView
@@ -201,43 +211,69 @@ export function Dashboard({
                             paging={paging}
                         />
                     )}
-                    {tab === 'withdrawals' && data.withdrawals && (
-                        <WithdrawalsView
-                            data={data.withdrawals}
-                            paging={paging}
-                            onDetail={setDetailId}
-                        />
-                    )}
-                    {tab === 'audit' && data.audit && (
-                        <AccountActivityView
-                            data={data.audit}
-                            paging={paging}
-                        />
-                    )}
-                    {tab === 'payout' && (
-                        <PayoutProfileView
-                            profile={data.profile}
-                            onUpdate={() => setForm('payout')}
-                        />
+                    {tab === 'statement' && (
+                        <Accordion
+                            variant='separated'
+                            value={report}
+                            onChange={setReport}
+                        >
+                            <Accordion.Item value='earnings'>
+                                <Accordion.Control>
+                                    Earnings by month, source and rate
+                                </Accordion.Control>
+                                <Accordion.Panel>
+                                    {data.earnings && (
+                                        <EarningsBreakdown
+                                            data={data.earnings}
+                                            paging={{
+                                                ...earningsPaging,
+                                                onPage: (page) =>
+                                                    setEarningsPaging(
+                                                        (current) => ({
+                                                            ...current,
+                                                            page,
+                                                        }),
+                                                    ),
+                                                onSize: (perPage) =>
+                                                    setEarningsPaging({
+                                                        page: 1,
+                                                        perPage,
+                                                    }),
+                                            }}
+                                        />
+                                    )}
+                                </Accordion.Panel>
+                            </Accordion.Item>
+                            <Accordion.Item value='activity'>
+                                <Accordion.Control>
+                                    Account activity history
+                                </Accordion.Control>
+                                <Accordion.Panel>
+                                    {data.audit && (
+                                        <AccountActivityView
+                                            data={data.audit}
+                                            paging={{
+                                                ...activityPaging,
+                                                onPage: (page) =>
+                                                    setActivityPaging(
+                                                        (current) => ({
+                                                            ...current,
+                                                            page,
+                                                        }),
+                                                    ),
+                                                onSize: (perPage) =>
+                                                    setActivityPaging({
+                                                        page: 1,
+                                                        perPage,
+                                                    }),
+                                            }}
+                                        />
+                                    )}
+                                </Accordion.Panel>
+                            </Accordion.Item>
+                        </Accordion>
                     )}
                 </>
-            )}
-            {detailId && !detail && !detailError && (
-                <Text role='status'>Loading withdrawal audit...</Text>
-            )}
-            {detail && data && !error && (
-                <WithdrawalAuditView
-                    {...detail}
-                    destination={
-                        detail.withdrawal.payout
-                            ? `${detail.withdrawal.payout.method === 'mpesa' ? 'M-Pesa' : 'Bank'}: ${detail.withdrawal.payout.accountName}, ending in ${detail.withdrawal.payout.destination.slice(-4)}`
-                            : undefined
-                    }
-                    onClose={() => {
-                        setDetailId(null);
-                        setDetail(null);
-                    }}
-                />
             )}
             <Suspense
                 fallback={<Text role='status'>Loading secure form...</Text>}

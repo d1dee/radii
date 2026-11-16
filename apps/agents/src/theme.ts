@@ -1,33 +1,10 @@
-import {
-    Badge,
-    Button,
-    createTheme,
-    type CSSVariablesResolver,
-    Paper,
-    Table,
-} from '@mantine/core';
-
-export const portalCssVariables: CSSVariablesResolver = () => ({
-    variables: {},
-    light: {
-        '--mantine-color-dimmed': '#596579',
-        '--mantine-color-placeholder': '#667085',
-        '--mantine-color-blue-light-color': 'var(--mantine-color-blue-9)',
-        '--mantine-color-green-light-color': '#237032',
-        '--mantine-color-orange-light-color': '#b33b0c',
-        '--mantine-color-gray-light-color': 'var(--mantine-color-gray-7)',
-    },
-    dark: {},
-});
+import { Badge, Button, createTheme, Paper, Table } from '@mantine/core';
 
 export const portalTheme = createTheme({
-    primaryColor: 'blue',
-    primaryShade: { light: 8, dark: 5 },
     autoContrast: true,
     defaultRadius: 'md',
     radius: { xs: '3px', sm: '5px', md: '8px', lg: '12px', xl: '16px' },
-    fontFamily:
-        '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
+    fontFamily: '"Nunito Sans", Arial, sans-serif',
     headings: {
         fontWeight: '600',
         sizes: {
