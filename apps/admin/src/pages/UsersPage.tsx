@@ -99,7 +99,6 @@ function CredentialField({ label, value }: { label: string; value: string }) {
             label={label}
             value={value}
             readOnly
-            styles={{ input: { fontFamily: 'monospace' } }}
             rightSection={
                 <CopyButton value={value} timeout={1500}>
                     {({ copied, copy }) => (
@@ -678,7 +677,6 @@ export default function UsersPage() {
                                                 <Text
                                                     size='xs'
                                                     c='dimmed'
-                                                    ff='monospace'
                                                 >
                                                     {u.pppoe.username}
                                                 </Text>

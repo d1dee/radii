@@ -944,7 +944,7 @@ export function UserDetailsDrawer({
                                     </Badge>
                                 </Group>
                                 <Group gap={4}>
-                                    <Text size='lg' fw={700} ff='monospace'>
+                                    <Text size='lg' fw={700}>
                                         {detail.pinResetOtp}
                                     </Text>
                                     <CopyButton value={detail.pinResetOtp}>

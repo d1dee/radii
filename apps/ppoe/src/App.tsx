@@ -1,10 +1,12 @@
 import '@mantine/core/styles.css';
 import '@mantine/notifications/styles.css';
+import '@radii/ui/fonts.css';
 
 import { Alert, Container, MantineProvider, Stack } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import { Notifications } from '@mantine/notifications';
 import type { Package } from '@radii/shared';
+import { typography } from '@radii/ui';
 import {
     createContext,
     useCallback,
@@ -195,7 +197,7 @@ export default function App() {
     }, [storedPackageId]);
 
     return (
-        <MantineProvider defaultColorScheme='auto'>
+        <MantineProvider theme={typography} defaultColorScheme='auto'>
             <Notifications position='top-center' />
             <Container
                 size='sm'
