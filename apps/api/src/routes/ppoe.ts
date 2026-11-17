@@ -379,6 +379,7 @@ app.get('/status', requireAuth, async (c) => {
             octetsLimit: a.octetsLimit,
             remainingOctets: a.remainingOctets,
             avgSpeedBps: a.avgSpeedBps,
+            currentSpeedBps: a.liveSessions[0]?.currentSpeedBps ?? null,
             liveSessions: a.liveSessions,
         }));
     return c.json({ success: true, data });

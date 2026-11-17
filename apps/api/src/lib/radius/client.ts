@@ -61,6 +61,7 @@ import {
 import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
 import * as dgram from 'node:dgram';
 import { db } from '../../db';
+import { getCurrentSessionSpeeds } from './usageLedger';
 import { env } from '../../env';
 import { apiLogger } from '../../logging';
 import { getAdminSettings } from '../adminSettings';
@@ -425,6 +426,7 @@ export interface SessionInfo {
     // Average speed across the session's lifetime so far (closed sessions use
     // their final counters).
     avgSpeedBps: number;
+    currentSpeedBps: number | null;
     fupWindowStart: Date | null;
     fupRateLimit: string | null;
     fupForced: boolean;
@@ -4716,7 +4718,7 @@ export class RadiusClient {
                         : undefined,
                 ),
             )
-            .orderBy(desc(radacct.acctstarttime));
+            .orderBy(desc(radacct.acctstarttime), desc(radacct.radacctid));
         const rows = await (opts.limit === null ? query : query.limit(opts.limit ?? 200));
         return rows.map((row) => this.sessionInfoFromRow(row));
     }
@@ -4753,6 +4755,7 @@ export class RadiusClient {
             terminateCause: row.acctterminatecause,
             avgSpeedBps:
                 seconds > 0 ? Math.round((totalOctets * 8) / seconds) : 0,
+            currentSpeedBps: null,
             fupWindowStart: row.fupWindowStart,
             fupRateLimit: row.fupRateLimit,
             fupForced: row.fupForced,
@@ -4779,6 +4782,13 @@ export class RadiusClient {
             limit: null,
         });
         const liveSessions = sessions.filter((s) => s.live);
+
+        const speeds = await getCurrentSessionSpeeds(
+            db, activationId, liveSessions.map((session) => BigInt(session.radacctId)),
+        );
+        for (const session of liveSessions) {
+            session.currentSpeedBps = speeds.get(session.radacctId) ?? null;
+        }
 
         const cumulativeUsed = sessions.reduce((sum, s) => sum + (pkg.noExpiry ? s.bankChargedSeconds : s.seconds), 0);
         const usedSeconds = Math.round(cumulativeUsed);

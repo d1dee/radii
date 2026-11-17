@@ -42,6 +42,8 @@ export type Quota = {
     octetsLimit?: number | null;
     remainingOctets?: number | null;
     avgSpeedBps?: number;
+    // Combined last-interval speed for the selected client session; null if unavailable.
+    currentSpeedBps?: number | null;
     // Cumulative time-bank packages (noExpiry): total/used/remaining bank
     // seconds. Null for regular expiry packages.
     bankTotalSeconds?: number | null;
@@ -69,6 +71,7 @@ export type Quota = {
         totalOctets: number;
         terminateCause: string | null;
         avgSpeedKBps: number;
+        currentSpeedBps?: number | null;
     }>;
 };
 

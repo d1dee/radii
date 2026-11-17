@@ -1,6 +1,47 @@
-import { and, asc, eq, inArray, isNotNull, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
 import type { db } from '../../db';
 import { activatedPackages, radacct, radiusUsageDelta } from '../../db/schema';
+import { currentSpeedBps } from './currentSpeed';
+
+/** Read only already-authorized live sessions; never capture usage from a GET. */
+export async function getCurrentSessionSpeeds(
+    database: typeof db,
+    activationId: string,
+    sessionIds: bigint[],
+): Promise<Map<string, number | null>> {
+    if (sessionIds.length === 0) return new Map();
+    const history = database.select({
+        radacctId: radiusUsageDelta.radacctId,
+        observedAt: radiusUsageDelta.observedAt,
+        intervalStartedAt: sql<string>`coalesce(lag(${radiusUsageDelta.observedAt}) over (
+            partition by ${radiusUsageDelta.radacctId}, ${radiusUsageDelta.activationId}
+            order by ${radiusUsageDelta.observedAt}, ${radiusUsageDelta.id}
+        ), ${radacct.acctstarttime})::text`.as('interval_started_at'),
+        rank: sql<number>`row_number() over (
+            partition by ${radiusUsageDelta.radacctId}, ${radiusUsageDelta.activationId}
+            order by ${radiusUsageDelta.observedAt} desc, ${radiusUsageDelta.id} desc
+        )`.as('observation_rank'),
+        inputOctets: radiusUsageDelta.inputOctets,
+        outputOctets: radiusUsageDelta.outputOctets,
+        accountingUpdatedAt: sql<string>`greatest(${radacct.acctupdatetime}, ${radacct.acctstarttime})::text`.as('accounting_updated_at'),
+        accountingInterval: radacct.acctinterval,
+    }).from(radiusUsageDelta)
+        .innerJoin(radacct, eq(radiusUsageDelta.radacctId, radacct.radacctid))
+        .where(and(
+            eq(radiusUsageDelta.activationId, activationId),
+            eq(radacct.class, activationId),
+            inArray(radacct.radacctid, sessionIds),
+            isNotNull(radacct.acctstarttime),
+            isNull(radacct.acctstoptime),
+        )).as('current_speed_history');
+    // Rank after calculating lag over the complete session history, not a date range.
+    const rows = await database.select().from(history).where(eq(history.rank, 1));
+    return new Map(rows.map((row) => [String(row.radacctId), currentSpeedBps({
+        ...row,
+        intervalStartedAt: new Date(row.intervalStartedAt),
+        accountingUpdatedAt: new Date(row.accountingUpdatedAt),
+    })]));
+}
 
 // Keep this predicate aligned with radacct_usage_pending_idx. Lower/reset
 // counters never lower the high-water mark or make already counted bytes new.
