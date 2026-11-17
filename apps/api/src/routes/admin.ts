@@ -40,6 +40,7 @@ import {
     createNasDevice,
     deleteNasDevice,
     getNasDeviceById,
+    getNasDeviceThroughput,
     getNasDevices,
     listAdminNasDevices,
     updateNasDevice,
@@ -522,6 +523,20 @@ app.get('/nas-devices/:id/analytics', requireAdmin, async (c) => {
     return c.json({ success: true, data });
 });
 
+app.get('/nas-devices/:id/throughput', requireAdmin, async (c) => {
+    const id = z.uuid().safeParse(c.req.param('id'));
+    if (!id.success) return jsonError(c, 400, 'Invalid NAS id');
+    const range = z.enum(['hour', 'day', 'month'])
+        .default('day')
+        .safeParse(c.req.query('range'));
+    if (!range.success) return jsonError(c, 400, 'Invalid throughput range');
+    const adminId = c.get('adminSession').userId;
+    const device = await getNasDeviceById(id.data, adminId);
+    if (!device) return jsonError(c, 404, 'NAS device not found');
+    const data = await getNasDeviceThroughput(adminId, device.id, range.data);
+    return c.json({ success: true, data });
+});
+
 // Non-secret fields of a nas_setup_script row that the admin frontend
 // consumes (NasSetupScriptRow in apps/admin/src/lib/api.ts): the rendered
 // script, status/timestamps, WG tunnel facts and the persisted generation
@@ -793,12 +808,16 @@ app.get('/users', requireAdmin, async (c) => {
 // One customer's valuation: identity, moderation state, lifetime payments,
 // activations, usage, flags and PPPoE credentials.
 app.get('/users/:id/throughput', requireAdmin, async (c) => {
+    const range = z.enum(['hour', 'day', 'month'])
+        .default('hour')
+        .safeParse(c.req.query('range'));
+    if (!range.success) return jsonError(c, 400, 'Invalid throughput range');
     const userId = c.req.param('id');
     const adminId = c.get('adminSession').userId;
     if (!userId || !(await isAdminUserVisible(adminId, userId))) {
         return jsonError(c, 404, 'User not found');
     }
-    const data = await getAdminThroughputObservations(adminId, { userId });
+    const data = await getAdminThroughputObservations(adminId, { userId }, range.data);
     return c.json({ success: true, data });
 });
 
@@ -1535,12 +1554,16 @@ app.get('/radius/sessions', requireAdmin, async (c) => {
 });
 
 app.get('/radius/sessions/:radacctId/throughput', requireAdmin, async (c) => {
+    const range = z.enum(['hour', 'day', 'month'])
+        .default('hour')
+        .safeParse(c.req.query('range'));
+    if (!range.success) return jsonError(c, 400, 'Invalid throughput range');
     const radacctId = c.req.param('radacctId');
     const adminId = c.get('adminSession').userId;
     if (!radacctId || !/^\d+$/.test(radacctId) || !(await isAdminRadacctVisible(adminId, radacctId))) {
         return jsonError(c, 404, 'Unknown session');
     }
-    const data = await getAdminThroughputObservations(adminId, { radacctId });
+    const data = await getAdminThroughputObservations(adminId, { radacctId }, range.data);
     return c.json({ success: true, data });
 });
 

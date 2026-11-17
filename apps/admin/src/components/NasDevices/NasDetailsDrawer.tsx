@@ -15,6 +15,7 @@ import {
     Title,
 } from '@mantine/core';
 import { ArchivedPackageBadge } from '@/components/Packages/ArchivedPackageBadge';
+import { ThroughputChart } from '@/components/Sessions/ThroughputChart';
 import type { ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import { MdDelete, MdEdit, MdTerminal } from 'react-icons/md';
@@ -28,6 +29,7 @@ import {
     type NasDeviceAnalytics,
     type NasDeviceRow,
     type NasSetupScriptRow,
+    type ThroughputRange,
     type PackagePaymentStatus,
     type PackageRow,
 } from '@/lib/api';
@@ -119,10 +121,13 @@ export function NasDetailsDrawer({
     const [scriptRow, setScriptRow] = useState<NasSetupScriptRow | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [paymentsPage, setPaymentsPage] = useState(1);
+    const [throughputRange, setThroughputRange] =
+        useState<ThroughputRange>('day');
     const loadRequest = useRef(0);
 
     useEffect(() => {
         if (nasDeviceId) setPaymentsPage(1);
+        setThroughputRange('day');
     }, [nasDeviceId]);
 
     useEffect(() => {
@@ -411,6 +416,16 @@ export function NasDetailsDrawer({
                     )}
 
                     <Divider label='Analytics' labelPosition='left' />
+
+                    {nasDeviceId ? (
+                        <ThroughputChart
+                            key={nasDeviceId}
+                            kind='nas'
+                            id={nasDeviceId}
+                            range={throughputRange}
+                            onRangeChange={setThroughputRange}
+                        />
+                    ) : null}
 
                     <Grid>
                         <Grid.Col span={{ base: 12, xs: 6, sm: 4 }}>

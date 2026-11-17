@@ -55,6 +55,7 @@ import { manualFairUsageAvailable } from './radius/fairUsage';
 import { bankSessionUsage } from './radius/bankUsage';
 import { paymentService } from './payments';
 import { concisePaymentFailure } from './payments/types';
+import { nasThroughputRanges, type NasThroughputRange } from './nasThroughput';
 import {
     nasAddressClaims,
     scopedNasHistoryAddress,
@@ -212,6 +213,7 @@ function scopedAccountingToAdminNas(adminId: string): SQL {
 export async function getAdminThroughputObservations(
     adminId: string,
     target: { userId: string } | { radacctId: string },
+    range: NasThroughputRange = 'hour',
 ) {
     const history = db
         .select({
@@ -247,7 +249,7 @@ export async function getAdminThroughputObservations(
                 : eq(radacct.radacctid, BigInt(target.radacctId)),
         )).as('throughput_history');
     const rows = await db.select().from(history)
-        .where(sql`${history.observedAt} >= ${history.latestAt}::timestamptz - interval '1 hour'`)
+        .where(sql`${history.observedAt} >= ${history.latestAt}::timestamptz - ${nasThroughputRanges[range].seconds} * interval '1 second'`)
         .orderBy(asc(history.observedAt));
     return rows.map((row) => ({
         intervalStartedAt: row.intervalStartedAt,

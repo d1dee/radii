@@ -751,9 +751,28 @@ export type ThroughputObservation = {
     outputOctets: string;
 };
 
-export function getThroughputObservations(kind: 'customer' | 'session', id: string) {
+export type ThroughputRange = 'hour' | 'day' | 'month';
+
+export type NasThroughput = {
+    bucketSeconds: number;
+    points: { at: number; Upload: number | null; Download: number | null }[];
+};
+
+export function getNasThroughput(id: string, range: ThroughputRange) {
+    return request<NasThroughput>(
+        `/admin/nas-devices/${encodeURIComponent(id)}/throughput?range=${range}`,
+    );
+}
+
+export function getThroughputObservations(
+    kind: 'customer' | 'session',
+    id: string,
+    range: ThroughputRange,
+) {
     const path = kind === 'customer' ? 'users' : 'radius/sessions';
-    return request<ThroughputObservation[]>(`/admin/${path}/${encodeURIComponent(id)}/throughput`);
+    return request<ThroughputObservation[]>(
+        `/admin/${path}/${encodeURIComponent(id)}/throughput?range=${range}`,
+    );
 }
 
 export function deleteAdminUser(id: string) {

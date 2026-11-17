@@ -13,6 +13,12 @@ import {
 } from 'drizzle-orm';
 import { db } from '../db';
 import {
+    nasThroughputQuery,
+    nasThroughputRanges,
+    type NasThroughputPoint,
+    type NasThroughputRange,
+} from './nasThroughput';
+import {
     nas,
     nasDevice,
     nasSetupScript,
@@ -22,6 +28,21 @@ import {
 
 type InsertNasDevice = typeof nasDevice.$inferInsert;
 export type NasDeviceRow = typeof nasDevice.$inferSelect;
+
+export async function getNasDeviceThroughput(
+    adminId: string,
+    nasDeviceId: string,
+    range: NasThroughputRange,
+) {
+    const points = await db.execute<NasThroughputPoint>(
+        nasThroughputQuery(adminId, nasDeviceId, range),
+    );
+    return {
+        points: Array.from(points),
+        bucketSeconds: nasThroughputRanges[range].bucketSeconds,
+    };
+}
+
 export type AdminNasDeviceSortBy =
     | 'name'
     | 'ipAddress'
