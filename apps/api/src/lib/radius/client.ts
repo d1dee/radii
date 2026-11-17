@@ -520,6 +520,8 @@ export interface NetworkUsage {
     windowMinutes: number;
     liveSessions: number;
     liveUsers: number;
+    sessionsByType: { pppoe: number; hotspot: number };
+    pppoeAccounts: { online: number; offline: number };
     liveOctets: number;
     // Sum of lifetime average speeds for open sessions, NOT current throughput.
     aggregateThroughputBps: number;
@@ -2995,12 +2997,22 @@ export class RadiusClient {
     async getNetworkUsage(
         windowMinutes: number,
         nasIpAddresses: string[],
+        adminId: string,
     ): Promise<NetworkUsage> {
         const windowMs = Math.max(1, windowMinutes) * 60_000;
         const windowStart = new Date(Date.now() - windowMs);
 
         const liveRows = await db
-            .select()
+            .select({
+                ...getTableColumns(radacct),
+                isPppoe: exists(
+                    db.select({ id: pppoeServiceAccounts.id })
+                        .from(pppoeServiceAccounts)
+                        .where(
+                            eq(pppoeServiceAccounts.username, radacct.username),
+                        ),
+                ),
+            })
             .from(radacct)
             .where(
                 and(
@@ -3013,6 +3025,20 @@ export class RadiusClient {
             );
 
         const liveStats = summarizeOpenSessions(liveRows);
+        const pppoeSessions = liveRows.filter((row) => row.isPppoe);
+        const onlineUsernames = new Set(pppoeSessions.map((row) => row.username));
+        const accounts = await db
+            .select({ username: pppoeServiceAccounts.username })
+            .from(pppoeServiceAccounts)
+            .where(
+                and(
+                    eq(pppoeServiceAccounts.tenantAdminId, adminId),
+                    ne(pppoeServiceAccounts.status, 'closed'),
+                ),
+            );
+        const onlineAccounts = accounts.filter((account) =>
+            onlineUsernames.has(account.username),
+        ).length;
 
         const [windowStats] = await db
             .select({
@@ -3051,6 +3077,14 @@ export class RadiusClient {
         return {
             windowMinutes,
             ...liveStats,
+            sessionsByType: {
+                pppoe: pppoeSessions.length,
+                hotspot: liveRows.length - pppoeSessions.length,
+            },
+            pppoeAccounts: {
+                online: onlineAccounts,
+                offline: accounts.length - onlineAccounts,
+            },
             sessionsStartedInWindow: Number(windowStats?.sessions ?? 0),
             topUsers: topUsers.map((u) => ({
                 username: u.username ?? '',

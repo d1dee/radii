@@ -1468,9 +1468,11 @@ app.get('/radius/summary', requireAdmin, async (c) => {
     const windowMinutes =
         Number.isFinite(raw) && raw > 0 ? Math.min(raw, 1440) : 60;
     const addresses = await getAdminNasAddresses(c.get('adminSession').userId);
-    const data = await radiusClient.getNetworkUsage(windowMinutes, [
-        ...addresses,
-    ]);
+    const data = await radiusClient.getNetworkUsage(
+        windowMinutes,
+        [...addresses],
+        c.get('adminSession').userId,
+    );
     return c.json({ success: true, data });
 });
 

@@ -1176,6 +1176,7 @@ export type AdminReports = {
         buyers: number;
         newUsers: number;
         newActivations: number;
+        newActivationsByType: { pppoe: number; hotspot: number };
     };
     daily: Array<{
         day: string;
@@ -1435,6 +1436,8 @@ export type NetworkUsage = {
     windowMinutes: number;
     liveSessions: number;
     liveUsers: number;
+    sessionsByType: { pppoe: number; hotspot: number };
+    pppoeAccounts: { online: number; offline: number };
     liveOctets: number;
     // Sum and mean of open sessions' lifetime averages, not current throughput.
     aggregateThroughputBps: number;

@@ -16,20 +16,25 @@ import {
     Title,
     Tooltip,
 } from '@mantine/core';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+    useCallback,
+    useEffect,
+    useRef,
+    useState,
+    type ReactNode,
+} from 'react';
 import { MdRefresh } from 'react-icons/md';
 
 import { PageLayout } from '@/components/Layout/PageLayout';
 import { PageTableScrollContainer } from '@/components/PageTableScrollContainer';
-import { TablePagination } from '@/components/TablePagination';
 import { RevenueCharts } from '@/components/RevenueCharts';
+import { TablePagination } from '@/components/TablePagination';
 import {
     getAdminReports,
     getRadiusSummary,
     type AdminReports,
     type NetworkUsage,
 } from '@/lib/api';
-import { useAutoRefresh } from '@/lib/autoRefresh';
 import { warnBackgroundFailure } from '@/lib/clientError';
 import { dayjs } from '@/lib/dayjs';
 import {
@@ -65,10 +70,12 @@ function StatCard({
     label,
     value,
     sub,
+    color,
 }: {
     label: string;
-    value: string;
+    value: ReactNode;
     sub: string;
+    color?: string;
 }) {
     return (
         <Card withBorder padding='md' radius='md' miw={0}>
@@ -78,6 +85,7 @@ function StatCard({
             <Text
                 size='lg'
                 fw={700}
+                c={color}
                 mt={2}
                 style={{ overflowWrap: 'anywhere' }}
             >
@@ -159,8 +167,7 @@ export default function DashboardPage() {
         void loadReports(range.from, range.to);
     }, [loaded, settings, loadReports]);
 
-    // Live network figures and the current report range refresh together on
-    // the admin's configured cadence.
+    // Network figures are independent of the selected report date range.
     useEffect(() => {
         void loadUsage();
     }, [loadUsage]);
@@ -173,7 +180,11 @@ export default function DashboardPage() {
         setTo(range.to);
         void loadReports(range.from, range.to, true);
     }, [loadUsage, loadReports, preset]);
-    useAutoRefresh(autoRefreshData);
+    useEffect(() => {
+        if (!loaded) return;
+        const timer = setInterval(autoRefreshData, 10_000);
+        return () => clearInterval(timer);
+    }, [autoRefreshData, loaded]);
 
     useEffect(() => {
         if (!loaded || !reports) return;
@@ -246,66 +257,128 @@ export default function DashboardPage() {
                 <Group justify='space-between' mb='xs'>
                     <Group gap='xs'>
                         <Badge color='green' variant='dot' size='lg'>
-                            Network accounting
+                            Revenue & network overview
                         </Badge>
                         <Text size='xs' c='dimmed'>
-                            Latest reported counters; refreshes every{' '}
-                            {settings.dashboard.usageRefreshSeconds}s
+                            Refreshes every 10 seconds
                         </Text>
                     </Group>
                     <Tooltip label='Refresh now'>
                         <ActionIcon
-                            aria-label='Refresh live network'
+                            aria-label='Refresh revenue and network overview'
                             size='lg'
                             variant='subtle'
-                            onClick={() => void loadUsage()}
+                            onClick={autoRefreshData}
                         >
                             <MdRefresh size={18} />
                         </ActionIcon>
                     </Tooltip>
                 </Group>
-                {!reports ? (
-                    <SimpleGrid cols={{ base: 2, lg: 5 }}>
-                        {Array.from({ length: 5 }).map((_, i) => (
-                            <Skeleton key={i} height={48} radius='sm' />
-                        ))}
-                    </SimpleGrid>
-                ) : (
-                    <SimpleGrid cols={{ base: 2, lg: 5 }}>
-                        <StatCard
-                            label='Revenue'
-                            value={formatMoney(reports.totals.revenue)}
-                            sub={`${reports.totals.payments} payments in the selected range`}
-                        />
-                        <StatCard
-                            label='Buyers'
-                            value={String(reports.totals.buyers)}
-                            sub='Distinct customers with paid orders, including free grants'
-                        />
-                        <StatCard
-                            label='New users'
-                            value={String(reports.totals.newUsers)}
-                            sub='Visible customers registered in the selected range'
-                        />
-                        <StatCard
-                            label='New activations'
-                            value={String(reports.totals.newActivations)}
-                            sub='Packages activated in the selected range'
-                        />
-                        <StatCard
-                            label='Avg per buyer'
-                            value={
-                                reports.totals.buyers > 0
-                                    ? formatMoney(
-                                          reports.totals.revenue /
-                                              reports.totals.buyers,
-                                      )
-                                    : '—'
-                            }
-                            sub='Selected-range revenue divided by buyers'
-                        />
-                    </SimpleGrid>
-                )}
+                <Group>
+                    {!reports ? (
+                        <SimpleGrid cols={{ base: 2, lg: 5 }}>
+                            {Array.from({ length: 5 }).map((_, i) => (
+                                <Skeleton key={i} height={48} radius='sm' />
+                            ))}
+                        </SimpleGrid>
+                    ) : (
+                        <SimpleGrid cols={{ base: 2, lg: 5 }}>
+                            <StatCard
+                                label='Revenue'
+                                color='teal'
+                                value={formatMoney(reports.totals.revenue)}
+                                sub={`${reports.totals.payments} payments in the selected range`}
+                            />
+                            <StatCard
+                                label='Buyers'
+                                color='blue'
+                                value={String(reports.totals.buyers)}
+                                sub='Distinct customers with paid orders, including free grants'
+                            />
+                            <StatCard
+                                label='New users'
+                                color='cyan'
+                                value={String(reports.totals.newUsers)}
+                                sub='Visible customers registered in the selected range'
+                            />
+                            <StatCard
+                                label='New activations'
+                                color='violet'
+                                value={String(reports.totals.newActivations)}
+                                sub={`PPPoE ${reports.totals.newActivationsByType.pppoe} / Hotspot ${reports.totals.newActivationsByType.hotspot} in the selected range`}
+                            />
+                            <StatCard
+                                label='Avg per buyer'
+                                color='teal'
+                                value={
+                                    reports.totals.buyers > 0
+                                        ? formatMoney(
+                                              reports.totals.revenue /
+                                                  reports.totals.buyers,
+                                          )
+                                        : '—'
+                                }
+                                sub='Selected-range revenue divided by buyers'
+                            />
+                        </SimpleGrid>
+                    )}{' '}
+                    {!usage ? (
+                        <SimpleGrid cols={{ base: 2, lg: 5 }}>
+                            {Array.from({ length: 5 }).map((_, i) => (
+                                <Skeleton key={i} height={48} radius='sm' />
+                            ))}
+                        </SimpleGrid>
+                    ) : (
+                        <SimpleGrid cols={{ base: 2, lg: 5 }}>
+                            <StatCard
+                                label='Online sessions'
+                                color='green'
+                                value={String(usage.liveSessions)}
+                                sub={`PPPoE ${usage.sessionsByType.pppoe} / Hotspot ${usage.sessionsByType.hotspot}`}
+                            />
+                            <StatCard
+                                label='PPPoE online / offline'
+                                value={
+                                    <>
+                                        <Text
+                                            component='span'
+                                            inherit
+                                            c='green'
+                                        >
+                                            {usage.pppoeAccounts.online} online
+                                        </Text>
+                                        {' / '}
+                                        <Text component='span' inherit c='red'>
+                                            {usage.pppoeAccounts.offline}{' '}
+                                            offline
+                                        </Text>
+                                    </>
+                                }
+                                sub='Service accounts excluding closed accounts'
+                            />
+                            <StatCard
+                                label='Combined average session speed'
+                                color='cyan'
+                                value={formatSpeed(
+                                    usage.aggregateThroughputBps,
+                                )}
+                                sub={`Lifetime avg ${formatSpeed(usage.avgSpeedPerSessionBps)}/session, not current throughput`}
+                            />
+                            <StatCard
+                                label='Online-session data'
+                                color='blue'
+                                value={formatBytes(usage.liveOctets)}
+                                sub='Upload + download since session start'
+                            />
+                            <StatCard
+                                label='Average online session age'
+                                color='orange'
+                                value={formatSeconds(usage.avgSessionSeconds)}
+                                sub='Average elapsed time since session start'
+                            />
+                        </SimpleGrid>
+                    )}
+                </Group>
             </Card>
 
             {error ? (
@@ -316,42 +389,6 @@ export default function DashboardPage() {
                 </Center>
             ) : !reports ? null : (
                 <>
-                    {!usage ? (
-                        <SimpleGrid cols={{ base: 2, lg: 5 }}>
-                            {Array.from({ length: 5 }).map((_, i) => (
-                                <Skeleton key={i} height={48} radius='sm' />
-                            ))}
-                        </SimpleGrid>
-                    ) : (
-                        <SimpleGrid cols={{ base: 2, lg: 5 }}>
-                            <StatCard
-                                label='Open sessions'
-                                value={String(usage.liveSessions)}
-                                sub={`${usage.sessionsStartedInWindow} started in last ${usage.windowMinutes} minutes`}
-                            />
-                            <StatCard
-                                label='Users with open sessions'
-                                value={String(usage.liveUsers)}
-                                sub='Distinct usernames across open sessions'
-                            />
-                            <StatCard
-                                label='Combined avg speed'
-                                value={formatSpeed(usage.aggregateThroughputBps)}
-                                sub={`Lifetime avg ${formatSpeed(usage.avgSpeedPerSessionBps)}/session, not current throughput`}
-                            />
-                            <StatCard
-                                label='Open-session data'
-                                value={formatBytes(usage.liveOctets)}
-                                sub='Upload + download since session start'
-                            />
-                            <StatCard
-                                label='Avg open session age'
-                                value={formatSeconds(usage.avgSessionSeconds)}
-                                sub='Average elapsed time since session start'
-                            />
-                        </SimpleGrid>
-                    )}
-
                     <RevenueCharts packages={reports.packageRevenue} />
                     <Grid>
                         <Grid.Col span={{ base: 12, lg: 8 }}>

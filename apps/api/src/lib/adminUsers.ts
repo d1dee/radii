@@ -2027,8 +2027,13 @@ export async function getAdminReports(
         );
 
     const [newActivations] = await db
-        .select({ total: count(activatedPackages.id) })
+        .select({
+            total: count(activatedPackages.id),
+            pppoe: sql<number>`count(*) filter (where ${packages.type} = 'pppoe')`,
+            hotspot: sql<number>`count(*) filter (where ${packages.type} = 'hotspot')`,
+        })
         .from(activatedPackages)
+        .innerJoin(packages, eq(activatedPackages.packageId, packages.id))
         .innerJoin(
             packagePayments,
             eq(activatedPackages.packagePaymentId, packagePayments.id),
@@ -2215,6 +2220,10 @@ export async function getAdminReports(
             buyers: Number(totals.buyers),
             newUsers: Number(newUsers.total),
             newActivations: Number(newActivations.total),
+            newActivationsByType: {
+                pppoe: Number(newActivations.pppoe),
+                hotspot: Number(newActivations.hotspot),
+            },
         },
         daily: daily.map((d) => ({
             day: d.day,
