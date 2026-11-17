@@ -43,6 +43,13 @@ export const radacct = pgTable(
         acctinputoctets: bigint({ mode: 'number' }),
         // You can use { mode: "bigint" } if numbers are exceeding js number limitations
         acctoutputoctets: bigint({ mode: 'number' }),
+        // Null means pre-ledger-checkpoint accounting; initialize from existing deltas.
+        usageCapturedInputOctets: bigint('usage_captured_input_octets', {
+            mode: 'number',
+        }),
+        usageCapturedOutputOctets: bigint('usage_captured_output_octets', {
+            mode: 'number',
+        }),
         calledstationid: text(),
         callingstationid: text(),
         acctterminatecause: text(),
@@ -77,6 +84,14 @@ export const radacct = pgTable(
         }),
     },
     (table) => [
+        index('radacct_usage_pending_idx')
+            .on(table.class, table.radacctid)
+            .where(sql`${table.acctstarttime} is not null and (
+                ${table.usageCapturedInputOctets} is null or
+                ${table.usageCapturedOutputOctets} is null or
+                ${table.acctinputoctets} > ${table.usageCapturedInputOctets} or
+                ${table.acctoutputoctets} > ${table.usageCapturedOutputOctets}
+            )`),
         index('radacct_active_session_idx')
             .using('btree', table.acctuniqueid.asc().nullsLast().op('text_ops'))
             .where(sql`(acctstoptime IS NULL)`),

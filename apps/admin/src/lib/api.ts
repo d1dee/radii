@@ -744,6 +744,18 @@ export function getAdminUser(id: string) {
     return request<AdminUserDetail>(`/admin/users/${id}`);
 }
 
+export type ThroughputObservation = {
+    intervalStartedAt: string | null;
+    observedAt: string;
+    inputOctets: string;
+    outputOctets: string;
+};
+
+export function getThroughputObservations(kind: 'customer' | 'session', id: string) {
+    const path = kind === 'customer' ? 'users' : 'radius/sessions';
+    return request<ThroughputObservation[]>(`/admin/${path}/${encodeURIComponent(id)}/throughput`);
+}
+
 export function deleteAdminUser(id: string) {
     return request<{ message?: string }>(`/admin/users/${id}`, undefined, {
         method: 'DELETE',

@@ -42,6 +42,7 @@ import {
     packages,
     pppoeServiceAccounts,
     radacct,
+    radiusUsageDelta,
     transaction,
     transactionLog,
     user,
@@ -204,6 +205,56 @@ function activationTypeExists(adminId: string, type: AdminUserTypeFilter): SQL {
 // including exact UUID-bound historical registry addresses.
 function scopedAccountingToAdminNas(adminId: string): SQL {
     return scopedNasHistoryAddress(sql`${radacct.nasipaddress}`, adminId);
+}
+
+// Compute interval boundaries before trimming history. The first capture contains
+// lifetime counters, so its baseline is session start, never a polling interval.
+export async function getAdminThroughputObservations(
+    adminId: string,
+    target: { userId: string } | { radacctId: string },
+) {
+    const history = db
+        .select({
+            observedAt: radiusUsageDelta.observedAt,
+            intervalStartedAt: sql<string | null>`coalesce(lag(${radiusUsageDelta.observedAt}) over (
+                partition by ${radiusUsageDelta.radacctId}, ${radiusUsageDelta.activationId}
+                order by ${radiusUsageDelta.observedAt}, ${radiusUsageDelta.id}
+            ), ${radacct.acctstarttime})::text`.as('interval_started_at'),
+            latestAt: sql<string>`max(${radiusUsageDelta.observedAt}) over ()::text`.as('latest_at'),
+            inputOctets: sql<string>`${radiusUsageDelta.inputOctets}::text`.as('input_octets'),
+            outputOctets: sql<string>`${radiusUsageDelta.outputOctets}::text`.as('output_octets'),
+        })
+        .from(radiusUsageDelta)
+        .innerJoin(radacct, eq(radiusUsageDelta.radacctId, radacct.radacctid))
+        .innerJoin(activatedPackages, and(
+            eq(radiusUsageDelta.activationId, activatedPackages.id),
+            eq(radacct.class, sql`${activatedPackages.id}::text`),
+        ))
+        .where(and(
+            scopedAccountingToAdminNas(adminId),
+            isNotNull(radacct.acctstarttime),
+            lte(radiusUsageDelta.observedAt, new Date()),
+            'userId' in target
+                ? and(
+                    eq(activatedPackages.userId, target.userId),
+                    sql`exists (
+                        select 1 from ${packagePayments}
+                        inner join ${nasDevice} on ${nasDevice.id} = ${packagePayments.nasDeviceId}
+                        where ${packagePayments.id} = ${activatedPackages.packagePaymentId}
+                          and ${nasDevice.ownerId} = ${adminId}
+                    )`,
+                )
+                : eq(radacct.radacctid, BigInt(target.radacctId)),
+        )).as('throughput_history');
+    const rows = await db.select().from(history)
+        .where(sql`${history.observedAt} >= ${history.latestAt}::timestamptz - interval '1 hour'`)
+        .orderBy(asc(history.observedAt));
+    return rows.map((row) => ({
+        intervalStartedAt: row.intervalStartedAt,
+        observedAt: row.observedAt,
+        inputOctets: row.inputOctets,
+        outputOctets: row.outputOctets,
+    }));
 }
 
 // --- Per-admin CRM tags ------------------------------------------------------

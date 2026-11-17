@@ -52,6 +52,7 @@ import { PaymentRefCell } from '@/components/Payments/PaymentRefCell';
 import { ArchivedPackageBadge } from '@/components/Packages/ArchivedPackageBadge';
 import { CustomerAudienceTags } from './CustomerAudienceTags';
 import { TablePagination } from '@/components/TablePagination';
+import { ThroughputChart } from '@/components/Sessions/ThroughputChart';
 import {
     activateActivation,
     addUserFlag,
@@ -973,6 +974,8 @@ export function UserDetailsDrawer({
                             </Text>
                         </Card>
                     ) : null}
+
+                    {userId ? <ThroughputChart key={userId} kind='customer' id={userId} /> : null}
 
                     <Tabs value={tab} onChange={setTab}>
                         <Tabs.List>

@@ -33,6 +33,7 @@ import {
     formatSpeed,
 } from '@/lib/format';
 import { SessionAdjustmentControls } from './SessionAdjustmentControls';
+import { ThroughputChart } from './ThroughputChart';
 
 const PAYMENT_STATUS_COLOR: Record<PackagePaymentStatus, string> = {
     paid: 'green',
@@ -333,12 +334,14 @@ export function SessionDetailsDrawer({
                                 {formatBytes(session.inputOctets)}
                             </Text>
                         </LinkedCard>
-                        <LinkedCard label='Average speed'>
+                        <LinkedCard label='Session lifetime average'>
                             <Text fw={700}>
                                 {formatSpeed(session.avgSpeedBps)}
                             </Text>
                         </LinkedCard>
                     </SimpleGrid>
+
+                    {sessionId ? <ThroughputChart key={sessionId} kind='session' id={sessionId} /> : null}
 
                     <Divider label='Linked records' labelPosition='left' />
                     {detail.activation ? (

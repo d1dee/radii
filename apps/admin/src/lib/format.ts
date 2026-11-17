@@ -42,9 +42,9 @@ export function formatDateTime(value: ConfigType, withSeconds = false): string {
         .format(`DD MMM YYYY ${timeToken(withSeconds)}`);
 }
 
-// Day + time without the year (compact table cells).
+// Table timestamps use the same full date format as other displays.
 export function formatDayTime(value: ConfigType): string {
-    return dayjs(value).tz(appearance.timezone).format(`D MMM ${timeToken()}`);
+    return formatDateTime(value);
 }
 
 export function formatTime(value: ConfigType, withSeconds = false): string {

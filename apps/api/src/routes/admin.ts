@@ -21,6 +21,7 @@ import {
     getAdminPaymentDetail,
     getAdminReports,
     getAdminSessionDetail,
+    getAdminThroughputObservations,
     getAdminUserDetail,
     getOwnedActivationIds,
     getUserPayments,
@@ -791,6 +792,16 @@ app.get('/users', requireAdmin, async (c) => {
 
 // One customer's valuation: identity, moderation state, lifetime payments,
 // activations, usage, flags and PPPoE credentials.
+app.get('/users/:id/throughput', requireAdmin, async (c) => {
+    const userId = c.req.param('id');
+    const adminId = c.get('adminSession').userId;
+    if (!userId || !(await isAdminUserVisible(adminId, userId))) {
+        return jsonError(c, 404, 'User not found');
+    }
+    const data = await getAdminThroughputObservations(adminId, { userId });
+    return c.json({ success: true, data });
+});
+
 app.get('/users/:id', requireAdmin, async (c) => {
     const id = c.req.param('id');
     if (!id) return jsonError(c, 404, 'User not found');
@@ -1521,6 +1532,16 @@ app.get('/radius/sessions', requireAdmin, async (c) => {
         success: true,
         data: { ...data, page, perPage },
     });
+});
+
+app.get('/radius/sessions/:radacctId/throughput', requireAdmin, async (c) => {
+    const radacctId = c.req.param('radacctId');
+    const adminId = c.get('adminSession').userId;
+    if (!radacctId || !/^\d+$/.test(radacctId) || !(await isAdminRadacctVisible(adminId, radacctId))) {
+        return jsonError(c, 404, 'Unknown session');
+    }
+    const data = await getAdminThroughputObservations(adminId, { radacctId });
+    return c.json({ success: true, data });
 });
 
 app.get('/radius/sessions/:radacctId', requireAdmin, async (c) => {

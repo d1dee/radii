@@ -104,6 +104,7 @@ import {
 import { portalStatusIsVisible, sessionRemainingSeconds } from './sessionStatus';
 import { additionalBankTime, bankSessionTimeout, bankSessionUsage } from './bankUsage';
 import { summarizeSessionsInRange } from './networkUsage';
+import { recordAccountingUsage } from './usageLedger';
 
 const logger = apiLogger.getChild('radius');
 const PPPOE_EXPIRED_PROFILE = 'radii-ppp-expired';
@@ -3407,7 +3408,11 @@ export class RadiusClient {
         pkg: typeof packages.$inferSelect,
         session?: SessionInfo,
     ): Promise<{ windowStart: Date; usedBytes: number; throttled: boolean }> {
-        await this.captureFairUsageDeltas(activation.id, session);
+        await recordAccountingUsage(
+            db,
+            activation.id,
+            session ? BigInt(session.radacctId) : undefined,
+        );
         const windowStart = this.fairUsageWindowStart(
             activation,
             pkg,
@@ -3468,84 +3473,8 @@ export class RadiusClient {
         return state;
     }
 
-    private async captureFairUsageDeltas(
-        activationId: string,
-        session?: SessionInfo,
-    ): Promise<void> {
-        await db.transaction(async (tx) => {
-            // REST authorization and the periodic reconciler can overlap. One
-            // activation-scoped transaction lock keeps both from inserting the
-            // same uncaptured counter increment.
-            await tx.execute(
-                sql`select pg_advisory_xact_lock(hashtext(${activationId}))`,
-            );
-
-            const accountingRows = await tx
-                .select({
-                    radacctId: radacct.radacctid,
-                    inputOctets: radacct.acctinputoctets,
-                    outputOctets: radacct.acctoutputoctets,
-                    observedAt: sql<Date>`coalesce(${radacct.acctupdatetime}, ${radacct.acctstoptime}, ${radacct.acctstarttime}, now())`,
-                })
-                .from(radacct)
-                .where(
-                    and(
-                        eq(radacct.class, activationId),
-                        isNotNull(radacct.acctstarttime),
-                        session
-                            ? eq(radacct.radacctid, BigInt(session.radacctId))
-                            : undefined,
-                    ),
-                );
-            if (accountingRows.length === 0) return;
-
-            const radacctIds = accountingRows.map((row) => row.radacctId);
-            const capturedRows = await tx
-                .select({
-                    radacctId: radiusUsageDelta.radacctId,
-                    inputOctets: sql<number>`coalesce(sum(${radiusUsageDelta.inputOctets}), 0)::float8`,
-                    outputOctets: sql<number>`coalesce(sum(${radiusUsageDelta.outputOctets}), 0)::float8`,
-                })
-                .from(radiusUsageDelta)
-                .where(
-                    and(
-                        eq(radiusUsageDelta.activationId, activationId),
-                        inArray(radiusUsageDelta.radacctId, radacctIds),
-                    ),
-                )
-                .groupBy(radiusUsageDelta.radacctId);
-            const capturedBySession = new Map(
-                capturedRows.map((row) => [String(row.radacctId), row]),
-            );
-
-            const deltas = accountingRows.flatMap((row) => {
-                const captured = capturedBySession.get(String(row.radacctId));
-                const inputOctets = Math.max(
-                    0,
-                    Number(row.inputOctets ?? 0) -
-                        Number(captured?.inputOctets ?? 0),
-                );
-                const outputOctets = Math.max(
-                    0,
-                    Number(row.outputOctets ?? 0) -
-                        Number(captured?.outputOctets ?? 0),
-                );
-                return inputOctets > 0 || outputOctets > 0
-                    ? [
-                          {
-                              radacctId: row.radacctId,
-                              activationId,
-                              observedAt: row.observedAt,
-                              inputOctets,
-                              outputOctets,
-                          },
-                      ]
-                    : [];
-            });
-            if (deltas.length > 0) {
-                await tx.insert(radiusUsageDelta).values(deltas);
-            }
-        });
+    async reconcileAccountingUsage(): Promise<number> {
+        return recordAccountingUsage(db);
     }
 
     private rateLimitValue(
