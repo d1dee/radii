@@ -132,8 +132,12 @@ function RevenueChartCard({
                             }]}
                             valueFormatter={formatMoney}
                             yAxisProps={{
-                                width: 70,
-                                tickMargin: 6,
+                                width: 'auto',
+                                tick: {
+                                    transform: 'translate(0, 0)',
+                                    fontSize: 12,
+                                    fill: 'currentColor',
+                                },
                                 interval: 0,
                                 tickFormatter: (value: string) => labels.get(value) ?? value,
                             }}
