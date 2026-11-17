@@ -255,7 +255,7 @@ export function HavingIssues({ adminContacts }: Props) {
                                             Expires:{' '}
                                             {activationDetails.expireAt
                                                 ? dayjs(activationDetails.expireAt).format('DD MMM YYYY HH:mm:ss')
-                                                : 'Unlimited'}
+                                                : 'No Expiry'}
                                         </Text>
                                         {selectedAccount ? (
                                             <Text size='sm'>

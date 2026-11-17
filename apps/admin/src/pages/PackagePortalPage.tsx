@@ -208,7 +208,7 @@ function SortablePackageCard({ pkg }: { pkg: PackageRow }) {
                     <Stack gap='xs' align='flex-end' style={{ flexShrink: 0 }}>
                         <Text size='sm' c='dimmed'>
                             {pkg.noExpiry
-                                ? 'Unlimited'
+                                ? 'No Expiry'
                                 : formatSeconds(pkg.sessionLength * 60)}
                         </Text>
                         <Text size='xl' fw={700}>

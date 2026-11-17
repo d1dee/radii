@@ -468,7 +468,7 @@ export default function PackagesPage() {
                                         </Table.Td>
                                         <Table.Td>
                                             {pkg.noExpiry
-                                                ? 'Unlimited'
+                                                ? 'No Expiry'
                                                 : 'Expires'}
                                         </Table.Td>
                                         <Table.Td>
