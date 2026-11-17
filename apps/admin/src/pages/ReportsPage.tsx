@@ -21,6 +21,7 @@ import { PageLayout } from '@/components/Layout/PageLayout';
 import { PageTableScrollContainer } from '@/components/PageTableScrollContainer';
 import { ArchivedPackageBadge } from '@/components/Packages/ArchivedPackageBadge';
 import { TablePagination } from '@/components/TablePagination';
+import { RevenueCharts } from '@/components/RevenueCharts';
 import { getAdminReports, type AdminReports } from '@/lib/api';
 import { useAutoRefresh } from '@/lib/autoRefresh';
 import { warnBackgroundFailure } from '@/lib/clientError';
@@ -290,6 +291,8 @@ export default function ReportsPage() {
                         />
                     </SimpleGrid>
                     <Stack gap='md' miw={0}>
+                        <RevenueCharts packages={reports.packageRevenue} />
+                        <RevenueCharts packages={reports.packageRevenue} detail />
                         <Grid>
                             <Grid.Col span={{ base: 12, lg: 8 }}>
                                 <Card withBorder padding='md' h='100%'>

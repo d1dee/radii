@@ -2042,10 +2042,11 @@ export async function getAdminReports(
             ),
         );
 
-    const topPackagesQuery = db.select({
+    const packageRevenueRows = await db.select({
             packageId: packages.id,
             title: packages.title,
             type: packages.type,
+            category: packages.category,
             archivedAt: packages.archivedAt,
             paid: count(packagePayments.id),
             revenue: sql<number>`coalesce(sum(${packagePayments.amount}), 0)::float8`,
@@ -2058,28 +2059,25 @@ export async function getAdminReports(
             packages.id,
             packages.title,
             packages.type,
+            packages.category,
             packages.archivedAt,
         )
         .orderBy(
             desc(sql`sum(${packagePayments.amount})`),
             asc(packages.id),
         );
-    const [topPackages, [topPackagesCount]] = await Promise.all([
-        pagination.topPackages.perPage === 'all'
-            ? topPackagesQuery
-            : topPackagesQuery
-                  .limit(pagination.topPackages.perPage)
-                  .offset(
-                      (pagination.topPackages.page - 1) *
-                          pagination.topPackages.perPage,
-                  ),
-        db.select({
-            total: sql<number>`count(distinct ${packagePayments.packageId})`,
-        })
-        .from(packagePayments)
-        .innerJoin(nasDevice, eq(packagePayments.nasDeviceId, nasDevice.id))
-        .where(and(inRange, eq(packagePayments.status, 'paid'))),
-    ]);
+    // Charts use all package aggregates, independently of the ranked table page.
+    const packageRevenue = packageRevenueRows.map((p) => ({
+        ...p,
+        paid: Number(p.paid),
+        revenue: Number(p.revenue),
+    }));
+    const topPackages = pagination.topPackages.perPage === 'all'
+        ? packageRevenue
+        : packageRevenue.slice(
+              (pagination.topPackages.page - 1) * pagination.topPackages.perPage,
+              pagination.topPackages.page * pagination.topPackages.perPage,
+          );
 
     const reportCustomerName = sql<string>`coalesce(
         ${userAdminTag.name},
@@ -2225,13 +2223,15 @@ export async function getAdminReports(
             failed: Number(d.failed),
             revenue: Number(d.revenue),
         })),
+        packageRevenue,
         topPackages: {
-            total: Number(topPackagesCount.total),
+            total: packageRevenue.length,
             ...pagination.topPackages,
             items: topPackages.map((p) => ({
                 packageId: p.packageId,
                 title: p.title,
                 type: p.type,
+                archivedAt: p.archivedAt,
                 paid: Number(p.paid),
                 revenue: Number(p.revenue),
             })),

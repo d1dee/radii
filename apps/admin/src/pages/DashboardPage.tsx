@@ -1,4 +1,4 @@
-import { AreaChart, BarChart, DonutChart } from '@mantine/charts';
+import { AreaChart, DonutChart } from '@mantine/charts';
 import {
     ActionIcon,
     Badge,
@@ -22,6 +22,7 @@ import { MdRefresh } from 'react-icons/md';
 import { PageLayout } from '@/components/Layout/PageLayout';
 import { PageTableScrollContainer } from '@/components/PageTableScrollContainer';
 import { TablePagination } from '@/components/TablePagination';
+import { RevenueCharts } from '@/components/RevenueCharts';
 import {
     getAdminReports,
     getRadiusSummary,
@@ -212,12 +213,6 @@ export default function DashboardPage() {
           ]
         : [];
 
-    const packageChartData = (reports?.topPackages.items ?? []).map((p) => ({
-        package: p.archivedAt ? `${p.title} (Archived)` : p.title,
-        revenue: p.revenue,
-        paid: p.paid,
-    }));
-
     return (
         <PageLayout
             label='Dashboard page content'
@@ -357,6 +352,7 @@ export default function DashboardPage() {
                         </SimpleGrid>
                     )}
 
+                    <RevenueCharts packages={reports.packageRevenue} />
                     <Grid>
                         <Grid.Col span={{ base: 12, lg: 8 }}>
                             <Card withBorder padding='md' h='100%'>
@@ -432,34 +428,7 @@ export default function DashboardPage() {
                                 </Group>
                             </Card>
                         </Grid.Col>
-                        <Grid.Col span={{ base: 12, lg: 6 }}>
-                            <Card withBorder padding='md' h='100%'>
-                                <Text fw={600} mb='sm'>
-                                    Top packages by revenue
-                                </Text>
-                                {packageChartData.length === 0 ? (
-                                    <Text size='sm' c='dimmed'>
-                                        No paid purchases in this range.
-                                    </Text>
-                                ) : (
-                                    <BarChart
-                                        h={260}
-                                        data={packageChartData}
-                                        dataKey='package'
-                                        series={[
-                                            {
-                                                name: 'revenue',
-                                                color: 'blue.6',
-                                                label: 'Revenue',
-                                            },
-                                        ]}
-                                        yAxisProps={{ width: 60 }}
-                                        mb='xs'
-                                    />
-                                )}
-                            </Card>
-                        </Grid.Col>
-                        <Grid.Col span={{ base: 12, lg: 6 }}>
+                        <Grid.Col span={12}>
                             <Card withBorder padding='md' h='100%'>
                                 <Text fw={600} mb='sm'>
                                     Top customers

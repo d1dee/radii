@@ -1184,6 +1184,15 @@ export type AdminReports = {
         failed: number;
         revenue: number;
     }>;
+    packageRevenue: Array<{
+        packageId: string;
+        title: string;
+        type: PackageType;
+        category: string;
+        archivedAt: string | null;
+        paid: number;
+        revenue: number;
+    }>;
     topPackages: PaginatedItems<{
         packageId: string;
         title: string;
