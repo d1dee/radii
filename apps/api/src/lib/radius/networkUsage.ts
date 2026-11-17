@@ -1,44 +1,61 @@
-type OpenAccountingSession = {
-    username: string | null;
+type HistoricalAccountingSession = {
     acctstarttime: Date | null;
-    acctsessiontime: number | null;
+    acctstoptime: Date | null;
+    acctupdatetime: Date | null;
     acctinputoctets: number | null;
     acctoutputoctets: number | null;
+    isPppoe: boolean;
+    capturedOctets: number;
+    rangeOctets: number;
 };
 
-export function summarizeOpenSessions(
-    rows: OpenAccountingSession[],
+export function summarizeSessionsInRange(
+    rows: HistoricalAccountingSession[],
+    from: Date,
+    to: Date,
     now = Date.now(),
 ) {
-    let liveOctets = 0;
-    let aggregateBps = 0;
-    let totalAgeSeconds = 0;
-    const users = new Set<string>();
+    const rangeStart = from.getTime();
+    const rangeEnd = Math.min(to.getTime(), now);
+    let sessions = 0;
+    let octets = 0;
+    let totalSeconds = 0;
+    const sessionsByType = { pppoe: 0, hotspot: 0 };
 
     for (const row of rows) {
-        const octets =
+        if (!row.acctstarttime) continue;
+        const start = row.acctstarttime.getTime();
+        const end = Math.min(row.acctstoptime?.getTime() ?? now, now);
+        if (rangeStart > rangeEnd || start > rangeEnd || end < rangeStart)
+            continue;
+        sessions++;
+        sessionsByType[row.isPppoe ? 'pppoe' : 'hotspot']++;
+        totalSeconds += Math.max(
+            0,
+            (Math.min(end, rangeEnd) - Math.max(start, rangeStart)) / 1000,
+        );
+
+        const cumulativeOctets =
             Math.max(0, Number(row.acctinputoctets ?? 0)) +
             Math.max(0, Number(row.acctoutputoctets ?? 0));
-        liveOctets += octets;
-        if (row.username) users.add(row.username);
-        totalAgeSeconds += row.acctstarttime
-            ? Math.max(0, (now - row.acctstarttime.getTime()) / 1000)
-            : 0;
-
-        // Match cumulative bytes to the NAS-reported duration, not a trailing
-        // window or time elapsed since the last accounting update.
-        const seconds = Number(row.acctsessiontime ?? 0);
-        if (seconds > 0) aggregateBps += (octets * 8) / seconds;
+        const reportedAt = (
+            row.acctstoptime ?? row.acctupdatetime ?? row.acctstarttime
+        ).getTime();
+        // Attribute only the not-yet-captured counter tail to its report time.
+        // Never add lifetime counters on top of already captured usage deltas.
+        octets += Number(row.rangeOctets);
+        if (reportedAt >= rangeStart && reportedAt <= rangeEnd) {
+            octets += Math.max(0, cumulativeOctets - Number(row.capturedOctets));
+        }
     }
 
+    const rangeSeconds = Math.max(0, (rangeEnd - rangeStart) / 1000);
     return {
-        liveSessions: rows.length,
-        liveUsers: users.size,
-        liveOctets,
-        aggregateThroughputBps: Math.round(aggregateBps),
-        avgSpeedPerSessionBps: rows.length
-            ? Math.round(aggregateBps / rows.length)
-            : 0,
-        avgSessionSeconds: rows.length ? totalAgeSeconds / rows.length : 0,
+        sessions,
+        sessionsByType,
+        octets,
+        averageThroughputBps:
+            rangeSeconds > 0 ? Math.round((octets * 8) / rangeSeconds) : 0,
+        avgSessionSeconds: sessions > 0 ? totalSeconds / sessions : 0,
     };
 }

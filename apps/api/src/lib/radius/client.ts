@@ -52,6 +52,7 @@ import {
     inArray,
     isNotNull,
     isNull,
+    lte,
     ne,
     notExists,
     or,
@@ -102,7 +103,7 @@ import {
 } from './fairUsage';
 import { portalStatusIsVisible, sessionRemainingSeconds } from './sessionStatus';
 import { additionalBankTime, bankSessionTimeout, bankSessionUsage } from './bankUsage';
-import { summarizeOpenSessions } from './networkUsage';
+import { summarizeSessionsInRange } from './networkUsage';
 
 const logger = apiLogger.getChild('radius');
 const PPPOE_EXPIRED_PROFILE = 'radii-ppp-expired';
@@ -517,19 +518,12 @@ export interface AdminActivationStatus extends ActivationStatus {
 }
 
 export interface NetworkUsage {
-    windowMinutes: number;
-    liveSessions: number;
-    liveUsers: number;
+    sessions: number;
     sessionsByType: { pppoe: number; hotspot: number };
-    pppoeAccounts: { online: number; offline: number };
-    liveOctets: number;
-    // Sum of lifetime average speeds for open sessions, NOT current throughput.
-    aggregateThroughputBps: number;
-    // Mean of lifetime average speeds for open sessions.
-    avgSpeedPerSessionBps: number;
-    sessionsStartedInWindow: number;
+    pppoeAccounts: { withActivity: number; withoutActivity: number };
+    octets: number;
+    averageThroughputBps: number;
     avgSessionSeconds: number;
-    topUsers: Array<{ username: string; octets: number; sessions: number }>;
 }
 
 // Rejection sampling: bytes >= limit would make the first (256 % n)
@@ -2992,105 +2986,81 @@ export class RadiusClient {
     // Metrics
     // =========================================================================
 
-    // Open-session lifetime totals and averages. The trailing window applies
-    // only to session starts and the start-time-based top-user ranking.
+    // Historical sessions overlapping the selected range, including ended ones.
     async getNetworkUsage(
-        windowMinutes: number,
+        from: Date,
+        to: Date,
         nasIpAddresses: string[],
         adminId: string,
     ): Promise<NetworkUsage> {
-        const windowMs = Math.max(1, windowMinutes) * 60_000;
-        const windowStart = new Date(Date.now() - windowMs);
-
-        const liveRows = await db
+        const now = Date.now();
+        const rangeEnd = new Date(Math.min(to.getTime(), now));
+        const sessionScope = and(
+            from > rangeEnd ? sql`false` : undefined,
+            isNotNull(radacct.acctstarttime),
+            lte(radacct.acctstarttime, rangeEnd),
+            or(isNull(radacct.acctstoptime), gte(radacct.acctstoptime, from)),
+            nasIpAddresses.length > 0
+                ? inArray(radacct.nasipaddress, nasIpAddresses)
+                : sql`false`,
+        );
+        const usageTotals = db
             .select({
-                ...getTableColumns(radacct),
-                isPppoe: exists(
-                    db.select({ id: pppoeServiceAccounts.id })
-                        .from(pppoeServiceAccounts)
-                        .where(
-                            eq(pppoeServiceAccounts.username, radacct.username),
-                        ),
-                ),
+                radacctId: radiusUsageDelta.radacctId,
+                capturedOctets: sql<number>`sum(${radiusUsageDelta.inputOctets} + ${radiusUsageDelta.outputOctets})::float8`.as('captured_octets'),
+                rangeOctets: sql<number>`coalesce(sum(${radiusUsageDelta.inputOctets} + ${radiusUsageDelta.outputOctets}) filter (where ${radiusUsageDelta.observedAt} >= ${from} and ${radiusUsageDelta.observedAt} <= ${rangeEnd}), 0)::float8`.as('range_octets'),
             })
-            .from(radacct)
-            .where(
-                and(
-                    isNull(radacct.acctstoptime),
-                    isNotNull(radacct.acctstarttime),
-                    nasIpAddresses.length > 0
-                        ? inArray(radacct.nasipaddress, nasIpAddresses)
-                        : sql`false`,
-                ),
-            );
+            .from(radiusUsageDelta)
+            .innerJoin(radacct, eq(radiusUsageDelta.radacctId, radacct.radacctid))
+            .where(sessionScope)
+            .groupBy(radiusUsageDelta.radacctId)
+            .as('usage_totals');
 
-        const liveStats = summarizeOpenSessions(liveRows);
-        const pppoeSessions = liveRows.filter((row) => row.isPppoe);
-        const onlineUsernames = new Set(pppoeSessions.map((row) => row.username));
-        const accounts = await db
-            .select({ username: pppoeServiceAccounts.username })
-            .from(pppoeServiceAccounts)
-            .where(
-                and(
-                    eq(pppoeServiceAccounts.tenantAdminId, adminId),
-                    ne(pppoeServiceAccounts.status, 'closed'),
+        const [rows, accounts] = await Promise.all([
+            db
+                .select({
+                    username: radacct.username,
+                    acctstarttime: radacct.acctstarttime,
+                    acctstoptime: radacct.acctstoptime,
+                    acctupdatetime: radacct.acctupdatetime,
+                    acctinputoctets: radacct.acctinputoctets,
+                    acctoutputoctets: radacct.acctoutputoctets,
+                    capturedOctets: sql<number>`coalesce(${usageTotals.capturedOctets}, 0)::float8`,
+                    rangeOctets: sql<number>`coalesce(${usageTotals.rangeOctets}, 0)::float8`,
+                    isPppoe: sql<boolean>`${exists(
+                        db.select({ id: pppoeServiceAccounts.id })
+                            .from(pppoeServiceAccounts)
+                            .where(
+                                eq(pppoeServiceAccounts.username, radacct.username),
+                            ),
+                    )}`,
+                })
+                .from(radacct)
+                .leftJoin(usageTotals, eq(usageTotals.radacctId, radacct.radacctid))
+                .where(sessionScope),
+            db
+                .select({ username: pppoeServiceAccounts.username })
+                .from(pppoeServiceAccounts)
+                .where(
+                    and(
+                        eq(pppoeServiceAccounts.tenantAdminId, adminId),
+                        lte(pppoeServiceAccounts.createdAt, rangeEnd),
+                    ),
                 ),
-            );
-        const onlineAccounts = accounts.filter((account) =>
-            onlineUsernames.has(account.username),
+        ]);
+        const activeUsernames = new Set(
+            rows.filter((row) => row.isPppoe).map((row) => row.username),
+        );
+        const withActivity = accounts.filter((account) =>
+            activeUsernames.has(account.username),
         ).length;
 
-        const [windowStats] = await db
-            .select({
-                sessions: sql<number>`count(*)`,
-            })
-            .from(radacct)
-            .where(
-                and(
-                    gte(radacct.acctstarttime, windowStart),
-                    nasIpAddresses.length > 0
-                        ? inArray(radacct.nasipaddress, nasIpAddresses)
-                        : sql`false`,
-                ),
-            );
-
-        const totalOctets = sql<number>`coalesce(sum(coalesce(${radacct.acctinputoctets}, 0) + coalesce(${radacct.acctoutputoctets}, 0)), 0)::float8`;
-        const topUsers = await db
-            .select({
-                username: radacct.username,
-                octets: totalOctets,
-                sessions: sql<number>`count(*)`,
-            })
-            .from(radacct)
-            .where(
-                and(
-                    gte(radacct.acctstarttime, windowStart),
-                    nasIpAddresses.length > 0
-                        ? inArray(radacct.nasipaddress, nasIpAddresses)
-                        : sql`false`,
-                ),
-            )
-            .groupBy(radacct.username)
-            .orderBy(desc(totalOctets))
-            .limit(10);
-
         return {
-            windowMinutes,
-            ...liveStats,
-            sessionsByType: {
-                pppoe: pppoeSessions.length,
-                hotspot: liveRows.length - pppoeSessions.length,
-            },
+            ...summarizeSessionsInRange(rows, from, to, now),
             pppoeAccounts: {
-                online: onlineAccounts,
-                offline: accounts.length - onlineAccounts,
+                withActivity,
+                withoutActivity: accounts.length - withActivity,
             },
-            sessionsStartedInWindow: Number(windowStats?.sessions ?? 0),
-            topUsers: topUsers.map((u) => ({
-                username: u.username ?? '',
-                octets: Number(u.octets),
-                sessions: Number(u.sessions),
-            })),
         };
     }
 

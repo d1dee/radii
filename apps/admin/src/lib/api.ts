@@ -1433,23 +1433,18 @@ export function getAdminSession(id: string) {
 
 // Mirrors the API's NetworkUsage (apps/api/src/lib/radius/client.ts).
 export type NetworkUsage = {
-    windowMinutes: number;
-    liveSessions: number;
-    liveUsers: number;
+    sessions: number;
     sessionsByType: { pppoe: number; hotspot: number };
-    pppoeAccounts: { online: number; offline: number };
-    liveOctets: number;
-    // Sum and mean of open sessions' lifetime averages, not current throughput.
-    aggregateThroughputBps: number;
-    avgSpeedPerSessionBps: number;
-    sessionsStartedInWindow: number;
+    pppoeAccounts: { withActivity: number; withoutActivity: number };
+    octets: number;
+    averageThroughputBps: number;
     avgSessionSeconds: number;
-    topUsers: Array<{ username: string; octets: number; sessions: number }>;
 };
 
-export function getRadiusSummary(windowMinutes = 60) {
+export function getRadiusSummary(from: string, to: string) {
+    const params = new URLSearchParams({ from, to });
     return request<NetworkUsage>(
-        `/admin/radius/summary?windowMinutes=${windowMinutes}`,
+        `/admin/radius/summary?${params}`,
     );
 }
 

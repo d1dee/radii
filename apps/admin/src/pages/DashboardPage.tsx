@@ -112,23 +112,30 @@ export default function DashboardPage() {
     const [topUsersPerPage, setTopUsersPerPage] = useTablePageSize(6);
     const reportsRequest = useRef(0);
 
-    const loadReports = useCallback(
+    const loadData = useCallback(
         async (rangeFrom: Date, rangeTo: Date, silent = false) => {
             const requestId = ++reportsRequest.current;
-            if (!silent) setLoading(true);
+            if (!silent) {
+                setLoading(true);
+                setReports(null);
+                setUsage(null);
+            }
             setError(null);
-            const res = await getAdminReports(
-                rangeFrom.toISOString(),
-                rangeTo.toISOString(),
-                {
-                    topPackagesPerPage: 10,
-                    topUsersPage,
-                    topUsersPerPage,
-                    heavyUsersPerPage: 10,
-                },
-            );
+            const [res, usageRes] = await Promise.all([
+                getAdminReports(
+                    rangeFrom.toISOString(),
+                    rangeTo.toISOString(),
+                    {
+                        topPackagesPerPage: 10,
+                        topUsersPage,
+                        topUsersPerPage,
+                        heavyUsersPerPage: 10,
+                    },
+                ),
+                getRadiusSummary(rangeFrom.toISOString(), rangeTo.toISOString()),
+            ]);
             if (requestId !== reportsRequest.current) return;
-            if (!silent) setLoading(false);
+            setLoading(false);
             if (!res.success) {
                 if (silent)
                     warnBackgroundFailure('refresh dashboard reports', res);
@@ -141,16 +148,24 @@ export default function DashboardPage() {
                 else setError('Failed to load dashboard data');
                 return;
             }
+            if (!usageRes.success || !usageRes.data) {
+                if (silent)
+                    warnBackgroundFailure(
+                        'refresh dashboard network activity',
+                        usageRes,
+                    );
+                else
+                    setError(
+                        (!usageRes.success && usageRes.message) ||
+                            'Failed to load network activity',
+                    );
+                return;
+            }
             setReports(res.data);
+            setUsage(usageRes.data);
         },
         [topUsersPage, topUsersPerPage],
     );
-
-    const loadUsage = useCallback(async () => {
-        const res = await getRadiusSummary(60);
-        if (res.success && res.data) setUsage(res.data);
-        else warnBackgroundFailure('load dashboard network usage', res);
-    }, []);
 
     // Initial load waits for the admin's saved settings so their default
     // date range applies; presets/Apply drive the rest.
@@ -164,22 +179,16 @@ export default function DashboardPage() {
         setFrom(range.from);
         setTo(range.to);
 
-        void loadReports(range.from, range.to);
-    }, [loaded, settings, loadReports]);
-
-    // Network figures are independent of the selected report date range.
-    useEffect(() => {
-        void loadUsage();
-    }, [loadUsage]);
+        void loadData(range.from, range.to);
+    }, [loaded, settings, loadData]);
 
     const autoRefreshData = useCallback(() => {
-        void loadUsage();
         const days = rangePresets.find((p) => p.label === preset)?.days ?? 30;
         const range = presetRange(days);
         setFrom(range.from);
         setTo(range.to);
-        void loadReports(range.from, range.to, true);
-    }, [loadUsage, loadReports, preset]);
+        void loadData(range.from, range.to, true);
+    }, [loadData, preset]);
     useEffect(() => {
         if (!loaded) return;
         const timer = setInterval(autoRefreshData, 10_000);
@@ -188,7 +197,7 @@ export default function DashboardPage() {
 
     useEffect(() => {
         if (!loaded || !reports) return;
-        void loadReports(from, to);
+        void loadData(from, to);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [topUsersPage, topUsersPerPage]);
 
@@ -201,7 +210,7 @@ export default function DashboardPage() {
         setFrom(range.from);
         setTo(range.to);
 
-        void loadReports(range.from, range.to);
+        void loadData(range.from, range.to);
     };
 
     const statusBreakdown = reports
@@ -232,7 +241,7 @@ export default function DashboardPage() {
                     <Stack gap={4}>
                         <Title order={3}>Dashboard</Title>
                         <Text size='sm' c='dimmed'>
-                            Current accounting sessions and revenue overview for
+                            Historical network activity and revenue overview for
                             the selected date range.
                         </Text>
                     </Stack>
@@ -252,7 +261,6 @@ export default function DashboardPage() {
                 </Group>
             }
         >
-            {/* Accounting totals are independent of the revenue date range. */}
             <Card withBorder padding='md' radius='md'>
                 <Group justify='space-between' mb='xs'>
                     <Group gap='xs'>
@@ -331,13 +339,13 @@ export default function DashboardPage() {
                     ) : (
                         <SimpleGrid cols={{ base: 2, lg: 5 }}>
                             <StatCard
-                                label='Online sessions'
+                                label='Sessions in range'
                                 color='green'
-                                value={String(usage.liveSessions)}
+                                value={String(usage.sessions)}
                                 sub={`PPPoE ${usage.sessionsByType.pppoe} / Hotspot ${usage.sessionsByType.hotspot}`}
                             />
                             <StatCard
-                                label='PPPoE online / offline'
+                                label='PPPoE activity / no activity'
                                 value={
                                     <>
                                         <Text
@@ -345,36 +353,36 @@ export default function DashboardPage() {
                                             inherit
                                             c='green'
                                         >
-                                            {usage.pppoeAccounts.online} online
+                                            {usage.pppoeAccounts.withActivity} active
                                         </Text>
                                         {' / '}
                                         <Text component='span' inherit c='red'>
-                                            {usage.pppoeAccounts.offline}{' '}
-                                            offline
+                                            {usage.pppoeAccounts.withoutActivity}{' '}
+                                            inactive
                                         </Text>
                                     </>
                                 }
-                                sub='Service accounts excluding closed accounts'
+                                sub='Accounts created by range end, with / without sessions in range'
                             />
                             <StatCard
-                                label='Combined average session speed'
+                                label='Average throughput in range'
                                 color='cyan'
                                 value={formatSpeed(
-                                    usage.aggregateThroughputBps,
+                                    usage.averageThroughputBps,
                                 )}
-                                sub={`Lifetime avg ${formatSpeed(usage.avgSpeedPerSessionBps)}/session, not current throughput`}
+                                sub='Recorded data divided by elapsed time in the selected range'
                             />
                             <StatCard
-                                label='Online-session data'
+                                label='Data in range'
                                 color='blue'
-                                value={formatBytes(usage.liveOctets)}
-                                sub='Upload + download since session start'
+                                value={formatBytes(usage.octets)}
+                                sub='Upload + download attributed to accounting reports in range'
                             />
                             <StatCard
-                                label='Average online session age'
+                                label='Average session time in range'
                                 color='orange'
                                 value={formatSeconds(usage.avgSessionSeconds)}
-                                sub='Average elapsed time since session start'
+                                sub='Average session duration overlapping the selected range'
                             />
                         </SimpleGrid>
                     )}

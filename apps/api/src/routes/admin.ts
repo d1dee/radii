@@ -1461,15 +1461,19 @@ app.put('/activations/:id', requireAdmin, async (c) => {
 
 // --- RADIUS -----------------------------------------------------------------
 
-// Open-session accounting totals and lifetime average speeds. The window
-// scopes session starts/top users only. ?windowMinutes=<n> (default 60).
+// Historical accounting activity scoped to the dashboard's selected date range.
 app.get('/radius/summary', requireAdmin, async (c) => {
-    const raw = Number(c.req.query('windowMinutes') ?? 60);
-    const windowMinutes =
-        Number.isFinite(raw) && raw > 0 ? Math.min(raw, 1440) : 60;
+    const range = z
+        .object({ from: z.iso.datetime(), to: z.iso.datetime() })
+        .safeParse(c.req.query());
+    if (!range.success) return jsonError(c, 400, 'Invalid date range');
+    const from = new Date(range.data.from);
+    const to = new Date(range.data.to);
+    if (from > to) return jsonError(c, 400, 'Invalid date range');
     const addresses = await getAdminNasAddresses(c.get('adminSession').userId);
     const data = await radiusClient.getNetworkUsage(
-        windowMinutes,
+        from,
+        to,
         [...addresses],
         c.get('adminSession').userId,
     );
