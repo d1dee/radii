@@ -23,17 +23,20 @@ import {
     useState,
     type ReactNode,
 } from 'react';
-import { MdRefresh } from 'react-icons/md';
+import { MdChevronLeft, MdChevronRight, MdRefresh } from 'react-icons/md';
 
 import { PageLayout } from '@/components/Layout/PageLayout';
 import { PageTableScrollContainer } from '@/components/PageTableScrollContainer';
 import { RevenueCharts } from '@/components/RevenueCharts';
+import { ThroughputChart } from '@/components/Sessions/ThroughputChart';
 import { TablePagination } from '@/components/TablePagination';
 import {
     getAdminReports,
+    getAllNasDevices,
     getRadiusSummary,
     type AdminReports,
     type NetworkUsage,
+    type NasDeviceRow,
 } from '@/lib/api';
 import { warnBackgroundFailure } from '@/lib/clientError';
 import { dayjs } from '@/lib/dayjs';
@@ -95,6 +98,124 @@ function StatCard({
                 {sub}
             </Text>
         </Card>
+    );
+}
+
+function NasThroughputCard({ from, to }: { from: Date; to: Date }) {
+    const [devices, setDevices] = useState<NasDeviceRow[] | null>(null);
+    const [nasIndex, setNasIndex] = useState(0);
+    const [error, setError] = useState(false);
+    const [retry, setRetry] = useState(0);
+
+    useEffect(() => {
+        let disposed = false;
+        setError(false);
+        async function load() {
+            try {
+                const result = await getAllNasDevices();
+                if (disposed) return;
+                if (!result.success || !result.data)
+                    throw new Error('Unavailable');
+                setDevices(
+                    [...result.data].sort((a, b) => a.name.localeCompare(b.name)),
+                );
+                setNasIndex(0);
+            } catch {
+                if (!disposed) setError(true);
+            }
+        }
+        void load();
+        return () => {
+            disposed = true;
+        };
+    }, [retry]);
+
+    const deviceCount = devices?.length ?? 0;
+    const device = devices?.[nasIndex];
+    if (!device) {
+        return (
+            <Card withBorder padding='md' radius='md'>
+                <Stack gap='xs'>
+                    <Text fw={600}>NAS Average Thoughput</Text>
+                    <Group>
+                        <Text
+                            size='sm'
+                            c={error ? 'red' : 'dimmed'}
+                            role='status'
+                        >
+                            {error
+                                ? 'Unable to load NAS devices.'
+                                : devices
+                                  ? 'No NAS devices available.'
+                                  : 'Loading NAS devices...'}
+                        </Text>
+                        {error ? (
+                            <ActionIcon
+                                variant='subtle'
+                                aria-label='Retry loading NAS devices'
+                                onClick={() => setRetry((value) => value + 1)}
+                            >
+                                <MdRefresh size={18} />
+                            </ActionIcon>
+                        ) : null}
+                    </Group>
+                </Stack>
+            </Card>
+        );
+    }
+
+    return (
+        <ThroughputChart
+            key={device.id}
+            kind='nas'
+            id={device.id}
+            dateRange={{ from: from.toISOString(), to: to.toISOString() }}
+            header={
+                <Group justify='space-between' wrap='nowrap'>
+                    <Stack gap={2} style={{ minWidth: 0 }}>
+                        <Text fw={600}>NAS Average Thoughput</Text>
+                        <Text
+                            fw={600}
+                            style={{ overflowWrap: 'anywhere' }}
+                            aria-live='polite'
+                        >
+                            {device.name}
+                        </Text>
+                    </Stack>
+                    <Group gap='xs' wrap='nowrap'>
+                        <ActionIcon
+                            variant='subtle'
+                            aria-label='Previous NAS'
+                            disabled={deviceCount < 2}
+                            onClick={() =>
+                                setNasIndex((index) =>
+                                    (index - 1 + deviceCount) % deviceCount,
+                                )
+                            }
+                        >
+                            <MdChevronLeft size={22} />
+                        </ActionIcon>
+                        <Text
+                            size='xs'
+                            c='dimmed'
+                            style={{ whiteSpace: 'nowrap' }}
+                        >
+                            {nasIndex + 1} / {deviceCount}
+                        </Text>
+                        <ActionIcon
+                            variant='subtle'
+                            aria-label='Next NAS'
+                            disabled={deviceCount < 2}
+                            onClick={() =>
+                                setNasIndex((index) => (index + 1) % deviceCount)
+                            }
+                        >
+                            <MdChevronRight size={22} />
+                        </ActionIcon>
+                    </Group>
+                </Group>
+            }
+        />
     );
 }
 
@@ -388,6 +509,8 @@ export default function DashboardPage() {
                     )}
                 </Group>
             </Card>
+
+            {loaded ? <NasThroughputCard from={from} to={to} /> : null}
 
             {error ? (
                 <Text c='red'>{error}</Text>

@@ -90,7 +90,7 @@ function DetailItem({ label, value }: { label: string; value: ReactNode }) {
             <Text size='xs' c='dimmed'>
                 {label}
             </Text>
-            <Text size='sm' fw={500}>
+            <Text component='div' size='sm' fw={500}>
                 {value}
             </Text>
         </Stack>

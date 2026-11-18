@@ -753,14 +753,22 @@ export type ThroughputObservation = {
 
 export type ThroughputRange = 'hour' | 'day' | 'month';
 
+export type ThroughputDateRange = { from: string; to: string };
+
 export type NasThroughput = {
     bucketSeconds: number;
     points: { at: number; Upload: number | null; Download: number | null }[];
 };
 
-export function getNasThroughput(id: string, range: ThroughputRange) {
+export function getNasThroughput(
+    id: string,
+    range: ThroughputRange | ThroughputDateRange,
+) {
+    const params = new URLSearchParams(
+        typeof range === 'string' ? { range } : range,
+    );
     return request<NasThroughput>(
-        `/admin/nas-devices/${encodeURIComponent(id)}/throughput?range=${range}`,
+        `/admin/nas-devices/${encodeURIComponent(id)}/throughput?${params}`,
     );
 }
 

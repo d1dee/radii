@@ -14,9 +14,9 @@ import {
 import { db } from '../db';
 import {
     nasThroughputQuery,
-    nasThroughputRanges,
+    nasThroughputConfig,
     type NasThroughputPoint,
-    type NasThroughputRange,
+    type NasThroughputWindow,
 } from './nasThroughput';
 import {
     nas,
@@ -32,14 +32,16 @@ export type NasDeviceRow = typeof nasDevice.$inferSelect;
 export async function getNasDeviceThroughput(
     adminId: string,
     nasDeviceId: string,
-    range: NasThroughputRange,
+    range: NasThroughputWindow,
 ) {
+    const now = new Date();
+    const { bucketSeconds } = nasThroughputConfig(range, now);
     const points = await db.execute<NasThroughputPoint>(
-        nasThroughputQuery(adminId, nasDeviceId, range),
+        nasThroughputQuery(adminId, nasDeviceId, range, now),
     );
     return {
         points: Array.from(points),
-        bucketSeconds: nasThroughputRanges[range].bucketSeconds,
+        bucketSeconds,
     };
 }
 

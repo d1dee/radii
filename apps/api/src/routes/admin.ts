@@ -10,6 +10,7 @@ import {
 } from '@radii/shared';
 import { Hono } from 'hono';
 import { z } from 'zod';
+import { nasThroughputQuerySchema } from '../lib/nasThroughput';
 import { getAdminSettings, saveAdminSettings } from '../lib/adminSettings';
 import { createAdminActivation } from '../lib/adminActivations';
 import {
@@ -526,9 +527,7 @@ app.get('/nas-devices/:id/analytics', requireAdmin, async (c) => {
 app.get('/nas-devices/:id/throughput', requireAdmin, async (c) => {
     const id = z.uuid().safeParse(c.req.param('id'));
     if (!id.success) return jsonError(c, 400, 'Invalid NAS id');
-    const range = z.enum(['hour', 'day', 'month'])
-        .default('day')
-        .safeParse(c.req.query('range'));
+    const range = nasThroughputQuerySchema.safeParse(c.req.query());
     if (!range.success) return jsonError(c, 400, 'Invalid throughput range');
     const adminId = c.get('adminSession').userId;
     const device = await getNasDeviceById(id.data, adminId);
