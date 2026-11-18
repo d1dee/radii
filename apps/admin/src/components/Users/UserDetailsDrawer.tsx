@@ -183,6 +183,7 @@ export function UserDetailsDrawer({
     const [paymentsPage, setPaymentsPage] = useState(1);
     const [paymentsLoading, setPaymentsLoading] = useState(false);
     const [busy, setBusy] = useState(false);
+    const detailRequest = useRef(0);
     const activationsRequest = useRef(0);
     const paymentsRequest = useRef(0);
 
@@ -247,8 +248,9 @@ export function UserDetailsDrawer({
     const navigate = useNavigate();
 
     const loadDetail = useCallback(async (id: string) => {
-        setError(null);
+        const requestId = ++detailRequest.current;
         const res = await getAdminUser(id);
+        if (requestId !== detailRequest.current) return;
         if (!res.success) {
             setError(res.message || 'Failed to load user');
             return;
@@ -257,13 +259,14 @@ export function UserDetailsDrawer({
             setError('Failed to load user');
             return;
         }
+        setError(null);
         setDetail(res.data);
     }, []);
 
     const loadActivations = useCallback(
-        async (id: string, page: number) => {
+        async (id: string, page: number, background = false) => {
             const requestId = ++activationsRequest.current;
-            setActivationsLoading(true);
+            if (!background) setActivationsLoading(true);
             const res = await getUserActivations(id, {
                 page,
                 perPage: activationsPerPage,
@@ -279,9 +282,9 @@ export function UserDetailsDrawer({
     );
 
     const loadPayments = useCallback(
-        async (id: string, page: number) => {
+        async (id: string, page: number, background = false) => {
             const requestId = ++paymentsRequest.current;
-            setPaymentsLoading(true);
+            if (!background) setPaymentsLoading(true);
             const res = await getUserPayments(id, {
                 page,
                 perPage: paymentsPerPage,
@@ -316,17 +319,45 @@ export function UserDetailsDrawer({
         setPppoeLabelModal(null);
         setActivationModal(false);
         void loadDetail(userId);
+        let refreshing = false;
+        const timer = setInterval(async () => {
+            if (refreshing) return;
+            refreshing = true;
+            await loadDetail(userId);
+            refreshing = false;
+        }, 10_000);
+        return () => {
+            clearInterval(timer);
+            detailRequest.current += 1;
+            activationsRequest.current += 1;
+            paymentsRequest.current += 1;
+        };
     }, [userId, loadDetail]);
 
+    const detailLoaded = detail !== null;
     useEffect(() => {
-        if (!userId || !detail) return;
-        if (tab === 'activations')
-            void loadActivations(userId, activationsPage);
-        if (tab === 'payments') void loadPayments(userId, paymentsPage);
+        if (!userId || !detailLoaded) return;
+        let refreshing = false;
+        const load = async (background = false) => {
+            if (refreshing) return;
+            refreshing = true;
+            if (tab === 'activations')
+                await loadActivations(userId, activationsPage, background);
+            if (tab === 'payments')
+                await loadPayments(userId, paymentsPage, background);
+            refreshing = false;
+        };
+        void load();
+        const timer = setInterval(() => void load(true), 10_000);
+        return () => {
+            clearInterval(timer);
+            activationsRequest.current += 1;
+            paymentsRequest.current += 1;
+        };
     }, [
         tab,
         userId,
-        detail,
+        detailLoaded,
         activationsPage,
         paymentsPage,
         loadActivations,
@@ -900,7 +931,7 @@ export function UserDetailsDrawer({
                 </Group>
             }
         >
-            {error ? (
+            {error && !detail ? (
                 <Text c='red'>{error}</Text>
             ) : !detail ? (
                 <Center py='xl'>

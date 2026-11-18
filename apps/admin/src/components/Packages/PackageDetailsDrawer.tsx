@@ -145,7 +145,10 @@ export function PackageDetailsDrawer({
         setAnalytics(null);
         setError(null);
 
-        (async () => {
+        let refreshing = false;
+        const load = async () => {
+            if (refreshing) return;
+            refreshing = true;
             const [pkgRes, analyticsRes] = await Promise.all([
                 getAdminPackage(packageId),
                 getPackageAnalytics(packageId, {
@@ -153,6 +156,7 @@ export function PackageDetailsDrawer({
                     perPage,
                 }),
             ]);
+            refreshing = false;
             if (requestId !== loadRequest.current) return;
             if (!pkgRes.success) {
                 setError(pkgRes.message);
@@ -166,9 +170,16 @@ export function PackageDetailsDrawer({
                 setError('Failed to load package details');
                 return;
             }
+            setError(null);
             setPkg(pkgRes.data);
             setAnalytics(analyticsRes.data);
-        })();
+        };
+        void load();
+        const timer = setInterval(() => void load(), 10_000);
+        return () => {
+            clearInterval(timer);
+            loadRequest.current += 1;
+        };
     }, [packageId, paymentsPage, perPage]);
 
     const repeatRate =
@@ -236,7 +247,7 @@ export function PackageDetailsDrawer({
                 </Group>
             }
         >
-            {error ? (
+            {error && !pkg ? (
                 <Text c='red'>{error}</Text>
             ) : !pkg || !analytics ? (
                 <Center py='xl'>

@@ -120,7 +120,12 @@ export function SessionDetailsDrawer({
         setDetail(null);
         setError(null);
 
-        void getAdminSession(sessionId).then((result) => {
+        let refreshing = false;
+        const load = async () => {
+            if (refreshing) return;
+            refreshing = true;
+            const result = await getAdminSession(sessionId);
+            refreshing = false;
             if (ignore) return;
             if (!result.success) {
                 setError(result.message);
@@ -130,11 +135,15 @@ export function SessionDetailsDrawer({
                 setError('Failed to load session details');
                 return;
             }
+            setError(null);
             setDetail(result.data);
-        });
+        };
+        void load();
+        const timer = setInterval(() => void load(), 10_000);
 
         return () => {
             ignore = true;
+            clearInterval(timer);
         };
     }, [sessionId, adjustmentRevision]);
 
@@ -199,7 +208,7 @@ export function SessionDetailsDrawer({
                 </Group>
             }
         >
-            {error ? (
+            {error && !detail ? (
                 <Text c='red'>{error}</Text>
             ) : !detail || !session ? (
                 <Center py='xl'>

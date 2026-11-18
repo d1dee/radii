@@ -139,7 +139,10 @@ export function NasDetailsDrawer({
         setScriptRow(null);
         setError(null);
 
-        (async () => {
+        let refreshing = false;
+        const load = async () => {
+            if (refreshing) return;
+            refreshing = true;
             const [deviceRes, analyticsRes, packagesRes, scriptRes] =
                 await Promise.all([
                     getNasDevice(nasDeviceId),
@@ -150,6 +153,7 @@ export function NasDetailsDrawer({
                     getAllAdminPackages(),
                     getNasSetupScript(nasDeviceId),
                 ]);
+            refreshing = false;
             if (requestId !== loadRequest.current) return;
             if (!deviceRes.success) {
                 setError(deviceRes.message);
@@ -163,6 +167,7 @@ export function NasDetailsDrawer({
                 setError('Failed to load NAS device details');
                 return;
             }
+            setError(null);
             setDevice(deviceRes.data);
             setAnalytics(analyticsRes.data);
             if (packagesRes.success && packagesRes.data) {
@@ -175,7 +180,13 @@ export function NasDetailsDrawer({
             if (scriptRes.success && scriptRes.data) {
                 setScriptRow(scriptRes.data);
             }
-        })();
+        };
+        void load();
+        const timer = setInterval(() => void load(), 10_000);
+        return () => {
+            clearInterval(timer);
+            loadRequest.current += 1;
+        };
     }, [nasDeviceId, paymentsPage, perPage]);
 
     const repeatRate =
@@ -241,7 +252,7 @@ export function NasDetailsDrawer({
                 </Group>
             }
         >
-            {error ? (
+            {error && !device ? (
                 <Text c='red'>{error}</Text>
             ) : !device || !analytics ? (
                 <Center py='xl'>

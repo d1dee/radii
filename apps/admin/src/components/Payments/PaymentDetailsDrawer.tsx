@@ -207,8 +207,20 @@ export function PaymentDetailsDrawer({
             }
         });
 
+        let refreshing = false;
+        const timer = setInterval(async () => {
+            if (refreshing) return;
+            refreshing = true;
+            const result = await getAdminPayment(paymentId);
+            refreshing = false;
+            if (ignore || !result.success || !result.data) return;
+            setError(null);
+            setPayment(result.data);
+        }, 10_000);
+
         return () => {
             ignore = true;
+            clearInterval(timer);
             clearTimeout(refreshTimer);
         };
     }, [paymentId]);
