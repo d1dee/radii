@@ -510,8 +510,6 @@ export default function DashboardPage() {
                 </Group>
             </Card>
 
-            {loaded ? <NasThroughputCard from={from} to={to} /> : null}
-
             {error ? (
                 <Text c='red'>{error}</Text>
             ) : loading ? (
@@ -596,6 +594,11 @@ export default function DashboardPage() {
                                 </Group>
                             </Card>
                         </Grid.Col>
+                        {loaded ? (
+                            <Grid.Col span={12}>
+                                <NasThroughputCard from={from} to={to} />
+                            </Grid.Col>
+                        ) : null}
                         <Grid.Col span={12}>
                             <Card withBorder padding='md' h='100%'>
                                 <Text fw={600} mb='sm'>
