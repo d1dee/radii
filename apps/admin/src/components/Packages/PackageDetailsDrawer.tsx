@@ -260,6 +260,11 @@ export function PackageDetailsDrawer({
                             {pkg.type.toUpperCase()}
                         </Badge>
                         <Badge variant='light'>{pkg.category}</Badge>
+                        {pkg.fairUsageLimit > 0 ? (
+                            <Badge color='orange' variant='light'>
+                                FUP enabled
+                            </Badge>
+                        ) : null}
                         <Badge
                             variant='light'
                             color={pkg.archivedAt ? 'gray' : 'green'}

@@ -224,6 +224,11 @@ export function SessionDetailsDrawer({
                             >
                                 {session.live ? 'Live' : 'Ended'}
                             </Badge>
+                            {detail.adjustments.fairUsage.active ? (
+                                <Badge color='orange' variant='filled'>
+                                    Under FUP
+                                </Badge>
+                            ) : null}
                             {session.serviceType ? (
                                 <Badge variant='outline'>
                                     {session.serviceType}
