@@ -249,7 +249,7 @@ export function ThroughputChart({
                             color='var(--mantine-color-teal-6)'
                         />
                         <Text size='sm'>
-                            Upload: {latest?.upload.toFixed(1) ?? '--'} Mbps
+                            {latest?.upload.toFixed(1) ?? '--'} Mbps
                         </Text>
                     </Group>
                     <Group gap={4} wrap='nowrap'>
@@ -258,7 +258,7 @@ export function ThroughputChart({
                             color='var(--mantine-color-blue-6)'
                         />
                         <Text size='sm'>
-                            Download: {latest?.download.toFixed(1) ?? '--'} Mbps
+                            {latest?.download.toFixed(1) ?? '--'} Mbps
                         </Text>
                     </Group>
                     {latest && (
