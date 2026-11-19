@@ -8,8 +8,10 @@ const connectionString = env.databaseUrl;
 // Bun SQL pool tuning to avoid Postgres rejecting new clients with ("too many clients already").
 const poolOptions = {
     max: parseInt(process.env.PG_POOL_MAX || '10', 10),
-    idleTimeout: 30,
-    maxLifetime: 30 * 60,
+    // Older Bun SQL releases close in-flight queries when either timer fires
+    // (oven-sh/bun#30646). Keep the bounded pool until shutdown instead.
+    idleTimeout: 0,
+    maxLifetime: 0,
     connectionTimeout: 15,
 };
 

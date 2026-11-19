@@ -215,47 +215,85 @@ export async function getAdminThroughputObservations(
     target: { userId: string } | { radacctId: string },
     range: NasThroughputRange = 'hour',
 ) {
-    const history = db
-        .select({
-            observedAt: radiusUsageDelta.observedAt,
-            intervalStartedAt: sql<string | null>`coalesce(lag(${radiusUsageDelta.observedAt}) over (
-                partition by ${radiusUsageDelta.radacctId}, ${radiusUsageDelta.activationId}
-                order by ${radiusUsageDelta.observedAt}, ${radiusUsageDelta.id}
-            ), ${radacct.acctstarttime})::text`.as('interval_started_at'),
-            latestAt: sql<string>`max(${radiusUsageDelta.observedAt}) over ()::text`.as('latest_at'),
-            inputOctets: sql<string>`${radiusUsageDelta.inputOctets}::text`.as('input_octets'),
-            outputOctets: sql<string>`${radiusUsageDelta.outputOctets}::text`.as('output_octets'),
-        })
-        .from(radiusUsageDelta)
-        .innerJoin(radacct, eq(radiusUsageDelta.radacctId, radacct.radacctid))
-        .innerJoin(activatedPackages, and(
-            eq(radiusUsageDelta.activationId, activatedPackages.id),
-            eq(radacct.class, sql`${activatedPackages.id}::text`),
-        ))
-        .where(and(
-            scopedAccountingToAdminNas(adminId),
-            isNotNull(radacct.acctstarttime),
-            lte(radiusUsageDelta.observedAt, new Date()),
-            'userId' in target
-                ? and(
-                    eq(activatedPackages.userId, target.userId),
-                    sql`exists (
+    const now = new Date();
+    // Authorize sessions once, rather than resolving NAS claims for every delta.
+    // The activation/time index supports both latest and boundary lookups.
+    const rows = await db.execute(sql`
+        with claims as materialized (${nasAddressClaims}),
+        sessions as materialized (
+            select ${radacct.radacctid} as radacct_id,
+                ${activatedPackages.id} as activation_id,
+                ${radacct.acctstarttime} as started_at
+            from ${radacct}
+            inner join ${activatedPackages} on ${radacct.class} = ${activatedPackages.id}::text
+            where ${radacct.acctstarttime} is not null
+              and host(${radacct.nasipaddress}) in (
+                  select owned.ip from claims owned
+                  where owned.owner_id = ${adminId}
+                    and not exists (
+                        select 1 from claims other
+                        where other.ip = owned.ip and other.owner_id <> ${adminId}
+                    )
+              )
+              and ${'userId' in target
+                ? sql`${activatedPackages.userId} = ${target.userId} and exists (
                         select 1 from ${packagePayments}
                         inner join ${nasDevice} on ${nasDevice.id} = ${packagePayments.nasDeviceId}
                         where ${packagePayments.id} = ${activatedPackages.packagePaymentId}
                           and ${nasDevice.ownerId} = ${adminId}
-                    )`,
-                )
-                : eq(radacct.radacctid, BigInt(target.radacctId)),
-        )).as('throughput_history');
-    const rows = await db.select().from(history)
-        .where(sql`${history.observedAt} >= ${history.latestAt}::timestamptz - ${nasThroughputRanges[range].seconds} * interval '1 second'`)
-        .orderBy(asc(history.observedAt));
+                     )`
+                : sql`${radacct.radacctid} = ${BigInt(target.radacctId)}`}
+        ),
+        bounds as materialized (
+            select max(latest.observed_at) - ${nasThroughputRanges[range].seconds} * interval '1 second' as since
+            from sessions s
+            cross join lateral (
+                select d.observed_at from ${radiusUsageDelta} d
+                where d.activation_id = s.activation_id and d.radacct_id = s.radacct_id
+                  and d.observed_at <= ${now}
+                order by d.observed_at desc
+                limit 1
+            ) latest
+        ),
+        history as (
+            select s.*, d.* from sessions s
+            cross join bounds b
+            cross join lateral (
+                select d.id, d.observed_at, d.input_octets, d.output_octets
+                from ${radiusUsageDelta} d
+                where d.activation_id = s.activation_id and d.radacct_id = s.radacct_id
+                  and d.observed_at >= b.since and d.observed_at <= ${now}
+                union all
+                (select d.id, d.observed_at, d.input_octets, d.output_octets
+                 from ${radiusUsageDelta} d
+                 where d.activation_id = s.activation_id and d.radacct_id = s.radacct_id
+                   and d.observed_at < b.since
+                 order by d.observed_at desc, d.id desc
+                 limit 1)
+            ) d
+        ),
+        intervals as (
+            select observed_at,
+                coalesce(lag(observed_at) over (
+                    partition by radacct_id, activation_id order by observed_at, id
+                ), started_at)::text as interval_started_at,
+                input_octets::text, output_octets::text
+            from history
+        )
+        select * from intervals
+        where observed_at >= (select since from bounds)
+        order by observed_at
+    `) as unknown as {
+        observed_at: Date | string;
+        interval_started_at: string | null;
+        input_octets: string;
+        output_octets: string;
+    }[];
     return rows.map((row) => ({
-        intervalStartedAt: row.intervalStartedAt,
-        observedAt: row.observedAt,
-        inputOctets: row.inputOctets,
-        outputOctets: row.outputOctets,
+        intervalStartedAt: row.interval_started_at,
+        observedAt: new Date(row.observed_at),
+        inputOctets: row.input_octets,
+        outputOctets: row.output_octets,
     }));
 }
 

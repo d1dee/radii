@@ -94,27 +94,42 @@ export function nasThroughputQuery(
                   where other.ip = owned.ip
                     and (other.owner_id <> ${adminId} or other.device_id <> ${nasDeviceId}::uuid)
               )
-        ), intervals as (
-            select delta.observed_at as ended_at,
-                coalesce(previous.observed_at, accounting.acctstarttime) as started_at,
-                delta.input_octets, delta.output_octets
+        ), recent as materialized (
+            select delta.*, accounting.acctstarttime
             from radius_usage_delta delta
             inner join radacct accounting on accounting.radacctid = delta.radacct_id
             cross join bounds
-            left join lateral (
-                select earlier.observed_at
-                from radius_usage_delta earlier
-                where earlier.activation_id = delta.activation_id
-                  and earlier.radacct_id = delta.radacct_id
-                  and (earlier.observed_at, earlier.id) < (delta.observed_at, delta.id)
-                order by earlier.observed_at desc, earlier.id desc
-                limit 1
-            ) previous on true
             where delta.observed_at > bounds.since
               and delta.observed_at <= ${typeof range === 'string' ? to.toISOString() : now.toISOString()}::timestamptz
-              and coalesce(previous.observed_at, accounting.acctstarttime) < bounds.until
               and accounting.acctstarttime is not null
               and host(accounting.nasipaddress) in (select ip from addresses)
+        ), captures as (
+            select * from recent
+            union all
+            -- One boundary capture per session/activation keeps lag accurate
+            -- without scanning all history or looking up every row's predecessor.
+            select previous.*, sessions.acctstarttime
+            from (select distinct activation_id, radacct_id, acctstarttime from recent) sessions
+            cross join bounds
+            cross join lateral (
+                select earlier.* from radius_usage_delta earlier
+                where earlier.activation_id = sessions.activation_id
+                  and earlier.radacct_id = sessions.radacct_id
+                  and earlier.observed_at <= bounds.since
+                order by earlier.observed_at desc, earlier.id desc
+                limit 1
+            ) previous
+        ), history as (
+            select observed_at as ended_at,
+                coalesce(lag(observed_at) over (
+                    partition by activation_id, radacct_id
+                    order by observed_at, id
+                ), acctstarttime) as started_at,
+                input_octets, output_octets
+            from captures
+        ), intervals as (
+            select history.* from history cross join bounds
+            where ended_at > bounds.since and started_at < bounds.until
         ), buckets as (
             select n as bucket,
                 bounds.since + n * ${bucketSeconds} * interval '1 second' as started_at,
