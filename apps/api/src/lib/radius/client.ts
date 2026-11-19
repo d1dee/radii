@@ -4160,6 +4160,13 @@ export class RadiusClient {
             },
         ];
 
+        // HotSpot otherwise falls back to the built-in default user profile,
+        // bypassing the managed FQ-CoDel queue type. PPP inherits its server
+        // profile, with a separate group override for expired subscribers.
+        if (pkg.type === 'hotspot') {
+            attrs.push({ attribute: 'Mikrotik-Group', value: 'radii-default' });
+        }
+
         if (
             pkg.uploadRate > 0 ||
             pkg.downloadRate > 0 ||

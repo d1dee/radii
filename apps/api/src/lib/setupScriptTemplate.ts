@@ -353,7 +353,7 @@ export const MIKROTIK_SETUP_SCRIPT_TEMPLATE = `# ===============================
 #  RADIUS    : {{RADIUS_SERVER}}
 #  Generated : {{GENERATED_AT}}
 #
-#  RouterOS 7.x required. Idempotent: managed settings are overwritten
+#  RouterOS 7.19+ required. Idempotent: managed settings are overwritten
 #  with the values in this configuration on every run.
 #
 #  Sections:
@@ -741,8 +741,24 @@ $radiiLog "Read-only session monitoring configured (monitoring account WireGuard
 };
 
 # ---------------------------------------------------------------------
-# 8. HotSpot + DHCP + NAT
+# 8. Subscriber queues + HotSpot + DHCP + NAT
 # ---------------------------------------------------------------------
+
+# Shared by HotSpot and PPPoE dynamic simple queues in both directions.
+# Keep package/RADIUS rate limits unchanged; FQ-CoDel manages their backlog.
+:local fqCodelIds [/queue/type/find where name="radii-fq-codel"];
+:if ([:len $fqCodelIds] = 0) do={
+    /queue/type/add \
+        name="radii-fq-codel" kind=fq-codel \
+        fq-codel-limit=1024 fq-codel-quantum=1514 \
+        fq-codel-target=5ms fq-codel-interval=100ms fq-codel-ecn=yes;
+} else={
+    /queue/type/set [:pick $fqCodelIds 0] \
+        kind=fq-codel \
+        fq-codel-limit=1024 fq-codel-quantum=1514 \
+        fq-codel-target=5ms fq-codel-interval=100ms fq-codel-ecn=yes;
+};
+$radiiLog "Subscriber FQ-CoDel queue type configured";
 
 :local hsIf "{{HOTSPOT_INTERFACE}}";
 
@@ -841,11 +857,13 @@ $radiiLog "Read-only session monitoring configured (monitoring account WireGuard
     :if ([:len $hsUserProfileIds] = 0) do={
         /ip/hotspot/user/profile/add \
             name="radii-default" \
+            queue-type="radii-fq-codel" \
             address-pool="radii-hs-pool" \
             shared-users={{SHARED_USERS}} \
             status-autorefresh=1m;
     } else={
         /ip/hotspot/user/profile/set [:pick $hsUserProfileIds 0] \
+            queue-type="radii-fq-codel" \
             address-pool="radii-hs-pool" \
             shared-users={{SHARED_USERS}} \
             status-autorefresh=1m;
@@ -858,7 +876,7 @@ $radiiLog "Read-only session monitoring configured (monitoring account WireGuard
     };
 
     # Do NOT modify the built-in "default" HotSpot profile.
-    # RADIUS can select the radii-default profile when appropriate.
+    # RADIUS selects radii-default for managed HotSpot sessions.
 
     # --- HotSpot server ----------------------------------------------
 
@@ -1135,6 +1153,7 @@ $radiiLog "Read-only session monitoring configured (monitoring account WireGuard
     :if ([:len $pppProfileIds] = 0) do={
         /ppp/profile/add \
             name="radii-ppp" \
+            queue-type="radii-fq-codel/radii-fq-codel" \
             local-address={{PPP_GATEWAY}} \
             remote-address="radii-ppp-pool" \
             dns-server={{PPP_GATEWAY}} \
@@ -1145,6 +1164,7 @@ $radiiLog "Read-only session monitoring configured (monitoring account WireGuard
             comment="radii managed";
     } else={
         /ppp/profile/set [:pick $pppProfileIds 0] \
+            queue-type="radii-fq-codel/radii-fq-codel" \
             local-address={{PPP_GATEWAY}} \
             remote-address="radii-ppp-pool" \
             dns-server={{PPP_GATEWAY}} \
@@ -1171,6 +1191,7 @@ $radiiLog "Read-only session monitoring configured (monitoring account WireGuard
     :if ([:len $expiredPppProfileIds] = 0) do={
         /ppp/profile/add \
             name="radii-ppp-expired" \
+            queue-type="radii-fq-codel/radii-fq-codel" \
             local-address={{PPP_GATEWAY}} \
             remote-address="radii-ppp-pool" \
             dns-server={{PPP_GATEWAY}} \
@@ -1184,6 +1205,7 @@ $radiiLog "Read-only session monitoring configured (monitoring account WireGuard
             comment="radii managed";
     } else={
         /ppp/profile/set [:pick $expiredPppProfileIds 0] \
+            queue-type="radii-fq-codel/radii-fq-codel" \
             local-address={{PPP_GATEWAY}} \
             remote-address="radii-ppp-pool" \
             dns-server={{PPP_GATEWAY}} \
