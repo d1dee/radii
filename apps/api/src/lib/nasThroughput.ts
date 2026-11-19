@@ -1,6 +1,6 @@
 import { sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { scopedNasHistoryAddress } from './nasHistory';
+import { nasAddressClaims } from './nasHistory';
 
 export type NasThroughputRange = 'hour' | 'day' | 'month';
 export type NasThroughputWindow = NasThroughputRange | { from: Date; to: Date };
@@ -82,7 +82,19 @@ export function nasThroughputQuery(
         with bounds as (
             select ${to.toISOString()}::timestamptz as until,
                 ${from.toISOString()}::timestamptz as since
-        ), intervals as materialized (
+        ), claims as materialized (
+            ${nasAddressClaims}
+        ), addresses as materialized (
+            select distinct owned.ip
+            from claims owned
+            where owned.owner_id = ${adminId}
+              and owned.device_id = ${nasDeviceId}::uuid
+              and not exists (
+                  select 1 from claims other
+                  where other.ip = owned.ip
+                    and (other.owner_id <> ${adminId} or other.device_id <> ${nasDeviceId}::uuid)
+              )
+        ), intervals as (
             select delta.observed_at as ended_at,
                 coalesce(previous.observed_at, accounting.acctstarttime) as started_at,
                 delta.input_octets, delta.output_octets
@@ -102,26 +114,38 @@ export function nasThroughputQuery(
               and delta.observed_at <= ${typeof range === 'string' ? to.toISOString() : now.toISOString()}::timestamptz
               and coalesce(previous.observed_at, accounting.acctstarttime) < bounds.until
               and accounting.acctstarttime is not null
-              and ${scopedNasHistoryAddress(sql`accounting.nasipaddress`, adminId, sql`${nasDeviceId}::uuid`)}
+              and host(accounting.nasipaddress) in (select ip from addresses)
         ), buckets as (
-            select bounds.since + n * ${bucketSeconds} * interval '1 second' as started_at,
+            select n as bucket,
+                bounds.since + n * ${bucketSeconds} * interval '1 second' as started_at,
                 least(bounds.until, bounds.since + (n + 1) * ${bucketSeconds} * interval '1 second') as ended_at
             from bounds cross join generate_series(0, ${count - 1}) n
+        ), totals as (
+            select bucket,
+                sum(intervals.input_octets::numeric *
+                    extract(epoch from (least(intervals.ended_at, buckets.ended_at) - greatest(intervals.started_at, buckets.started_at))) /
+                    nullif(extract(epoch from (intervals.ended_at - intervals.started_at)), 0)
+                ) as input_octets,
+                sum(intervals.output_octets::numeric *
+                    extract(epoch from (least(intervals.ended_at, buckets.ended_at) - greatest(intervals.started_at, buckets.started_at))) /
+                    nullif(extract(epoch from (intervals.ended_at - intervals.started_at)), 0)
+                ) as output_octets
+            from intervals
+            cross join bounds
+            -- Expand only overlapping buckets, not every interval against every bucket.
+            cross join lateral generate_series(
+                greatest(0, floor(extract(epoch from (intervals.started_at - bounds.since)) / ${bucketSeconds})::int),
+                least(${count - 1}, ceil(extract(epoch from (intervals.ended_at - bounds.since)) / ${bucketSeconds})::int - 1)
+            ) overlapping(bucket)
+            inner join buckets using (bucket)
+            where intervals.ended_at > intervals.started_at
+            group by bucket
         )
         select (extract(epoch from (buckets.started_at + (buckets.ended_at - buckets.started_at) / 2)) * 1000)::float8 as at,
-            (sum(intervals.input_octets::numeric *
-                extract(epoch from (least(intervals.ended_at, buckets.ended_at) - greatest(intervals.started_at, buckets.started_at))) /
-                nullif(extract(epoch from (intervals.ended_at - intervals.started_at)), 0)
-            ) * 8 / extract(epoch from (buckets.ended_at - buckets.started_at)) / 1000000)::float8 as "Upload",
-            (sum(intervals.output_octets::numeric *
-                extract(epoch from (least(intervals.ended_at, buckets.ended_at) - greatest(intervals.started_at, buckets.started_at))) /
-                nullif(extract(epoch from (intervals.ended_at - intervals.started_at)), 0)
-            ) * 8 / extract(epoch from (buckets.ended_at - buckets.started_at)) / 1000000)::float8 as "Download"
+            (totals.input_octets * 8 / extract(epoch from (buckets.ended_at - buckets.started_at)) / 1000000)::float8 as "Upload",
+            (totals.output_octets * 8 / extract(epoch from (buckets.ended_at - buckets.started_at)) / 1000000)::float8 as "Download"
         from buckets
-        left join intervals on intervals.started_at < buckets.ended_at
-            and intervals.ended_at > buckets.started_at
-            and intervals.ended_at > intervals.started_at
-        group by buckets.started_at, buckets.ended_at
+        left join totals using (bucket)
         order by buckets.started_at
     `;
 }
