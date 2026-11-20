@@ -191,7 +191,7 @@ export function BuyForm({
                 >
                     {isFree
                         ? 'Activate Free Package'
-                        : `Pay ${price ? `Ksh ${price}` : 'for package'}`}
+                        : `Pay ${price ? `Ksh ${Number(price).toLocaleString('en-KE')}` : 'for package'}`}
                 </Button>
             </Stack>
         </form>
