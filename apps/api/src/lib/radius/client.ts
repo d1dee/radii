@@ -3161,7 +3161,12 @@ export class RadiusClient {
         const where = and(
             isNotNull(radacct.acctstarttime),
             inArray(radacct.nasipaddress, nasIpAddresses),
-            opts.from ? gte(radacct.acctstarttime, opts.from) : undefined,
+            opts.from
+                ? or(
+                      isNull(radacct.acctstoptime),
+                      gte(radacct.acctstoptime, opts.from),
+                  )
+                : undefined,
             opts.to ? lte(radacct.acctstarttime, opts.to) : undefined,
             opts.live === undefined
                 ? undefined
