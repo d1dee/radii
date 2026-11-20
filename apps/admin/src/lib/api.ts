@@ -1332,6 +1332,8 @@ export type ListRadiusSessionsQuery = PaginationQuery & {
     q?: string;
     live?: boolean;
     sessionType?: SessionTypeFilter;
+    from?: string;
+    to?: string;
     sortBy?: SessionSortKey;
     sortDirection?: SortDirection;
 };
@@ -1351,6 +1353,8 @@ export function getRadiusSessions(query: ListRadiusSessionsQuery = {}) {
     if (query.q) params.set('q', query.q);
     if (query.live !== undefined) params.set('live', query.live ? '1' : '0');
     if (query.sessionType) params.set('type', query.sessionType);
+    if (query.from) params.set('from', query.from);
+    if (query.to) params.set('to', query.to);
     if (query.sortBy) params.set('sortBy', query.sortBy);
     if (query.sortDirection) params.set('sortDirection', query.sortDirection);
     const qs = params.toString();

@@ -15,6 +15,7 @@ import {
     Title,
     UnstyledButton,
 } from '@mantine/core';
+import { DatePickerInput } from '@mantine/dates';
 import { useDebouncedValue } from '@mantine/hooks';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MdDelete, MdEdit, MdSearch } from 'react-icons/md';
@@ -42,6 +43,7 @@ import {
 } from '@/lib/api';
 import { useAutoRefresh } from '@/lib/autoRefresh';
 import { warnBackgroundFailure } from '@/lib/clientError';
+import { dayjs } from '@/lib/dayjs';
 import { useDrawerHistory } from '@/lib/drawerHistory';
 import {
     formatBytes,
@@ -96,6 +98,12 @@ export default function SessionsPage() {
     );
     const [sortBy, setSortBy] = useState<SessionSortKey>('startedAt');
     const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+    const [from, setFrom] = useState<Date | null>(null);
+    const [to, setTo] = useState<Date | null>(null);
+    const [dateRange, setDateRange] = useState<[string | null, string | null]>([
+        null,
+        null,
+    ]);
 
     const [confirmDisconnect, setConfirmDisconnect] =
         useState<SessionInfo | null>(null);
@@ -120,6 +128,8 @@ export default function SessionsPage() {
                         ? undefined
                         : sessionStatus === 'live',
                 sessionType: sessionType ?? undefined,
+                from: from ? from.toISOString() : undefined,
+                to: to ? to.toISOString() : undefined,
                 sortBy,
                 sortDirection,
                 page: pageToLoad,
@@ -140,6 +150,8 @@ export default function SessionsPage() {
             debouncedSearch,
             sessionStatus,
             sessionType,
+            from,
+            to,
             sortBy,
             sortDirection,
             perPage,
@@ -152,6 +164,8 @@ export default function SessionsPage() {
         debouncedSearch,
         sessionStatus,
         sessionType,
+        from,
+        to,
         sortBy,
         sortDirection,
         perPage,
@@ -299,6 +313,29 @@ export default function SessionsPage() {
                         { value: 'pppoe', label: 'PPPoE' },
                     ]}
                     w={{ base: '100%', sm: 140 }}
+                />
+                <DatePickerInput
+                    type='range'
+                    allowSingleDateInRange
+                    aria-label='Sessions date range'
+                    placeholder='Date range'
+                    value={dateRange}
+                    onChange={(range) => {
+                        setDateRange(range);
+                        if (range[0] && range[1]) {
+                            setFrom(dayjs(range[0]).startOf('day').toDate());
+                            setTo(dayjs(range[1]).endOf('day').toDate());
+                        } else if (!range[0] && !range[1]) {
+                            setFrom(null);
+                            setTo(null);
+                        }
+                    }}
+                    valueFormat='DD MMM YYYY'
+                    clearable
+                    clearButtonProps={{
+                        'aria-label': 'Clear sessions date range',
+                    }}
+                    w={{ base: '100%', sm: 300 }}
                 />
             </TableFilters>
 

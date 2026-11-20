@@ -3076,6 +3076,8 @@ export class RadiusClient {
             q?: string;
             live?: boolean;
             sessionType?: 'hotspot' | 'pppoe';
+            from?: Date;
+            to?: Date;
             sortBy?: AdminSessionSortBy;
             sortDirection?: 'asc' | 'desc';
             page: number;
@@ -3159,6 +3161,8 @@ export class RadiusClient {
         const where = and(
             isNotNull(radacct.acctstarttime),
             inArray(radacct.nasipaddress, nasIpAddresses),
+            opts.from ? gte(radacct.acctstarttime, opts.from) : undefined,
+            opts.to ? lte(radacct.acctstarttime, opts.to) : undefined,
             opts.live === undefined
                 ? undefined
                 : opts.live

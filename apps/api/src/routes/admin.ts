@@ -1512,7 +1512,7 @@ app.get('/radius/summary', requireAdmin, async (c) => {
 // RADIUS accounting sessions, most recent first, limited to sessions on the
 // requesting admin's NAS devices
 // (matched on NAS-IP-Address: direct IP or WireGuard tunnel address).
-// Supports q/live/type filters and page/perPage pagination.
+// Supports q/live/type/from/to filters and page/perPage pagination.
 app.get('/radius/sessions', requireAdmin, async (c) => {
     const sort = sessionSortSchema.safeParse({
         sortBy: c.req.query('sortBy'),
@@ -1529,6 +1529,17 @@ app.get('/radius/sessions', requireAdmin, async (c) => {
     if (typeParam && !['hotspot', 'pppoe'].includes(typeParam)) {
         return jsonError(c, 400, 'Invalid session type filter');
     }
+    const fromParam = c.req.query('from');
+    const toParam = c.req.query('to');
+    const from = fromParam ? new Date(fromParam) : undefined;
+    const to = toParam ? new Date(toParam) : undefined;
+    if (
+        (fromParam && Number.isNaN(from?.getTime())) ||
+        (toParam && Number.isNaN(to?.getTime())) ||
+        (from && to && from > to)
+    ) {
+        return jsonError(c, 400, 'Invalid date range');
+    }
     const { page, perPage } = paginationParams(
         c.req.query('page'),
         c.req.query('perPage'),
@@ -1542,6 +1553,8 @@ app.get('/radius/sessions', requireAdmin, async (c) => {
                 ? undefined
                 : liveParam === '1' || liveParam === 'true',
         sessionType: typeParam as 'hotspot' | 'pppoe' | undefined,
+        from,
+        to,
         ...sort.data,
         page,
         perPage,
