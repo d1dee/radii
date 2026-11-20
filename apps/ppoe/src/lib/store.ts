@@ -193,7 +193,7 @@ export function loadPppoePortal(
                       contacts: defaultAdminSettings.contacts,
                   }
                 : {}),
-            packagesLoading: scopeChanged || portalSnapshot.packages === undefined,
+            packagesLoading: true,
             packagesError: null,
             contactsError: null,
         });
@@ -399,6 +399,7 @@ export function refreshPppoeAccounts() {
                 loading: false,
                 error: clients.success ? null : clients.message,
             });
+            if (clients.success && !scopeChanged) void refreshPppoePackages();
         })
         .catch((error: unknown) => {
             storeLogger.warning('Unexpected account refresh failure.', {
@@ -479,6 +480,8 @@ export function selectPppoeAccount(accountId: string) {
     }
     if (client.nasDeviceId && client.nasDeviceId !== scopeSnapshot.nasDeviceId) {
         setNasScope(client.nasDeviceId);
+    } else {
+        void refreshPppoePackages();
     }
 }
 

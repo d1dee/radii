@@ -70,6 +70,7 @@ export function BuyForm({
         try {
             const result = await createOrder({
                 packageId,
+                expectedAmount: Number(price),
                 ...(phoneNumber ? { phoneNumber } : {}),
                 serviceAccountId,
             });

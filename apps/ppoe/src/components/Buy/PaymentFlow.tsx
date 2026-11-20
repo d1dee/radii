@@ -1,4 +1,4 @@
-import { Modal, Paper, Stack, Text, Title } from '@mantine/core';
+import { Alert, Loader, Modal, Paper, Stack, Text, Title } from '@mantine/core';
 import { useState } from 'react';
 import type { OrderResult } from '../../lib/api.ts';
 import { refreshPppoePackages } from '../../lib/store.ts';
@@ -51,18 +51,22 @@ export function PaymentFlow({
     opened,
     onClose,
     seed,
+    loading,
     serviceAccountId,
 }: {
     opened: boolean;
     onClose: () => void;
     seed: { packageId: string; price: string } | null;
+    loading: boolean;
     serviceAccountId: string | null;
 }) {
     const [status, setStatus] = useState<FlowStatus>('buy');
     const [orderId, setOrderId] = useState('');
     const [paymentData, setPaymentData] = useState<OrderResult | null>(null);
     const [errorMessage, setErrorMessage] = useState('');
-    const isFree = seed?.price !== '' && Number(seed?.price) === 0;
+    const isFree = paymentData && status !== 'buy'
+        ? paymentData.amount === 0
+        : seed !== null && seed.price !== '' && Number(seed.price) === 0;
     const heading = isFree ? FREE_TITLES[status] : TITLES[status];
 
     return (
@@ -102,6 +106,18 @@ export function PaymentFlow({
                             }
                         }}
                     />
+                ) : status === 'buy' ? (
+                    loading ? (
+                        <Stack align='center' py='md'>
+                            <Loader size='sm' />
+                            <Text size='sm'>Refreshing checkout price...</Text>
+                        </Stack>
+                    ) : (
+                        <Alert color='orange' title='Package unavailable'>
+                            Close checkout and sign in or refresh the available
+                            packages before trying again.
+                        </Alert>
+                    )
                 ) : null}
 
                 {status === 'pending' ? (

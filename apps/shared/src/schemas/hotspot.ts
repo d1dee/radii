@@ -6,6 +6,7 @@ export type Package = {
     category: string;
     sessionLength: number; // minutes
     price: number;
+    connectionFee?: number;
     maxDevices: number;
     noExpiry: boolean;
     note?: string;

@@ -595,6 +595,7 @@ function ContactsSection() {
 
 interface PackagesForm {
     noExpiryValidityMonths: number | '';
+    pppoeConnectionFeeAmount: number | '';
 }
 
 function PackagesSection() {
@@ -605,12 +606,18 @@ function PackagesSection() {
         initialValues: {
             noExpiryValidityMonths:
                 settings.packages.noExpiryValidityMonths ?? '',
+            pppoeConnectionFeeAmount:
+                settings.packages.pppoeConnectionFeeAmount,
         },
         validate: {
             noExpiryValidityMonths: (v) =>
                 v === '' || (Number.isInteger(v) && v >= 1 && v <= 120)
                     ? null
                     : 'Must be a whole number between 1 and 120 months',
+            pppoeConnectionFeeAmount: (value) =>
+                value === '' || (Number.isSafeInteger(value) && value >= 0 && value <= 99999999)
+                    ? null
+                    : 'Enter a whole Ksh amount between 0 and 99,999,999',
         },
     });
 
@@ -625,6 +632,10 @@ function PackagesSection() {
                     values.noExpiryValidityMonths === ''
                         ? null
                         : values.noExpiryValidityMonths,
+                pppoeConnectionFeeAmount:
+                    values.pppoeConnectionFeeAmount === ''
+                        ? 0
+                        : values.pppoeConnectionFeeAmount,
             },
         });
         if (res.success) form.resetDirty(values);
@@ -640,10 +651,30 @@ function PackagesSection() {
         <>
             <SectionHeader
                 title='Packages'
-                description='Validity defaults for the hotspot time-bank packages you sell.'
+                description='Hotspot time-bank validity and PPPoE connection fees.'
             />
             <form onSubmit={form.onSubmit(handleSubmit)}>
                 <Stack gap='md' maw='40em'>
+                    <NumberInput
+                        label='PPPoE connection fee (Ksh)'
+                        description='Added to the first successful PPPoE package purchase only. Returning paying customers are exempt. Set to 0 to disable.'
+                        min={0}
+                        max={99999999}
+                        clampBehavior='strict'
+                        thousandSeparator=','
+                        allowDecimal={false}
+                        allowNegative={false}
+                        onPaste={(event) => {
+                            const text = event.clipboardData.getData('text').trim();
+                            const amount = Number(text.replaceAll(',', ''));
+                            if (!/^\d+(,\d{3})*$/.test(text) ||
+                                !Number.isSafeInteger(amount) || amount > 99999999) {
+                                event.preventDefault();
+                            }
+                        }}
+                        {...form.getInputProps('pppoeConnectionFeeAmount')}
+                    />
+                    <Divider />
                     <NumberInput
                         label='No Expiry validity window (months)'
                         description='How long a hotspot "No Expiry" (time-bank) package stays usable after activation. The customer must consume the session-length time bank within this window. Leave empty to use the server default.'

@@ -77,11 +77,11 @@ export function PackagePricing({
     function initiateOrderFlow(pkg: Package) {
         const seed = {
             packageId: pkg.packageId,
-            price: String(pkg.price),
+            price: String(pkg.price + (pkg.connectionFee ?? 0)),
         };
 
         if (session.data?.session) startBuy(seed);
-        else openLogin(pkg.packageId, String(pkg.price));
+        else openLogin(pkg.packageId, seed.price);
     }
 
     if (!packages || packages.length === 0)
@@ -206,8 +206,21 @@ export function PackagePricing({
                                                 {expiry}
                                             </Text>
                                             <Text size='xl' fw={700}>
-                                                {formatPackagePrice(pkg.price)}
+                                                {pkg.connectionFee
+                                                    ? `Ksh ${pkg.price.toLocaleString()}`
+                                                    : formatPackagePrice(pkg.price)}
                                             </Text>
+                                            {pkg.connectionFee ? (
+                                                <Text
+                                                    size='sm'
+                                                    c='dimmed'
+                                                    ta='right'
+                                                >
+                                                    + Ksh{' '}
+                                                    {pkg.connectionFee.toLocaleString()}{' '}
+                                                    connection fee
+                                                </Text>
+                                            ) : null}
                                         </Stack>
                                     </Group>
 
@@ -218,13 +231,16 @@ export function PackagePricing({
                                             accountsLoading
                                         }
                                         disabled={
-                                            Boolean(session.data?.session) &&
-                                            Boolean(selectedAccount) &&
-                                            selectedAccount?.status !== 'active'
+                                            loading ||
+                                            (Boolean(session.data?.session) &&
+                                                Boolean(selectedAccount) &&
+                                                selectedAccount?.status !== 'active')
                                         }
                                         onClick={() => initiateOrderFlow(pkg)}
                                     >
-                                        {pkg.price === 0 ? 'Activate' : 'Buy Now'}
+                                        {pkg.price + (pkg.connectionFee ?? 0) === 0
+                                            ? 'Activate'
+                                            : 'Buy Now'}
                                     </Button>
                                 </Stack>
                             </Card>

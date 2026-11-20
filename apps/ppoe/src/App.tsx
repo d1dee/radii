@@ -71,14 +71,10 @@ function pkgPrice(
     dbPackages: Array<[string, Array<Package>]> | undefined,
     packageId: string,
 ) {
-    return String(
-        dbPackages
-            ?.flat(2)
-            .find(
-                (v): v is Package =>
-                    typeof v !== 'string' && v?.packageId === packageId,
-            )?.price ?? '',
-    );
+    const pkg = dbPackages
+        ?.flatMap(([, offers]) => offers)
+        .find((offer) => offer.packageId === packageId);
+    return pkg ? String(pkg.price + (pkg.connectionFee ?? 0)) : '';
 }
 
 export default function App() {
@@ -98,7 +94,8 @@ export default function App() {
         nasDeviceId,
         pending: isPending,
     });
-    const { clients, selectedAccountId } = usePppoeAccounts();
+    const { clients, selectedAccountId, loading: accountsLoading } =
+        usePppoeAccounts();
     // Purchases land on the account the portal is currently showing (the
     // account switcher selection also sets the NAS scope). If that account is
     // not on the scoped network, pass null so the backend provisions one on
@@ -146,6 +143,18 @@ export default function App() {
     );
     // Bumped on each open so PaymentFlow remounts with fresh state.
     const [buyKey, setBuyKey] = useState(resumeBuy ? 1 : 0);
+    // Authentication and payment history can change fee eligibility. Never
+    // submit using the price captured before the latest scoped package load.
+    const checkoutLoading = isPending || packagesLoading || accountsLoading;
+    const checkoutPrice = buySeed ? pkgPrice(packages, buySeed.packageId) : '';
+    const checkoutSeed =
+        data?.session &&
+        !checkoutLoading &&
+        !packagesError &&
+        checkoutPrice !== '' &&
+        buySeed
+            ? { packageId: buySeed.packageId, price: checkoutPrice }
+            : null;
 
     const [authOpened, { open: openAuth, close: closeAuth }] =
         useDisclosure(false);
@@ -274,16 +283,13 @@ export default function App() {
                                 ) : null}
                             </Stack>
                             <Footer />
-                            {/*
-                      Modals are rendered outside the mutating status polling
-                      and own their state locally, so background polling
-                      cannot mutate data shown inside them.
-                    */}
+                            {/* The payment state is local; checkout pricing follows current offers. */}
                             <PaymentFlow
                                 key={buyKey}
                                 opened={buyOpened}
                                 onClose={closeBuy}
-                                seed={buySeed}
+                                seed={checkoutSeed}
+                                loading={checkoutLoading}
                                 serviceAccountId={purchaseAccountId}
                             />
                             <RegisterModal

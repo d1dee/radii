@@ -1,4 +1,4 @@
-import type { Package, PageSize } from '@radii/shared';
+import { adminSettingsSchema, type Package, type PageSize } from '@radii/shared';
 import {
     and,
     asc,
@@ -21,6 +21,7 @@ import {
 } from './packageAudience';
 import {
     activatedPackages,
+    adminSetting,
     nasDevice,
     packageNasDevice,
     packagePayments,
@@ -38,6 +39,36 @@ export type PackageLayoutCategory = {
     name: string;
     packageIds: string[];
 };
+
+// A connection fee belongs to the customer/provider relationship, not a dialer
+// or individual package. Failed payments and free redemptions do not waive it.
+export async function getPppoeConnectionFee(
+    providerId: string,
+    userId: string | null,
+    executor: Pick<typeof db, 'select'> = db,
+): Promise<number> {
+    const [settings] = await executor.select({ settings: adminSetting.settings })
+        .from(adminSetting).where(eq(adminSetting.adminUserId, providerId)).limit(1);
+    const parsed = adminSettingsSchema.safeParse(settings?.settings ?? {});
+    if (!parsed.success || parsed.data.packages.pppoeConnectionFeeAmount === 0) return 0;
+    if (userId) {
+        const [purchase] = await executor.select({ id: packagePayments.id })
+            .from(packagePayments)
+            .innerJoin(packages, eq(packagePayments.packageId, packages.id))
+            .leftJoin(nasDevice, eq(packagePayments.nasDeviceId, nasDevice.id))
+            .leftJoin(transaction, eq(packagePayments.transaction, transaction.id))
+            .where(and(
+                eq(packagePayments.userId, userId),
+                sql`coalesce(${packagePayments.tenantAdminId}, ${nasDevice.ownerId}) = ${providerId}`,
+                eq(packages.type, 'pppoe'),
+                eq(packagePayments.status, 'paid'),
+                sql`${packagePayments.amount} > 0`,
+                sql`${transaction.status} is distinct from 'reversed'`,
+            )).limit(1);
+        if (purchase) return 0;
+    }
+    return parsed.data.packages.pppoeConnectionFeeAmount;
+}
 export type AdminPackageSortBy =
     | 'title'
     | 'category'
@@ -58,6 +89,9 @@ export async function getPackagesGroupedByCategory(
     const [device] = await db.select({ ownerId: nasDevice.ownerId })
         .from(nasDevice).where(eq(nasDevice.id, nasDeviceId)).limit(1);
     if (!device) return [];
+    const connectionFee = type === 'pppoe'
+        ? await getPppoeConnectionFee(device.ownerId, userId)
+        : 0;
     const rows = await db
         .select()
         .from(packages)
@@ -105,6 +139,7 @@ export async function getPackagesGroupedByCategory(
             category: row.category,
             sessionLength: row.sessionLength,
             price: Number(row.price),
+            ...(connectionFee > 0 ? { connectionFee } : {}),
             maxDevices: row.maxDevices,
             noExpiry: row.noExpiry,
             description: row.description ?? undefined,
@@ -762,6 +797,7 @@ export async function createPayment(data: {
     nasDeviceId?: string | null;
     tenantAdminId?: string | null;
     pppoeServiceAccountId?: string | null;
+    expectedAmount?: number;
 }) {
     const nasDeviceId =
         data.nasDeviceId ?? (await resolvePackageNasDevice(data.pkg.id));
@@ -774,11 +810,9 @@ export async function createPayment(data: {
             .limit(1);
         tenantAdminId = device?.ownerId ?? null;
     }
-    const amount = Number(data.pkg.price);
     const values = {
         userId: data.userId,
         packageId: data.pkg.id,
-        amount: String(amount),
         phoneNumber: data.phoneNumber,
         nasDeviceId,
         tenantAdminId,
@@ -816,9 +850,37 @@ export async function createPayment(data: {
             currentPackage,
         );
         if (!eligibility.eligible) throw new PackageEligibilityError();
+        let connectionFee = 0;
+        if (currentPackage.type === 'pppoe') {
+            // Read pending orders before paid history: a callback can complete
+            // between statements, and must not make an old fee quote billable.
+            const [pending] = await tx.select({ id: packagePayments.id })
+                .from(packagePayments)
+                .innerJoin(packages, eq(packagePayments.packageId, packages.id))
+                .leftJoin(transaction, eq(packagePayments.transaction, transaction.id))
+                .where(and(
+                    eq(packagePayments.userId, data.userId),
+                    eq(packagePayments.tenantAdminId, tenantAdminId),
+                    eq(packages.type, 'pppoe'),
+                    eq(packagePayments.status, 'pending'),
+                    or(
+                        // An order abandoned before provider initiation cannot
+                        // collect money and must not reserve the fee forever.
+                        and(isNull(transaction.id), sql`${packagePayments.createdAt} > now() - interval '2 minutes'`),
+                        eq(transaction.status, 'pending'),
+                    ),
+                )).limit(1);
+            connectionFee = await getPppoeConnectionFee(tenantAdminId, data.userId, tx);
+            if (connectionFee > 0 && pending) throw new PackageEligibilityError('Your first package payment is still pending. Wait for it to finish before buying another package.');
+        }
+        const amount = Number(currentPackage.price) + connectionFee;
+        if ((data.expectedAmount !== undefined && data.expectedAmount !== amount)
+            || (connectionFee > 0 && data.expectedAmount === undefined)) {
+            throw new PackageEligibilityError('The package price changed. Reload the available packages and confirm the new total.');
+        }
         const [payment] = await tx
             .insert(packagePayments)
-            .values(values)
+            .values({ ...values, amount: String(amount) })
             .returning();
         if (amount !== 0) return payment;
         const internalReference = `free:${payment.id}`;
