@@ -353,6 +353,200 @@ export async function upsertUserAdminTag(
 
 // --- User listing -----------------------------------------------------------
 
+export type AdminUserEligibilitySummary = {
+    spend30Days: number;
+    dataUsageBytes30Days: number | null;
+    dataUsageBytes30DaysLowerBound: number;
+    dataUsageBytes30DaysComplete: boolean;
+    services: ('hotspot' | 'pppoe')[];
+};
+
+// Shared SQL metrics for a caller-bounded customer set or the ranked picker.
+// Match audience semantics, including unknown usage rather than prorating counters.
+function adminCustomerMetrics(
+    customers: SQL,
+    adminId: string,
+    now: Date,
+): SQL {
+    const since = new Date(now.getTime() - 30 * 86_400_000);
+    return sql`
+        with customers as materialized (${customers}), claims as materialized (${nasAddressClaims}),
+        owned_payments as materialized (
+            select p.id, p.user_id, p.transaction, p.status, p.amount, p.created_at,
+                pkg.type as service
+            from ${packagePayments} p
+            inner join ${packages} pkg on pkg.id = p.package_id
+            left join ${nasDevice} device on device.id = p.nas_device_id
+            where (p.tenant_admin_id = ${adminId}
+                or (p.tenant_admin_id is null and device.owner_id = ${adminId}))
+                and p.user_id in (select id from customers)
+        ), owned_activations as materialized (
+            select a.id, a.user_id, p.service
+            from ${activatedPackages} a
+            inner join owned_payments p on p.id = a.package_payment_id and p.user_id = a.user_id
+        ), sessions as materialized (
+            select a.user_id, a.service, r.acctstarttime, r.acctstoptime,
+                greatest(0, coalesce(r.acctinputoctets, 0))::numeric
+                    + greatest(0, coalesce(r.acctoutputoctets, 0))::numeric as bytes
+            from owned_activations a
+            inner join ${radacct} r on r.class = a.id::text
+            where r.acctstarttime <= ${now}
+                and exists (select 1 from claims owned where owned.owner_id = ${adminId}
+                    and owned.ip = host(r.nasipaddress))
+                and not exists (select 1 from claims other where other.owner_id <> ${adminId}
+                    and other.ip = host(r.nasipaddress))
+        ), spend as (
+            select p.user_id, sum(round(p.amount::numeric * 100)) / 100 as amount
+            from owned_payments p
+            left join ${transaction} t on t.id = p.transaction
+            where p.status = 'paid' and p.amount > 0 and t.status is distinct from 'reversed'
+                and p.created_at >= ${since} and p.created_at <= ${now}
+            group by p.user_id
+        ), usage as (
+            select user_id,
+                sum(case when acctstarttime >= ${since} then bytes else 0 end) as lower_bound,
+                not bool_or(acctstarttime < ${since} and bytes > 0
+                    and coalesce(acctstoptime, ${now}) > ${since}) as complete
+            from sessions
+            group by user_id
+        ), service_history as (
+            select user_id, service from owned_payments
+            union
+            select login.user_id, 'hotspot' from ${hotspotLoginRequest} login
+                inner join ${nasDevice} device on device.id = login.nas_device_id
+                where device.owner_id = ${adminId} and login.user_id in (select id from customers)
+            union
+            select customer_user_id, 'pppoe' from ${pppoeServiceAccounts}
+                where tenant_admin_id = ${adminId} and customer_user_id in (select id from customers)
+            union
+            select user_id, service from sessions where service is not null
+        ), services as (
+            select user_id, array_agg(distinct service order by service) as services
+            from service_history where user_id in (select id from customers) group by user_id
+        )
+    `;
+}
+
+export async function getAdminUserEligibilitySummaries(
+    userIds: string[],
+    adminId: string,
+    now = new Date(),
+): Promise<Map<string, AdminUserEligibilitySummary>> {
+    if (userIds.length === 0) return new Map();
+    const rows = await db.execute(sql`
+        ${adminCustomerMetrics(sql`select id from ${user} where ${inArray(user.id, userIds)}`, adminId, now)}
+        select c.id as user_id, coalesce(spend.amount, 0)::float8 as spend,
+            case when coalesce(usage.complete, true)
+                then coalesce(usage.lower_bound, 0) else null end::float8 as bytes,
+            coalesce(usage.lower_bound, 0)::float8 as lower_bound,
+            coalesce(usage.complete, true) as complete,
+            coalesce(services.services, array[]::text[]) as services
+        from customers c
+        left join spend on spend.user_id = c.id
+        left join usage on usage.user_id = c.id
+        left join services on services.user_id = c.id
+    `) as unknown as Array<{
+        user_id: string;
+        spend: number;
+        bytes: number | null;
+        lower_bound: number;
+        complete: boolean;
+        services: ('hotspot' | 'pppoe')[];
+    }>;
+    return new Map(rows.map((row) => [row.user_id, {
+        spend30Days: Number(row.spend),
+        dataUsageBytes30Days: row.bytes === null ? null : Number(row.bytes),
+        dataUsageBytes30DaysLowerBound: Number(row.lower_bound),
+        dataUsageBytes30DaysComplete: row.complete,
+        services: row.services,
+    }]));
+}
+
+export type AdminCustomerOption = {
+    value: string;
+    label: string;
+    displayName: string;
+    phoneNumber: string;
+    summary: AdminUserEligibilitySummary;
+};
+
+export async function getAdminCustomerOptions(
+    adminId: string,
+    query: { q?: string; ids?: string[] } = {},
+    now = new Date(),
+): Promise<AdminCustomerOption[]> {
+    if (query.ids?.length === 0) return [];
+    const q = query.q?.trim();
+    const pattern = `%${(q ?? '').replace(/[\\%_]/g, '\\$&')}%`;
+    // Order-time payment tenancy takes precedence over the current NAS owner.
+    // Only registered customers enter this set, never pending phone claims.
+    const customers = sql`
+        select u.id, coalesce(nullif(concat_ws(' · ',
+                coalesce(nullif(trim(tag.name), ''), nullif(trim(u.name), '')),
+                nullif(trim(tag.location), '')), ''), u.username, u.id) as display_name,
+            coalesce(u.username, '') as phone_number
+        from ${user} u
+        left join ${userAdminTag} tag on tag.user_id = u.id and tag.admin_id = ${adminId}
+        where nullif(trim(u.username), '') is not null and (
+            exists (select 1 from ${packagePayments} p
+                left join ${nasDevice} device on device.id = p.nas_device_id
+                where p.user_id = u.id and (p.tenant_admin_id = ${adminId}
+                    or (p.tenant_admin_id is null and device.owner_id = ${adminId})))
+            or exists (select 1 from ${hotspotLoginRequest} login
+                inner join ${nasDevice} device on device.id = login.nas_device_id
+                where login.user_id = u.id and device.owner_id = ${adminId})
+            or exists (select 1 from ${pppoeServiceAccounts} account
+                where account.customer_user_id = u.id and account.tenant_admin_id = ${adminId})
+        )
+        ${query.ids ? sql`and u.id in (${sql.join(query.ids.map((id) => sql`${id}`), sql`, `)})` : sql``}
+        ${q ? sql`and (u.name ilike ${pattern} or u.username ilike ${pattern} or u.email ilike ${pattern}
+            or tag.name ilike ${pattern} or tag.location ilike ${pattern})` : sql``}
+        order by display_name, u.id
+        ${q ? sql`limit 20` : sql``}
+    `;
+    const ranked = !q && !query.ids;
+    const rows = await db.execute(sql`
+        ${adminCustomerMetrics(customers, adminId, now)}, metrics as materialized (
+            select c.*, coalesce(spend.amount, 0)::float8 as spend,
+                case when coalesce(usage.complete, true)
+                    then coalesce(usage.lower_bound, 0) else null end::float8 as bytes,
+                coalesce(usage.lower_bound, 0)::float8 as lower_bound,
+                coalesce(usage.complete, true) as complete
+            from customers c
+            left join spend on spend.user_id = c.id
+            left join usage on usage.user_id = c.id
+        )
+        ${ranked ? sql`, selected as (
+            (select id from metrics order by spend desc, id limit 10)
+            union
+            (select id from metrics order by lower_bound desc, id limit 10)
+        )` : sql``}
+        select m.*, coalesce(services.services, array[]::text[]) as services
+        from metrics m
+        left join services on services.user_id = m.id
+        ${ranked ? sql`where m.id in (select id from selected)` : sql``}
+        order by ${ranked ? sql`m.spend desc, m.lower_bound desc, m.id` : sql`m.display_name, m.id`}
+    `) as unknown as Array<{
+        id: string; display_name: string; phone_number: string;
+        spend: number; bytes: number | null; services: ('hotspot' | 'pppoe')[];
+        lower_bound: number; complete: boolean;
+    }>;
+    return rows.map((row) => ({
+        value: row.id,
+        label: row.phone_number && row.phone_number !== row.display_name
+            ? `${row.display_name} (${row.phone_number})` : row.display_name,
+        displayName: row.display_name,
+        phoneNumber: row.phone_number,
+        summary: {
+            spend30Days: Number(row.spend),
+            dataUsageBytes30Days: row.bytes === null ? null : Number(row.bytes),
+            dataUsageBytes30DaysLowerBound: Number(row.lower_bound),
+            dataUsageBytes30DaysComplete: row.complete,
+            services: row.services,
+        },
+    }));
+}
+
 export interface ListAdminUsersOpts {
     // The requesting admin; customers are scoped to their NAS devices.
     adminId: string;
@@ -362,6 +556,7 @@ export interface ListAdminUsersOpts {
     type?: AdminUserTypeFilter;
     // Only users carrying at least one flag raised by this admin.
     flagged?: boolean;
+    eligibilitySummary?: boolean;
     sortBy?: AdminUserSortBy;
     sortDirection?: 'asc' | 'desc';
     page?: number;
@@ -789,7 +984,7 @@ export async function listAdminUsers(opts: ListAdminUsersOpts) {
               ),
     ]);
 
-    const [agg, tags] = await Promise.all([
+    const [agg, tags, eligibilitySummaries] = await Promise.all([
         userAggregates(
             users.map((u) => u.id),
             opts.adminId,
@@ -798,6 +993,9 @@ export async function listAdminUsers(opts: ListAdminUsersOpts) {
             users.map((u) => u.id),
             opts.adminId,
         ),
+        opts.eligibilitySummary
+            ? getAdminUserEligibilitySummaries(userIds, opts.adminId)
+            : Promise.resolve(new Map<string, AdminUserEligibilitySummary>()),
     ]);
 
     const emptyPayments = {
@@ -868,6 +1066,9 @@ export async function listAdminUsers(opts: ListAdminUsersOpts) {
                 createdAt: u.createdAt,
                 flags: agg.flags.get(u.id) ?? 0,
                 online: agg.online.has(u.id),
+                ...(opts.eligibilitySummary
+                    ? { eligibilitySummary: eligibilitySummaries.get(u.id)! }
+                    : {}),
                 payments: {
                     total: payments?.total ?? 0,
                     paid: payments?.paid ?? 0,

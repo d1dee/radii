@@ -18,6 +18,7 @@ import {
     canAdminManageActivation,
     canAdminManageGlobalUser,
     deleteAdminUser,
+    getAdminCustomerOptions,
     getAdminNasAddresses,
     getAdminPaymentDetail,
     getAdminReports,
@@ -760,6 +761,26 @@ app.delete('/nas-devices/:id', requireAdmin, async (c) => {
 
 const userTypeFilterSchema = z.enum(['hotspot', 'pppoe']);
 
+const customerOptionsQuerySchema = z.object({
+    q: z.string().trim().max(200).refine((value) => !value.includes('\0')).optional(),
+    ids: z.array(z.string().trim().min(1).max(200).refine((value) => !value.includes('\0')))
+        .min(1).max(500).optional(),
+}).refine((query) => query.q === undefined || query.ids === undefined, {
+    message: 'Use either q or ids, not both',
+});
+
+app.get('/customer-options', requireAdmin, async (c) => {
+    const parsed = customerOptionsQuerySchema.safeParse({
+        q: c.req.query('q'),
+        ids: c.req.queries('ids'),
+    });
+    if (!parsed.success || (c.req.queries('q')?.length ?? 0) > 1) {
+        return jsonError(c, 400, 'Invalid customer options query');
+    }
+    const data = await getAdminCustomerOptions(c.get('adminSession').userId, parsed.data);
+    return c.json({ success: true, data });
+});
+
 // Customer list with lifetime value aggregates; supports search, service-type
 // and flagged filters, paginated.
 app.get('/users', requireAdmin, async (c) => {
@@ -779,6 +800,11 @@ app.get('/users', requireAdmin, async (c) => {
         return jsonError(c, 400, 'Invalid flagged user filter');
     }
     const flagged = flaggedParam === '1' || flaggedParam === 'true';
+    const summaryParam = c.req.query('eligibilitySummary');
+    if (summaryParam !== undefined && !['1', '0', 'true', 'false'].includes(summaryParam)) {
+        return jsonError(c, 400, 'Invalid eligibility summary flag');
+    }
+    const eligibilitySummary = summaryParam === '1' || summaryParam === 'true';
     const typeParam = c.req.query('type');
     const type = typeParam
         ? userTypeFilterSchema.safeParse(typeParam).success
@@ -797,6 +823,7 @@ app.get('/users', requireAdmin, async (c) => {
         q,
         type,
         flagged,
+        eligibilitySummary,
         ...sort.data,
         page,
         perPage,

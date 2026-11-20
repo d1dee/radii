@@ -14,7 +14,7 @@ export const PACKAGE_AUDIENCE_METRICS = {
     tenure_days: { label: 'Time with this provider', type: 'number', unit: 'days', window: false, serviceScoped: true },
     successful_paid_purchase_count: { label: 'Successful paid purchases', type: 'number', unit: 'count', window: true, serviceScoped: true },
     spend: { label: 'Total paid', type: 'number', unit: 'KES', window: true, serviceScoped: true },
-    data_usage_bytes: { label: 'Data used', type: 'number', unit: 'bytes', window: true, serviceScoped: true, description: 'Uses recorded accounting counters. Rolling totals are unavailable if a nonzero session spans the window boundary.' },
+    data_usage_bytes: { label: 'Data used', type: 'number', unit: 'bytes', window: true, serviceScoped: true, description: 'Uses recorded accounting counters. Boundary-crossing sessions are excluded from known rolling usage; incomplete usage matches only comparisons proven by its lower bound.' },
     connected_seconds: { label: 'Connected time', type: 'number', unit: 'seconds', window: true, serviceScoped: true },
     distinct_connection_days: { label: 'Days connected (UTC)', type: 'number', unit: 'days', window: true, serviceScoped: true },
     never_connected: { label: 'Never connected', type: 'boolean', unit: 'none', window: false, serviceScoped: true },

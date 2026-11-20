@@ -585,6 +585,31 @@ export function getNasDeviceAnalytics(id: string, query: PaginationQuery = {}) {
 
 // --- Users (hotspot + PPPoE management) ------------------------------------
 
+export type AdminCustomerOption = {
+    value: string;
+    label: string;
+    displayName: string;
+    phoneNumber: string;
+    summary: {
+        spend30Days: number;
+        dataUsageBytes30Days: number | null;
+        dataUsageBytes30DaysLowerBound: number;
+        dataUsageBytes30DaysComplete: boolean;
+        services: ('hotspot' | 'pppoe')[];
+    };
+};
+
+export function getAdminCustomerOptions(
+    query: { q?: string; ids?: string[] } = {},
+): Promise<ApiEnvelope<AdminCustomerOption[]>> {
+    if (query.ids?.length === 0) return Promise.resolve({ success: true, data: [] });
+    const params = new URLSearchParams();
+    if (query.q !== undefined) params.set('q', query.q);
+    for (const id of query.ids ?? []) params.append('ids', id);
+    const qs = params.toString();
+    return request<AdminCustomerOption[]>(`/admin/customer-options${qs ? `?${qs}` : ''}`);
+}
+
 export type AdminUserRow = {
     id: string;
     // True for PPPoE accounts provisioned by phone that no customer has
@@ -600,6 +625,13 @@ export type AdminUserRow = {
     createdAt: string;
     flags: number;
     online: boolean;
+    eligibilitySummary?: {
+        spend30Days: number;
+        dataUsageBytes30Days: number | null;
+        dataUsageBytes30DaysLowerBound: number;
+        dataUsageBytes30DaysComplete: boolean;
+        services: ('hotspot' | 'pppoe')[];
+    };
     payments: {
         total: number;
         paid: number;
@@ -713,6 +745,7 @@ export type ListAdminUsersQuery = {
     q?: string;
     type?: PackageType;
     flagged?: boolean;
+    eligibilitySummary?: boolean;
     page?: number;
     perPage?: PageSize;
     sortBy?: AdminUserSortKey;
@@ -732,6 +765,7 @@ export function getAdminUsers(query: ListAdminUsersQuery = {}) {
     if (query.q) params.set('q', query.q);
     if (query.type) params.set('type', query.type);
     if (query.flagged) params.set('flagged', '1');
+    if (query.eligibilitySummary) params.set('eligibilitySummary', '1');
     if (query.page) params.set('page', String(query.page));
     if (query.perPage) params.set('perPage', String(query.perPage));
     if (query.sortBy) params.set('sortBy', query.sortBy);

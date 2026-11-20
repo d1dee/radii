@@ -21,18 +21,25 @@ import { useEffect, useState } from 'react';
 
 import {
     getAllAdminPackages,
-    getAdminUsers,
     previewPackageEligibility,
     type PackageRow,
 } from '@/lib/api';
-import { fuseOptionsFilter } from '@/lib/fuseOptionsFilter';
-import {
-    EligibilityBuilder,
-    type EligibilityBuilderProps,
-} from './EligibilityBuilder';
+import { formatMoney } from '@/lib/format';
+import { EligibilityBuilder } from './EligibilityBuilder';
 import { PackageAudienceSelect } from './PackageAudienceSelect';
+import { CustomerPickerProvider, useCustomerPicker } from './customerPicker';
 
-export function PackageTargeting({
+export function PackageTargeting(
+    props: Parameters<typeof PackageTargetingContent>[0],
+) {
+    return (
+        <CustomerPickerProvider>
+            <PackageTargetingContent {...props} />
+        </CustomerPickerProvider>
+    );
+}
+
+function PackageTargetingContent({
     audienceId,
     eligibility,
     onAudienceChange,
@@ -48,13 +55,7 @@ export function PackageTargeting({
     const [packages, setPackages] = useState<PackageRow[]>([]);
     const [optionError, setOptionError] = useState<string | null>(null);
     const [userId, setUserId] = useState<string | null>(null);
-    const [customers, setCustomers] = useState<
-        NonNullable<EligibilityBuilderProps['customers']>
-    >({
-        options: [],
-        loading: true,
-        error: null,
-    });
+    const customers = useCustomerPicker(userId ? [userId] : []);
     const [previewing, setPreviewing] = useState(false);
     const [preview, setPreview] = useState<{
         eligible: boolean;
@@ -73,32 +74,6 @@ export function PackageTargeting({
                         : result.message,
                 );
         });
-        void getAdminUsers({ perPage: 'all' }).then((result) => {
-            if (!active) return;
-            if (result.success && result.data) {
-                setCustomers({
-                    options: result.data.users
-                        .filter(
-                            (customer) =>
-                                !customer.pendingClaim && customer.phoneNumber,
-                        )
-                        .map((customer) => ({
-                            value: customer.id,
-                            label: customer.phoneNumber,
-                        })),
-                    loading: false,
-                    error: null,
-                });
-            } else {
-                setCustomers({
-                    options: [],
-                    loading: false,
-                    error: result.success
-                        ? 'Could not load customer numbers.'
-                        : result.message,
-                });
-            }
-        });
         return () => {
             active = false;
         };
@@ -108,6 +83,9 @@ export function PackageTargeting({
         label: `${pkg.title}${pkg.archivedAt ? ' (archived)' : ''}`,
     }));
     const categoryOptions = [...new Set(packages.map((pkg) => pkg.category))];
+    const customersById = new Map(
+        customers.options.map((customer) => [customer.value, customer]),
+    );
     const conditions = {
         mode: eligibility?.mode ?? ('all' as const),
         rules: eligibility?.rules ?? [],
@@ -156,7 +134,6 @@ export function PackageTargeting({
                     onChange={onAudienceChange}
                     packageOptions={packageOptions}
                     categoryOptions={categoryOptions}
-                    customers={customers}
                 />
             </Fieldset>
             {optionError && (
@@ -164,11 +141,6 @@ export function PackageTargeting({
                     Package suggestions unavailable: {optionError} You can still
                     enter exact package IDs or categories.
                 </Text>
-            )}
-            {customers.error && (
-                <Alert color='red' title='Customer numbers unavailable'>
-                    {customers.error} Reload the page to try again.
-                </Alert>
             )}
             <Paper withBorder p='md' radius='sm'>
                 <Switch
@@ -194,7 +166,6 @@ export function PackageTargeting({
                         }
                         packageOptions={packageOptions}
                         categoryOptions={categoryOptions}
-                        customers={customers}
                     />
                     <Divider label='Redemption controls' labelPosition='left' />
                     <Grid>
@@ -268,22 +239,84 @@ export function PackageTargeting({
                             label='Customer number'
                             description='Select a registered customer by phone number to test the last saved rules.'
                             descriptionProps={{ pb: 'xs' }}
-                            placeholder='Search by phone number'
+                            placeholder='Search name, location or phone number'
                             searchable
                             clearable
-                            filter={fuseOptionsFilter}
-                            data={customers.options}
+                            filter={customers.filter}
+                            data={customers.data}
+                            onSearchChange={(value) => {
+                                // Mantine also reports the selected label as a search change.
+                                if (
+                                    customers.options.some(
+                                        (option) => option.label === value,
+                                    )
+                                )
+                                    return;
+                                customers.setSearchValue(value);
+                            }}
+                            onDropdownClose={() => customers.setSearchValue('')}
+                            error={customers.error}
+                            renderOption={({ option }) => {
+                                const customer = customersById.get(
+                                    option.value,
+                                );
+                                return (
+                                    <Stack gap={2}>
+                                        <Text size='sm' fw={500}>
+                                            {customer?.displayName ??
+                                                option.label}
+                                        </Text>
+                                        <Text size='xs' c='dimmed'>
+                                            {customer?.phoneNumber}
+                                            {' · '}
+                                            {customer?.summary
+                                                ? `${formatMoney(customer.summary.spend30Days)} paid (30d)`
+                                                : 'Spend unavailable (30d)'}
+                                            {' · '}
+                                            {customer?.summary ? (
+                                                <Text
+                                                    span
+                                                    inherit
+                                                    title={
+                                                        customer.summary
+                                                            .dataUsageBytes30DaysComplete
+                                                            ? undefined
+                                                            : 'Some sessions cross the start of this window; the recorded amount is a minimum, not an exact total.'
+                                                    }
+                                                >
+                                                    {`${(customer.summary.dataUsageBytes30DaysLowerBound / 1024 ** 3).toLocaleString(undefined, { maximumFractionDigits: 2 })} GB${customer.summary.dataUsageBytes30DaysComplete ? '' : '*'} (30d)`}
+                                                </Text>
+                                            ) : (
+                                                'Data unavailable (30d)'
+                                            )}
+                                            {' · '}
+                                            {customer?.summary?.services.length
+                                                ? customer.summary.services
+                                                      .map((service) =>
+                                                          service === 'pppoe'
+                                                              ? 'PPPoE'
+                                                              : 'Hotspot',
+                                                      )
+                                                      .join(' · ')
+                                                : customer?.summary
+                                                  ? 'No services'
+                                                  : 'Services unavailable'}
+                                        </Text>
+                                    </Stack>
+                                );
+                            }}
                             loading={customers.loading}
-                            nothingFoundMessage='No registered customer matches this number'
-                            value={userId}
-                            disabled={
-                                previewing ||
-                                customers.loading ||
-                                !!customers.error
+                            nothingFoundMessage={
+                                customers.loading
+                                    ? 'Searching customers...'
+                                    : 'No registered customer matches this search'
                             }
+                            value={userId}
+                            disabled={previewing}
                             style={{ flex: 1, minWidth: 180 }}
                             onChange={(value) => {
                                 setUserId(value);
+                                customers.setSearchValue('');
                                 setPreview(null);
                                 setPreviewError(null);
                             }}
@@ -292,11 +325,7 @@ export function PackageTargeting({
                             type='button'
                             mb='xs'
                             loading={previewing}
-                            disabled={
-                                !userId ||
-                                customers.loading ||
-                                !!customers.error
-                            }
+                            disabled={!userId}
                             onClick={() => void check()}
                         >
                             Check saved eligibility

@@ -96,19 +96,6 @@ type MeasurementUnit = {
     multiplier: number;
 };
 
-function bestMeasurementUnit(
-    baseValue: number,
-    units: readonly MeasurementUnit[],
-): MeasurementUnit {
-    if (baseValue <= 0) return units[0];
-
-    for (let index = units.length - 1; index > 0; index -= 1) {
-        if (baseValue >= units[index].multiplier) return units[index];
-    }
-
-    return units[0];
-}
-
 function MeasurementInput({
     id,
     label,
@@ -132,8 +119,7 @@ function MeasurementInput({
     const inputId = id ?? generatedId;
     const draftControls = useContext(PackageDraftControls)!;
     const control = draftControls.controls[inputId];
-    const unitValue =
-        control?.unit ?? bestMeasurementUnit(baseValue, units).value;
+    const unitValue = control?.unit ?? units[1].value;
     const unit = units.find(({ value }) => value === unitValue) ?? units[0];
 
     return (
@@ -187,11 +173,19 @@ function MeasurementInput({
                     style={{ flexShrink: 0 }}
                     onChange={(value) => {
                         const next = units.find((item) => item.value === value);
-                        if (next)
-                            draftControls.setControl(inputId, {
-                                unit: next.value,
-                                value: baseValue / next.multiplier,
-                            });
+                        if (!next) return;
+                        const currentValue =
+                            control?.value ?? baseValue / unit.multiplier;
+                        draftControls.setControl(inputId, {
+                            unit: next.value,
+                            value: currentValue,
+                        });
+                        const numericValue =
+                            typeof currentValue === 'number' &&
+                            Number.isFinite(currentValue)
+                                ? currentValue
+                                : 0;
+                        onChange(Math.round(numericValue * next.multiplier));
                     }}
                 />
             </Group>
