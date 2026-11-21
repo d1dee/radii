@@ -1876,21 +1876,22 @@ function PackageEditor({
                                                     ),
                                                 ],
                                                 [
-                                                    'Speed up/down',
+                                                    'Speed',
                                                     `${formatPackageRate(form.values.uploadRate)} / ${formatPackageRate(form.values.downloadRate)}`,
                                                 ],
                                                 [
-                                                    'FUP up/down',
-                                                    form.values.fairUsageLimit > 0
+                                                    'FUP',
+                                                    form.values.fairUsageLimit >
+                                                    0
                                                         ? `${formatPackageRate(form.values.fairUsageUploadRate)} / ${formatPackageRate(form.values.fairUsageDownloadRate)} · ${formatPackageQuota(form.values.fairUsageLimit)} / ${form.values.fairUsageWindowUnit === 'session' ? 'session' : `${form.values.fairUsageWindowValue} ${form.values.fairUsageWindowUnit}`}`
                                                         : 'Disabled',
                                                 ],
                                                 [
-                                                    'Total data up/down',
+                                                    'Total data',
                                                     `${formatPackageQuota(form.values.uploadQuota)} / ${formatPackageQuota(form.values.downloadQuota)}`,
                                                 ],
                                                 [
-                                                    'Burst up/down',
+                                                    'Burst',
                                                     form.values.burstTime > 0
                                                         ? `${formatPackageRate(form.values.burstUploadRate)} / ${formatPackageRate(form.values.burstDownloadRate)} · ${formatSeconds(form.values.burstTime)}`
                                                         : 'Disabled',
@@ -1901,7 +1902,11 @@ function PackageEditor({
                                                     justify='space-between'
                                                     gap='xs'
                                                 >
-                                                    <Text size='sm' c='dimmed'>
+                                                    <Text
+                                                        size='sm'
+                                                        c='dimmed'
+                                                        component='span'
+                                                    >
                                                         {label}
                                                     </Text>
                                                     <Text size='sm' fw={500}>
