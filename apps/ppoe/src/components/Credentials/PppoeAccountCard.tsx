@@ -509,8 +509,12 @@ function AccountOption({
     client: PppoeClient;
     selected: boolean;
 }) {
+    const packageName = client.activeActivation
+        ? `${client.activeActivation.packageCategory ? `${client.activeActivation.packageCategory} · ` : ''}${client.activeActivation.packageTitle}`
+        : 'No active package';
+
     return (
-        <Group wrap='nowrap' gap='sm' w='100%'>
+        <Group wrap='nowrap' gap='sm' w='100%' miw={0}>
             <Box
                 c={client.online ? 'green.7' : 'gray.6'}
                 bg={
@@ -519,7 +523,7 @@ function AccountOption({
                         : 'var(--mantine-color-default-hover)'
                 }
                 p={8}
-                style={{ borderRadius: '50%', lineHeight: 0 }}
+                style={{ borderRadius: '50%', lineHeight: 0, flexShrink: 0 }}
             >
                 <MdSettingsEthernet size={18} />
             </Box>
@@ -539,9 +543,8 @@ function AccountOption({
                 <Text size='xs' c='dimmed' truncate>
                     {client.nasName || client.tenantName} · {client.username}
                 </Text>
-                <Text size='xs' c='dimmed' truncate>
-                    {client.activeActivation?.packageTitle ??
-                        'No active package'}
+                <Text size='xs' c='dimmed' truncate title={packageName}>
+                    {packageName}
                 </Text>
             </Stack>
             <AccountStatus client={client} />

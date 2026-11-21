@@ -64,7 +64,9 @@ export function CurrentPackage() {
               ? '0 Kbps'
               : humanFormat(speed / 1e3, { scale: dataScale });
     const title = thisDevice?.packageTitle
-        ? `${thisDevice.packageTitle} @ ${formatPackagePrice(thisDevice.price)}`
+        ? `${thisDevice.packageCategory ? `${thisDevice.packageCategory} · ` : ''}${
+              thisDevice.packageTitle
+          } @ ${formatPackagePrice(thisDevice.price)}`
         : '_';
 
     if (!thisDevice) {
@@ -179,7 +181,13 @@ export function CurrentPackage() {
                                 Devices:{' '}
                                 {thisDevice?.liveSessions?.length || ' _'}
                             </Text>
-                            <Text size='sm' c='dimmed'>
+                            <Text
+                                size='sm'
+                                c='dimmed'
+                                miw={0}
+                                truncate
+                                title={title}
+                            >
                                 Package title: {title}
                             </Text>
                             <Text size='sm' c='dimmed'>

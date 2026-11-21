@@ -243,6 +243,9 @@ export function HavingIssues({ adminContacts }: Props) {
                                 {activationDetails ? (
                                     <Stack gap={4} mt='sm'>
                                         <Text fw={600}>
+                                            {activationDetails.packageCategory
+                                                ? `${activationDetails.packageCategory} · `
+                                                : ''}
                                             {activationDetails.packageTitle}
                                         </Text>
                                         <Text size='sm'>

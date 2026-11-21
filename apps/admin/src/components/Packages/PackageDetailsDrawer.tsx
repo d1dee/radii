@@ -205,7 +205,8 @@ export function PackageDetailsDrawer({
                     <Title
                         component='span'
                         order={4}
-                        style={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere' }}
+                        title={pkg?.title}
+                        style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
                     >
                         {pkg?.title ?? 'Package details'}
                     </Title>
@@ -259,7 +260,7 @@ export function PackageDetailsDrawer({
                         <Badge variant='light' color='grape'>
                             {pkg.type.toUpperCase()}
                         </Badge>
-                        <Badge variant='light'>{pkg.category}</Badge>
+                        <Badge variant='light' maw='100%' title={pkg.category}>{pkg.category}</Badge>
                         {pkg.fairUsageLimit > 0 ? (
                             <Badge color='orange' variant='light'>
                                 FUP enabled

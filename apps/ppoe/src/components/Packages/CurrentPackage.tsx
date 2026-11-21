@@ -1,7 +1,6 @@
 import {
     refreshPppoeQuota,
     usePppoeAccounts,
-    usePppoePortal,
     usePppoeQuota,
 } from '@lib/store.ts';
 import {
@@ -30,7 +29,6 @@ export function CurrentPackage() {
     const { openLogin } = useContext(ModalActionsContext);
     const { data } = useSession();
     const { clients, selectedAccountId } = usePppoeAccounts();
-    const { packages } = usePppoePortal();
     const { quota, error, loading } = usePppoeQuota(
         selectedAccountId,
         Boolean(data?.session),
@@ -40,9 +38,10 @@ export function CurrentPackage() {
         (client) => client.accountId === selectedAccountId,
     );
     const thisDevice = quota.find((value) => value.online) || quota[0];
-    const packageCategory = packages
-        ?.flatMap(([, items]) => items)
-        .find((pkg) => pkg.packageId === thisDevice?.packageId)?.category;
+    const activePackage = thisDevice?.packageTitle
+        ? thisDevice
+        : selected?.activeActivation;
+    const packageName = `${activePackage?.packageCategory ? `${activePackage.packageCategory} · ` : ''}${activePackage?.packageTitle ?? 'Current package'}`;
     const currentSession = thisDevice?.liveSessions?.[0];
     const speed =
         thisDevice?.online && currentSession?.live
@@ -130,22 +129,26 @@ export function CurrentPackage() {
                             justify='space-between'
                             align='flex-start'
                             gap='sm'
+                            wrap='nowrap'
                         >
                             <Box style={{ flex: 1, minWidth: 0 }}>
                                 <Text size='xs' c='dimmed' mb={4}>
                                     Active package
                                 </Text>
-                                <Text className={classes.packageHeading}>
-                                    {packageCategory
-                                        ? `${packageCategory} · `
-                                        : ''}
-                                    {thisDevice.packageTitle ??
-                                        selected?.activeActivation
-                                            ?.packageTitle ??
-                                        'Current package'}
+                                <Text
+                                    className={classes.packageHeading}
+                                    truncate
+                                    title={packageName}
+                                >
+                                    {activePackage?.packageCategory ? (
+                                        <span style={{ opacity: 0.65 }}>
+                                            {activePackage.packageCategory} ·{' '}
+                                        </span>
+                                    ) : null}
+                                    {activePackage?.packageTitle ?? 'Current package'}
                                 </Text>
                             </Box>
-                            <Text size='sm' fw={600} pt={4}>
+                            <Text size='sm' fw={600} pt={4} style={{ flexShrink: 0 }}>
                                 {formatPackagePrice(thisDevice.price)}
                             </Text>
                         </Group>

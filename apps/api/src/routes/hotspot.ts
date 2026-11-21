@@ -266,6 +266,7 @@ app.get('/status', requireAuth, async (c) => {
                     ?.callingStationId ?? null,
             packageId: a.packageId,
             packageTitle: a.packageTitle,
+            packageCategory: a.packageCategory,
             username: a.username,
             usedSeconds: a.usedSeconds,
             sessionLimitSeconds: a.sessionLimitSeconds,

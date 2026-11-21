@@ -216,6 +216,7 @@ app.get('/clients', requireAuth, async (c) => {
                     ? {
                           activationId: activeActivation.activationId,
                           packageTitle: activeActivation.packageTitle,
+                          packageCategory: activeActivation.packageCategory,
                           activatedAt:
                               activeActivation.activatedAt.toISOString(),
                           expireAt: activeActivation.expireAt.toISOString(),
@@ -258,6 +259,7 @@ app.get('/clients/:id/config', requireAuth, async (c) => {
             passwordVisible,
             tenantName: client.tenantName,
             packageTitle: activeActivation?.packageTitle ?? null,
+            packageCategory: activeActivation?.packageCategory ?? null,
             expireAt: activeActivation?.expireAt.toISOString() ?? null,
             serviceName: env.pppoe.serviceName,
             mtu: env.pppoe.mtu,
@@ -370,6 +372,7 @@ app.get('/status', requireAuth, async (c) => {
                 null,
             packageId: a.packageId,
             packageTitle: a.packageTitle,
+            packageCategory: a.packageCategory,
             username: a.username,
             usedSeconds: a.usedSeconds,
             sessionLimitSeconds: a.sessionLimitSeconds,

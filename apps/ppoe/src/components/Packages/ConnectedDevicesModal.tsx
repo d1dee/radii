@@ -75,6 +75,7 @@ export function ConnectedDevicesModal({ accountId, isOpen, onClose }: Props) {
     const rows = quota.flatMap((v) => {
         const speed = formatPackageRate(v.downloadRate);
         const price = formatPackagePrice(v.price);
+        const packageName = `${v.packageCategory ? `${v.packageCategory} · ` : ''}${v.packageTitle}`;
 
         if (!v.liveSessions || v.liveSessions.length === 0) {
             return [
@@ -89,8 +90,10 @@ export function ConnectedDevicesModal({ accountId, isOpen, onClose }: Props) {
                         </Stack>
                     </Table.Td>
                     <Table.Td miw='120'>
-                        <Stack gap={0}>
-                            <span>{v.packageTitle}</span>
+                        <Stack gap={0} w={160} miw={0}>
+                            <Text truncate title={packageName}>
+                                {packageName}
+                            </Text>
                             <Text size='xs' c='dimmed' opacity={0.5}>
                                 {speed} - {price}
                             </Text>
@@ -123,8 +126,10 @@ export function ConnectedDevicesModal({ accountId, isOpen, onClose }: Props) {
                     </Stack>
                 </Table.Td>
                 <Table.Td miw='120'>
-                    <Stack gap={0}>
-                        <span>{v.packageTitle}</span>
+                    <Stack gap={0} w={160} miw={0}>
+                        <Text truncate title={packageName}>
+                            {packageName}
+                        </Text>
                         <Text size='xs' c='dimmed' opacity={0.5}>
                             {speed} - {price}
                         </Text>

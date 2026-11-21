@@ -55,6 +55,7 @@ import {
     formatPackagePrice,
     formatPackageQuota,
     formatPackageRate,
+    formatPackageTitle,
     formatSeconds,
 } from '@/lib/format';
 import { notifyResult } from '@/lib/notify';
@@ -476,9 +477,14 @@ export default function PackagesPage() {
                                             <UnstyledButton
                                                 fz='sm'
                                                 fw={500}
-                                                aria-label={`View details for ${pkg.title}`}
+                                                maw={220}
+                                                style={{ display: 'block', minWidth: 0 }}
+                                                title={pkg.title}
+                                                aria-label={`View details for ${formatPackageTitle(pkg.title, pkg.category)}`}
                                             >
-                                                {pkg.title}
+                                                <Text size='sm' fw={500} truncate maw={220}>
+                                                    {pkg.title}
+                                                </Text>
                                             </UnstyledButton>
                                         </Table.Td>
                                         <Table.Td>
@@ -495,7 +501,11 @@ export default function PackagesPage() {
                                                     : 'PPPoE'}
                                             </Badge>
                                         </Table.Td>
-                                        <Table.Td>{pkg.category}</Table.Td>
+                                        <Table.Td>
+                                            <Text size='sm' truncate maw={220} title={pkg.category}>
+                                                {pkg.category}
+                                            </Text>
+                                        </Table.Td>
                                         <Table.Td className='admin-table-value'>
                                             {formatPackagePrice(pkg.price)}
                                         </Table.Td>
@@ -542,7 +552,7 @@ export default function PackagesPage() {
                                                         ? [
                                                               {
                                                                   label: 'Restore package',
-                                                                  ariaLabel: `Restore ${pkg.title}`,
+                                                                  ariaLabel: `Restore ${formatPackageTitle(pkg.title, pkg.category)}`,
                                                                   icon: <MdRestore size={16} />,
                                                                   loading:
                                                                       actionBusyId ===
@@ -556,14 +566,14 @@ export default function PackagesPage() {
                                                         : [
                                                               {
                                                                   label: 'Edit package',
-                                                                  ariaLabel: `Edit ${pkg.title}`,
+                                                                  ariaLabel: `Edit ${formatPackageTitle(pkg.title, pkg.category)}`,
                                                                   icon: <MdEdit size={16} />,
                                                                   onClick: () =>
                                                                       handleEdit(pkg),
                                                               },
                                                               {
                                                                   label: 'Archive package',
-                                                                  ariaLabel: `Archive ${pkg.title}`,
+                                                                  ariaLabel: `Archive ${formatPackageTitle(pkg.title, pkg.category)}`,
                                                                   icon: <MdArchive size={16} />,
                                                                   color: 'red',
                                                                   onClick: () =>
@@ -616,7 +626,11 @@ export default function PackagesPage() {
                     <Text size='sm'>
                         Archive{' '}
                         <Text span fw={600}>
-                            {archiveTarget?.title}
+                            {archiveTarget &&
+                                formatPackageTitle(
+                                    archiveTarget.title,
+                                    archiveTarget.category,
+                                )}
                         </Text>{' '}
                         ?
                     </Text>

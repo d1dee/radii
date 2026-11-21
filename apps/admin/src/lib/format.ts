@@ -75,6 +75,13 @@ export function formatPackagePrice(price: number | string): string {
     return Number(price) === 0 ? 'Free' : formatMoney(price);
 }
 
+export function formatPackageTitle(
+    title: string,
+    category: string | null | undefined,
+): string {
+    return category ? `${category} · ${title}` : title;
+}
+
 // Payment amounts: a zero-amount payment (free package purchase) shows
 // "Free" instead of a zero currency total.
 export const formatPaymentAmount = formatPackagePrice;

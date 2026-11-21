@@ -573,6 +573,7 @@ export type NasDeviceAnalytics = {
             amount: string;
             status: PackagePaymentStatus;
             packageTitle: string;
+            packageCategory: string;
             packageArchivedAt: string | null;
             createdAt: string;
         }>;
@@ -872,6 +873,7 @@ export type AdminPaymentRow = {
     amount: string;
     status: PackagePaymentStatus;
     packageTitle: string | null;
+    packageCategory: string | null;
     packageType: PackageType | null;
     packageArchivedAt: string | null;
     nasDeviceName: string;
@@ -919,6 +921,7 @@ export type AdminPaymentDetail = {
     amount: string;
     status: PackagePaymentStatus;
     packageTitle: string;
+    packageCategory: string;
     packageType: PackageType;
     packageArchivedAt: string | null;
     nasDeviceName: string;
@@ -940,6 +943,7 @@ export type UserPaymentRow = {
     status: PackagePaymentStatus;
     phoneNumber: string;
     packageTitle: string;
+    packageCategory: string;
     packageType: PackageType;
     packageArchivedAt: string | null;
     provider: string | null;
@@ -1001,6 +1005,7 @@ export type AdminActivationRow = {
     username: string;
     packageId: string;
     packageTitle: string;
+    packageCategory: string;
     packageType: PackageType;
     packageArchivedAt: string | null;
     paymentId: string;
@@ -1274,6 +1279,7 @@ export type AdminReports = {
     topPackages: PaginatedItems<{
         packageId: string;
         title: string;
+        category: string;
         type: PackageType;
         archivedAt: string | null;
         paid: number;

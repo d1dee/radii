@@ -64,6 +64,7 @@ import {
     formatPackagePrice,
     formatPackageQuota,
     formatPackageRate,
+    formatPackageTitle,
     formatSeconds,
 } from '@/lib/format';
 import { fuseOptionsFilter } from '@/lib/fuseOptionsFilter';
@@ -522,7 +523,7 @@ function PackageEditor({
 
         notifications.show({
             title: isEdit ? 'Package updated' : 'Package created',
-            message: values.title,
+            message: formatPackageTitle(values.title, values.category),
             color: 'green',
         });
         navigate('/packages');

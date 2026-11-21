@@ -13,7 +13,7 @@ import { useState } from 'react';
 import { MdChevronLeft, MdChevronRight } from 'react-icons/md';
 
 import type { AdminReports } from '@/lib/api';
-import { formatMoney } from '@/lib/format';
+import { formatMoney, formatPackageTitle } from '@/lib/format';
 
 type PackageRevenue = AdminReports['packageRevenue'];
 
@@ -52,7 +52,7 @@ function RevenueChartCard({
         ? [...categoryTotals].map(([name, revenue]) => ({ id: name, name, revenue }))
         : filteredPackages.map((p) => ({
               id: p.packageId,
-              name: `${p.title}${p.archivedAt ? ' (Archived)' : ''}`,
+              name: `${detail ? p.title : formatPackageTitle(p.title, p.category)}${p.archivedAt ? ' (Archived)' : ''}`,
               revenue: p.revenue,
           })))
         .sort((a, b) => b.revenue - a.revenue || a.id.localeCompare(b.id));
@@ -132,11 +132,29 @@ function RevenueChartCard({
                             }]}
                             valueFormatter={formatMoney}
                             yAxisProps={{
-                                width: 'auto',
-                                tick: {
-                                    transform: 'translate(0, 0)',
-                                    fontSize: 12,
-                                    fill: 'currentColor',
+                                width: 148,
+                                tick: ({ x, y, payload }) => {
+                                    const name = labels.get(String(payload.value)) ?? String(payload.value);
+                                    return (
+                                        <g transform={`translate(${x}, ${y})`}>
+                                            <foreignObject x={-140} y={-10} width={132} height={20}>
+                                                <div
+                                                    title={name}
+                                                    style={{
+                                                        overflow: 'hidden',
+                                                        textOverflow: 'ellipsis',
+                                                        whiteSpace: 'nowrap',
+                                                        textAlign: 'right',
+                                                        fontSize: 12,
+                                                        lineHeight: '20px',
+                                                        color: 'var(--mantine-color-text)',
+                                                    }}
+                                                >
+                                                    {name}
+                                                </div>
+                                            </foreignObject>
+                                        </g>
+                                    );
                                 },
                                 interval: 0,
                                 tickFormatter: (value: string) => labels.get(value) ?? value,

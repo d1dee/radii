@@ -24,7 +24,7 @@ import {
     previewPackageEligibility,
     type PackageRow,
 } from '@/lib/api';
-import { formatMoney } from '@/lib/format';
+import { formatMoney, formatPackageTitle } from '@/lib/format';
 import { EligibilityBuilder } from './EligibilityBuilder';
 import { PackageAudienceSelect } from './PackageAudienceSelect';
 import { CustomerPickerProvider, useCustomerPicker } from './customerPicker';
@@ -80,7 +80,7 @@ function PackageTargetingContent({
     }, []);
     const packageOptions = packages.map((pkg) => ({
         value: pkg.id,
-        label: `${pkg.title}${pkg.archivedAt ? ' (archived)' : ''}`,
+        label: `${formatPackageTitle(pkg.title, pkg.category)}${pkg.archivedAt ? ' (archived)' : ''}`,
     }));
     const categoryOptions = [...new Set(packages.map((pkg) => pkg.category))];
     const customersById = new Map(

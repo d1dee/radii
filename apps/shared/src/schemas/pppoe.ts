@@ -43,6 +43,7 @@ export type PppoeClient = {
     activeActivation: {
         activationId: string;
         packageTitle: string;
+        packageCategory: string;
         activatedAt: string;
         expireAt: string;
     } | null;
@@ -57,6 +58,7 @@ export type PppoeClientConfig =
         passwordVisible: boolean;
         tenantName: string;
         packageTitle: string | null;
+        packageCategory: string | null;
         expireAt: string | null;
     };
 

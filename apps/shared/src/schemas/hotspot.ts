@@ -37,6 +37,7 @@ export type Quota = {
     online?: boolean;
     packageId?: string;
     packageTitle?: string;
+    packageCategory?: string;
     username?: string;
     usedSeconds?: number;
     sessionLimitSeconds?: number;

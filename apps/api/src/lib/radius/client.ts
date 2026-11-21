@@ -471,6 +471,7 @@ export interface ActivationStatus {
     username: string;
     packageId: string;
     packageTitle: string;
+    packageCategory: string;
     paymentId: string;
     activatedAt: Date;
     expireAt: Date;
@@ -4878,6 +4879,7 @@ export class RadiusClient {
             username,
             packageId: pkg.id,
             packageTitle: pkg.title,
+            packageCategory: pkg.category,
             paymentId: activation.packagePaymentId,
             activatedAt: activation.activatedAt,
             expireAt,

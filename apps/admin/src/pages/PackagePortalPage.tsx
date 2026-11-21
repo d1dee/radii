@@ -47,7 +47,12 @@ import {
     type PackageRow,
     type PackageType,
 } from '@/lib/api';
-import { formatPackagePrice, formatPackageRate, formatSeconds } from '@/lib/format';
+import {
+    formatPackagePrice,
+    formatPackageRate,
+    formatPackageTitle,
+    formatSeconds,
+} from '@/lib/format';
 import { fuseOptionsFilter } from '@/lib/fuseOptionsFilter';
 import { notifyResult } from '@/lib/notify';
 
@@ -186,18 +191,18 @@ function SortablePackageCard({ pkg }: { pkg: PackageRow }) {
             <Stack gap='md'>
                 <Group justify='space-between' align='flex-start' wrap='nowrap'>
                     <Stack gap='xs' miw={0}>
-                        <Group gap='xs' wrap='nowrap'>
+                        <Group gap='xs' wrap='nowrap' miw={0}>
                             <ActionIcon
                                 variant='subtle'
                                 color='gray'
-                                aria-label={`Drag ${pkg.title} to reorder or move it to another category`}
+                                aria-label={`Drag ${formatPackageTitle(pkg.title, pkg.category)} to reorder or move it to another category`}
                                 style={{ touchAction: 'none', flexShrink: 0 }}
                                 {...attributes}
                                 {...listeners}
                             >
                                 <MdDragIndicator />
                             </ActionIcon>
-                            <Text c='dimmed' truncate>
+                            <Text c='dimmed' truncate miw={0} title={upperFirstCase(pkg.title)}>
                                 {upperFirstCase(pkg.title)}
                             </Text>
                         </Group>

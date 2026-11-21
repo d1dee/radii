@@ -91,6 +91,7 @@ import {
     formatDateTime,
     formatMoney,
     formatPackageRate,
+    formatPackageTitle,
     formatPaymentAmount,
     formatSeconds,
 } from '@/lib/format';
@@ -1216,12 +1217,16 @@ export function UserDetailsDrawer({
                                                         )}
                                                     </Table.Td>
                                                     <Table.Td>
-                                                        <Group gap={4} wrap='nowrap'>
+                                                        <Group gap={4} wrap='nowrap' maw={360} className='admin-package-label'>
                                                             <Text
                                                                 size='sm'
                                                                 fw={500}
+                                                                truncate
+                                                                maw={220}
+                                                                style={{ minWidth: 0, flexShrink: 1 }}
+                                                                title={formatPackageTitle(a.packageTitle, a.packageCategory)}
                                                             >
-                                                                {a.packageTitle}
+                                                                {formatPackageTitle(a.packageTitle, a.packageCategory)}
                                                             </Text>
                                                             <ArchivedPackageBadge
                                                                 archivedAt={
@@ -1347,7 +1352,7 @@ export function UserDetailsDrawer({
                                                                 mt={5}
                                                             >
                                                                 <Progress
-                                                                    aria-label={`Fair usage for ${a.packageTitle}`}
+                                                                    aria-label={`Fair usage for ${formatPackageTitle(a.packageTitle, a.packageCategory)}`}
                                                                     value={Math.min(
                                                                         100,
                                                                         (a
@@ -1470,7 +1475,7 @@ export function UserDetailsDrawer({
                                                                     : !a.expired
                                                                       ? [{
                                                                             label: 'Deactivate client package',
-                                                                            ariaLabel: `Deactivate ${a.packageTitle}`,
+                                                                            ariaLabel: `Deactivate ${formatPackageTitle(a.packageTitle, a.packageCategory)}`,
                                                                             icon: <MdBlock size={16} />,
                                                                             color: 'red',
                                                                             onClick: () =>
@@ -1478,7 +1483,7 @@ export function UserDetailsDrawer({
                                                                                     activationId:
                                                                                         a.activationId,
                                                                                     packageTitle:
-                                                                                        a.packageTitle,
+                                                                                        formatPackageTitle(a.packageTitle, a.packageCategory),
                                                                                 }),
                                                                         }]
                                                                       : []),
@@ -1587,9 +1592,15 @@ export function UserDetailsDrawer({
                                                         </Text>
                                                     </Table.Td>
                                                     <Table.Td>
-                                                        <Group gap={4} wrap='nowrap'>
-                                                            <Text size='sm'>
-                                                                {p.packageTitle}
+                                                        <Group gap={4} wrap='nowrap' maw={300} className='admin-package-label'>
+                                                            <Text
+                                                                size='sm'
+                                                                truncate
+                                                                maw={220}
+                                                                style={{ minWidth: 0, flexShrink: 1 }}
+                                                                title={formatPackageTitle(p.packageTitle, p.packageCategory)}
+                                                            >
+                                                                {formatPackageTitle(p.packageTitle, p.packageCategory)}
                                                             </Text>
                                                             <ArchivedPackageBadge
                                                                 archivedAt={
@@ -2072,7 +2083,7 @@ export function UserDetailsDrawer({
                             placeholder='Select any package'
                             data={activationPackages.map((pkg) => ({
                                 value: pkg.id,
-                                label: `${pkg.title} · ${pkg.type}${pkg.archivedAt ? ' · archived' : ''}`,
+                                label: `${formatPackageTitle(pkg.title, pkg.category)} · ${pkg.type}${pkg.archivedAt ? ' · archived' : ''}`,
                             }))}
                             value={activationPackageId}
                             onChange={selectActivationPackage}

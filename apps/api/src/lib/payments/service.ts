@@ -1386,7 +1386,7 @@ export class PaymentService {
             active = Boolean(usage && usage.remainingSeconds > 0);
         }
         return {
-            activationId: activation.id, packageTitle: pkg.title,
+            activationId: activation.id, packageTitle: pkg.title, packageCategory: pkg.category,
             nasDeviceName: row.nasDeviceName ?? '',
             activatedAt: activation.activatedAt.toISOString(), expireAt: activation.expireAt.toISOString(),
             noExpiry: pkg.noExpiry, sessionLength: pkg.sessionLength, active,

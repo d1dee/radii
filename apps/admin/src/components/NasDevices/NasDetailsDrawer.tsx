@@ -37,6 +37,7 @@ import {
     formatDate,
     formatDateTime,
     formatPackagePrice,
+    formatPackageTitle,
     formatPaymentAmount,
 } from '@/lib/format';
 import { nasDeviceOsLabel, nasDeviceStatusColors } from '@/lib/nas';
@@ -416,10 +417,12 @@ export function NasDetailsDrawer({
                                 <Badge
                                     key={pkg.id}
                                     maw='100%'
+                                    style={{ maxWidth: 'min(100%, 320px)', flexShrink: 0 }}
+                                    title={`${formatPackageTitle(pkg.title, pkg.category)} · ${formatPackagePrice(pkg.price)}`}
                                     variant='light'
                                     color={pkg.isActive ? undefined : 'gray'}
                                 >
-                                    {pkg.title} ·{' '}
+                                    {formatPackageTitle(pkg.title, pkg.category)} ·{' '}
                                     {formatPackagePrice(pkg.price)}
                                 </Badge>
                             ))}
@@ -531,8 +534,19 @@ export function NasDetailsDrawer({
                                                     {p.phoneNumber}
                                                 </Table.Td>
                                                 <Table.Td>
-                                                    <Group gap={4} wrap='nowrap'>
-                                                        {p.packageTitle}
+                                                    <Group gap={4} wrap='nowrap' maw={300} className='admin-package-label'>
+                                                        <Text
+                                                            size='sm'
+                                                            truncate
+                                                            maw={220}
+                                                            style={{ minWidth: 0, flexShrink: 1 }}
+                                                            title={formatPackageTitle(p.packageTitle, p.packageCategory)}
+                                                        >
+                                                            {formatPackageTitle(
+                                                                p.packageTitle,
+                                                                p.packageCategory,
+                                                            )}
+                                                        </Text>
                                                         <ArchivedPackageBadge
                                                             archivedAt={
                                                                 p.packageArchivedAt

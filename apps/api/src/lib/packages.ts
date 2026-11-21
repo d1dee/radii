@@ -730,6 +730,7 @@ export async function getNasDeviceAnalytics(
             amount: packagePayments.amount,
             status: packagePayments.status,
             packageTitle: packages.title,
+            packageCategory: packages.category,
             packageArchivedAt: packages.archivedAt,
             createdAt: packagePayments.createdAt,
         })

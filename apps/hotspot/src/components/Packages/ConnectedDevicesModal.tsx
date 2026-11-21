@@ -128,6 +128,7 @@ export function ConnectedDevicesModal({ isOpen, onClose }: Props) {
         .toSorted((v) => (v.thisDevice ? -1 : 1))
         .map((v, i) => {
             const downloadRate = formatPackageRate(v.downloadRate);
+            const packageName = `${v.packageCategory ? `${v.packageCategory} · ` : ''}${v.packageTitle}`;
             const adjustedSessions =
                 v.liveSessions?.filter(
                     (session) =>
@@ -147,8 +148,10 @@ export function ConnectedDevicesModal({ isOpen, onClose }: Props) {
                         </Stack>
                     </Table.Td>
                     <Table.Td miw='120'>
-                        <Stack gap={0}>
-                            <span>{v.packageTitle}</span>
+                        <Stack gap={0} w={160} miw={0}>
+                            <Text truncate title={packageName}>
+                                {packageName}
+                            </Text>
                             <Text size='xs' c='dimmed' opacity={0.5}>
                                 {downloadRate} - {formatPackagePrice(v.price)}
                             </Text>

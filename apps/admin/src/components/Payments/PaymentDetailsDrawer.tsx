@@ -23,7 +23,12 @@ import {
     type AdminPaymentEvent,
     type PackagePaymentStatus,
 } from '@/lib/api';
-import { formatDateTime, formatMoney, formatPaymentAmount } from '@/lib/format';
+import {
+    formatDateTime,
+    formatMoney,
+    formatPackageTitle,
+    formatPaymentAmount,
+} from '@/lib/format';
 
 const STATUS_BADGE: Record<
     PackagePaymentStatus,
@@ -300,8 +305,20 @@ export function PaymentDetailsDrawer({
                             <DetailItem
                                 label='Package'
                                 value={
-                                    <Group gap='xs'>
-                                        {payment.packageTitle}
+                                    <Group gap='xs' wrap='nowrap' maw={320} className='admin-package-label'>
+                                        <Text
+                                            size='sm'
+                                            fw={500}
+                                            truncate
+                                            maw={220}
+                                            style={{ minWidth: 0, flexShrink: 1 }}
+                                            title={formatPackageTitle(payment.packageTitle, payment.packageCategory)}
+                                        >
+                                            {formatPackageTitle(
+                                                payment.packageTitle,
+                                                payment.packageCategory,
+                                            )}
+                                        </Text>
                                         <ArchivedPackageBadge
                                             archivedAt={
                                                 payment.packageArchivedAt

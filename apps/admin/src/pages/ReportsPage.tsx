@@ -26,7 +26,12 @@ import { getAdminReports, type AdminReports } from '@/lib/api';
 import { useAutoRefresh } from '@/lib/autoRefresh';
 import { warnBackgroundFailure } from '@/lib/clientError';
 import { dayjs } from '@/lib/dayjs';
-import { formatBytes, formatMoney, formatSeconds } from '@/lib/format';
+import {
+    formatBytes,
+    formatMoney,
+    formatPackageTitle,
+    formatSeconds,
+} from '@/lib/format';
 import { tableRowNumber, useTablePageSize } from '@/lib/pagination';
 import { useAdminSettings } from '@/lib/settings';
 
@@ -425,8 +430,16 @@ export default function ReportsPage() {
                                                                     )}
                                                                 </Table.Td>
                                                                 <Table.Td>
-                                                                    <Group gap={4} wrap='nowrap'>
-                                                                        {p.title}
+                                                                    <Group gap={4} wrap='nowrap' maw={300} className='admin-package-label'>
+                                                                        <Text
+                                                                            size='sm'
+                                                                            truncate
+                                                                            maw={220}
+                                                                            style={{ minWidth: 0, flexShrink: 1 }}
+                                                                            title={formatPackageTitle(p.title, p.category)}
+                                                                        >
+                                                                            {formatPackageTitle(p.title, p.category)}
+                                                                        </Text>
                                                                         <ArchivedPackageBadge
                                                                             archivedAt={
                                                                                 p.archivedAt
