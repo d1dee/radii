@@ -39,7 +39,6 @@ import {
     refreshPppoeAccounts,
     refreshPppoeQuota,
     selectPppoeAccount,
-    useNasScope,
     usePppoeAccounts,
 } from '../../lib/store.ts';
 import classes from './PppoeAccountCard.module.css';
@@ -54,18 +53,11 @@ export function PppoeAccountCard() {
         selectedAccountId,
         error: accountsError,
     } = usePppoeAccounts();
-    const { nasDeviceId } = useNasScope();
     const [rotating, setRotating] = useState<string | null>(null);
     const [disconnecting, setDisconnecting] = useState<string | null>(null);
     const [expanded, setExpanded] = useState(false);
     const [chooserOpened, setChooserOpened] = useState(false);
     const prompted = useRef(false);
-
-    // Refresh on sign-in and on every network change so availability
-    // (availableOnPortal) reflects the NAS the portal is scoped to.
-    useEffect(() => {
-        if (session?.session) void refreshPppoeAccounts();
-    }, [session?.session, nasDeviceId]);
 
     // First-visit chooser when the customer has multiple service accounts.
     useEffect(() => {

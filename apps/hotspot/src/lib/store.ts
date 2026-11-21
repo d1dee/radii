@@ -125,7 +125,7 @@ export function loadHotspotPortal(
         !publicScope ||
         publicScope.userId !== userId ||
         publicScope.loginRequestId !== loginRequestId;
-    if (scopeChanged || (force && !publicFlight)) {
+    if (scopeChanged || force) {
         const cachedUnknown = isCachedUnknownLoginRequest(loginRequestId);
         // Identity also rejects old responses after switching away and back.
         const scope = { userId, loginRequestId };
@@ -135,13 +135,13 @@ export function loadHotspotPortal(
                 ? {
                       packages: undefined,
                       contacts: defaultAdminSettings.contacts,
+                      packagesError: cachedUnknown ? UNKNOWN_LOGIN_REQUEST : null,
+                      contactsError: null,
                   }
                 : {}),
             packagesLoading:
                 !cachedUnknown &&
                 (scopeChanged || portalSnapshot.packages === undefined),
-            packagesError: cachedUnknown ? UNKNOWN_LOGIN_REQUEST : null,
-            contactsError: null,
         });
         const flight = (async () => {
             try {
@@ -192,17 +192,16 @@ export function loadHotspotPortal(
         void publicFlight.then(finish, finish);
     }
 
-    if (clientUserId !== userId || (force && !clientFlight)) {
+    if (clientUserId !== userId || force) {
         const userChanged = clientUserId !== userId;
         clientUserId = userId;
-        publishPortal({
-            ...(userChanged ? { client: undefined } : {}),
-            clientError: null,
-        });
-        clientFlight = userId
+        if (userChanged) {
+            publishPortal({ client: undefined, clientError: null });
+        }
+        const flight = userId
             ? getClientData()
                   .then((result) => {
-                      if (clientUserId === userId) {
+                      if (clientFlight === flight) {
                           publishPortal(
                               result.success
                                   ? { client: result.data, clientError: null }
@@ -218,7 +217,7 @@ export function loadHotspotPortal(
                                   ? error.name
                                   : 'UnknownError',
                       });
-                      if (clientUserId === userId) {
+                      if (clientFlight === flight) {
                           publishPortal({
                               clientError:
                                   'Could not load your account. Try again.',
@@ -226,9 +225,12 @@ export function loadHotspotPortal(
                       }
                   })
                   .finally(() => {
-                      clientFlight = null;
+                      if (clientFlight === flight) {
+                          clientFlight = null;
+                      }
                   })
             : null;
+        clientFlight = flight;
     }
 
     return Promise.all([publicFlight, clientFlight]);
@@ -238,8 +240,7 @@ export function refreshHotspotPackages() {
     const scope = publicScope;
     if (!scope) return Promise.resolve();
     // Eligibility may have changed during a purchase; supersede any older load.
-    publicScope = undefined;
-    return loadHotspotPortal(scope.userId, scope.loginRequestId);
+    return loadHotspotPortal(scope.userId, scope.loginRequestId, true);
 }
 
 export function refreshHotspotQuota(loginRequestId: string | null) {
@@ -250,7 +251,7 @@ export function refreshHotspotQuota(loginRequestId: string | null) {
     }
     const flight = getStatus(loginRequestId)
         .then((result) => {
-            if (quotaScope !== loginRequestId) return;
+            if (quotaFlight !== flight) return;
             if (result.success) {
                 publishQuota({
                     quota: result.data ?? [],
@@ -266,7 +267,7 @@ export function refreshHotspotQuota(loginRequestId: string | null) {
                 operation: 'load-quota',
                 errorName: error instanceof Error ? error.name : 'UnknownError',
             });
-            if (quotaScope === loginRequestId) {
+            if (quotaFlight === flight) {
                 publishQuota({
                     error: 'Could not load your active package. Try again.',
                     loading: false,

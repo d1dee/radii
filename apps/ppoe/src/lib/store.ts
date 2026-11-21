@@ -149,6 +149,9 @@ export function setNasScope(nasDeviceId: string | null) {
                     client.nasDeviceId === nasDeviceId,
             );
         if (!stillValid) {
+            quotaFlight = null;
+            quotaFlightAccountId = null;
+            publishQuota({ quota: [], loading: true, error: null });
             publishAccount({
                 selectedAccountId:
                     accountSnapshot.clients.find(
@@ -182,7 +185,7 @@ export function loadPppoePortal(
         !publicScope ||
         publicScope.userId !== userId ||
         publicScope.nasDeviceId !== nasDeviceId;
-    if (scopeChanged || (force && !publicFlight)) {
+    if (scopeChanged || force) {
         // Identity also rejects old responses after switching away and back.
         const scope = { userId, nasDeviceId };
         publicScope = scope;
@@ -191,11 +194,12 @@ export function loadPppoePortal(
                 ? {
                       packages: undefined,
                       contacts: defaultAdminSettings.contacts,
+                      packagesError: null,
+                      contactsError: null,
                   }
                 : {}),
-            packagesLoading: true,
-            packagesError: null,
-            contactsError: null,
+            packagesLoading:
+                scopeChanged || portalSnapshot.packages === undefined,
         });
         const flight = (async () => {
             try {
@@ -258,27 +262,29 @@ export function loadPppoePortal(
         void publicFlight.then(finish, finish);
     }
 
-    if (clientUserId !== userId || (force && !clientFlight)) {
+    if (clientUserId !== userId || force) {
         const userChanged = clientUserId !== userId;
         clientUserId = userId;
         publishPortal({
-            ...(userChanged ? { client: undefined } : {}),
-            clientError: null,
+            ...(userChanged ? { client: undefined, clientError: null } : {}),
         });
-        if (!userId) {
+        if (userChanged) {
+            accountFlight = null;
+            quotaFlight = null;
+            quotaFlightAccountId = null;
             publishAccount({
                 clients: [],
                 selectedAccountId: null,
                 config: null,
-                loading: false,
+                loading: Boolean(userId),
                 error: null,
             });
             publishQuota({ quota: [], loading: false, error: null });
         }
-        clientFlight = userId
+        const flight = userId
             ? getClientData()
                   .then((result) => {
-                      if (clientUserId === userId) {
+                      if (clientFlight === flight) {
                           publishPortal(
                               result.success
                                   ? { client: result.data, clientError: null }
@@ -294,7 +300,7 @@ export function loadPppoePortal(
                                   ? error.name
                                   : 'UnknownError',
                       });
-                      if (clientUserId === userId) {
+                      if (clientFlight === flight) {
                           publishPortal({
                               clientError:
                                   'Could not load your account. Try again.',
@@ -302,9 +308,10 @@ export function loadPppoePortal(
                       }
                   })
                   .finally(() => {
-                      clientFlight = null;
+                      if (clientFlight === flight) clientFlight = null;
                   })
             : null;
+        clientFlight = flight;
     }
 
     return Promise.all([publicFlight, clientFlight]);
@@ -313,23 +320,21 @@ export function loadPppoePortal(
 export function refreshPppoePackages() {
     const scope = publicScope;
     if (!scope) return Promise.resolve();
-    // Eligibility may have changed during a purchase; supersede any older load.
-    publicScope = undefined;
-    return loadPppoePortal(scope.userId, scope.nasDeviceId);
+    // Refresh eligibility and supersede older loads without clearing cached
+    // packages: active-package labels must stay visible while revalidating.
+    return loadPppoePortal(scope.userId, scope.nasDeviceId, true);
 }
 
 export function refreshPppoeAccounts() {
     if (accountFlight) return accountFlight;
     const userId = clientUserId;
     if (!userId) return Promise.resolve();
-    publishAccount({
-        loading: accountSnapshot.clients.length === 0,
-        error: null,
-    });
+    // Loading belongs to the initial customer snapshot, not background requests.
+    // A previously resolved empty account list must also remain visible.
     const configRequest = accountSnapshot.config ? null : getServiceConfig();
     const flight = Promise.all([getClients(), configRequest])
         .then(([clients, config]) => {
-            if (clientUserId !== userId) return;
+            if (accountFlight !== flight) return;
             if (config && !config.success) {
                 storeLogger.warning('Could not load the PPPoE service config.', {
                     operation: 'load-service-config',
@@ -407,7 +412,7 @@ export function refreshPppoeAccounts() {
                 errorName:
                     error instanceof Error ? error.name : 'UnknownError',
             });
-            if (clientUserId === userId) {
+            if (accountFlight === flight) {
                 publishAccount({
                     error: 'Could not load your PPPoE accounts. Try again.',
                 });
@@ -434,7 +439,10 @@ export function refreshPppoeQuota(
     quotaFlightAccountId = accountId;
     const flight = getStatus(accountId)
         .then((result) => {
-            if (accountSnapshot.selectedAccountId !== accountId) return;
+            if (
+                quotaFlight !== flight ||
+                accountSnapshot.selectedAccountId !== accountId
+            ) return;
             if (result.success) {
                 publishQuota({
                     quota: result.data ?? [],
@@ -450,7 +458,10 @@ export function refreshPppoeQuota(
                 operation: 'load-quota',
                 errorName: error instanceof Error ? error.name : 'UnknownError',
             });
-            if (accountSnapshot.selectedAccountId === accountId) {
+            if (
+                quotaFlight === flight &&
+                accountSnapshot.selectedAccountId === accountId
+            ) {
                 publishQuota({
                     error: 'Could not load your active package. Try again.',
                     loading: false,
@@ -458,7 +469,7 @@ export function refreshPppoeQuota(
             }
         })
         .finally(() => {
-            if (quotaFlightAccountId === accountId) {
+            if (quotaFlight === flight) {
                 quotaFlight = null;
                 quotaFlightAccountId = null;
             }

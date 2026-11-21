@@ -143,14 +143,13 @@ export default function App() {
     );
     // Bumped on each open so PaymentFlow remounts with fresh state.
     const [buyKey, setBuyKey] = useState(resumeBuy ? 1 : 0);
-    // Authentication and payment history can change fee eligibility. Never
-    // submit using the price captured before the latest scoped package load.
+    // Follow scoped offer updates without unmounting checkout during background
+    // refreshes. The server validates expectedAmount against the payable total.
     const checkoutLoading = isPending || packagesLoading || accountsLoading;
     const checkoutPrice = buySeed ? pkgPrice(packages, buySeed.packageId) : '';
     const checkoutSeed =
         data?.session &&
         !checkoutLoading &&
-        !packagesError &&
         checkoutPrice !== '' &&
         buySeed
             ? { packageId: buySeed.packageId, price: checkoutPrice }
