@@ -1066,9 +1066,9 @@ export default function UsersPage() {
                                 </Text>
                             ) : (
                                 <Text span size='xs' c='dimmed'>
-                                    Claim account:{' '}
-                                    {accountDetails.phoneNumber} using the
-                                    one-time code provided. Provisioned{' '}
+                                    Claim account: {accountDetails.phoneNumber}{' '}
+                                    using the one-time code provided.
+                                    Provisioned{' '}
                                     {formatDate(accountDetails.createdAt)}
                                     {accountDetails.lastUsedAt
                                         ? ` · last used ${dayjs(accountDetails.lastUsedAt).fromNow()}`
@@ -1112,6 +1112,7 @@ export default function UsersPage() {
                 }
                 styles={{ header: { alignItems: 'flex-start' } }}
                 centered
+                size='lg'
             >
                 {accountDetailsLoading ? (
                     <Center py='xl'>

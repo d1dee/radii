@@ -35,7 +35,7 @@ export function RegisterModal({
                       ? 'Welcom back!'
                       : 'Reset your PIN'
             }
-            size='md'
+            size='lg'
             centered
         >
             <Stack gap='sm'>

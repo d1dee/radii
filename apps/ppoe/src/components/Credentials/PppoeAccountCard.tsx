@@ -425,6 +425,7 @@ export function PppoeAccountCard() {
                 opened={chooserOpened}
                 onClose={() => setChooserOpened(false)}
                 title='Choose a service line'
+                size='lg'
                 centered
                 radius='lg'
             >

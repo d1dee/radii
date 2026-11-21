@@ -78,6 +78,7 @@ export const adminTheme = createTheme({
         }),
         Modal: Modal.extend({
             defaultProps: {
+                size: 'lg',
                 classNames: { title: 'admin-dialog-title' },
                 closeButtonProps: { 'aria-label': 'Close dialog' },
             },

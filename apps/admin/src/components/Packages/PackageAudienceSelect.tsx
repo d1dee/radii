@@ -198,7 +198,7 @@ export function PackageAudienceSelect({
                 title={
                     editingId ? 'Edit named audience' : 'Create named audience'
                 }
-                size='xl'
+                size='lg'
                 closeOnClickOutside={!saving}
                 closeOnEscape={!saving}
                 withCloseButton={!saving}
