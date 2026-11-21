@@ -1876,30 +1876,24 @@ function PackageEditor({
                                                     ),
                                                 ],
                                                 [
-                                                    'Download speed',
-                                                    formatPackageRate(
-                                                        form.values
-                                                            .downloadRate,
-                                                    ),
+                                                    'Speed up/down',
+                                                    `${formatPackageRate(form.values.uploadRate)} / ${formatPackageRate(form.values.downloadRate)}`,
                                                 ],
                                                 [
-                                                    'Upload speed',
-                                                    formatPackageRate(
-                                                        form.values.uploadRate,
-                                                    ),
+                                                    'FUP up/down',
+                                                    form.values.fairUsageLimit > 0
+                                                        ? `${formatPackageRate(form.values.fairUsageUploadRate)} / ${formatPackageRate(form.values.fairUsageDownloadRate)} · ${formatPackageQuota(form.values.fairUsageLimit)} / ${form.values.fairUsageWindowUnit === 'session' ? 'session' : `${form.values.fairUsageWindowValue} ${form.values.fairUsageWindowUnit}`}`
+                                                        : 'Disabled',
                                                 ],
                                                 [
-                                                    'Download data',
-                                                    formatPackageQuota(
-                                                        form.values
-                                                            .downloadQuota,
-                                                    ),
+                                                    'Total data up/down',
+                                                    `${formatPackageQuota(form.values.uploadQuota)} / ${formatPackageQuota(form.values.downloadQuota)}`,
                                                 ],
                                                 [
-                                                    'Upload data',
-                                                    formatPackageQuota(
-                                                        form.values.uploadQuota,
-                                                    ),
+                                                    'Burst up/down',
+                                                    form.values.burstTime > 0
+                                                        ? `${formatPackageRate(form.values.burstUploadRate)} / ${formatPackageRate(form.values.burstDownloadRate)} · ${formatSeconds(form.values.burstTime)}`
+                                                        : 'Disabled',
                                                 ],
                                             ].map(([label, value]) => (
                                                 <Group
