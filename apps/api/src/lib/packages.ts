@@ -41,7 +41,7 @@ export type PackageLayoutCategory = {
 };
 
 // A connection fee belongs to the customer/provider relationship, not a dialer
-// or individual package. Failed payments and free redemptions do not waive it.
+// or individual package. Successful free redemptions waive it; failures do not.
 export async function getPppoeConnectionFee(
     providerId: string,
     userId: string | null,
@@ -51,23 +51,29 @@ export async function getPppoeConnectionFee(
         .from(adminSetting).where(eq(adminSetting.adminUserId, providerId)).limit(1);
     const parsed = adminSettingsSchema.safeParse(settings?.settings ?? {});
     if (!parsed.success || parsed.data.packages.pppoeConnectionFeeAmount === 0) return 0;
-    if (userId) {
-        const [purchase] = await executor.select({ id: packagePayments.id })
-            .from(packagePayments)
-            .innerJoin(packages, eq(packagePayments.packageId, packages.id))
-            .leftJoin(nasDevice, eq(packagePayments.nasDeviceId, nasDevice.id))
-            .leftJoin(transaction, eq(packagePayments.transaction, transaction.id))
-            .where(and(
-                eq(packagePayments.userId, userId),
-                sql`coalesce(${packagePayments.tenantAdminId}, ${nasDevice.ownerId}) = ${providerId}`,
-                eq(packages.type, 'pppoe'),
-                eq(packagePayments.status, 'paid'),
-                sql`${packagePayments.amount} > 0`,
-                sql`${transaction.status} is distinct from 'reversed'`,
-            )).limit(1);
-        if (purchase) return 0;
-    }
+    if (await hasPaidPppoePackage(providerId, userId, executor)) return 0;
     return parsed.data.packages.pppoeConnectionFeeAmount;
+}
+
+export async function hasPaidPppoePackage(
+    providerId: string,
+    userId: string | null,
+    executor: Pick<typeof db, 'select'> = db,
+): Promise<boolean> {
+    if (!userId) return false;
+    const [purchase] = await executor.select({ id: packagePayments.id })
+        .from(packagePayments)
+        .innerJoin(packages, eq(packagePayments.packageId, packages.id))
+        .leftJoin(nasDevice, eq(packagePayments.nasDeviceId, nasDevice.id))
+        .leftJoin(transaction, eq(packagePayments.transaction, transaction.id))
+        .where(and(
+            eq(packagePayments.userId, userId),
+            sql`coalesce(${packagePayments.tenantAdminId}, ${nasDevice.ownerId}) = ${providerId}`,
+            eq(packages.type, 'pppoe'),
+            eq(packagePayments.status, 'paid'),
+            sql`${transaction.status} is distinct from 'reversed'`,
+        )).limit(1);
+    return Boolean(purchase);
 }
 export type AdminPackageSortBy =
     | 'title'
@@ -89,8 +95,10 @@ export async function getPackagesGroupedByCategory(
     const [device] = await db.select({ ownerId: nasDevice.ownerId })
         .from(nasDevice).where(eq(nasDevice.id, nasDeviceId)).limit(1);
     if (!device) return [];
-    const connectionFee = type === 'pppoe'
-        ? await getPppoeConnectionFee(device.ownerId, userId)
+    const showInstallation = type === 'pppoe'
+        && !(await hasPaidPppoePackage(device.ownerId, userId));
+    const connectionFee = showInstallation
+        ? await getPppoeConnectionFee(device.ownerId, null)
         : 0;
     const rows = await db
         .select()
@@ -139,7 +147,7 @@ export async function getPackagesGroupedByCategory(
             category: row.category,
             sessionLength: row.sessionLength,
             price: Number(row.price),
-            ...(connectionFee > 0 ? { connectionFee } : {}),
+            ...(showInstallation ? { connectionFee } : {}),
             maxDevices: row.maxDevices,
             noExpiry: row.noExpiry,
             description: row.description ?? undefined,

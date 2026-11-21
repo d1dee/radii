@@ -6,6 +6,7 @@ export type Package = {
     category: string;
     sessionLength: number; // minutes
     price: number;
+    // Present only before the first successful PPPoE purchase, including free installation.
     connectionFee?: number;
     maxDevices: number;
     noExpiry: boolean;

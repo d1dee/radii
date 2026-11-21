@@ -42,12 +42,12 @@ import {
     useNavigate,
 } from 'react-router-dom';
 
+import { PageLayout } from '@/components/Layout/PageLayout';
 import { previewDateTime } from '@/lib/format';
 import { fuseOptionsFilter } from '@/lib/fuseOptionsFilter';
 import { useAdminSettings } from '@/lib/settings';
-import { PageLayout } from '@/components/Layout/PageLayout';
-import { TbInfoTriangle } from 'react-icons/tb';
 import { settingsCategories } from '@/lib/settingsCategories';
+import { TbInfoTriangle } from 'react-icons/tb';
 
 const SettingsDraftContext = createContext<
     (category: string, dirty: boolean, saving: boolean) => void
@@ -120,30 +120,38 @@ export default function SettingsPage() {
     const [drafts, setDrafts] = useState<
         Record<string, { dirty: boolean; saving: boolean }>
     >({});
-    const setDirty = useCallback((id: string, dirty: boolean, saving: boolean) => {
-        setDrafts((current) =>
-            current[id]?.dirty === dirty && current[id]?.saving === saving
-                ? current
-                : { ...current, [id]: { dirty, saving } },
-        );
-    }, []);
+    const setDirty = useCallback(
+        (id: string, dirty: boolean, saving: boolean) => {
+            setDrafts((current) =>
+                current[id]?.dirty === dirty && current[id]?.saving === saving
+                    ? current
+                    : { ...current, [id]: { dirty, saving } },
+            );
+        },
+        [],
+    );
     const hasDrafts = Object.values(drafts).some((draft) => draft.dirty);
     // Saves replace the full document, so prevent overlapping saves or edits.
     const isSaving = Object.values(drafts).some((draft) => draft.saving);
     const blocker = useBlocker(
-        ({ nextLocation }) => hasDrafts && !isSettingsPath(nextLocation.pathname),
+        ({ nextLocation }) =>
+            hasDrafts && !isSettingsPath(nextLocation.pathname),
     );
     useBeforeUnload(
-        useCallback((event) => {
-            if (hasDrafts) {
-                event.preventDefault();
-                event.returnValue = '';
-            }
-        }, [hasDrafts]),
+        useCallback(
+            (event) => {
+                if (hasDrafts) {
+                    event.preventDefault();
+                    event.returnValue = '';
+                }
+            },
+            [hasDrafts],
+        ),
     );
 
     useEffect(() => {
-        if (!matchedCategory) navigate('/settings/appearance', { replace: true });
+        if (!matchedCategory)
+            navigate('/settings/appearance', { replace: true });
     }, [matchedCategory, navigate]);
 
     useEffect(() => {
@@ -203,7 +211,9 @@ export default function SettingsPage() {
                                 component='fieldset'
                                 key={item.id}
                                 disabled={isSaving}
-                                display={category.id === item.id ? 'block' : 'none'}
+                                display={
+                                    category.id === item.id ? 'block' : 'none'
+                                }
                                 m={0}
                                 p={0}
                                 style={{ border: 0, minWidth: 0 }}
@@ -615,7 +625,8 @@ function PackagesSection() {
                     ? null
                     : 'Must be a whole number between 1 and 120 months',
             pppoeConnectionFeeAmount: (value) =>
-                value === '' || (Number.isSafeInteger(value) && value >= 0 && value <= 99999999)
+                value === '' ||
+                (Number.isSafeInteger(value) && value >= 0 && value <= 99999999)
                     ? null
                     : 'Enter a whole Ksh amount between 0 and 99,999,999',
         },
@@ -657,7 +668,7 @@ function PackagesSection() {
                 <Stack gap='md' maw='40em'>
                     <NumberInput
                         label='PPPoE connection fee (Ksh)'
-                        description='Added to the first successful PPPoE package purchase only. Returning paying customers are exempt. Set to 0 to disable.'
+                        description='Added to the first successful PPPoE package purchase only. Returning customers, including those with free package activations, are exempt. Set to 0 to show "Free Installation".'
                         min={0}
                         max={99999999}
                         clampBehavior='strict'
@@ -665,10 +676,15 @@ function PackagesSection() {
                         allowDecimal={false}
                         allowNegative={false}
                         onPaste={(event) => {
-                            const text = event.clipboardData.getData('text').trim();
+                            const text = event.clipboardData
+                                .getData('text')
+                                .trim();
                             const amount = Number(text.replaceAll(',', ''));
-                            if (!/^\d+(,\d{3})*$/.test(text) ||
-                                !Number.isSafeInteger(amount) || amount > 99999999) {
+                            if (
+                                !/^\d+(,\d{3})*$/.test(text) ||
+                                !Number.isSafeInteger(amount) ||
+                                amount > 99999999
+                            ) {
                                 event.preventDefault();
                             }
                         }}

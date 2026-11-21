@@ -210,15 +210,15 @@ export function PackagePricing({
                                                     ? `Ksh ${pkg.price.toLocaleString()}`
                                                     : formatPackagePrice(pkg.price)}
                                             </Text>
-                                            {pkg.connectionFee ? (
+                                            {pkg.connectionFee !== undefined ? (
                                                 <Text
                                                     size='sm'
                                                     c='dimmed'
                                                     ta='right'
                                                 >
-                                                    + Ksh{' '}
-                                                    {pkg.connectionFee.toLocaleString()}{' '}
-                                                    connection fee
+                                                    {pkg.connectionFee > 0
+                                                        ? `+ Ksh ${pkg.connectionFee.toLocaleString()} connection fee`
+                                                        : 'Free Installation'}
                                                 </Text>
                                             ) : null}
                                         </Stack>
