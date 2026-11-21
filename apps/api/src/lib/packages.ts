@@ -234,6 +234,7 @@ export async function savePackageLayout(
 export async function listAdminPackages(opts: {
     ownerId: string;
     type?: PackageType;
+    categories?: string[];
     q?: string;
     archived?: 'current' | 'archived' | 'all';
     sortBy?: AdminPackageSortBy;
@@ -248,6 +249,9 @@ export async function listAdminPackages(opts: {
         conditions.push(isNull(packages.archivedAt));
     }
     if (opts.type) conditions.push(eq(packages.type, opts.type));
+    if (opts.categories?.length) {
+        conditions.push(inArray(packages.category, opts.categories));
+    }
     if (opts.q) {
         const q = `%${opts.q}%`;
         conditions.push(

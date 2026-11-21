@@ -245,6 +245,7 @@ export type AdminPackageList = {
 
 export type ListAdminPackagesQuery = PaginationQuery & {
     type?: PackageType;
+    categories?: string[];
     q?: string;
     archived?: 'current' | 'archived' | 'all';
     sortBy?: PackageSortKey;
@@ -262,6 +263,9 @@ export type PackageSortKey =
 export function getAdminPackages(query: ListAdminPackagesQuery = {}) {
     const params = new URLSearchParams();
     if (query.type) params.set('type', query.type);
+    for (const category of query.categories ?? []) {
+        params.append('category', category);
+    }
     if (query.q) params.set('q', query.q);
     if (query.archived) params.set('archived', query.archived);
     if (query.sortBy) params.set('sortBy', query.sortBy);

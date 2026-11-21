@@ -238,6 +238,10 @@ app.get('/packages', requireAdmin, async (c) => {
     ) {
         return jsonError(c, 400, 'Invalid package archive filter');
     }
+    const categories = [...new Set(c.req.queries('category') ?? [])];
+    if (categories.some((category) => !category.trim() || category.includes('\0'))) {
+        return jsonError(c, 400, 'Invalid package category filter');
+    }
     const { page, perPage } = paginationParams(
         c.req.query('page'),
         c.req.query('perPage'),
@@ -245,6 +249,7 @@ app.get('/packages', requireAdmin, async (c) => {
     const { total, rows } = await listAdminPackages({
         ownerId: c.var.adminSession.userId,
         type: typeParam as 'hotspot' | 'pppoe' | undefined,
+        categories,
         q: c.req.query('q')?.trim() || undefined,
         archived: archivedParam as
             | 'current'

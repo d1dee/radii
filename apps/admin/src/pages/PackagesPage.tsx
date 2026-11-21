@@ -6,6 +6,7 @@ import {
     Group,
     Loader,
     Modal,
+    MultiSelect,
     Select,
     SimpleGrid,
     Stack,
@@ -40,6 +41,7 @@ import { TableRowActions } from '@/components/TableRowActions';
 import {
     archiveAdminPackage,
     getAdminPackages,
+    getAllAdminPackages,
     restoreAdminPackage,
     type PackageRow,
     type PackageSortKey,
@@ -98,6 +100,9 @@ export default function PackagesPage() {
         loaded,
     );
     const [typeFilter, setTypeFilter] = useState<PackageType | null>(null);
+    const [categoryFilter, setCategoryFilter] = useState<string[]>([]);
+    const [categoryOptions, setCategoryOptions] = useState<string[]>([]);
+    const [categoryError, setCategoryError] = useState<string | null>(null);
     const [packages, setPackages] = useState<PackageRow[]>([]);
     const [total, setTotal] = useState(0);
     const [page, setPage] = useState(1);
@@ -116,6 +121,27 @@ export default function PackagesPage() {
     const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
     const loadRequest = useRef(0);
 
+    useEffect(() => {
+        if (!loaded) return;
+        let cancelled = false;
+        void getAllAdminPackages({ archived: 'all' }).then((result) => {
+            if (cancelled) return;
+            if (!result.success) {
+                setCategoryError(result.message || 'Failed to load categories');
+                return;
+            }
+            setCategoryError(null);
+            setCategoryOptions(
+                [...new Set(result.data.map((pkg) => pkg.category))]
+                    .filter(Boolean)
+                    .sort((a, b) => a.localeCompare(b)),
+            );
+        });
+        return () => {
+            cancelled = true;
+        };
+    }, [loaded]);
+
     const load = useCallback(
         async (pageToLoad: number, silent = false) => {
             const requestId = ++loadRequest.current;
@@ -125,6 +151,7 @@ export default function PackagesPage() {
             }
             const result = await getAdminPackages({
                 type: typeFilter ?? undefined,
+                categories: categoryFilter,
                 q: debouncedSearch.trim() || undefined,
                 archived,
                 sortBy: sortBy ?? undefined,
@@ -145,6 +172,7 @@ export default function PackagesPage() {
         },
         [
             typeFilter,
+            categoryFilter,
             debouncedSearch,
             archived,
             sortBy,
@@ -308,6 +336,30 @@ export default function PackagesPage() {
                         ]}
                         w={{ base: '100%', sm: 140 }}
                     />
+                    <MultiSelect
+                        aria-label='Filter packages by category'
+                        placeholder='Categories'
+                        searchable
+                        clearable
+                        clearButtonProps={{ 'aria-label': 'Clear category filter' }}
+                        data={categoryOptions}
+                        value={categoryFilter}
+                        onChange={(values) => {
+                            setCategoryFilter(values);
+                            setPage(1);
+                        }}
+                        error={categoryError}
+                        nothingFoundMessage='No categories found'
+                        w={{ base: '100%', sm: 240 }}
+                        styles={{
+                            pillsList: {
+                                flexWrap: 'nowrap',
+                                overflowX: 'auto',
+                                scrollbarWidth: 'none',
+                            },
+                            pill: { flexShrink: 0 },
+                        }}
+                    />
                     <Select
                         aria-label='Filter packages by archive state'
                         value={archived}
@@ -335,7 +387,10 @@ export default function PackagesPage() {
                     <Text c='red'>{error}</Text>
                 ) : packages.length === 0 ? (
                     <Text c='dimmed' py='xl' ta='center'>
-                        {debouncedSearch || typeFilter || archived !== 'current'
+                        {debouncedSearch ||
+                        typeFilter ||
+                        categoryFilter.length > 0 ||
+                        archived !== 'current'
                             ? 'No packages match.'
                             : 'No packages yet.'}
                     </Text>
