@@ -1,5 +1,6 @@
 import {
     Alert,
+    Badge,
     Box,
     Button,
     Card,
@@ -20,19 +21,15 @@ import {
     TextInput,
     Title,
 } from '@mantine/core';
-import { schemaResolver, useForm } from '@mantine/form';
+import { createFormContext, schemaResolver, useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
-import {
-    adminAppearanceSettingsSchema,
-    adminContactsSettingsSchema,
-    adminMpesaSettingsSchema,
-    type AdminSettings,
-} from '@shared/index';
+import { adminSettingsSchema, type AdminSettings } from '@shared/index';
 import {
     createContext,
     useCallback,
     useContext,
     useEffect,
+    useRef,
     useState,
 } from 'react';
 import {
@@ -52,6 +49,7 @@ import { TbInfoTriangle } from 'react-icons/tb';
 const SettingsDraftContext = createContext<
     (category: string, dirty: boolean, saving: boolean) => void
 >(() => {});
+const SettingsSavingContext = createContext(false);
 
 function useSettingsDraft(category: string, dirty: boolean, saving: boolean) {
     const setDirty = useContext(SettingsDraftContext);
@@ -61,13 +59,233 @@ function useSettingsDraft(category: string, dirty: boolean, saving: boolean) {
 }
 
 const sections = {
-    appearance: AppearanceSection,
-    dashboard: DashboardSection,
-    mpesa: MpesaSection,
-    contacts: ContactsSection,
-    packages: PackagesSection,
-    pppoe: PppoeSection,
+    general: [AppearanceSection, DashboardSection, ContactsSection],
+    packages: [PackagesSection, PppoeSection],
+    payments: [MpesaSection],
 };
+
+type CategoryId = (typeof settingsCategories)[number]['id'];
+type CategoryFormValues = Omit<AdminSettings, 'dashboard' | 'packages'> & {
+    dashboard: {
+        usageRefreshSeconds: number | '';
+        defaultRangeDays: string;
+        perPage: string;
+    };
+    packages: {
+        noExpiryValidityMonths: number | '';
+        pppoeConnectionFeeAmount: number | '';
+    };
+};
+
+const [CategoryFormProvider, useCategoryForm] =
+    createFormContext<CategoryFormValues>();
+
+function useSectionForm<Key extends keyof CategoryFormValues>(section: Key) {
+    const form = useCategoryForm();
+    return {
+        values: form.values[section],
+        getInputProps: (
+            field: keyof CategoryFormValues[Key] & string,
+            options?: Parameters<typeof form.getInputProps>[1],
+        ) => form.getInputProps(`${section}.${field}`, options),
+    };
+}
+
+function settingsFormValues(settings: AdminSettings): CategoryFormValues {
+    return {
+        ...settings,
+        dashboard: {
+            ...settings.dashboard,
+            defaultRangeDays: String(settings.dashboard.defaultRangeDays),
+            perPage: String(settings.dashboard.perPage),
+        },
+        packages: {
+            ...settings.packages,
+            noExpiryValidityMonths:
+                settings.packages.noExpiryValidityMonths ?? '',
+        },
+    };
+}
+
+function categorySettings(values: CategoryFormValues, category: CategoryId) {
+    switch (category) {
+        case 'general':
+            return {
+                appearance: {
+                    ...values.appearance,
+                    dateFormat: 'DD MMM YYYY' as const,
+                    timezone: values.appearance.timezone.trim(),
+                    currencyLabel: values.appearance.currencyLabel.trim(),
+                },
+                dashboard: {
+                    ...values.dashboard,
+                    defaultRangeDays: Number(
+                        values.dashboard.defaultRangeDays,
+                    ) as 7 | 30 | 90,
+                    perPage: Number(values.dashboard.perPage) as
+                        | 10
+                        | 25
+                        | 50
+                        | 100,
+                },
+                contacts: {
+                    adminTel: values.contacts.adminTel.trim(),
+                    adminWhatsapp: values.contacts.adminWhatsapp.trim(),
+                },
+            };
+        case 'packages':
+            return {
+                packages: {
+                    noExpiryValidityMonths:
+                        values.packages.noExpiryValidityMonths === ''
+                            ? null
+                            : values.packages.noExpiryValidityMonths,
+                    pppoeConnectionFeeAmount:
+                        values.packages.pppoeConnectionFeeAmount === ''
+                            ? 0
+                            : values.packages.pppoeConnectionFeeAmount,
+                },
+                pppoe: values.pppoe,
+            };
+        case 'payments':
+            return {
+                mpesa: {
+                    ...values.mpesa,
+                    consumerKey: values.mpesa.consumerKey.trim(),
+                    shortcode: values.mpesa.shortcode.trim(),
+                    tillNumber: values.mpesa.tillNumber.trim(),
+                    initiatorName: values.mpesa.initiatorName.trim(),
+                    certificatePath: values.mpesa.certificatePath.trim(),
+                },
+            };
+    }
+}
+
+const categorySchemas = {
+    general: adminSettingsSchema.pick({
+        appearance: true,
+        dashboard: true,
+        contacts: true,
+    }),
+    packages: adminSettingsSchema.pick({ packages: true, pppoe: true }),
+    payments: adminSettingsSchema.pick({ mpesa: true }),
+};
+
+function CategoryForm({
+    category,
+}: {
+    category: (typeof settingsCategories)[number];
+}) {
+    const { settings, saveSettings } = useAdminSettings();
+    const isSaving = useContext(SettingsSavingContext);
+    const [saving, setSaving] = useState(false);
+    const savingRef = useRef(false);
+    const form = useForm<CategoryFormValues>({
+        initialValues: settingsFormValues(settings),
+        validate: (values) =>
+            schemaResolver(categorySchemas[category.id])(
+                categorySettings(values, category.id),
+            ),
+        enhanceGetInputProps: () => ({ disabled: isSaving || saving }),
+    });
+    const dirty = form.isDirty();
+    useSettingsDraft(category.id, dirty, saving);
+
+    const handleSubmit = async (values: CategoryFormValues) => {
+        if (savingRef.current || isSaving || !form.isDirty()) return;
+        savingRef.current = true;
+        setSaving(true);
+        try {
+            const validated = categorySchemas[category.id].parse(
+                categorySettings(values, category.id),
+            );
+            const next = { ...settings, ...validated };
+            const res = await saveSettings(next);
+            if (res.success) {
+                const saved = settingsFormValues(res.data ?? next);
+                form.setValues(saved);
+                form.resetDirty(saved);
+                form.clearErrors();
+            }
+            notifySaved(
+                res.success
+                    ? `${category.label} saved`
+                    : `Could not save ${category.label}`,
+                res.success,
+                res.success ? undefined : res.message,
+            );
+        } catch (error) {
+            notifySaved(
+                `Could not save ${category.label}`,
+                false,
+                error instanceof Error
+                    ? error.message
+                    : 'Please try again. Your changes have been kept.',
+            );
+        } finally {
+            savingRef.current = false;
+            setSaving(false);
+        }
+    };
+
+    return (
+        <Card p={{ base: 'md', sm: 'lg' }} radius='md' withBorder>
+            <CategoryFormProvider form={form}>
+                <form onSubmit={form.onSubmit(handleSubmit)}>
+                    <Stack gap='xl'>
+                        <Group justify='space-between'>
+                            <Title order={3} size='h4'>
+                                {category.label}
+                            </Title>
+                            <Badge
+                                color={dirty ? 'yellow' : 'gray'}
+                                variant='light'
+                                role='status'
+                            >
+                                {saving
+                                    ? 'Saving changes'
+                                    : dirty
+                                      ? 'Unsaved changes'
+                                      : 'All changes saved'}
+                            </Badge>
+                        </Group>
+                        {sections[category.id].map((Section, index) => (
+                            <Box key={index}>
+                                {index > 0 && <Divider mb='xl' />}
+                                <Section />
+                            </Box>
+                        ))}
+                        <Divider />
+                        <Group justify='flex-end'>
+                            <Button
+                                type='button'
+                                variant='default'
+                                disabled={!dirty || saving}
+                                w={{ base: '100%', sm: 'auto' }}
+                                onClick={() => {
+                                    const saved = settingsFormValues(settings);
+                                    form.setValues(saved);
+                                    form.resetDirty(saved);
+                                    form.clearErrors();
+                                }}
+                            >
+                                Reset changes
+                            </Button>
+                            <Button
+                                type='submit'
+                                loading={saving}
+                                disabled={!dirty || saving}
+                                w={{ base: '100%', sm: 'auto' }}
+                            >
+                                Save changes
+                            </Button>
+                        </Group>
+                    </Stack>
+                </form>
+            </CategoryFormProvider>
+        </Card>
+    );
+}
 
 function isSettingsPath(pathname: string) {
     return pathname === '/settings' || pathname.startsWith('/settings/');
@@ -150,8 +368,7 @@ export default function SettingsPage() {
     );
 
     useEffect(() => {
-        if (!matchedCategory)
-            navigate('/settings/appearance', { replace: true });
+        if (!matchedCategory) navigate('/settings/general', { replace: true });
     }, [matchedCategory, navigate]);
 
     useEffect(() => {
@@ -159,7 +376,7 @@ export default function SettingsPage() {
     }, [category.id]);
 
     const header = (
-        <Container size='xl' mx={0} px={0} w='100%'>
+        <Container size='md' mx={0} px={0} w='100%'>
             <Stack gap={4}>
                 <Title order={2} size='h3'>
                     Settings / {category.label}
@@ -188,7 +405,7 @@ export default function SettingsPage() {
     if (!loaded) {
         return (
             <PageLayout header={header} label='Settings'>
-                <Container size='xl' mx={0} px={0} w='100%'>
+                <Container size='md' mx={0} px={0} w='100%'>
                     <Card padding='lg' radius='md'>
                         <Center py='xl'>
                             <Loader />
@@ -201,29 +418,30 @@ export default function SettingsPage() {
 
     return (
         <PageLayout header={header} label='Settings'>
-            <Container size='xl' mx={0} px={0} w='100%'>
+            <Container size='md' mx={0} px={0} w='100%'>
                 <SettingsDraftContext.Provider value={setDirty}>
-                    {/* Keep drafts in memory, including credentials, only while settings is open. */}
-                    {settingsCategories.map((item) => {
-                        const Section = sections[item.id];
-                        return (
-                            <Box
-                                component='fieldset'
-                                key={item.id}
-                                disabled={isSaving}
-                                display={
-                                    category.id === item.id ? 'block' : 'none'
-                                }
-                                m={0}
-                                p={0}
-                                style={{ border: 0, minWidth: 0 }}
-                            >
-                                <Card padding='md' radius='md' withBorder>
-                                    <Section />
-                                </Card>
-                            </Box>
-                        );
-                    })}
+                    <SettingsSavingContext.Provider value={isSaving}>
+                        {/* Keep drafts in memory, including credentials, only while settings is open. */}
+                        {settingsCategories.map((item) => {
+                            return (
+                                <Box
+                                    component='fieldset'
+                                    key={item.id}
+                                    disabled={isSaving}
+                                    display={
+                                        category.id === item.id
+                                            ? 'block'
+                                            : 'none'
+                                    }
+                                    m={0}
+                                    p={0}
+                                    style={{ border: 0, minWidth: 0 }}
+                                >
+                                    <CategoryForm category={item} />
+                                </Box>
+                            );
+                        })}
+                    </SettingsSavingContext.Provider>
                 </SettingsDraftContext.Provider>
             </Container>
             <Modal
@@ -291,35 +509,9 @@ function SectionHeader({ title, description }: SectionHeaderProps) {
 // --- Appearance & time formatting ---------------------------------------------
 
 function AppearanceSection() {
-    const { settings, saveSettings } = useAdminSettings();
-    const [saving, setSaving] = useState(false);
-
-    const form = useForm<AdminSettings['appearance']>({
-        initialValues: settings.appearance,
-        validate: schemaResolver(adminAppearanceSettingsSchema),
-        transformValues: (values) => ({
-            ...values,
-            dateFormat: 'DD MMM YYYY',
-            timezone: values.timezone.trim(),
-            currencyLabel: values.currencyLabel.trim(),
-        }),
-    });
-    useSettingsDraft('appearance', form.isDirty(), saving);
-
+    const form = useSectionForm('appearance');
     const values = form.values;
     const sample = new Date();
-
-    const handleSubmit = async (next: AdminSettings['appearance']) => {
-        setSaving(true);
-        const res = await saveSettings({ ...settings, appearance: next });
-        if (res.success) form.resetDirty(next);
-        setSaving(false);
-        notifySaved(
-            'Appearance saved',
-            res.success,
-            res.success ? undefined : res.message,
-        );
-    };
 
     return (
         <>
@@ -327,138 +519,80 @@ function AppearanceSection() {
                 title='Appearance & Time Formatting'
                 description='How dates, times and money are displayed across your console.'
             />
-            <form onSubmit={form.onSubmit(handleSubmit)}>
-                <Stack gap='md'>
-                    <Grid>
-                        <Grid.Col span={{ base: 12, sm: 6 }}>
-                            <Stack gap={4}>
-                                <Text size='sm' fw={500}>
-                                    Time format
-                                </Text>
-                                <SegmentedControl
-                                    fullWidth
-                                    aria-label='Time format'
-                                    styles={{ label: { whiteSpace: 'normal' } }}
-                                    data={[
-                                        {
-                                            label: '24-hour (14:30)',
-                                            value: '24h',
-                                        },
-                                        {
-                                            label: '12-hour (2:30 PM)',
-                                            value: '12h',
-                                        },
-                                    ]}
-                                    {...form.getInputProps('timeFormat')}
-                                />
-                            </Stack>
-                        </Grid.Col>
-                        <Grid.Col span={{ base: 12, sm: 6 }}>
-                            <TextInput
-                                label='Date format'
-                                description='How dates appear in tables and reports'
-                                pb='xs'
-                                value='DD MMM YYYY'
-                                readOnly
+            <Stack gap='md'>
+                <Grid>
+                    <Grid.Col span={{ base: 12, sm: 6 }}>
+                        <Stack gap={4}>
+                            <Text size='sm' fw={500}>
+                                Time format
+                            </Text>
+                            <SegmentedControl
+                                fullWidth
+                                aria-label='Time format'
+                                styles={{ label: { whiteSpace: 'normal' } }}
+                                data={[
+                                    {
+                                        label: '24-hour (14:30)',
+                                        value: '24h',
+                                    },
+                                    {
+                                        label: '12-hour (2:30 PM)',
+                                        value: '12h',
+                                    },
+                                ]}
+                                {...form.getInputProps('timeFormat')}
                             />
-                        </Grid.Col>
-                    </Grid>
-                    <Grid>
-                        <Grid.Col span={{ base: 12, sm: 6 }}>
-                            <Select
-                                label='Timezone'
-                                data={TIMEZONE_OPTIONS}
-                                searchable
-                                filter={fuseOptionsFilter}
-                                allowDeselect={false}
-                                description='Used to render all dates and times'
-                                {...form.getInputProps('timezone')}
-                            />
-                        </Grid.Col>
-                        <Grid.Col span={{ base: 12, sm: 6 }}>
-                            <TextInput
-                                label='Currency label'
-                                maxLength={12}
-                                description='Prefix shown before amounts'
-                                {...form.getInputProps('currencyLabel')}
-                            />
-                        </Grid.Col>
-                    </Grid>
-                    <Alert color='blue'>
-                        <Text size='sm'>
-                            Preview: {previewDateTime(sample, values)} ·{' '}
-                            {values.currencyLabel}{' '}
-                            {(1500).toLocaleString(undefined, {
-                                maximumFractionDigits: 2,
-                            })}
-                        </Text>
-                    </Alert>
-                    <Divider />
-                    <Group justify='flex-end'>
-                        <Button
-                            type='submit'
-                            loading={saving}
-                            w={{ base: '100%', sm: 'auto' }}
-                        >
-                            Save Appearance
-                        </Button>
-                    </Group>
-                </Stack>
-            </form>
+                        </Stack>
+                    </Grid.Col>
+                    <Grid.Col span={{ base: 12, sm: 6 }}>
+                        <TextInput
+                            label='Date format'
+                            description='How dates appear in tables and reports'
+                            pb='xs'
+                            value='DD MMM YYYY'
+                            readOnly
+                        />
+                    </Grid.Col>
+                </Grid>
+                <Grid>
+                    <Grid.Col span={{ base: 12, sm: 6 }}>
+                        <Select
+                            label='Timezone'
+                            data={TIMEZONE_OPTIONS}
+                            searchable
+                            filter={fuseOptionsFilter}
+                            allowDeselect={false}
+                            description='Used to render all dates and times'
+                            {...form.getInputProps('timezone')}
+                        />
+                    </Grid.Col>
+                    <Grid.Col span={{ base: 12, sm: 6 }}>
+                        <TextInput
+                            label='Currency label'
+                            maxLength={12}
+                            description='Prefix shown before amounts'
+                            {...form.getInputProps('currencyLabel')}
+                        />
+                    </Grid.Col>
+                </Grid>
+                <Alert color='blue'>
+                    <Text size='sm'>
+                        Preview: {previewDateTime(sample, values)} ·{' '}
+                        {values.currencyLabel}{' '}
+                        {(1500).toLocaleString(undefined, {
+                            maximumFractionDigits: 2,
+                        })}
+                    </Text>
+                </Alert>
+            </Stack>
         </>
     );
 }
 
 // --- Dashboard & interface defaults ---------------------------------------------
 
-interface DashboardForm {
-    usageRefreshSeconds: number;
-    defaultRangeDays: string;
-    perPage: string;
-}
-
 function DashboardSection() {
-    const { settings, saveSettings } = useAdminSettings();
-    const [saving, setSaving] = useState(false);
-
-    const form = useForm<DashboardForm>({
-        initialValues: {
-            usageRefreshSeconds: settings.dashboard.usageRefreshSeconds,
-            defaultRangeDays: String(settings.dashboard.defaultRangeDays),
-            perPage: String(settings.dashboard.perPage),
-        },
-        validate: {
-            usageRefreshSeconds: (v) =>
-                v >= 10 && v <= 600
-                    ? null
-                    : 'Must be between 10 and 600 seconds',
-        },
-    });
-
-    useSettingsDraft('dashboard', form.isDirty(), saving);
-
-    const handleSubmit = async (values: DashboardForm) => {
-        setSaving(true);
-        const res = await saveSettings({
-            ...settings,
-            dashboard: {
-                ...settings.dashboard,
-                usageRefreshSeconds: values.usageRefreshSeconds,
-                defaultRangeDays: Number(values.defaultRangeDays) as
-                    | 7
-                    | 30
-                    | 90,
-                perPage: Number(values.perPage) as 10 | 25 | 50 | 100,
-            },
-        });
-        if (res.success) form.resetDirty(values);
-        setSaving(false);
-        notifySaved(
-            'Dashboard defaults saved',
-            res.success,
-            res.success ? undefined : res.message,
-        );
-    };
+    const form = useSectionForm('dashboard');
 
     return (
         <>
@@ -466,90 +600,52 @@ function DashboardSection() {
                 title='Dashboard & Interface Defaults'
                 description='Refresh cadence and pagination defaults for your console pages.'
             />
-            <form onSubmit={form.onSubmit(handleSubmit)}>
-                <Stack gap='md' maw='62em'>
-                    <NumberInput
-                        label='Data auto-refresh (seconds)'
-                        description='How often dashboard, users, payments, sessions and other pages reload their data'
-                        min={10}
-                        max={600}
-                        step={5}
-                        {...form.getInputProps('usageRefreshSeconds')}
+            <Stack gap='md'>
+                <NumberInput
+                    label='Data auto-refresh (seconds)'
+                    description='How often dashboard, users, payments, sessions and other pages reload their data'
+                    min={10}
+                    max={600}
+                    step={5}
+                    {...form.getInputProps('usageRefreshSeconds')}
+                />
+
+                <Stack gap={4}>
+                    <Text size='sm' fw={500}>
+                        Default dashboard range
+                    </Text>
+                    <SegmentedControl
+                        fullWidth
+                        aria-label='Default dashboard range'
+                        data={[
+                            { label: '7 days', value: '7' },
+                            { label: '30 days', value: '30' },
+                            { label: '90 days', value: '90' },
+                        ]}
+                        {...form.getInputProps('defaultRangeDays')}
                     />
-
-                    <Stack gap={4}>
-                        <Text size='sm' fw={500}>
-                            Default dashboard range
-                        </Text>
-                        <SegmentedControl
-                            fullWidth
-                            aria-label='Default dashboard range'
-                            data={[
-                                { label: '7 days', value: '7' },
-                                { label: '30 days', value: '30' },
-                                { label: '90 days', value: '90' },
-                            ]}
-                            {...form.getInputProps('defaultRangeDays')}
-                        />
-                    </Stack>
-
-                    <Stack gap={4}>
-                        <Text size='sm' fw={500}>
-                            Table page size
-                        </Text>
-                        <SegmentedControl
-                            fullWidth
-                            aria-label='Table page size'
-                            data={['10', '25', '50', '100']}
-                            {...form.getInputProps('perPage')}
-                        />
-                    </Stack>
-
-                    <Divider />
-                    <Group justify='flex-end'>
-                        <Button
-                            type='submit'
-                            loading={saving}
-                            w={{ base: '100%', sm: 'auto' }}
-                        >
-                            Save Defaults
-                        </Button>
-                    </Group>
                 </Stack>
-            </form>
+
+                <Stack gap={4}>
+                    <Text size='sm' fw={500}>
+                        Table page size
+                    </Text>
+                    <SegmentedControl
+                        fullWidth
+                        aria-label='Table page size'
+                        data={['10', '25', '50', '100']}
+                        {...form.getInputProps('perPage')}
+                    />
+                </Stack>
+            </Stack>
         </>
     );
 }
 
 // --- Support contacts -------------------------------------------------------------
 
-type ContactsFormValues = AdminSettings['contacts'];
-
 function ContactsSection() {
-    const { settings, saveSettings } = useAdminSettings();
-    const [saving, setSaving] = useState(false);
-
-    const form = useForm<ContactsFormValues>({
-        initialValues: settings.contacts,
-        validate: schemaResolver(adminContactsSettingsSchema),
-        transformValues: (values) => ({
-            adminTel: values.adminTel.trim(),
-            adminWhatsapp: values.adminWhatsapp.trim(),
-        }),
-    });
-    useSettingsDraft('contacts', form.isDirty(), saving);
-
-    const handleSubmit = async (values: ContactsFormValues) => {
-        setSaving(true);
-        const res = await saveSettings({ ...settings, contacts: values });
-        if (res.success) form.resetDirty(values);
-        setSaving(false);
-        notifySaved(
-            'Contacts saved',
-            res.success,
-            res.success ? undefined : res.message,
-        );
-    };
+    const form = useSectionForm('contacts');
 
     return (
         <>
@@ -557,106 +653,42 @@ function ContactsSection() {
                 title='Support Contacts'
                 description='Phone and WhatsApp numbers customers see on the "Having Issues?" card in your hotspot and PPPoE portals.'
             />
-            <form onSubmit={form.onSubmit(handleSubmit)}>
-                <Stack gap='md'>
-                    <Grid>
-                        <Grid.Col span={{ base: 12, sm: 6 }}>
-                            <TextInput
-                                label='Support phone'
-                                description='Used for the "Call Admin" button (tel: link)'
-                                placeholder='+254712345678'
-                                inputMode='tel'
-                                {...form.getInputProps('adminTel')}
-                            />
-                        </Grid.Col>
-                        <Grid.Col span={{ base: 12, sm: 6 }}>
-                            <TextInput
-                                label='Support WhatsApp'
-                                description='International format starting with + for the "WhatsApp Admin" button'
-                                placeholder='+254712345678'
-                                inputMode='tel'
-                                {...form.getInputProps('adminWhatsapp')}
-                            />
-                        </Grid.Col>
-                    </Grid>
-                    <Alert icon={<TbInfoTriangle />}>
-                        <Text size='sm'>
-                            Leave a field empty to hide its button in the
-                            customer portals.
-                        </Text>
-                    </Alert>
-                    <Divider />
-                    <Group justify='flex-end'>
-                        <Button
-                            type='submit'
-                            loading={saving}
-                            w={{ base: '100%', sm: 'auto' }}
-                        >
-                            Save Contacts
-                        </Button>
-                    </Group>
-                </Stack>
-            </form>
+            <Stack gap='md'>
+                <Grid>
+                    <Grid.Col span={{ base: 12, sm: 6 }}>
+                        <TextInput
+                            label='Support phone'
+                            description='Used for the "Call Admin" button (tel: link)'
+                            placeholder='+254712345678'
+                            inputMode='tel'
+                            {...form.getInputProps('adminTel')}
+                        />
+                    </Grid.Col>
+                    <Grid.Col span={{ base: 12, sm: 6 }}>
+                        <TextInput
+                            label='Support WhatsApp'
+                            description='International format starting with + for the "WhatsApp Admin" button'
+                            placeholder='+254712345678'
+                            inputMode='tel'
+                            {...form.getInputProps('adminWhatsapp')}
+                        />
+                    </Grid.Col>
+                </Grid>
+                <Alert icon={<TbInfoTriangle />}>
+                    <Text size='sm'>
+                        Leave a field empty to hide its button in the customer
+                        portals.
+                    </Text>
+                </Alert>
+            </Stack>
         </>
     );
 }
 
 // --- Packages -----------------------------------------------------------------
 
-interface PackagesForm {
-    noExpiryValidityMonths: number | '';
-    pppoeConnectionFeeAmount: number | '';
-}
-
 function PackagesSection() {
-    const { settings, saveSettings } = useAdminSettings();
-    const [saving, setSaving] = useState(false);
-
-    const form = useForm<PackagesForm>({
-        initialValues: {
-            noExpiryValidityMonths:
-                settings.packages.noExpiryValidityMonths ?? '',
-            pppoeConnectionFeeAmount:
-                settings.packages.pppoeConnectionFeeAmount,
-        },
-        validate: {
-            noExpiryValidityMonths: (v) =>
-                v === '' || (Number.isInteger(v) && v >= 1 && v <= 120)
-                    ? null
-                    : 'Must be a whole number between 1 and 120 months',
-            pppoeConnectionFeeAmount: (value) =>
-                value === '' ||
-                (Number.isSafeInteger(value) && value >= 0 && value <= 99999999)
-                    ? null
-                    : 'Enter a whole Ksh amount between 0 and 99,999,999',
-        },
-    });
-
-    useSettingsDraft('packages', form.isDirty(), saving);
-
-    const handleSubmit = async (values: PackagesForm) => {
-        setSaving(true);
-        const res = await saveSettings({
-            ...settings,
-            packages: {
-                noExpiryValidityMonths:
-                    values.noExpiryValidityMonths === ''
-                        ? null
-                        : values.noExpiryValidityMonths,
-                pppoeConnectionFeeAmount:
-                    values.pppoeConnectionFeeAmount === ''
-                        ? 0
-                        : values.pppoeConnectionFeeAmount,
-            },
-        });
-        if (res.success) form.resetDirty(values);
-        setSaving(false);
-        notifySaved(
-            'Package settings saved',
-            res.success,
-            res.success ? undefined : res.message,
-        );
-    };
+    const form = useSectionForm('packages');
 
     return (
         <>
@@ -664,61 +696,47 @@ function PackagesSection() {
                 title='Packages'
                 description='Hotspot time-bank validity and PPPoE connection fees.'
             />
-            <form onSubmit={form.onSubmit(handleSubmit)}>
-                <Stack gap='md' maw='40em'>
-                    <NumberInput
-                        label='PPPoE connection fee (Ksh)'
-                        description='Added to the first successful PPPoE package purchase only. Returning customers, including those with free package activations, are exempt. Set to 0 to show "Free Installation".'
-                        min={0}
-                        max={99999999}
-                        clampBehavior='strict'
-                        thousandSeparator=','
-                        allowDecimal={false}
-                        allowNegative={false}
-                        onPaste={(event) => {
-                            const text = event.clipboardData
-                                .getData('text')
-                                .trim();
-                            const amount = Number(text.replaceAll(',', ''));
-                            if (
-                                !/^\d+(,\d{3})*$/.test(text) ||
-                                !Number.isSafeInteger(amount) ||
-                                amount > 99999999
-                            ) {
-                                event.preventDefault();
-                            }
-                        }}
-                        {...form.getInputProps('pppoeConnectionFeeAmount')}
-                    />
-                    <Divider />
-                    <NumberInput
-                        label='No Expiry validity window (months)'
-                        description='How long a hotspot "No Expiry" (time-bank) package stays usable after activation. The customer must consume the session-length time bank within this window. Leave empty to use the server default.'
-                        placeholder='Server default'
-                        min={1}
-                        max={120}
-                        step={1}
-                        {...form.getInputProps('noExpiryValidityMonths')}
-                    />
-                    <Alert icon={<TbInfoTriangle />}>
-                        <Text size='sm'>
-                            This only affects hotspot time-bank packages. PPPoE
-                            packages are always calendar-based: their session
-                            length is the validity window.
-                        </Text>
-                    </Alert>
-                    <Divider />
-                    <Group justify='flex-end'>
-                        <Button
-                            type='submit'
-                            loading={saving}
-                            w={{ base: '100%', sm: 'auto' }}
-                        >
-                            Save Package Settings
-                        </Button>
-                    </Group>
-                </Stack>
-            </form>
+            <Stack gap='md'>
+                <NumberInput
+                    label='PPPoE connection fee (Ksh)'
+                    description='Added to the first successful PPPoE package purchase only. Returning customers, including those with free package activations, are exempt. Set to 0 to show "Free Installation".'
+                    min={0}
+                    max={99999999}
+                    clampBehavior='strict'
+                    thousandSeparator=','
+                    allowDecimal={false}
+                    allowNegative={false}
+                    onPaste={(event) => {
+                        const text = event.clipboardData.getData('text').trim();
+                        const amount = Number(text.replaceAll(',', ''));
+                        if (
+                            !/^\d+(,\d{3})*$/.test(text) ||
+                            !Number.isSafeInteger(amount) ||
+                            amount > 99999999
+                        ) {
+                            event.preventDefault();
+                        }
+                    }}
+                    {...form.getInputProps('pppoeConnectionFeeAmount')}
+                />
+                <Divider />
+                <NumberInput
+                    label='No Expiry validity window (months)'
+                    description='How long a hotspot "No Expiry" (time-bank) package stays usable after activation. The customer must consume the session-length time bank within this window. Leave empty to use the server default.'
+                    placeholder='Server default'
+                    min={1}
+                    max={120}
+                    step={1}
+                    {...form.getInputProps('noExpiryValidityMonths')}
+                />
+                <Alert icon={<TbInfoTriangle />}>
+                    <Text size='sm'>
+                        This only affects hotspot time-bank packages. PPPoE
+                        packages are always calendar-based: their session length
+                        is the validity window.
+                    </Text>
+                </Alert>
+            </Stack>
         </>
     );
 }
@@ -726,25 +744,7 @@ function PackagesSection() {
 // --- PPPoE customer self-service --------------------------------------------
 
 function PppoeSection() {
-    const { settings, saveSettings } = useAdminSettings();
-    const [saving, setSaving] = useState(false);
-
-    const form = useForm<AdminSettings['pppoe']>({
-        initialValues: settings.pppoe,
-    });
-    useSettingsDraft('pppoe', form.isDirty(), saving);
-
-    const handleSubmit = async (values: AdminSettings['pppoe']) => {
-        setSaving(true);
-        const res = await saveSettings({ ...settings, pppoe: values });
-        if (res.success) form.resetDirty(values);
-        setSaving(false);
-        notifySaved(
-            'PPPoE settings saved',
-            res.success,
-            res.success ? undefined : res.message,
-        );
-    };
+    const form = useSectionForm('pppoe');
 
     return (
         <>
@@ -752,256 +752,191 @@ function PppoeSection() {
                 title='PPPoE Customer Self-Service'
                 description='Control whether customers can access their PPPoE passwords in the portal.'
             />
-            <form onSubmit={form.onSubmit(handleSubmit)}>
-                <Stack gap='md' maw='48em'>
-                    <Switch
-                        label='Show PPPoE passwords to customers'
-                        description='When enabled, customers can reveal, copy, and rotate their PPPoE password. Passwords remain hidden by default.'
-                        {...form.getInputProps('showPasswordsInPortal', {
-                            type: 'checkbox',
-                        })}
-                    />
-                    <Alert icon={<TbInfoTriangle />} color='orange'>
-                        <Text size='sm'>
-                            Enable this only when customers need password
-                            self-service. Anyone with portal access could copy
-                            the credential and use it to connect to your
-                            network.
-                        </Text>
-                    </Alert>
-                    <Divider />
-                    <Group justify='flex-end'>
-                        <Button
-                            type='submit'
-                            loading={saving}
-                            w={{ base: '100%', sm: 'auto' }}
-                        >
-                            Save PPPoE Settings
-                        </Button>
-                    </Group>
-                </Stack>
-            </form>
+            <Stack gap='md'>
+                <Switch
+                    label='Show PPPoE passwords to customers'
+                    description='When enabled, customers can reveal, copy, and rotate their PPPoE password. Passwords remain hidden by default.'
+                    {...form.getInputProps('showPasswordsInPortal', {
+                        type: 'checkbox',
+                    })}
+                />
+                <Alert icon={<TbInfoTriangle />} color='orange'>
+                    <Text size='sm'>
+                        Enable this only when customers need password
+                        self-service. Anyone with portal access could copy the
+                        credential and use it to connect to your network.
+                    </Text>
+                </Alert>
+            </Stack>
         </>
     );
 }
 
 // --- M-Pesa payments -------------------------------------------------------------
 
-type MpesaFormValues = AdminSettings['mpesa'];
-
 function MpesaSection() {
-    const { settings, saveSettings } = useAdminSettings();
-    const [saving, setSaving] = useState(false);
-
-    const form = useForm<MpesaFormValues>({
-        initialValues: settings.mpesa,
-        validate: schemaResolver(adminMpesaSettingsSchema),
-        transformValues: (values) => ({
-            ...values,
-            consumerKey: values.consumerKey.trim(),
-            shortcode: values.shortcode.trim(),
-            tillNumber: values.tillNumber.trim(),
-            initiatorName: values.initiatorName.trim(),
-            certificatePath: values.certificatePath.trim(),
-        }),
-    });
-    useSettingsDraft('mpesa', form.isDirty(), saving);
-
-    const handleSubmit = async (values: MpesaFormValues) => {
-        setSaving(true);
-        const res = await saveSettings({ ...settings, mpesa: values });
-        if (res.success) form.resetDirty(values);
-        setSaving(false);
-        notifySaved(
-            'M-Pesa settings saved',
-            res.success,
-            res.success ? undefined : res.message,
-        );
-    };
+    const form = useSectionForm('mpesa');
 
     const own = form.values.useOwnCredentials;
-    const transactionType = form.useWatchValue('transactionType');
+    const transactionType = form.values.transactionType;
 
     return (
         <>
             <SectionHeader
-                title='M-Pesa Payments'
+                title='M-Pesa Credentials'
                 description='Credentials used for payments made through the NAS devices you own.'
             />
-            <form onSubmit={form.onSubmit(handleSubmit)}>
-                <Stack gap='md'>
-                    <Divider label='Payment Setup' labelPosition='left' />
-                    <Switch
-                        label='Use my own M-Pesa credentials'
-                        description='When off, the server-wide M-Pesa configuration is used for your payments.'
-                        {...form.getInputProps('useOwnCredentials', {
-                            type: 'checkbox',
-                        })}
-                    />
-                    {own ? (
-                        <>
-                            <Grid>
-                                <Grid.Col span={{ base: 12, sm: 6 }}>
-                                    <Stack gap={4}>
-                                        <Text size='sm' fw={500}>
-                                            Environment
-                                        </Text>
-                                        <SegmentedControl
-                                            fullWidth
-                                            aria-label='M-Pesa environment'
-                                            data={[
-                                                {
-                                                    label: 'Production',
-                                                    value: 'production',
-                                                },
-                                                {
-                                                    label: 'Sandbox',
-                                                    value: 'sandbox',
-                                                },
-                                            ]}
-                                            {...form.getInputProps(
-                                                'environment',
-                                            )}
-                                        />
-                                    </Stack>
-                                </Grid.Col>
-                                <Grid.Col span={{ base: 12, sm: 6 }}>
-                                    <Select
-                                        label='Transaction type'
-                                        description='Choose whether customers pay a PayBill or Buy Goods till'
+            <Stack gap='md'>
+                <Divider label='Payment Setup' labelPosition='left' />
+                <Switch
+                    label='Use my own M-Pesa credentials'
+                    description='When off, the server-wide M-Pesa configuration is used for your payments.'
+                    {...form.getInputProps('useOwnCredentials', {
+                        type: 'checkbox',
+                    })}
+                />
+                {own ? (
+                    <>
+                        <Grid>
+                            <Grid.Col span={{ base: 12, sm: 6 }}>
+                                <Stack gap={4}>
+                                    <Text size='sm' fw={500}>
+                                        Environment
+                                    </Text>
+                                    <SegmentedControl
+                                        fullWidth
+                                        aria-label='M-Pesa environment'
                                         data={[
                                             {
-                                                label: 'Paybill (CustomerPayBillOnline)',
-                                                value: 'CustomerPayBillOnline',
+                                                label: 'Production',
+                                                value: 'production',
                                             },
                                             {
-                                                label: 'Till (CustomerBuyGoodsOnline)',
-                                                value: 'CustomerBuyGoodsOnline',
+                                                label: 'Sandbox',
+                                                value: 'sandbox',
                                             },
                                         ]}
-                                        allowDeselect={false}
-                                        {...form.getInputProps(
-                                            'transactionType',
-                                        )}
+                                        {...form.getInputProps('environment')}
                                     />
-                                </Grid.Col>
-                            </Grid>
-                            <Divider label='Credentials' labelPosition='left' />
-                            <Grid>
+                                </Stack>
+                            </Grid.Col>
+                            <Grid.Col span={{ base: 12, sm: 6 }}>
+                                <Select
+                                    label='Transaction type'
+                                    description='Choose whether customers pay a PayBill or Buy Goods till'
+                                    data={[
+                                        {
+                                            label: 'Paybill (CustomerPayBillOnline)',
+                                            value: 'CustomerPayBillOnline',
+                                        },
+                                        {
+                                            label: 'Till (CustomerBuyGoodsOnline)',
+                                            value: 'CustomerBuyGoodsOnline',
+                                        },
+                                    ]}
+                                    allowDeselect={false}
+                                    {...form.getInputProps('transactionType')}
+                                />
+                            </Grid.Col>
+                        </Grid>
+                        <Divider label='Credentials' labelPosition='left' />
+                        <Grid>
+                            <Grid.Col span={{ base: 12, sm: 6 }}>
+                                <TextInput
+                                    label='Consumer Key'
+                                    description='From your Safaricom Developer Portal app'
+                                    placeholder='e.g. 7sbAVvNyG8u...'
+                                    {...form.getInputProps('consumerKey')}
+                                />
+                            </Grid.Col>
+                            <Grid.Col span={{ base: 12, sm: 6 }}>
+                                <PasswordInput
+                                    label='Consumer Secret'
+                                    description='Paired with the consumer key for API auth'
+                                    placeholder='Your app consumer secret'
+                                    {...form.getInputProps('consumerSecret')}
+                                />
+                            </Grid.Col>
+                        </Grid>
+                        <Grid>
+                            <Grid.Col span={{ base: 12, sm: 6 }}>
+                                <TextInput
+                                    label='Organization Shortcode'
+                                    description={
+                                        transactionType ===
+                                        'CustomerBuyGoodsOnline'
+                                            ? 'Business shortcode provided by M-Pesa for API authentication'
+                                            : 'PayBill business number customers pay to'
+                                    }
+                                    placeholder='e.g. 174379'
+                                    inputMode='numeric'
+                                    {...form.getInputProps('shortcode')}
+                                />
+                            </Grid.Col>
+                            {transactionType === 'CustomerBuyGoodsOnline' && (
                                 <Grid.Col span={{ base: 12, sm: 6 }}>
                                     <TextInput
-                                        label='Consumer Key'
-                                        description='From your Safaricom Developer Portal app'
-                                        placeholder='e.g. 7sbAVvNyG8u...'
-                                        {...form.getInputProps('consumerKey')}
-                                    />
-                                </Grid.Col>
-                                <Grid.Col span={{ base: 12, sm: 6 }}>
-                                    <PasswordInput
-                                        label='Consumer Secret'
-                                        description='Paired with the consumer key for API auth'
-                                        placeholder='Your app consumer secret'
-                                        {...form.getInputProps(
-                                            'consumerSecret',
-                                        )}
-                                    />
-                                </Grid.Col>
-                            </Grid>
-                            <Grid>
-                                <Grid.Col span={{ base: 12, sm: 6 }}>
-                                    <TextInput
-                                        label='Organization Shortcode'
-                                        description={
-                                            transactionType ===
-                                            'CustomerBuyGoodsOnline'
-                                                ? 'Business shortcode provided by M-Pesa for API authentication'
-                                                : 'PayBill business number customers pay to'
-                                        }
+                                        label='Till Number'
+                                        description='Buy Goods till number customers pay to'
                                         placeholder='e.g. 174379'
                                         inputMode='numeric'
-                                        {...form.getInputProps('shortcode')}
+                                        {...form.getInputProps('tillNumber')}
                                     />
                                 </Grid.Col>
-                                {transactionType ===
-                                    'CustomerBuyGoodsOnline' && (
-                                    <Grid.Col span={{ base: 12, sm: 6 }}>
-                                        <TextInput
-                                            label='Till Number'
-                                            description='Buy Goods till number customers pay to'
-                                            placeholder='e.g. 174379'
-                                            inputMode='numeric'
-                                            {...form.getInputProps(
-                                                'tillNumber',
-                                            )}
-                                        />
-                                    </Grid.Col>
-                                )}
-                                <Grid.Col span={{ base: 12, sm: 6 }}>
-                                    <PasswordInput
-                                        label='Passkey'
-                                        description='Lipa Na M-Pesa Online passkey used to sign STK push requests'
-                                        placeholder='Lipa Na M-Pesa Online passkey'
-                                        {...form.getInputProps('passkey')}
-                                    />
-                                </Grid.Col>
-                            </Grid>
-                            <Divider
-                                label='Receipt verification (optional)'
-                                labelPosition='left'
-                            />
-                            <Text size='xs' c='dimmed'>
-                                Only needed for the Transaction Status API —
-                                verifying M-Pesa receipt codes customers paste
-                                in. STK push works without them.
-                            </Text>
-                            <Grid>
-                                <Grid.Col span={{ base: 12, sm: 6 }}>
-                                    <TextInput
-                                        label='Initiator Name'
-                                        description='Operator user configured in the M-Pesa portal'
-                                        placeholder='e.g. apiop37'
-                                        {...form.getInputProps('initiatorName')}
-                                    />
-                                </Grid.Col>
-                                <Grid.Col span={{ base: 12, sm: 6 }}>
-                                    <PasswordInput
-                                        label='Initiator Password'
-                                        description='Security credential for the Transaction Status API'
-                                        placeholder='Security credential'
-                                        {...form.getInputProps(
-                                            'initiatorPassword',
-                                        )}
-                                    />
-                                </Grid.Col>
-                            </Grid>
-                            <TextInput
-                                label='Certificate path (optional)'
-                                description='Absolute path on the API server to a PEM/.cer certificate. Defaults to the bundled Safaricom certificate for the selected environment.'
-                                placeholder='/etc/radii/mpesa-cert.cer'
-                                {...form.getInputProps('certificatePath')}
-                            />
-                        </>
-                    ) : (
-                        <Alert icon={<TbInfoTriangle />}>
-                            <Text size='sm'>
-                                Using the server-wide M-Pesa configuration.
-                                Payments through your NAS devices will charge
-                                the till configured by the server operator.
-                            </Text>
-                        </Alert>
-                    )}
-                    <Divider />
-                    <Group justify='flex-end'>
-                        <Button
-                            type='submit'
-                            loading={saving}
-                            w={{ base: '100%', sm: 'auto' }}
-                        >
-                            Save M-Pesa Settings
-                        </Button>
-                    </Group>
-                </Stack>
-            </form>
+                            )}
+                            <Grid.Col span={{ base: 12, sm: 6 }}>
+                                <PasswordInput
+                                    label='Passkey'
+                                    description='Lipa Na M-Pesa Online passkey used to sign STK push requests'
+                                    placeholder='Lipa Na M-Pesa Online passkey'
+                                    {...form.getInputProps('passkey')}
+                                />
+                            </Grid.Col>
+                        </Grid>
+                        <Divider
+                            label='Receipt verification (optional)'
+                            labelPosition='left'
+                        />
+                        <Text size='xs' c='dimmed'>
+                            Only needed for the Transaction Status API —
+                            verifying M-Pesa receipt codes customers paste in.
+                            STK push works without them.
+                        </Text>
+                        <Grid>
+                            <Grid.Col span={{ base: 12, sm: 6 }}>
+                                <TextInput
+                                    label='Initiator Name'
+                                    description='Operator user configured in the M-Pesa portal'
+                                    placeholder='e.g. apiop37'
+                                    {...form.getInputProps('initiatorName')}
+                                />
+                            </Grid.Col>
+                            <Grid.Col span={{ base: 12, sm: 6 }}>
+                                <PasswordInput
+                                    label='Initiator Password'
+                                    description='Security credential for the Transaction Status API'
+                                    placeholder='Security credential'
+                                    {...form.getInputProps('initiatorPassword')}
+                                />
+                            </Grid.Col>
+                        </Grid>
+                        <TextInput
+                            label='Certificate path (optional)'
+                            description='Absolute path on the API server to a PEM/.cer certificate. Defaults to the bundled Safaricom certificate for the selected environment.'
+                            placeholder='/etc/radii/mpesa-cert.cer'
+                            {...form.getInputProps('certificatePath')}
+                        />
+                    </>
+                ) : (
+                    <Alert icon={<TbInfoTriangle />}>
+                        <Text size='sm'>
+                            Using the server-wide M-Pesa configuration. Payments
+                            through your NAS devices will charge the till
+                            configured by the server operator.
+                        </Text>
+                    </Alert>
+                )}
+            </Stack>
         </>
     );
 }
