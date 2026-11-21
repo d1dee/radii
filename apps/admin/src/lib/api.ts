@@ -1267,6 +1267,10 @@ export type AdminReports = {
         failed: number;
         revenue: number;
     }>;
+    revenueTimeline: {
+        unit: 'minute' | 'hour' | 'day' | 'week';
+        items: Array<{ start: string; hotspot: number; pppoe: number }>;
+    };
     packageRevenue: Array<{
         packageId: string;
         title: string;

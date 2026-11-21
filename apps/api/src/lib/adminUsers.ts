@@ -56,6 +56,7 @@ import { bankSessionUsage } from './radius/bankUsage';
 import { paymentService } from './payments';
 import { concisePaymentFailure } from './payments/types';
 import { nasThroughputRanges, type NasThroughputRange } from './nasThroughput';
+import { reportRevenueBuckets } from './reportRevenueBuckets';
 import {
     nasAddressClaims,
     scopedNasHistoryAddress,
@@ -2286,6 +2287,26 @@ export async function getAdminReports(
         scopedToAdminNas(adminId),
     );
 
+    const revenueTimeline = reportRevenueBuckets(from, to);
+    const revenueBucket = sql<number>`floor((extract(epoch from ${packagePayments.createdAt}) * 1000 - ${from.getTime()}::numeric) / ${revenueTimeline.bucketMs}::numeric)::int`;
+    const revenueRows = await db.select({
+        bucket: revenueBucket.as('revenue_bucket'),
+        hotspot: sql<number>`coalesce(sum(${packagePayments.amount}) filter (where ${packages.type} = 'hotspot'), 0)::float8`,
+        pppoe: sql<number>`coalesce(sum(${packagePayments.amount}) filter (where ${packages.type} = 'pppoe'), 0)::float8`,
+    })
+        .from(packagePayments)
+        .innerJoin(packages, eq(packagePayments.packageId, packages.id))
+        .innerJoin(nasDevice, eq(packagePayments.nasDeviceId, nasDevice.id))
+        .where(and(inRange, eq(packagePayments.status, 'paid')))
+        .groupBy(sql`revenue_bucket`);
+    for (const row of revenueRows) {
+        const bucket = revenueTimeline.items[Number(row.bucket)];
+        if (bucket) {
+            bucket.hotspot = Number(row.hotspot);
+            bucket.pppoe = Number(row.pppoe);
+        }
+    }
+
     const daily = await db
         .select({
             day: sql<string>`to_char(${packagePayments.createdAt}, 'YYYY-MM-DD')`,
@@ -2527,6 +2548,10 @@ export async function getAdminReports(
             failed: Number(d.failed),
             revenue: Number(d.revenue),
         })),
+        revenueTimeline: {
+            unit: revenueTimeline.unit,
+            items: revenueTimeline.items,
+        },
         packageRevenue,
         topPackages: {
             total: packageRevenue.length,
