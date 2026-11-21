@@ -28,6 +28,7 @@ import { MdChevronLeft, MdChevronRight, MdRefresh } from 'react-icons/md';
 import { PageLayout } from '@/components/Layout/PageLayout';
 import { PageTableScrollContainer } from '@/components/PageTableScrollContainer';
 import { RevenueCharts } from '@/components/RevenueCharts';
+import { RevenueTimelineChart } from '@/components/RevenueTimelineChart';
 import { ThroughputChart } from '@/components/Sessions/ThroughputChart';
 import { TablePagination } from '@/components/TablePagination';
 import {
@@ -518,7 +519,13 @@ export default function DashboardPage() {
                 </Center>
             ) : !reports ? null : (
                 <>
-                    <RevenueCharts packages={reports.packageRevenue} />
+                    <Stack gap='md' miw={0}>
+                        <RevenueTimelineChart
+                            timeline={reports.revenueTimeline}
+                            hasPaidPurchases={reports.packageRevenue.length > 0}
+                        />
+                        <RevenueCharts packages={reports.packageRevenue} />
+                    </Stack>
                     <Grid>
                         <Grid.Col span={{ base: 12, lg: 8 }}>
                             <Card withBorder padding='md' h='100%'>

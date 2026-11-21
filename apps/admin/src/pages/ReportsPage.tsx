@@ -1,4 +1,4 @@
-import { AreaChart, BarChart, DonutChart } from '@mantine/charts';
+import { AreaChart, DonutChart } from '@mantine/charts';
 import {
     Badge,
     Button,
@@ -22,6 +22,7 @@ import { PageTableScrollContainer } from '@/components/PageTableScrollContainer'
 import { ArchivedPackageBadge } from '@/components/Packages/ArchivedPackageBadge';
 import { TablePagination } from '@/components/TablePagination';
 import { RevenueCharts } from '@/components/RevenueCharts';
+import { RevenueTimelineChart } from '@/components/RevenueTimelineChart';
 import { getAdminReports, type AdminReports } from '@/lib/api';
 import { useAutoRefresh } from '@/lib/autoRefresh';
 import { warnBackgroundFailure } from '@/lib/clientError';
@@ -218,14 +219,6 @@ export default function ReportsPage() {
           ]
         : [];
 
-    const serviceRevenue = { hotspot: 0, pppoe: 0 };
-    for (const bucket of reports?.revenueTimeline.items ?? []) {
-        serviceRevenue.hotspot += bucket.hotspot;
-        serviceRevenue.pppoe += bucket.pppoe;
-    }
-    const revenueTickFormat = reports?.revenueTimeline.unit === 'minute'
-        || reports?.revenueTimeline.unit === 'hour' ? 'HH:mm' : 'DD MMM YYYY';
-
     return (
         <PageLayout
             label='Reports page content'
@@ -304,47 +297,10 @@ export default function ReportsPage() {
                         />
                     </SimpleGrid>
                     <Stack gap='md' miw={0}>
-                        <Card withBorder padding='md' miw={0}>
-                            <Text fw={600}>Hotspot and PPPoE earnings</Text>
-                            <Text size='xs' c='dimmed' mb='sm'>
-                                Paid earnings per {reports.revenueTimeline.unit} in the selected range.
-                            </Text>
-                            <Group gap='lg' mb='sm'>
-                                <Text size='sm' c='teal.6' fw={600}>
-                                    Hotspot: {formatMoney(serviceRevenue.hotspot)}
-                                </Text>
-                                <Text size='sm' c='blue.6' fw={600}>
-                                    PPPoE: {formatMoney(serviceRevenue.pppoe)}
-                                </Text>
-                            </Group>
-                            {reports.packageRevenue.length === 0 ? (
-                                <Text size='sm' c='dimmed' py='xl'>
-                                    No paid purchases in this range.
-                                </Text>
-                            ) : (
-                                <BarChart
-                                    h={280}
-                                    data={reports.revenueTimeline.items}
-                                    dataKey='start'
-                                    series={[
-                                        { name: 'hotspot', label: 'Hotspot', color: 'teal.6' },
-                                        { name: 'pppoe', label: 'PPPoE', color: 'blue.6' },
-                                    ]}
-                                    withLegend
-                                    valueFormatter={formatMoney}
-                                    xAxisProps={{
-                                        tickFormatter: (value: string) => dayjs(value).format(revenueTickFormat),
-                                        minTickGap: 30,
-                                    }}
-                                    tooltipProps={{
-                                        labelFormatter: (value) => dayjs(String(value)).format('DD MMM YYYY HH:mm'),
-                                    }}
-                                    yAxisProps={{ width: 90, domain: [0, 'auto'] }}
-                                    maxBarWidth={80}
-                                    barChartProps={{ accessibilityLayer: true }}
-                                />
-                            )}
-                        </Card>
+                        <RevenueTimelineChart
+                            timeline={reports.revenueTimeline}
+                            hasPaidPurchases={reports.packageRevenue.length > 0}
+                        />
                         <RevenueCharts packages={reports.packageRevenue} />
                         <RevenueCharts packages={reports.packageRevenue} detail />
                         <Grid>
