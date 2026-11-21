@@ -1124,6 +1124,8 @@ export function provisionPppoeAccount(body: {
     phoneNumber: string;
     nasDeviceId: string;
     label?: string;
+    name?: string;
+    location?: string;
 }) {
     return request<ProvisionedPppoeAccount>(
         '/admin/pppoe-accounts/provision',

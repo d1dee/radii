@@ -1114,6 +1114,8 @@ const provisionPppoeSchema = z.object({
     // network's packages.
     nasDeviceId: z.uuid(),
     label: z.string().trim().max(80).optional(),
+    name: z.string().trim().max(80).optional(),
+    location: z.string().trim().max(120).optional(),
 });
 
 app.post('/pppoe-accounts/provision', requireAdmin, async (c) => {
@@ -1134,6 +1136,7 @@ app.post('/pppoe-accounts/provision', requireAdmin, async (c) => {
             parsed.data.nasDeviceId,
             parsed.data.phoneNumber,
             parsed.data.label,
+            { name: parsed.data.name, location: parsed.data.location },
         );
         return c.json(
             {

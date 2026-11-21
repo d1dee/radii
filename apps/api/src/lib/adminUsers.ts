@@ -854,11 +854,13 @@ export async function listAdminUsers(opts: ListAdminUsersOpts) {
                 ilike(pppoeServiceAccounts.normalizedPhone, q),
                 ilike(pppoeServiceAccounts.username, q),
                 ilike(pppoeServiceAccounts.label, q),
+                ilike(pppoeServiceAccounts.customerName, q),
+                ilike(pppoeServiceAccounts.location, q),
             )!,
         );
     }
     const pendingWhere = and(...pendingConditions);
-    const pendingName = sql<string>`coalesce(${pppoeServiceAccounts.label}, ${pppoeServiceAccounts.normalizedPhone})`;
+    const pendingName = sql<string>`coalesce(${pppoeServiceAccounts.customerName}, ${pppoeServiceAccounts.normalizedPhone})`;
     const candidates = unionAll(
         db
             .select({
@@ -1027,7 +1029,7 @@ export async function listAdminUsers(opts: ListAdminUsersOpts) {
                     ? {
                           id: account.id,
                           pendingClaim: true as const,
-                          name: account.label ?? account.normalizedPhone,
+                          name: account.customerName ?? account.normalizedPhone,
                           email: null as string | null,
                           phoneNumber: account.normalizedPhone,
                           image: null as string | null,
@@ -1040,7 +1042,9 @@ export async function listAdminUsers(opts: ListAdminUsersOpts) {
                           payments: emptyPayments,
                           activations: emptyActivations,
                           lastPaymentAt: null as Date | null,
-                          tag: null as UserAdminTag | null,
+                          tag: account.location?.trim()
+                              ? { name: null, location: account.location.trim() } as UserAdminTag
+                              : null as UserAdminTag | null,
                           pppoe: {
                               username: account.username,
                               label: account.label,
