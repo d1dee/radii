@@ -38,6 +38,8 @@
 
 import type { PageSize } from '@radii/shared';
 import dayjs from 'dayjs';
+import timezone from 'dayjs/plugin/timezone';
+import utc from 'dayjs/plugin/utc';
 import {
     and,
     asc,
@@ -106,6 +108,9 @@ import { portalStatusIsVisible, sessionRemainingSeconds } from './sessionStatus'
 import { additionalBankTime, bankSessionTimeout, bankSessionUsage } from './bankUsage';
 import { summarizeSessionsInRange } from './networkUsage';
 import { recordAccountingUsage } from './usageLedger';
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
 
 const logger = apiLogger.getChild('radius');
 const PPPOE_EXPIRED_PROFILE = 'radii-ppp-expired';
@@ -2846,6 +2851,7 @@ export class RadiusClient {
                     this.sessionInfoFromRow(row),
                     rateLimit,
                     opts.adminId,
+                    tx,
                 );
                 if (!acknowledged)
                     return { ok: false, message: 'NAS answered CoA-NAK' };
@@ -3406,13 +3412,23 @@ export class RadiusClient {
                 : pkg.fairUsageWindowUnit === 'weeks'
                   ? 'week'
                   : 'month';
-        const anchor = dayjs(activation.activatedAt);
-        const elapsed = dayjs(now).diff(anchor, unit, true);
+        // Do calendar arithmetic on UTC copies of the EAT dates so the host's
+        // daylight-saving transitions cannot shift the midnight boundaries.
+        const anchor = dayjs.utc(dayjs(activation.activatedAt).tz('Africa/Nairobi').format('YYYY-MM-DD'));
+        const current = dayjs.utc(dayjs(now).tz('Africa/Nairobi').format('YYYY-MM-DD'));
+        // Month-end boundaries clamp to the last day of shorter months.
+        const elapsed = unit === 'month'
+            ? (current.year() - anchor.year()) * 12 + current.month() - anchor.month()
+            : current.diff(anchor, unit, true);
         const periods = Math.max(
             0,
             Math.floor(elapsed / pkg.fairUsageWindowValue),
         );
-        return anchor.add(periods * pkg.fairUsageWindowValue, unit).toDate();
+        let windowStart = anchor.add(periods * pkg.fairUsageWindowValue, unit);
+        if (periods > 0 && windowStart.isAfter(current)) {
+            windowStart = anchor.add((periods - 1) * pkg.fairUsageWindowValue, unit);
+        }
+        return dayjs.tz(windowStart.format('YYYY-MM-DD'), 'Africa/Nairobi').toDate();
     }
 
     private async fairUsageState(
@@ -3520,6 +3536,9 @@ export class RadiusClient {
                     gte(activatedPackages.expireAt, new Date()),
                     or(
                         gt(packages.fairUsageLimit, 0),
+                        isNotNull(activatedPackages.fupEffectiveRateLimit),
+                        // Even disabled policies can have a late Accounting-Start
+                        // for a session authorized with the old throttled tier.
                         exists(
                             db
                                 .select({ one: sql`1` })
@@ -3529,7 +3548,6 @@ export class RadiusClient {
                                         sql`${radacct.class} = ${activatedPackages.id}::text`,
                                         isNull(radacct.acctstoptime),
                                         isNotNull(radacct.acctstarttime),
-                                        isNotNull(radacct.fupRateLimit),
                                     ),
                                 ),
                         ),
@@ -3550,9 +3568,108 @@ export class RadiusClient {
                     username,
                     activationId: row.activation.id,
                     liveOnly: true,
+                    limit: null,
                 });
                 const enabled = row.pkg.fairUsageLimit > 0;
-                if (!enabled) {
+                const sharedState =
+                    !enabled || row.pkg.fairUsageWindowUnit === 'session'
+                        ? null
+                        : await this.fairUsageState(row.activation, row.pkg);
+
+                let reconciliationFailed = false;
+                for (const cachedSession of sessions) {
+                    try {
+                        // Usage capture uses its own transaction. Do not reserve a
+                        // session transaction connection while waiting for it.
+                        const state = enabled
+                            ? (sharedState ?? await this.fairUsageState(
+                                row.activation, row.pkg, cachedSession,
+                            ))
+                            : null;
+                        touched += await db.transaction(async (tx) => {
+                            await tx.execute(
+                                sql`select pg_advisory_xact_lock(hashtext(${`fup-session:${cachedSession.radacctId}`}))`,
+                            );
+                            const [current] = await tx
+                                .select()
+                                .from(radacct)
+                                .where(
+                                    and(
+                                        eq(
+                                            radacct.radacctid,
+                                            BigInt(cachedSession.radacctId),
+                                        ),
+                                        isNull(radacct.acctstoptime),
+                                        isNotNull(radacct.acctstarttime),
+                                    ),
+                                )
+                                .limit(1);
+                            if (!current) return 0;
+                            const session = this.sessionInfoFromRow(current);
+                            const rateLimit =
+                                session.fupForced &&
+                                !manualFairUsageAvailable(row.pkg)
+                                    ? (session.fupRateLimit ??
+                                      this.rateLimitValue(row.pkg, true))
+                                    : this.rateLimitValue(
+                                          row.pkg,
+                                          effectiveFairUsageThrottled(
+                                              state?.throttled ?? false,
+                                              session.fupForced,
+                                          ),
+                                      );
+                            // A missing checkpoint is unknown: authorization may have
+                            // installed a different tier before a reset or package edit.
+                            if (enabled) {
+                                if (
+                                    session.fupRateLimit === rateLimit &&
+                                    session.fupWindowStart?.getTime() ===
+                                        state!.windowStart.getTime()
+                                ) {
+                                    return 0;
+                                }
+                            } else if (session.fupRateLimit === rateLimit) {
+                                return 0;
+                            }
+
+                            const acknowledged = await this.coaRateLimit(
+                                username,
+                                session,
+                                rateLimit,
+                                undefined,
+                                tx,
+                            );
+                            if (!acknowledged) {
+                                reconciliationFailed = true;
+                                return 0;
+                            }
+                            await tx
+                                .update(radacct)
+                                .set({
+                                    fupWindowStart: state?.windowStart ?? null,
+                                    fupRateLimit: rateLimit,
+                                    fupUsedBytes: state?.usedBytes ?? 0,
+                                    fupThresholdReached: state?.throttled ?? false,
+                                    fupEvaluatedAt: new Date(),
+                                })
+                                .where(
+                                    eq(
+                                        radacct.radacctid,
+                                        BigInt(session.radacctId),
+                                    ),
+                                );
+                            return 1;
+                        });
+                    } catch (err) {
+                        reconciliationFailed = true;
+                        logger.error('Fair-usage session reconciliation failed', {
+                            activationId: row.activation.id,
+                            radacctId: cachedSession.radacctId,
+                            error: err,
+                        });
+                    }
+                }
+                if (!enabled && !reconciliationFailed) {
                     await db
                         .update(activatedPackages)
                         .set({
@@ -3563,124 +3680,6 @@ export class RadiusClient {
                             fupEvaluatedAt: new Date(),
                         })
                         .where(eq(activatedPackages.id, row.activation.id));
-                }
-                if (!enabled && sessions.every((s) => s.fupRateLimit === null)) {
-                    continue;
-                }
-                const sharedState =
-                    !enabled || row.pkg.fairUsageWindowUnit === 'session'
-                        ? null
-                        : await this.fairUsageState(row.activation, row.pkg);
-
-                for (const cachedSession of sessions) {
-                    touched += await db.transaction(async (tx) => {
-                        await tx.execute(
-                            sql`select pg_advisory_xact_lock(hashtext(${`fup-session:${cachedSession.radacctId}`}))`,
-                        );
-                        const [current] = await tx
-                            .select()
-                            .from(radacct)
-                            .where(
-                                and(
-                                    eq(
-                                        radacct.radacctid,
-                                        BigInt(cachedSession.radacctId),
-                                    ),
-                                    isNull(radacct.acctstoptime),
-                                    isNotNull(radacct.acctstarttime),
-                                ),
-                            )
-                            .limit(1);
-                        if (!current) return 0;
-                        const session = this.sessionInfoFromRow(current);
-                        const state = enabled
-                            ? (sharedState ??
-                              (await this.fairUsageState(
-                                  row.activation,
-                                  row.pkg,
-                                  session,
-                              )))
-                            : null;
-                        const rateLimit =
-                            session.fupForced &&
-                            !manualFairUsageAvailable(row.pkg)
-                                ? (session.fupRateLimit ??
-                                  this.rateLimitValue(row.pkg, true))
-                                : this.rateLimitValue(
-                                      row.pkg,
-                                      effectiveFairUsageThrottled(
-                                          state?.throttled ?? false,
-                                          session.fupForced,
-                                      ),
-                                  );
-                        if (
-                            enabled &&
-                            session.fupRateLimit === null &&
-                            !state!.throttled &&
-                            !session.fupForced
-                        ) {
-                            // Access-Accept already installed the normal package
-                            // rate. Record that baseline without sending a no-op
-                            // CoA; the first CoA is reserved for a real transition.
-                            await tx
-                                .update(radacct)
-                                .set({
-                                    fupWindowStart: state!.windowStart,
-                                    fupRateLimit: rateLimit,
-                                    fupUsedBytes: state!.usedBytes,
-                                    fupThresholdReached: false,
-                                    fupEvaluatedAt: new Date(),
-                                })
-                                .where(
-                                    eq(
-                                        radacct.radacctid,
-                                        BigInt(session.radacctId),
-                                    ),
-                                );
-                            return 0;
-                        }
-                        if (enabled) {
-                            if (
-                                session.fupRateLimit === rateLimit &&
-                                session.fupWindowStart?.getTime() ===
-                                    state!.windowStart.getTime()
-                            ) {
-                                return 0;
-                            }
-                        } else if (
-                            session.fupRateLimit === null ||
-                            (session.fupForced &&
-                                session.fupRateLimit === rateLimit)
-                        ) {
-                            return 0;
-                        }
-
-                        const acknowledged = await this.coaRateLimit(
-                            username,
-                            session,
-                            rateLimit,
-                        );
-                        if (!acknowledged) return 0;
-                        await tx
-                            .update(radacct)
-                            .set({
-                                fupWindowStart: state?.windowStart ?? null,
-                                fupRateLimit:
-                                    enabled || session.fupForced
-                                        ? rateLimit
-                                        : null,
-                                fupUsedBytes: state?.usedBytes ?? 0,
-                                fupThresholdReached: state?.throttled ?? false,
-                                fupEvaluatedAt: new Date(),
-                            })
-                            .where(
-                                eq(
-                                    radacct.radacctid,
-                                    BigInt(session.radacctId),
-                                ),
-                            );
-                        return 1;
-                    });
                 }
             } catch (err) {
                 logger.error('Fair-usage reconciliation failed', {
@@ -4501,12 +4500,13 @@ export class RadiusClient {
     private async nasTargetForSession(
         session: SessionInfo,
         adminId?: string,
+        database: Pick<typeof db, 'select'> = db,
     ): Promise<{
         host: string;
         port: number;
         secret: string;
     }> {
-        const [row] = await db
+        const [row] = await database
             .select({
                 wgClientIp: nasSetupScript.wgClientIp,
                 radiusSecret: nasSetupScript.radiusSecret,
@@ -4654,8 +4654,9 @@ export class RadiusClient {
         session: SessionInfo,
         rateLimit: string,
         adminId?: string,
+        database: Pick<typeof db, 'select' | 'update'> = db,
     ): Promise<boolean> {
-        const target = await this.nasTargetForSession(session, adminId);
+        const target = await this.nasTargetForSession(session, adminId, database);
         const attrs = this.sessionCoaIdentity(username, session);
         attrs.push({
             vendor: MIKROTIK_VENDOR_ID,
@@ -4669,7 +4670,11 @@ export class RadiusClient {
                 await this.closeSessionRecord(
                     session,
                     'Session-Context-Not-Found',
+                    database,
                 );
+                // Commit the stale-session closure even when called inside the
+                // FUP transaction; throwing would roll that closure back.
+                return false;
             }
             throw error;
         }
@@ -4680,8 +4685,9 @@ export class RadiusClient {
     private async closeSessionRecord(
         session: SessionInfo,
         cause = 'Admin-Reset',
+        database: Pick<typeof db, 'update'> = db,
     ): Promise<void> {
-        await db
+        await database
             .update(radacct)
             .set({
                 acctstoptime: new Date(),

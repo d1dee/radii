@@ -1389,7 +1389,7 @@ function PackageEditor({
                                                                     <Input.Wrapper
                                                                         pb='xs'
                                                                         label='Calculation Window'
-                                                                        description='Session, or recurring time from activation'
+                                                                        description='Recurring windows start and end at midnight EAT, anchored to the activation date'
                                                                         descriptionProps={{
                                                                             pb: 'xs',
                                                                         }}
