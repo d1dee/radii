@@ -3,13 +3,11 @@
 # PostgreSQL runs externally. Supply API environment variables at runtime.
 # Mount the complete configured FreeRADIUS tree at /etc/raddb (read-only)
 # and a server configuration at /etc/wireguard/wg0.conf (read-only).
-# Mount a persistent WRITABLE volume at /etc/raddb/certs for local certificates.
 # FreeRADIUS REST must use http://127.0.0.1:8080/api/radius/rest and the same
 # RADIUS_REST_API_KEY as the API. Preserve the SQL queries and tenant policies.
 # Run with --cap-add=NET_ADMIN; the host kernel must support WireGuard.
 # Put the reverse proxy on the same Docker network: API 8080, admin 8081,
-# hotspot 8082, PPPoE 8083. Route /api and /api/* to port 8080 on each frontend
-# host, preserving the path and giving this route priority over the frontend.
+# hotspot 8082, PPPoE 8083.
 # Set PPPOE_PORTAL_URL to the public canonical PPPoE URL (including scheme).
 FROM fedora:44 AS base
 
