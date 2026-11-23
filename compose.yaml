@@ -68,7 +68,7 @@ services:
         volumes:
             # Existing certificates are supplied by raddb/certs; do not hide them.
             - type: bind
-              source: ${RADIUS_CONFIG_PATH:-/home/radii/raddb}
+              source: /home/radii/raddb
               target: /etc/raddb
               read_only: true
               bind:
