@@ -7,8 +7,9 @@
 # FreeRADIUS REST must use http://127.0.0.1:8080/api/radius/rest and the same
 # RADIUS_REST_API_KEY as the API. Preserve the SQL queries and tenant policies.
 # Run with --cap-add=NET_ADMIN; the host kernel must support WireGuard.
-# Put Caddy on the same Docker network: API 8080, admin 8081, hotspot 8082,
-# PPPoE 8083. Route /api/* to port 8080 on each frontend host.
+# Put the reverse proxy on the same Docker network: API 8080, admin 8081,
+# hotspot 8082, PPPoE 8083. Route /api and /api/* to port 8080 on each frontend
+# host, preserving the path and giving this route priority over the frontend.
 # Set PPPOE_PORTAL_URL to the public canonical PPPoE URL (including scheme).
 FROM fedora:44 AS base
 
@@ -48,7 +49,7 @@ COPY apps/ppoe ./apps/ppoe
 COPY apps/shared ./apps/shared
 COPY apps/ui ./apps/ui
 
-# Empty API URL produces same-origin /api requests for the external Caddy proxy.
+# Empty API URL produces same-origin /api requests for the external reverse proxy.
 ARG VITE_API_URL=""
 
 RUN VITE_API_URL="$VITE_API_URL" VITE_APP_PORT=8081 bun --bun run --cwd apps/admin build \
