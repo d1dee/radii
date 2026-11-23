@@ -89,10 +89,19 @@ api_pid=
 radius_pid=
 frontend_pids=()
 wg_started=false
+stage=configuration
+
+log() {
+    printf '[radii-entrypoint] [%s] %s\n' "$stage" "$*" >&2
+}
+
+# Do not print BASH_COMMAND or enable set -x: commands may contain secrets.
+trap 'status=$?; log "ERROR: command failed at entrypoint line $LINENO (exit $status)"; exit "$status"' ERR
 
 cleanup() {
     local status=$?
-    trap - EXIT INT TERM
+    trap - EXIT INT TERM ERR
+    log "Stopping services (container exit $status)"
     for pid in "${frontend_pids[@]}"; do kill -TERM "$pid" 2>/dev/null || true; done
     [[ -z "$radius_pid" ]] || kill -TERM "$radius_pid" 2>/dev/null || true
     [[ -z "$api_pid" ]] || kill -TERM "$api_pid" 2>/dev/null || true
@@ -106,9 +115,24 @@ cleanup() {
 }
 
 trap cleanup EXIT
-trap 'exit 0' INT TERM
+trap 'log "Received shutdown signal"; exit 0' INT TERM
 
-: "${PPPOE_PORTAL_URL:?Set PPPOE_PORTAL_URL to the public canonical PPPoE portal URL}"
+log "Starting production stack; API port ${SERVER_PORT}, admin 8081, hotspot 8082, PPPoE 8083"
+missing=false
+for name in PPPOE_PORTAL_URL API_URL DATABASE_URL FRONTEND_URLS HOTSPOT_PORTAL_URL \
+    BETTER_AUTH_SECRET ADMIN_BETTER_AUTH_SECRET PAYMENT_CALLBACK_HMAC_SECRET \
+    RADIUS_REST_API_KEY RADIUS_SERVER; do
+    if [[ -z "${!name:-}" ]]; then
+        log "ERROR: missing required environment variable $name"
+        missing=true
+    elif [[ "${RADII_STARTUP_DEBUG:-false}" == true ]]; then
+        log "Environment variable $name is set (value hidden)"
+    fi
+done
+if [[ "$missing" == true ]]; then
+    log 'Pass runtime variables with --env-file or the deployment dashboard Environment section, then recreate the container'
+    exit 1
+fi
 
 if [[ ! "$WG_IFACE" =~ ^[a-zA-Z0-9_=+.-]{1,15}$ ]]; then
     printf 'Invalid WG_IFACE: %s\n' "$WG_IFACE" >&2
@@ -137,20 +161,33 @@ if grep -Eiq '^[[:space:]]*SaveConfig[[:space:]]*=[[:space:]]*true' "/etc/wiregu
     exit 1
 fi
 
+log "Configuration files and RADIUS mount found"
+stage=wireguard
+log "Bringing up $WG_IFACE; requires NET_ADMIN and host kernel WireGuard support"
 install -d -o radiusd -g radiusd /run/radiusd /var/log/radius
 wg-quick up "/etc/wireguard/${WG_IFACE}.conf"
 wg_started=true
-export WG_SERVER_PUBLIC_KEY="$(wg show "$WG_IFACE" public-key)"
+WG_SERVER_PUBLIC_KEY="$(wg show "$WG_IFACE" public-key)"
+export WG_SERVER_PUBLIC_KEY
+log "WireGuard interface is up"
 
+stage=api
+log "Starting API; database connection and schema must be available"
 bun run src/index.ts &
 api_pid=$!
+log "API started with PID $api_pid; waiting for /health"
 
 # REST initializes connections during FreeRADIUS startup, so wait for the API.
 ready=false
 for ((attempt=0; attempt<60; attempt++)); do
     if ! kill -0 "$api_pid" 2>/dev/null; then
-        printf 'API exited before becoming ready.\n' >&2
+        status=0
+        wait "$api_pid" || status=$?
+        log "ERROR: API exited before becoming ready (exit $status); inspect preceding API logs"
         exit 1
+    fi
+    if (( attempt % 10 == 0 )); then
+        log "Waiting for API health on port ${SERVER_PORT} (attempt $((attempt + 1))/60)"
     fi
     if curl --fail --silent --max-time 1 "http://127.0.0.1:${SERVER_PORT}/health" >/dev/null; then
         ready=true
@@ -162,13 +199,22 @@ if [[ "$ready" != true ]]; then
     printf 'API did not become ready within the startup deadline.\n' >&2
     exit 1
 fi
+log "API health check passed"
 
+stage=radius-certificates
+log "Checking existing certificates or generating local certificates"
 /usr/local/bin/radii-create-certificates
+stage=radius
+log "Validating FreeRADIUS configuration at $RADIUS_CONFIG_DIR"
 radiusd -XC -d "$RADIUS_CONFIG_DIR"
+log "Configuration validation passed; starting FreeRADIUS"
 radiusd -f -l stdout -d "$RADIUS_CONFIG_DIR" &
 radius_pid=$!
 printf '%s\n' "$radius_pid" > /run/radii-radius.pid
+log "FreeRADIUS started with PID $radius_pid"
 
+stage=frontends
+log "Starting compiled frontend production servers"
 SERVER_ADDRESS=0.0.0.0 SERVER_PORT=8081 bun run --cwd /app/apps/admin server.js &
 frontend_pids+=("$!")
 SERVER_ADDRESS=0.0.0.0 SERVER_PORT=8082 bun run --cwd /app/apps/hotspot server.js &
@@ -177,10 +223,23 @@ SERVER_ADDRESS=0.0.0.0 SERVER_PORT=8083 SERVER_PUBLIC_URL="$PPPOE_PORTAL_URL" \
     bun run --cwd /app/apps/ppoe server.js &
 frontend_pids+=("$!")
 printf '%s\n' "${frontend_pids[@]}" > /run/radii-frontends.pid
+log "Frontend PIDs: admin=${frontend_pids[0]}, hotspot=${frontend_pids[1]}, PPPoE=${frontend_pids[2]}"
 
 # An unexpected exit of any server stops the container for restart policies.
+stage=supervision
+log 'All servers launched; Docker healthcheck will verify readiness'
 status=0
-wait -n "$api_pid" "$radius_pid" "${frontend_pids[@]}" || status=$?
+exited_pid=
+wait -n -p exited_pid "$api_pid" "$radius_pid" "${frontend_pids[@]}" || status=$?
+service=unknown
+case "${exited_pid:-}" in
+    "$api_pid") service=API ;;
+    "$radius_pid") service=FreeRADIUS ;;
+    "${frontend_pids[0]}") service=admin ;;
+    "${frontend_pids[1]}") service=hotspot ;;
+    "${frontend_pids[2]}") service=PPPoE ;;
+esac
+log "ERROR: $service exited unexpectedly (PID ${exited_pid:-unknown}, exit $status); inspect preceding service logs"
 if [[ "$status" == 0 ]]; then
     status=1
 fi
