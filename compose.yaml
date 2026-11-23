@@ -61,8 +61,9 @@ services:
         networks:
             - default
             - database
+            - dokploy-network
         ports:
-            # RADIUS is reached through WireGuard; HTTP is reached through Caddy.
+            # RADIUS is reached through WireGuard; HTTP is reached through Traefik.
             - '${WG_PUBLIC_PORT:-51820}:51820/udp'
         expose:
             - '8080'
@@ -94,6 +95,8 @@ volumes:
     postgres_data:
 
 networks:
+    dokploy-network:
+        external: true
     database:
         # Other Compose projects can join this as an external network.
         name: ${POSTGRES_NETWORK:-radii-db}
