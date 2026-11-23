@@ -4,11 +4,11 @@
 # Mount the complete configured FreeRADIUS tree at /etc/raddb (read-only)
 # and a server configuration at /etc/wireguard/wg0.conf (read-only).
 # Mount a persistent WRITABLE volume at /etc/raddb/certs for local certificates.
-# FreeRADIUS REST must use http://127.0.0.1:3000/api/radius/rest and the same
+# FreeRADIUS REST must use http://127.0.0.1:8080/api/radius/rest and the same
 # RADIUS_REST_API_KEY as the API. Preserve the SQL queries and tenant policies.
 # Run with --cap-add=NET_ADMIN; the host kernel must support WireGuard.
-# Put Caddy on the same Docker network: API 3000, admin 8080, hotspot 8081,
-# PPPoE 8082. Route /api/* to port 3000 on each frontend host.
+# Put Caddy on the same Docker network: API 8080, admin 8081, hotspot 8082,
+# PPPoE 8083. Route /api/* to port 8080 on each frontend host.
 # Set PPPOE_PORTAL_URL to the public canonical PPPoE URL (including scheme).
 FROM fedora:44 AS base
 
@@ -51,9 +51,9 @@ COPY apps/ui ./apps/ui
 # Empty API URL produces same-origin /api requests for the external Caddy proxy.
 ARG VITE_API_URL=""
 
-RUN VITE_API_URL="$VITE_API_URL" VITE_APP_PORT=8080 bun --bun run --cwd apps/admin build \
-    && VITE_API_URL="$VITE_API_URL" VITE_APP_PORT=8081 bun --bun run --cwd apps/hotspot build \
-    && VITE_API_URL="$VITE_API_URL" VITE_APP_PORT=8082 VITE_PORTAL_URL=http://localhost:8082 \
+RUN VITE_API_URL="$VITE_API_URL" VITE_APP_PORT=8081 bun --bun run --cwd apps/admin build \
+    && VITE_API_URL="$VITE_API_URL" VITE_APP_PORT=8082 bun --bun run --cwd apps/hotspot build \
+    && VITE_API_URL="$VITE_API_URL" VITE_APP_PORT=8083 VITE_PORTAL_URL=http://localhost:8083 \
         bun --bun run --cwd apps/ppoe build \
     && bun build apps/admin/server.ts --target=bun --outfile=apps/admin/server.js \
     && bun build apps/hotspot/server.ts --target=bun --outfile=apps/hotspot/server.js \
@@ -169,11 +169,11 @@ radiusd -f -l stdout -d "$RADIUS_CONFIG_DIR" &
 radius_pid=$!
 printf '%s\n' "$radius_pid" > /run/radii-radius.pid
 
-SERVER_ADDRESS=0.0.0.0 SERVER_PORT=8080 bun run --cwd /app/apps/admin server.js &
+SERVER_ADDRESS=0.0.0.0 SERVER_PORT=8081 bun run --cwd /app/apps/admin server.js &
 frontend_pids+=("$!")
-SERVER_ADDRESS=0.0.0.0 SERVER_PORT=8081 bun run --cwd /app/apps/hotspot server.js &
+SERVER_ADDRESS=0.0.0.0 SERVER_PORT=8082 bun run --cwd /app/apps/hotspot server.js &
 frontend_pids+=("$!")
-SERVER_ADDRESS=0.0.0.0 SERVER_PORT=8082 SERVER_PUBLIC_URL="$PPPOE_PORTAL_URL" \
+SERVER_ADDRESS=0.0.0.0 SERVER_PORT=8083 SERVER_PUBLIC_URL="$PPPOE_PORTAL_URL" \
     bun run --cwd /app/apps/ppoe server.js &
 frontend_pids+=("$!")
 printf '%s\n' "${frontend_pids[@]}" > /run/radii-frontends.pid
@@ -191,7 +191,7 @@ BUILD
 
 ENV NODE_ENV=production \
     SERVER_ADDRESS=0.0.0.0 \
-    SERVER_PORT=3000 \
+    SERVER_PORT=8080 \
     WG_IFACE=wg0 \
     WG_MANAGE_PEERS=true \
     WG_USE_SUDO=false \
@@ -199,7 +199,7 @@ ENV NODE_ENV=production \
     RADIUS_CONFIG_DIR=/etc/raddb
 
 WORKDIR /app/apps/api
-EXPOSE 3000/tcp 8080/tcp 8081/tcp 8082/tcp 51820/udp 1812/udp 1813/udp
+EXPOSE 8080/tcp 8081/tcp 8082/tcp 8083/tcp 51820/udp 1812/udp 1813/udp
 STOPSIGNAL SIGTERM
 HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \
     CMD curl --fail --silent --max-time 3 "http://127.0.0.1:${SERVER_PORT}/health" >/dev/null \
@@ -208,7 +208,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \
         && kill -0 "$(cat /run/radii-radius.pid)" \
         && test -s /run/radii-frontends.pid \
         && while read -r pid; do kill -0 "$pid" || exit 1; done < /run/radii-frontends.pid \
-        && curl --fail --silent --max-time 3 http://127.0.0.1:8080/ >/dev/null \
         && curl --fail --silent --max-time 3 http://127.0.0.1:8081/ >/dev/null \
-        && curl --fail --silent --max-time 3 http://127.0.0.1:8082/ >/dev/null
+        && curl --fail --silent --max-time 3 http://127.0.0.1:8082/ >/dev/null \
+        && curl --fail --silent --max-time 3 http://127.0.0.1:8083/ >/dev/null
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/radii-entrypoint"]
