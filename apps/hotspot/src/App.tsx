@@ -80,6 +80,7 @@ function pkgPrice(
 export default function App() {
     const [havingIssues, setHavingIssues] = useState(false);
     const { data, isPending } = useSession();
+    const userId = data?.user?.id ?? null;
     const loginRequestId = localStorage.getItem(LOGIN_REQUEST_KEY);
     const {
         client: clientData,
@@ -90,16 +91,16 @@ export default function App() {
         contacts: adminContacts,
         contactsError,
     } = useHotspotPortal({
-        userId: data?.user.id ?? null,
+        userId,
         loginRequestId,
         pending: isPending,
     });
 
     useEffect(() => {
         if (!isPending) {
-            void loadHotspotPortal(data?.user.id ?? null, loginRequestId);
+            void loadHotspotPortal(userId, loginRequestId);
         }
-    }, [data?.user.id, isPending, loginRequestId]);
+    }, [userId, isPending, loginRequestId]);
 
     // Resume an interrupted purchase on first load (e.g. after a login
     // redirect). localStorage is synchronous, so the initial modal state can
@@ -190,7 +191,7 @@ export default function App() {
                                                 color='orange'
                                                 onClick={() =>
                                                     void loadHotspotPortal(
-                                                        data?.user.id ?? null,
+                                                        userId,
                                                         loginRequestId,
                                                         true,
                                                     )
@@ -220,7 +221,7 @@ export default function App() {
                                     loading={packagesLoading}
                                     onRetry={() =>
                                         void loadHotspotPortal(
-                                            data?.user.id ?? null,
+                                            userId,
                                             loginRequestId,
                                             true,
                                         )

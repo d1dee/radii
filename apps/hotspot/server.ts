@@ -36,6 +36,18 @@ const server = Bun.serve({
     async fetch(req) {
         const url = new URL(req.url);
 
+        // API traffic must reach the backend, never the successful SPA fallback.
+        if (url.pathname === '/api' || url.pathname.startsWith('/api/')) {
+            return Response.json(
+                {
+                    success: false,
+                    type: 'INTERNAL_ERROR',
+                    message: 'API routing is not configured. Route /api requests to the API service on port 8080.',
+                },
+                { status: 502, headers: { 'Cache-Control': 'no-store' } },
+            );
+        }
+
         // Static files
         let path = join('dist', url.pathname);
 

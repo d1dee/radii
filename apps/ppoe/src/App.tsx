@@ -80,6 +80,7 @@ function pkgPrice(
 export default function App() {
     const [havingIssues, setHavingIssues] = useState(false);
     const { data, isPending } = useSession();
+    const userId = data?.user?.id ?? null;
     // The session is only known once the pending check has settled.
     const signedOut = !isPending && !data?.session;
     const { nasDeviceId } = useNasScope();
@@ -90,7 +91,7 @@ export default function App() {
         packagesLoading,
         contacts: adminContacts,
     } = usePppoePortal({
-        userId: data?.user.id ?? null,
+        userId,
         nasDeviceId,
         pending: isPending,
     });
@@ -109,9 +110,9 @@ export default function App() {
 
     useEffect(() => {
         if (!isPending) {
-            void loadPppoePortal(data?.user.id ?? null, nasDeviceId);
+            void loadPppoePortal(userId, nasDeviceId);
         }
-    }, [data?.user.id, isPending, nasDeviceId]);
+    }, [userId, isPending, nasDeviceId]);
 
     // Accounts must load even without a network scope: they drive the
     // auto-scoping of external visits (the account switcher adopts the
@@ -272,7 +273,7 @@ export default function App() {
                                             loading={packagesLoading}
                                             onRetry={() =>
                                                 void loadPppoePortal(
-                                                    data?.user.id ?? null,
+                                                    userId,
                                                     nasDeviceId,
                                                     true,
                                                 )
