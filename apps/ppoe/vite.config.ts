@@ -2,15 +2,15 @@ import react from '@vitejs/plugin-react';
 import path from 'path';
 import { defineConfig, loadEnv } from 'vite';
 
-export default defineConfig(({ mode }) => {
+export default defineConfig(({ command, mode }) => {
     const env = loadEnv(mode, process.cwd(), '');
     const API_URL = env.VITE_API_URL;
     const APP_PORT = parseInt(env.VITE_APP_PORT || '');
     const PORTAL_URL = env.VITE_PORTAL_URL;
 
-    if (!API_URL || isNaN(APP_PORT) || !PORTAL_URL)
+    if ((command === 'serve' && !API_URL) || isNaN(APP_PORT) || !PORTAL_URL)
         throw new Error(
-            'VITE_API_URL, VITE_APP_PORT and VITE_PORTAL_URL environment variables are required',
+            'VITE_APP_PORT and VITE_PORTAL_URL are required; VITE_API_URL is required for the dev server',
         );
 
     const canonicalPortalUrl = new URL(PORTAL_URL);
