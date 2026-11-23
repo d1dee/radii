@@ -5,6 +5,9 @@ services:
         image: postgres:18
         restart: unless-stopped
         stop_grace_period: 30s
+        ports:
+            # Restrict access with the host/cloud firewall; use 127.0.0.1 for SSH tunnels.
+            - '${POSTGRES_BIND_ADDRESS:-0.0.0.0}:${POSTGRES_PORT:-5432}:5432'
         environment:
             POSTGRES_DB: ${POSTGRES_DB:-radii}
             POSTGRES_USER: ${POSTGRES_USER:-radii}
@@ -88,4 +91,5 @@ volumes:
 
 networks:
     database:
-        internal: true
+        # Other Compose projects can join this as an external network.
+        name: ${POSTGRES_NETWORK:-radii-db}

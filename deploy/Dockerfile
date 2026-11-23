@@ -70,6 +70,7 @@ COPY apps/shared/package.json ./apps/shared/package.json
 RUN bun install --production
 
 COPY apps/api/src ./apps/api/src
+COPY apps/api/drizzle ./apps/api/drizzle
 COPY apps/shared/src ./apps/shared/src
 COPY --chmod=755 deploy/radius/create-certificates.sh /usr/local/bin/radii-create-certificates
 COPY --from=frontend-build /app/apps/admin/dist ./apps/admin/dist
@@ -162,6 +163,11 @@ if grep -Eiq '^[[:space:]]*SaveConfig[[:space:]]*=[[:space:]]*true' "/etc/wiregu
 fi
 
 log "Configuration files and RADIUS mount found"
+stage=database-migrations
+log "Checking and applying pending database migrations"
+bun run db:migrate
+log "Database migrations complete"
+
 stage=wireguard
 log "Bringing up $WG_IFACE; requires NET_ADMIN and host kernel WireGuard support"
 install -d -o radiusd -g radiusd /run/radiusd /var/log/radius

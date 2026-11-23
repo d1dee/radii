@@ -37,7 +37,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
-drizzle
 dist
 docs/
 _apps
