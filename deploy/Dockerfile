@@ -47,8 +47,9 @@ COPY apps/ppoe ./apps/ppoe
 COPY apps/shared ./apps/shared
 COPY apps/ui ./apps/ui
 
-# Empty API URL produces same-origin /api requests for the external reverse proxy.
-ARG VITE_API_URL=""
+# Bake the public API URL into all frontends; empty keeps same-origin /api requests.
+ARG API_URL=""
+ARG VITE_API_URL="${API_URL}"
 
 RUN VITE_API_URL="$VITE_API_URL" VITE_APP_PORT=8081 bun --bun run --cwd apps/admin build \
     && VITE_API_URL="$VITE_API_URL" VITE_APP_PORT=8082 bun --bun run --cwd apps/hotspot build \
