@@ -66,7 +66,7 @@ services:
             - dokploy-network
         ports:
             # RADIUS is reached through WireGuard; HTTP is reached through Traefik.
-            - '${WG_PUBLIC_PORT:-51820}:51820/udp'
+            - '${WG_PUBLIC_PORT:-5138}:51820/udp'
         expose:
             - '8080'
             - '8081'
