@@ -38,6 +38,7 @@ import {
     createPayment,
     getOrderPackageForNas,
     getPackagesGroupedByCategory,
+    getPppoeConnectionFee,
     PackageEligibilityError,
 } from '../lib/packages';
 import { paymentService } from '../lib/payments';
@@ -215,6 +216,7 @@ app.get('/clients', requireAuth, async (c) => {
                     ? {
                           activationId: activeActivation.activationId,
                           packageTitle: activeActivation.packageTitle,
+                          packageCategory: activeActivation.packageCategory,
                           activatedAt:
                               activeActivation.activatedAt.toISOString(),
                           expireAt: activeActivation.expireAt.toISOString(),
@@ -257,6 +259,7 @@ app.get('/clients/:id/config', requireAuth, async (c) => {
             passwordVisible,
             tenantName: client.tenantName,
             packageTitle: activeActivation?.packageTitle ?? null,
+            packageCategory: activeActivation?.packageCategory ?? null,
             expireAt: activeActivation?.expireAt.toISOString() ?? null,
             serviceName: env.pppoe.serviceName,
             mtu: env.pppoe.mtu,
@@ -369,6 +372,7 @@ app.get('/status', requireAuth, async (c) => {
                 null,
             packageId: a.packageId,
             packageTitle: a.packageTitle,
+            packageCategory: a.packageCategory,
             username: a.username,
             usedSeconds: a.usedSeconds,
             sessionLimitSeconds: a.sessionLimitSeconds,
@@ -379,6 +383,7 @@ app.get('/status', requireAuth, async (c) => {
             octetsLimit: a.octetsLimit,
             remainingOctets: a.remainingOctets,
             avgSpeedBps: a.avgSpeedBps,
+            currentSpeedBps: a.liveSessions[0]?.currentSpeedBps ?? null,
             liveSessions: a.liveSessions,
         }));
     return c.json({ success: true, data });
@@ -388,6 +393,7 @@ app.get('/status', requireAuth, async (c) => {
 
 const orderSchema = z.object({
     packageId: z.uuid(),
+    expectedAmount: z.number().finite().nonnegative().optional(),
     phoneNumber: zPhoneNumber.optional(),
     // The NAS this portal instance is scoped to (captured from ?nas= in the
     // portal URL). Used for tenant attribution of the purchase; when absent
@@ -415,15 +421,16 @@ app.post('/order', requireAuth, async (c) => {
         'pppoe',
     );
     if (!pkg) return jsonError(c, 404, 'Package not found');
-    const isFree = Number(pkg.price) === 0;
+    const tenantAdminId = await getAdminIdForNasDevice(nasDeviceId);
+    if (!tenantAdminId) return jsonError(c, 404, 'Unknown NAS device');
+    const connectionFee = await getPppoeConnectionFee(tenantAdminId, currentUser!.id);
+    const isFree = Number(pkg.price) + connectionFee === 0;
     const phoneNumber =
         parsed.data.phoneNumber ??
         (isFree ? currentUser!.username?.trim() || currentUser!.email : null);
     if (!phoneNumber) {
         return jsonError(c, 400, 'Invalid order payload');
     }
-    const tenantAdminId = await getAdminIdForNasDevice(nasDeviceId);
-    if (!tenantAdminId) return jsonError(c, 404, 'Unknown NAS device');
     const account = parsed.data.serviceAccountId
         ? await getPppoeAccountOwnedByCustomer(
               parsed.data.serviceAccountId,
@@ -452,11 +459,12 @@ app.post('/order', requireAuth, async (c) => {
         nasDeviceId,
         tenantAdminId,
         pppoeServiceAccountId: account.id,
+        expectedAmount: parsed.data.expectedAmount,
     }).catch((error: unknown) => {
-        if (error instanceof PackageEligibilityError) return null;
+        if (error instanceof PackageEligibilityError) return error;
         throw error;
     });
-    if (!row) return jsonError(c, 403, 'This package is not available for your account. Reload the available packages.');
+    if (row instanceof PackageEligibilityError) return jsonError(c, 403, row.message);
 
     if (row.status === 'pending') {
         // Paid purchases retain the existing provider flow. Free purchases
@@ -480,7 +488,7 @@ app.post('/order', requireAuth, async (c) => {
         data: {
             paymentId: row.id,
             status: row.status,
-            amount: Number(pkg.price),
+            amount: Number(row.amount),
             packageId: pkg.id,
             ...(row.status === 'paid' ? { activation } : {}),
         },

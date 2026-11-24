@@ -11,6 +11,7 @@ import {
     pppoeServiceAccounts,
     radcheck,
     user,
+    userAdminTag,
 } from '../db/schema';
 
 const CREDENTIAL_CHARS =
@@ -47,6 +48,7 @@ export async function provisionPppoeAccountByPhone(
     nasDeviceId: string,
     phoneNumber: string,
     label?: string,
+    fields: { name?: string; location?: string } = {},
 ) {
     const normalizedPhone = zPhoneNumber.parse(phoneNumber);
     const [device] = await db
@@ -82,6 +84,8 @@ export async function provisionPppoeAccountByPhone(
                 normalizedPhone,
                 username: generatedUsername(id),
                 label: label?.trim() || null,
+                customerName: fields.name?.trim() || null,
+                location: fields.location?.trim() || null,
                 claimCodeHash,
             })
             // No conflict target: re-provisioning a claimed phone can violate
@@ -130,6 +134,8 @@ export async function provisionPppoeAccountByPhone(
                 customerUserId: linkedUserId,
                 claimCodeHash: nextClaimCodeHash,
                 label: label?.trim() || existing.label,
+                customerName: fields.name?.trim() || existing.customerName,
+                location: fields.location?.trim() || existing.location,
                 nasDeviceId: existing.nasDeviceId ?? nasDeviceId,
             })
             .where(eq(pppoeServiceAccounts.id, existing.id))
@@ -170,6 +176,32 @@ export async function provisionPppoeAccountByPhone(
         }
         if (!updated || !passwordRow) {
             throw new Error('Could not provision PPPoE credentials');
+        }
+        if (
+            linkedUserId &&
+            (fields.name !== undefined || fields.location !== undefined)
+        ) {
+            await tx
+                .insert(userAdminTag)
+                .values({
+                    adminId: tenantAdminId,
+                    userId: linkedUserId,
+                    name: fields.name?.trim() || null,
+                    location: fields.location?.trim() || null,
+                })
+                .onConflictDoUpdate({
+                    target: [userAdminTag.adminId, userAdminTag.userId],
+                    set: {
+                        ...(fields.name !== undefined
+                            ? { name: fields.name.trim() || null }
+                            : {}),
+                        ...(fields.location !== undefined
+                            ? { location: fields.location.trim() || null }
+                            : {}),
+                    },
+                });
+        } else if (linkedUserId) {
+            await seedClaimedCustomerTag(tx, updated);
         }
         return {
             account: updated,
@@ -241,7 +273,7 @@ export async function getPppoeAccountAdminDetail(
     };
 }
 
-// Renames an admin's private label on a provisioned account. Tenant-scoped;
+// Renames the customer-visible tag on a provisioned account. Tenant-scoped;
 // returns null when the account does not belong to this admin.
 export async function setPppoeAccountLabel(
     accountId: string,
@@ -287,19 +319,42 @@ export async function claimPppoeAccount(
     claimCode: string,
 ) {
     const normalizedPhone = zPhoneNumber.parse(phoneNumber);
-    const [account] = await db
-        .update(pppoeServiceAccounts)
-        .set({ customerUserId, claimCodeHash: null })
-        .where(
-            and(
-                eq(pppoeServiceAccounts.normalizedPhone, normalizedPhone),
-                eq(pppoeServiceAccounts.claimCodeHash, hashClaimCode(claimCode)),
-                isNull(pppoeServiceAccounts.customerUserId),
-                ne(pppoeServiceAccounts.status, 'closed'),
-            ),
-        )
-        .returning();
-    return account ?? null;
+    return db.transaction(async (tx) => {
+        const [account] = await tx
+            .update(pppoeServiceAccounts)
+            .set({ customerUserId, claimCodeHash: null })
+            .where(
+                and(
+                    eq(pppoeServiceAccounts.normalizedPhone, normalizedPhone),
+                    eq(pppoeServiceAccounts.claimCodeHash, hashClaimCode(claimCode)),
+                    isNull(pppoeServiceAccounts.customerUserId),
+                    ne(pppoeServiceAccounts.status, 'closed'),
+                ),
+            )
+            .returning();
+        if (account) await seedClaimedCustomerTag(tx, account);
+        return account ?? null;
+    });
+}
+
+async function seedClaimedCustomerTag(
+    tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+    account: typeof pppoeServiceAccounts.$inferSelect,
+) {
+    if (
+        !account.customerUserId ||
+        (!account.customerName && !account.location)
+    ) return;
+    // Never replace a name/location the admin has already edited.
+    await tx
+        .insert(userAdminTag)
+        .values({
+            adminId: account.tenantAdminId,
+            userId: account.customerUserId,
+            name: account.customerName,
+            location: account.location,
+        })
+        .onConflictDoNothing({ target: [userAdminTag.adminId, userAdminTag.userId] });
 }
 
 // One dialer account per customer per NAS device: self-service purchases on
@@ -374,16 +429,20 @@ export async function ensurePppoeServiceAccount(
         )
         .limit(1);
     if (unclaimed) {
-        const [adopted] = await db
-            .update(pppoeServiceAccounts)
-            .set({ customerUserId, claimCodeHash: null })
-            .where(
-                and(
-                    eq(pppoeServiceAccounts.id, unclaimed.id),
-                    isNull(pppoeServiceAccounts.customerUserId),
-                ),
-            )
-            .returning();
+        const adopted = await db.transaction(async (tx) => {
+            const [adopted] = await tx
+                .update(pppoeServiceAccounts)
+                .set({ customerUserId, claimCodeHash: null })
+                .where(
+                    and(
+                        eq(pppoeServiceAccounts.id, unclaimed.id),
+                        isNull(pppoeServiceAccounts.customerUserId),
+                    ),
+                )
+                .returning();
+            if (adopted) await seedClaimedCustomerTag(tx, adopted);
+            return adopted;
+        });
         if (adopted) return adopted;
     }
 

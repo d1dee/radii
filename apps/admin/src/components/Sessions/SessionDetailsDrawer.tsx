@@ -33,6 +33,7 @@ import {
     formatSpeed,
 } from '@/lib/format';
 import { SessionAdjustmentControls } from './SessionAdjustmentControls';
+import { ThroughputChart } from './ThroughputChart';
 
 const PAYMENT_STATUS_COLOR: Record<PackagePaymentStatus, string> = {
     paid: 'green',
@@ -119,7 +120,12 @@ export function SessionDetailsDrawer({
         setDetail(null);
         setError(null);
 
-        void getAdminSession(sessionId).then((result) => {
+        let refreshing = false;
+        const load = async () => {
+            if (refreshing) return;
+            refreshing = true;
+            const result = await getAdminSession(sessionId);
+            refreshing = false;
             if (ignore) return;
             if (!result.success) {
                 setError(result.message);
@@ -129,11 +135,15 @@ export function SessionDetailsDrawer({
                 setError('Failed to load session details');
                 return;
             }
+            setError(null);
             setDetail(result.data);
-        });
+        };
+        void load();
+        const timer = setInterval(() => void load(), 10_000);
 
         return () => {
             ignore = true;
+            clearInterval(timer);
         };
     }, [sessionId, adjustmentRevision]);
 
@@ -198,7 +208,7 @@ export function SessionDetailsDrawer({
                 </Group>
             }
         >
-            {error ? (
+            {error && !detail ? (
                 <Text c='red'>{error}</Text>
             ) : !detail || !session ? (
                 <Center py='xl'>
@@ -214,6 +224,11 @@ export function SessionDetailsDrawer({
                             >
                                 {session.live ? 'Live' : 'Ended'}
                             </Badge>
+                            {detail.adjustments.fairUsage.active ? (
+                                <Badge color='orange' variant='filled'>
+                                    Under FUP
+                                </Badge>
+                            ) : null}
                             {session.serviceType ? (
                                 <Badge variant='outline'>
                                     {session.serviceType}
@@ -333,12 +348,14 @@ export function SessionDetailsDrawer({
                                 {formatBytes(session.inputOctets)}
                             </Text>
                         </LinkedCard>
-                        <LinkedCard label='Average speed'>
+                        <LinkedCard label='Session lifetime average'>
                             <Text fw={700}>
                                 {formatSpeed(session.avgSpeedBps)}
                             </Text>
                         </LinkedCard>
                     </SimpleGrid>
+
+                    {sessionId ? <ThroughputChart key={sessionId} kind='session' id={sessionId} /> : null}
 
                     <Divider label='Linked records' labelPosition='left' />
                     {detail.activation ? (

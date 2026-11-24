@@ -1,4 +1,9 @@
 import {
+    refreshPppoeQuota,
+    usePppoeAccounts,
+    usePppoeQuota,
+} from '@lib/store.ts';
+import {
     Alert,
     Box,
     Button,
@@ -8,12 +13,6 @@ import {
     Stack,
     Text,
 } from '@mantine/core';
-import {
-    refreshPppoeQuota,
-    usePppoeAccounts,
-    usePppoePortal,
-    usePppoeQuota,
-} from '@lib/store.ts';
 import { useDisclosure } from '@mantine/hooks';
 import humanFormat from 'human-format';
 import { useContext } from 'react';
@@ -30,7 +29,6 @@ export function CurrentPackage() {
     const { openLogin } = useContext(ModalActionsContext);
     const { data } = useSession();
     const { clients, selectedAccountId } = usePppoeAccounts();
-    const { packages } = usePppoePortal();
     const { quota, error, loading } = usePppoeQuota(
         selectedAccountId,
         Boolean(data?.session),
@@ -40,10 +38,21 @@ export function CurrentPackage() {
         (client) => client.accountId === selectedAccountId,
     );
     const thisDevice = quota.find((value) => value.online) || quota[0];
-    const packageCategory = packages
-        ?.flatMap(([, items]) => items)
-        .find((pkg) => pkg.packageId === thisDevice?.packageId)?.category;
+    const activePackage = thisDevice?.packageTitle
+        ? thisDevice
+        : selected?.activeActivation;
+    const packageName = `${activePackage?.packageCategory ? `${activePackage.packageCategory} · ` : ''}${activePackage?.packageTitle ?? 'Current package'}`;
     const currentSession = thisDevice?.liveSessions?.[0];
+    const speed =
+        thisDevice?.online && currentSession?.live
+            ? currentSession.currentSpeedBps
+            : null;
+    const currentTransferSpeed =
+        speed == null
+            ? '--'
+            : speed === 0
+              ? '0 Kbps'
+              : humanFormat(speed / 1e3, { scale: dataScale });
     const sessionAdjusted = currentSession?.remainingSeconds != null;
     const remainingSeconds =
         currentSession?.remainingSeconds ?? thisDevice?.remainingSeconds ?? 0;
@@ -53,7 +62,8 @@ export function CurrentPackage() {
               Math.min(
                   100,
                   (thisDevice.remainingSeconds /
-                      (thisDevice.sessionLimitSeconds || 1)) * 100,
+                      (thisDevice.sessionLimitSeconds || 1)) *
+                      100,
               ),
           )
         : 0;
@@ -119,19 +129,26 @@ export function CurrentPackage() {
                             justify='space-between'
                             align='flex-start'
                             gap='sm'
+                            wrap='nowrap'
                         >
                             <Box style={{ flex: 1, minWidth: 0 }}>
                                 <Text size='xs' c='dimmed' mb={4}>
                                     Active package
                                 </Text>
-                                <Text className={classes.packageHeading}>
-                                    {packageCategory ? `${packageCategory} · ` : ''}
-                                    {thisDevice.packageTitle ??
-                                        selected?.activeActivation?.packageTitle ??
-                                        'Current package'}
+                                <Text
+                                    className={classes.packageHeading}
+                                    truncate
+                                    title={packageName}
+                                >
+                                    {activePackage?.packageCategory ? (
+                                        <span style={{ opacity: 0.65 }}>
+                                            {activePackage.packageCategory} ·{' '}
+                                        </span>
+                                    ) : null}
+                                    {activePackage?.packageTitle ?? 'Current package'}
                                 </Text>
                             </Box>
-                            <Text size='sm' fw={600} pt={4}>
+                            <Text size='sm' fw={600} pt={4} style={{ flexShrink: 0 }}>
                                 {formatPackagePrice(thisDevice.price)}
                             </Text>
                         </Group>
@@ -174,21 +191,15 @@ export function CurrentPackage() {
                                         ? 'No expiry'
                                         : selected?.activeActivation
                                           ? dayjs(
-                                                selected.activeActivation.expireAt,
+                                                selected.activeActivation
+                                                    .expireAt,
                                             ).format('DD MMM YYYY HH:mm:ss')
                                           : 'Not available'}
                                 </dd>
                             </div>
                             <div>
-                                <dt>Average transfer speed</dt>
-                                <dd>
-                                    {thisDevice.avgSpeedBps
-                                        ? humanFormat(
-                                              thisDevice.avgSpeedBps / 1e3,
-                                              { scale: dataScale },
-                                          )
-                                        : 'No traffic yet'}
-                                </dd>
+                                <dt>Current speed</dt>
+                                <dd>{currentTransferSpeed}</dd>
                             </div>
                         </dl>
 
@@ -216,8 +227,12 @@ export function CurrentPackage() {
                         ) : null}
                         <details className={classes.packageMeta}>
                             <summary>Package reference</summary>
-                            <Text size='xs'>Username: {thisDevice.username}</Text>
-                            <Text size='xs'>Activation ID: {thisDevice.id}</Text>
+                            <Text size='xs'>
+                                Username: {thisDevice.username}
+                            </Text>
+                            <Text size='xs'>
+                                Activation ID: {thisDevice.id}
+                            </Text>
                         </details>
                     </>
                 ) : loading && !error ? (
@@ -228,12 +243,15 @@ export function CurrentPackage() {
                     <Stack gap={4}>
                         <Text fw={600}>No active package</Text>
                         <Text size='sm' c='dimmed'>
-                            Choose a package below to get this service line connected.
+                            Choose a package below to get this service line
+                            connected.
                         </Text>
                         <Text size='xs' c='dimmed'>
                             Last used:{' '}
                             {selected?.lastUsedAt
-                                ? dayjs(selected.lastUsedAt).format('DD MMM YYYY HH:mm:ss')
+                                ? dayjs(selected.lastUsedAt).format(
+                                      'DD MMM YYYY HH:mm:ss',
+                                  )
                                 : 'Not used yet'}
                         </Text>
                     </Stack>

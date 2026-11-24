@@ -184,7 +184,7 @@ export function BuyForm({
                     loaderProps={{ children: <AiOutlineLoading /> }}
                     fullWidth
                 >
-                    Pay {price ? `Ksh ${price}` : 'for package'}
+                    Pay {price ? `Ksh ${Number(price).toLocaleString('en-KE')}` : 'for package'}
                 </Button>
             </Stack>
         </form>

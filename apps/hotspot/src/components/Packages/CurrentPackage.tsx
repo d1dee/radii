@@ -15,7 +15,6 @@ import { timeRemaining } from './functions.ts';
 import { currentLoginRequestId } from '@lib/api.ts';
 import { refreshHotspotQuota, useHotspotQuota } from '@lib/store.ts';
 import { useDisclosure } from '@mantine/hooks';
-import { IconSelector } from '@tabler/icons-react';
 import humanFormat from 'human-format';
 import { ConnectedDevice } from './ConnectedDevices.tsx';
 import { ConnectedDevicesModal } from './ConnectedDevicesModal.tsx';
@@ -32,15 +31,15 @@ export function CurrentPackage() {
         (session) => session.radacctId === thisDevice.currentSessionId,
     );
     const bonusRemainingSeconds = thisDevice?.noExpiry
-        ? currentSession?.bonusRemainingSeconds ?? 0
+        ? (currentSession?.bonusRemainingSeconds ?? 0)
         : 0;
     const sessionAdjusted = currentSession?.remainingSeconds != null;
     const remainingSeconds =
         bonusRemainingSeconds > 0
             ? bonusRemainingSeconds
-            : currentSession?.remainingSeconds ??
+            : (currentSession?.remainingSeconds ??
               thisDevice?.remainingSeconds ??
-              0;
+              0);
 
     const progressValue = thisDevice
         ? Math.max(
@@ -54,13 +53,20 @@ export function CurrentPackage() {
           )
         : 0;
 
-    const avgTransferSpeed = thisDevice?.avgSpeedBps
-        ? humanFormat(thisDevice?.avgSpeedBps / 1e3, {
-              scale: dataScale,
-          })
-        : '_';
+    const speed =
+        thisDevice?.thisDevice && thisDevice.online && currentSession?.live
+            ? currentSession.currentSpeedBps
+            : null;
+    const currentTransferSpeed =
+        speed == null
+            ? '--'
+            : speed === 0
+              ? '0 Kbps'
+              : humanFormat(speed / 1e3, { scale: dataScale });
     const title = thisDevice?.packageTitle
-        ? `${thisDevice.packageTitle} @ ${formatPackagePrice(thisDevice.price)}`
+        ? `${thisDevice.packageCategory ? `${thisDevice.packageCategory} · ` : ''}${
+              thisDevice.packageTitle
+          } @ ${formatPackagePrice(thisDevice.price)}`
         : '_';
 
     if (!thisDevice) {
@@ -134,8 +140,8 @@ export function CurrentPackage() {
                             {bonusRemainingSeconds > 0
                                 ? 'Additional time remaining'
                                 : sessionAdjusted
-                                ? 'Session time remaining'
-                                : 'Time remaining'}
+                                  ? 'Session time remaining'
+                                  : 'Time remaining'}
                         </Text>
                         <Text size='sm' fw={500}>
                             {timeRemaining(remainingSeconds)}
@@ -154,8 +160,8 @@ export function CurrentPackage() {
                             <Text size='xs' c='dimmed'>
                                 {timeRemaining(
                                     thisDevice.noExpiry
-                                        ? thisDevice.bankRemainingSeconds ??
-                                          thisDevice.remainingSeconds
+                                        ? (thisDevice.bankRemainingSeconds ??
+                                              thisDevice.remainingSeconds)
                                         : thisDevice.remainingSeconds,
                                 )}
                             </Text>
@@ -175,16 +181,18 @@ export function CurrentPackage() {
                                 Devices:{' '}
                                 {thisDevice?.liveSessions?.length || ' _'}
                             </Text>
-                            <Text size='sm' c='dimmed'>
+                            <Text
+                                size='sm'
+                                c='dimmed'
+                                miw={0}
+                                truncate
+                                title={title}
+                            >
                                 Package title: {title}
                             </Text>
-
-                            <Group gap='xs'>
-                                <IconSelector stroke={1} />
-                                <Text size='sm' c='dimmed'>
-                                    {avgTransferSpeed}
-                                </Text>
-                            </Group>
+                            <Text size='sm' c='dimmed'>
+                                Current speed: {currentTransferSpeed}
+                            </Text>
                         </SimpleGrid>
 
                         <Grid>

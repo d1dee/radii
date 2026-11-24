@@ -46,6 +46,7 @@ import {
     formatDate,
     formatDateTime,
     formatMoney,
+    formatPackageTitle,
     formatTime,
 } from '@/lib/format';
 import { tableRowNumber, useTablePageSize } from '@/lib/pagination';
@@ -392,9 +393,20 @@ export default function PaymentsPage() {
                                             </Text>
                                         </Table.Td>
                                         <Table.Td>
-                                            <Group gap={4} wrap='nowrap'>
-                                                <Text size='sm'>
-                                                    {p.packageTitle ?? '—'}
+                                            <Group gap={4} wrap='nowrap' maw={300} className='admin-package-label'>
+                                                <Text
+                                                    size='sm'
+                                                    truncate
+                                                    maw={220}
+                                                    style={{ minWidth: 0, flexShrink: 1 }}
+                                                    title={p.packageTitle == null ? undefined : formatPackageTitle(p.packageTitle, p.packageCategory)}
+                                                >
+                                                    {p.packageTitle == null
+                                                        ? '—'
+                                                        : formatPackageTitle(
+                                                              p.packageTitle,
+                                                              p.packageCategory,
+                                                          )}
                                                 </Text>
                                                 <ArchivedPackageBadge
                                                     archivedAt={

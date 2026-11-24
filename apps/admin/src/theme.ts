@@ -12,6 +12,7 @@ import {
     TableScrollContainer,
 } from '@mantine/core';
 import { DatePickerInput, DateTimePicker } from '@mantine/dates';
+import { typography } from '@radii/ui';
 
 export const adminCssVariables: CSSVariablesResolver = () => ({
     variables: {},
@@ -30,15 +31,15 @@ export const adminCssVariables: CSSVariablesResolver = () => ({
 });
 
 export const adminTheme = createTheme({
+    ...typography,
     primaryColor: 'blue',
     primaryShade: { light: 8, dark: 5 },
     autoContrast: true,
     luminanceThreshold: 0.179,
     defaultRadius: 'md',
     radius: { xs: '3px', sm: '5px', md: '8px', lg: '12px', xl: '16px' },
-    fontFamily:
-        '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
     headings: {
+        ...typography.headings,
         fontWeight: '600',
         sizes: {
             h1: { fontSize: '1.75rem', lineHeight: '1.3' },
@@ -77,6 +78,7 @@ export const adminTheme = createTheme({
         }),
         Modal: Modal.extend({
             defaultProps: {
+                size: 'lg',
                 classNames: { title: 'admin-dialog-title' },
                 closeButtonProps: { 'aria-label': 'Close dialog' },
             },

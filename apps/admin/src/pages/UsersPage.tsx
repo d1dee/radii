@@ -6,6 +6,7 @@ import {
     Center,
     Checkbox,
     CopyButton,
+    Flex,
     Group,
     Loader,
     Modal,
@@ -93,13 +94,21 @@ function SummaryCard({ label, value }: { label: string; value: string }) {
     );
 }
 
-function CredentialField({ label, value }: { label: string; value: string }) {
+function CredentialField({
+    label,
+    description,
+    value,
+}: {
+    label: string;
+    description: string;
+    value: string;
+}) {
     return (
         <TextInput
             label={label}
+            description={description}
             value={value}
             readOnly
-            styles={{ input: { fontFamily: 'monospace' } }}
             rightSection={
                 <CopyButton value={value} timeout={1500}>
                     {({ copied, copy }) => (
@@ -141,6 +150,8 @@ export default function UsersPage() {
     const [provisionOpened, setProvisionOpened] = useState(false);
     const [provisionPhone, setProvisionPhone] = useState('');
     const [provisionNas, setProvisionNas] = useState<string | null>(null);
+    const [provisionName, setProvisionName] = useState('');
+    const [provisionLocation, setProvisionLocation] = useState('');
     const [provisionLabel, setProvisionLabel] = useState('');
     const [provisioning, setProvisioning] = useState(false);
     const [provisionError, setProvisionError] = useState<string | null>(null);
@@ -377,6 +388,8 @@ export default function UsersPage() {
         setProvisionNas(
             nasDevices.length === 1 ? nasDevices[0]!.id : provisionNas,
         );
+        setProvisionName('');
+        setProvisionLocation('');
         setProvisionLabel('');
         setProvisionError(null);
         setProvisioned(null);
@@ -453,6 +466,17 @@ export default function UsersPage() {
 
     async function submitProvision(event: React.FormEvent<HTMLFormElement>) {
         event.preventDefault();
+        if (
+            !provisionName.trim() ||
+            !provisionPhone.trim() ||
+            !provisionLocation.trim() ||
+            !provisionLabel.trim()
+        ) {
+            setProvisionError(
+                'Enter the customer name, phone number, location and account tag',
+            );
+            return;
+        }
         if (!provisionNas) {
             setProvisionError('Select the NAS device for this account');
             return;
@@ -462,7 +486,9 @@ export default function UsersPage() {
         const result = await provisionPppoeAccount({
             phoneNumber: provisionPhone,
             nasDeviceId: provisionNas,
-            label: provisionLabel.trim() || undefined,
+            name: provisionName.trim(),
+            location: provisionLocation.trim(),
+            label: provisionLabel.trim(),
         });
         setProvisioning(false);
         if (!result.success) {
@@ -542,6 +568,7 @@ export default function UsersPage() {
                 search={
                     <TextInput
                         aria-label='Search users'
+                        description='Find customers by name, phone or email.'
                         placeholder='Search name, phone or email'
                         leftSection={<MdSearch />}
                         value={search}
@@ -675,11 +702,7 @@ export default function UsersPage() {
                                                     : ''}
                                             </Text>
                                             {u.pendingClaim && u.pppoe ? (
-                                                <Text
-                                                    size='xs'
-                                                    c='dimmed'
-                                                    ff='monospace'
-                                                >
+                                                <Text size='xs' c='dimmed'>
                                                     {u.pppoe.username}
                                                 </Text>
                                             ) : null}
@@ -788,44 +811,69 @@ export default function UsersPage() {
                                                             label: 'Edit name / location',
                                                             ariaLabel: `Edit ${u.tag?.name || u.name}`,
                                                             icon: (
-                                                                <MdEdit size={16} />
+                                                                <MdEdit
+                                                                    size={16}
+                                                                />
                                                             ),
                                                             color: 'gray',
                                                             onClick: () =>
-                                                                openQuickAction(u, 'edit'),
+                                                                openQuickAction(
+                                                                    u,
+                                                                    'edit',
+                                                                ),
                                                         },
                                                         {
                                                             label: 'Flag user',
                                                             ariaLabel: `Flag ${u.tag?.name || u.name}`,
                                                             icon: (
-                                                                <MdFlag size={16} />
+                                                                <MdFlag
+                                                                    size={16}
+                                                                />
                                                             ),
                                                             color: 'orange',
                                                             onClick: () =>
-                                                                openQuickAction(u, 'flag'),
+                                                                openQuickAction(
+                                                                    u,
+                                                                    'flag',
+                                                                ),
                                                         },
                                                         u.banned
                                                             ? {
                                                                   label: 'Unban user',
                                                                   ariaLabel: `Unban ${u.tag?.name || u.name}`,
                                                                   icon: (
-                                                                      <MdCheckCircle size={16} />
+                                                                      <MdCheckCircle
+                                                                          size={
+                                                                              16
+                                                                          }
+                                                                      />
                                                                   ),
                                                                   color: 'green',
-                                                                  disabled: quickBusy,
-                                                                  onClick: () => {
-                                                                      void submitQuickUnban(u);
-                                                                  },
+                                                                  disabled:
+                                                                      quickBusy,
+                                                                  onClick:
+                                                                      () => {
+                                                                          void submitQuickUnban(
+                                                                              u,
+                                                                          );
+                                                                      },
                                                               }
                                                             : {
                                                                   label: 'Ban user',
                                                                   ariaLabel: `Ban ${u.tag?.name || u.name}`,
                                                                   icon: (
-                                                                      <MdBlock size={16} />
+                                                                      <MdBlock
+                                                                          size={
+                                                                              16
+                                                                          }
+                                                                      />
                                                                   ),
                                                                   color: 'red',
                                                                   onClick: () =>
-                                                                      openQuickAction(u, 'ban'),
+                                                                      openQuickAction(
+                                                                          u,
+                                                                          'ban',
+                                                                      ),
                                                               },
                                                     ]}
                                                 />
@@ -877,15 +925,23 @@ export default function UsersPage() {
                         <CredentialField
                             label='PPPoE username'
                             value={provisioned.username}
+                            description='Username used by the router to connect.'
                         />
+                        {provisioned.label ? (
+                            <Text size='sm'>
+                                Account tag: {provisioned.label}
+                            </Text>
+                        ) : null}
                         <CredentialField
                             label='PPPoE password'
                             value={provisioned.password}
+                            description='Password used by the router to connect.'
                         />
                         {provisioned.claimCode ? (
                             <CredentialField
                                 label='One-time claim code'
                                 value={provisioned.claimCode}
+                                description='Use once during registration to claim this account.'
                             />
                         ) : null}
                         <Group justify='flex-end' mt='sm'>
@@ -905,17 +961,42 @@ export default function UsersPage() {
                                 phone is not registered yet, a one-time claim
                                 code is generated for the customer.
                             </Text>
+                            <TextInput
+                                label='Name'
+                                description='Internal CRM name, hidden from the customer.'
+                                placeholder='e.g. Jane Mwangi'
+                                value={provisionName}
+                                onChange={(event) =>
+                                    setProvisionName(event.currentTarget.value)
+                                }
+                                maxLength={80}
+                                required
+                            />
                             <PhoneNumberInput
                                 label='Customer phone number'
+                                description='Phone number used to register and claim the account.'
                                 value={provisionPhone}
                                 onChange={(value) =>
                                     setProvisionPhone(value ?? '')
                                 }
                                 required
                             />
+                            <TextInput
+                                label='Location'
+                                description='Internal customer address or location.'
+                                placeholder='e.g. Riverside Apartments, House 4B'
+                                value={provisionLocation}
+                                onChange={(event) =>
+                                    setProvisionLocation(
+                                        event.currentTarget.value,
+                                    )
+                                }
+                                maxLength={120}
+                                required
+                            />
                             <Select
                                 label='NAS device (PPPoE instance)'
-                                description="The user's first login binds them to this network; the portal shows this network's packages."
+                                description='Network this PPPoE account connects through.'
                                 placeholder='Select a NAS device'
                                 data={nasOptions}
                                 value={provisionNas}
@@ -927,14 +1008,15 @@ export default function UsersPage() {
                                 required
                             />
                             <TextInput
-                                label='Account label'
-                                description='Optional line or location name'
-                                placeholder='Home router'
+                                label='PPPoE account tag'
+                                description='Customer-visible name to distinguish their accounts.'
+                                placeholder='e.g. Shop 1, Home router'
                                 value={provisionLabel}
                                 onChange={(event) =>
                                     setProvisionLabel(event.currentTarget.value)
                                 }
                                 maxLength={80}
+                                required
                             />
                             {provisionError ? (
                                 <Text size='sm' c='red'>
@@ -951,7 +1033,13 @@ export default function UsersPage() {
                                 <Button
                                     type='submit'
                                     loading={provisioning}
-                                    disabled={!provisionPhone || !provisionNas}
+                                    disabled={
+                                        !provisionName.trim() ||
+                                        !provisionPhone.trim() ||
+                                        !provisionLocation.trim() ||
+                                        !provisionLabel.trim() ||
+                                        !provisionNas
+                                    }
                                 >
                                     Provision credentials
                                 </Button>
@@ -964,8 +1052,67 @@ export default function UsersPage() {
             <Modal
                 opened={detailsAccountId !== null}
                 onClose={() => setDetailsAccountId(null)}
-                title='Provisioned PPPoE account'
+                title={
+                    <Stack component='span' gap={4}>
+                        <Text span fw={500}>
+                            Provisioned PPPoE account
+                        </Text>
+                        {!accountDetailsLoading && accountDetails ? (
+                            accountDetails.customer ? (
+                                <Text span size='xs' c='dimmed'>
+                                    Linked to customer{' '}
+                                    {accountDetails.customer.name} (
+                                    {accountDetails.phoneNumber}).
+                                </Text>
+                            ) : (
+                                <Text span size='xs' c='dimmed'>
+                                    Claim account: {accountDetails.phoneNumber}{' '}
+                                    using the one-time code provided.
+                                    Provisioned{' '}
+                                    {formatDate(accountDetails.createdAt)}
+                                    {accountDetails.lastUsedAt
+                                        ? ` · last used ${dayjs(accountDetails.lastUsedAt).fromNow()}`
+                                        : ' · never used'}
+                                    <Group
+                                        component='span'
+                                        gap='xs'
+                                        display='inline-flex'
+                                        ml={6}
+                                        style={{ verticalAlign: 'middle' }}
+                                    >
+                                        <Badge
+                                            color={
+                                                accountDetails.status ===
+                                                'active'
+                                                    ? 'green'
+                                                    : accountDetails.status ===
+                                                        'suspended'
+                                                      ? 'orange'
+                                                      : 'red'
+                                            }
+                                            variant='light'
+                                            size='sm'
+                                        >
+                                            {accountDetails.status}
+                                        </Badge>
+                                        {accountDetails.awaitingClaim ? (
+                                            <Badge
+                                                color='violet'
+                                                variant='light'
+                                                size='sm'
+                                            >
+                                                Awaiting claim
+                                            </Badge>
+                                        ) : null}
+                                    </Group>
+                                </Text>
+                            )
+                        ) : null}{' '}
+                    </Stack>
+                }
+                styles={{ header: { alignItems: 'flex-start' } }}
                 centered
+                size='lg'
             >
                 {accountDetailsLoading ? (
                     <Center py='xl'>
@@ -973,89 +1120,70 @@ export default function UsersPage() {
                     </Center>
                 ) : accountDetails ? (
                     <Stack gap='md'>
-                        <Group gap='xs'>
-                            <Badge
-                                color={
-                                    accountDetails.status === 'active'
-                                        ? 'green'
-                                        : accountDetails.status === 'suspended'
-                                          ? 'orange'
-                                          : 'red'
-                                }
-                                variant='light'
-                                size='sm'
-                            >
-                                {accountDetails.status}
-                            </Badge>
-                            {accountDetails.awaitingClaim ? (
-                                <Badge color='violet' variant='light' size='sm'>
-                                    Awaiting claim
-                                </Badge>
-                            ) : null}
-                        </Group>
-                        {accountDetails.customer ? (
-                            <Text size='sm' c='dimmed'>
-                                Linked to customer{' '}
-                                {accountDetails.customer.name} (
-                                {accountDetails.phoneNumber}).
-                            </Text>
-                        ) : (
-                            <Text size='sm' c='dimmed'>
-                                Not claimed yet. The customer registers with{' '}
-                                {accountDetails.phoneNumber} and the one-time
-                                claim code to link these credentials. Their
-                                first PPPoE session bonds the account to the
-                                network it dials through.
-                            </Text>
-                        )}
                         <CredentialField
                             label='PPPoE username'
                             value={accountDetails.username}
+                            description='Username used by the router to connect.'
                         />
-                        <Select
-                            label='NAS device (PPPoE instance)'
-                            description='Moving the account cuts its live sessions; the customer re-dials through the new network.'
-                            placeholder='Select a NAS device'
-                            data={nasOptions}
-                            value={migrateNas}
-                            onChange={setMigrateNas}
-                            searchable
-                            filter={fuseOptionsFilter}
-                            nothingFoundMessage='No NAS devices — create one first'
-                        />
-                        <Group justify='flex-end'>
-                            <Button
-                                size='xs'
-                                variant='light'
-                                color='orange'
-                                loading={migrating}
-                                disabled={
-                                    !migrateNas ||
-                                    migrateNas === accountDetails.nasDeviceId
-                                }
-                                onClick={submitMigrate}
-                            >
-                                Migrate to selected network
-                            </Button>
-                        </Group>
                         {accountDetails.password ? (
                             <CredentialField
                                 label='PPPoE password'
                                 value={accountDetails.password}
+                                description='Password used by the router to connect.'
                             />
                         ) : null}
                         {regenerated?.claimCode ? (
                             <CredentialField
                                 label='One-time claim code'
                                 value={regenerated.claimCode}
+                                description='Use once during registration to claim this account.'
                             />
                         ) : null}
-                        <Text size='xs' c='dimmed'>
-                            Provisioned {formatDate(accountDetails.createdAt)}
-                            {accountDetails.lastUsedAt
-                                ? ` · last used ${dayjs(accountDetails.lastUsedAt).fromNow()}`
-                                : ' · never used'}
-                        </Text>
+
+                        <Stack gap={4}>
+                            <Flex
+                                gap='xs'
+                                align='flex-end'
+                                direction={{ base: 'column', xs: 'row' }}
+                            >
+                                <Select
+                                    label='NAS device (PPPoE instance)'
+                                    placeholder='Select a NAS device'
+                                    data={nasOptions}
+                                    value={migrateNas}
+                                    onChange={setMigrateNas}
+                                    searchable
+                                    filter={fuseOptionsFilter}
+                                    nothingFoundMessage='No NAS devices — create one first'
+                                    aria-describedby='pppoe-migration-description'
+                                    flex={1}
+                                    w='100%'
+                                    miw={0}
+                                />
+                                <Button
+                                    variant='light'
+                                    color='orange'
+                                    loading={migrating}
+                                    disabled={
+                                        !migrateNas ||
+                                        migrateNas ===
+                                            accountDetails.nasDeviceId
+                                    }
+                                    onClick={submitMigrate}
+                                    w={{ base: '100%', xs: 'auto' }}
+                                    style={{ flexShrink: 0 }}
+                                >
+                                    Migrate
+                                </Button>
+                            </Flex>
+                            <Text
+                                id='pppoe-migration-description'
+                                size='xs'
+                                c='dimmed'
+                            >
+                                Changing networks disconnects current sessions.
+                            </Text>
+                        </Stack>
                         <Group justify='flex-end' mt='sm'>
                             {accountDetails.awaitingClaim ? (
                                 <Button
@@ -1094,6 +1222,7 @@ export default function UsersPage() {
                         label='Name'
                         placeholder='e.g. Jane Mwangi'
                         value={tagName}
+                        description='Private customer name for your CRM records.'
                         onChange={(e) => setTagName(e.currentTarget.value)}
                         maxLength={80}
                     />
@@ -1101,6 +1230,7 @@ export default function UsersPage() {
                         label='Location'
                         placeholder='e.g. Riverside Apartments, House 4B'
                         value={tagLocation}
+                        description='Private customer address or location.'
                         onChange={(e) => setTagLocation(e.currentTarget.value)}
                         maxLength={120}
                     />
@@ -1124,6 +1254,7 @@ export default function UsersPage() {
                         label='Reason'
                         placeholder='e.g. payment dispute, abuse, suspicious activity'
                         value={flagReason}
+                        description='Briefly explain why this customer is flagged.'
                         onChange={(e) => setFlagReason(e.currentTarget.value)}
                         required
                     />
@@ -1131,6 +1262,7 @@ export default function UsersPage() {
                         label='Note (optional)'
                         placeholder='Extra context for other admins'
                         value={flagNote}
+                        description='Additional context for other admins.'
                         onChange={(e) => setFlagNote(e.currentTarget.value)}
                         rows={3}
                     />
@@ -1165,6 +1297,7 @@ export default function UsersPage() {
                     <Textarea
                         label='Reason (optional)'
                         value={banReason}
+                        description='Optional explanation for blocking portal access.'
                         onChange={(e) => setBanReason(e.currentTarget.value)}
                         rows={2}
                     />

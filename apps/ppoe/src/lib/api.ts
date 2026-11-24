@@ -109,6 +109,7 @@ export function getStatus(accountId: string) {
 
 export function createOrder(body: {
     packageId: string;
+    expectedAmount: number;
     phoneNumber?: string;
     serviceAccountId: string | null;
 }) {

@@ -33,7 +33,10 @@ export const pppoeServiceAccounts = pgTable(
         normalizedPhone: text('normalized_phone').notNull(),
         username: text('username').notNull(),
         claimCodeHash: text('claim_code_hash'),
+        // Customer-visible account tag, separate from internal CRM details.
         label: text('label'),
+        customerName: text('customer_name'),
+        location: text('location'),
         status: text('status', { enum: ['active', 'suspended', 'closed'] })
             .default('active')
             .notNull(),

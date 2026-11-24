@@ -15,6 +15,7 @@ import {
     Title,
 } from '@mantine/core';
 import { ArchivedPackageBadge } from '@/components/Packages/ArchivedPackageBadge';
+import { ThroughputChart } from '@/components/Sessions/ThroughputChart';
 import type { ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import { MdDelete, MdEdit, MdTerminal } from 'react-icons/md';
@@ -28,6 +29,7 @@ import {
     type NasDeviceAnalytics,
     type NasDeviceRow,
     type NasSetupScriptRow,
+    type ThroughputRange,
     type PackagePaymentStatus,
     type PackageRow,
 } from '@/lib/api';
@@ -35,6 +37,7 @@ import {
     formatDate,
     formatDateTime,
     formatPackagePrice,
+    formatPackageTitle,
     formatPaymentAmount,
 } from '@/lib/format';
 import { nasDeviceOsLabel, nasDeviceStatusColors } from '@/lib/nas';
@@ -88,7 +91,7 @@ function DetailItem({ label, value }: { label: string; value: ReactNode }) {
             <Text size='xs' c='dimmed'>
                 {label}
             </Text>
-            <Text size='sm' fw={500}>
+            <Text component='div' size='sm' fw={500}>
                 {value}
             </Text>
         </Stack>
@@ -119,10 +122,13 @@ export function NasDetailsDrawer({
     const [scriptRow, setScriptRow] = useState<NasSetupScriptRow | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [paymentsPage, setPaymentsPage] = useState(1);
+    const [throughputRange, setThroughputRange] =
+        useState<ThroughputRange>('day');
     const loadRequest = useRef(0);
 
     useEffect(() => {
         if (nasDeviceId) setPaymentsPage(1);
+        setThroughputRange('day');
     }, [nasDeviceId]);
 
     useEffect(() => {
@@ -134,7 +140,10 @@ export function NasDetailsDrawer({
         setScriptRow(null);
         setError(null);
 
-        (async () => {
+        let refreshing = false;
+        const load = async () => {
+            if (refreshing) return;
+            refreshing = true;
             const [deviceRes, analyticsRes, packagesRes, scriptRes] =
                 await Promise.all([
                     getNasDevice(nasDeviceId),
@@ -145,6 +154,7 @@ export function NasDetailsDrawer({
                     getAllAdminPackages(),
                     getNasSetupScript(nasDeviceId),
                 ]);
+            refreshing = false;
             if (requestId !== loadRequest.current) return;
             if (!deviceRes.success) {
                 setError(deviceRes.message);
@@ -158,6 +168,7 @@ export function NasDetailsDrawer({
                 setError('Failed to load NAS device details');
                 return;
             }
+            setError(null);
             setDevice(deviceRes.data);
             setAnalytics(analyticsRes.data);
             if (packagesRes.success && packagesRes.data) {
@@ -170,7 +181,13 @@ export function NasDetailsDrawer({
             if (scriptRes.success && scriptRes.data) {
                 setScriptRow(scriptRes.data);
             }
-        })();
+        };
+        void load();
+        const timer = setInterval(() => void load(), 10_000);
+        return () => {
+            clearInterval(timer);
+            loadRequest.current += 1;
+        };
     }, [nasDeviceId, paymentsPage, perPage]);
 
     const repeatRate =
@@ -236,7 +253,7 @@ export function NasDetailsDrawer({
                 </Group>
             }
         >
-            {error ? (
+            {error && !device ? (
                 <Text c='red'>{error}</Text>
             ) : !device || !analytics ? (
                 <Center py='xl'>
@@ -400,10 +417,12 @@ export function NasDetailsDrawer({
                                 <Badge
                                     key={pkg.id}
                                     maw='100%'
+                                    style={{ maxWidth: 'min(100%, 320px)', flexShrink: 0 }}
+                                    title={`${formatPackageTitle(pkg.title, pkg.category)} · ${formatPackagePrice(pkg.price)}`}
                                     variant='light'
                                     color={pkg.isActive ? undefined : 'gray'}
                                 >
-                                    {pkg.title} ·{' '}
+                                    {formatPackageTitle(pkg.title, pkg.category)} ·{' '}
                                     {formatPackagePrice(pkg.price)}
                                 </Badge>
                             ))}
@@ -411,6 +430,16 @@ export function NasDetailsDrawer({
                     )}
 
                     <Divider label='Analytics' labelPosition='left' />
+
+                    {nasDeviceId ? (
+                        <ThroughputChart
+                            key={nasDeviceId}
+                            kind='nas'
+                            id={nasDeviceId}
+                            range={throughputRange}
+                            onRangeChange={setThroughputRange}
+                        />
+                    ) : null}
 
                     <Grid>
                         <Grid.Col span={{ base: 12, xs: 6, sm: 4 }}>
@@ -505,8 +534,19 @@ export function NasDetailsDrawer({
                                                     {p.phoneNumber}
                                                 </Table.Td>
                                                 <Table.Td>
-                                                    <Group gap={4} wrap='nowrap'>
-                                                        {p.packageTitle}
+                                                    <Group gap={4} wrap='nowrap' maw={300} className='admin-package-label'>
+                                                        <Text
+                                                            size='sm'
+                                                            truncate
+                                                            maw={220}
+                                                            style={{ minWidth: 0, flexShrink: 1 }}
+                                                            title={formatPackageTitle(p.packageTitle, p.packageCategory)}
+                                                        >
+                                                            {formatPackageTitle(
+                                                                p.packageTitle,
+                                                                p.packageCategory,
+                                                            )}
+                                                        </Text>
                                                         <ArchivedPackageBadge
                                                             archivedAt={
                                                                 p.packageArchivedAt

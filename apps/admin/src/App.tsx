@@ -2,6 +2,7 @@ import '@mantine/core/styles.css';
 import '@mantine/notifications/styles.css';
 import '@mantine/dates/styles.css';
 import '@mantine/charts/styles.css';
+import '@radii/ui/fonts.css';
 import './admin.css';
 
 import { Center, Loader, MantineProvider } from '@mantine/core';

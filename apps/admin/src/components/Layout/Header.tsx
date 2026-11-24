@@ -6,9 +6,11 @@ import {
     Stack,
     Text,
     UnstyledButton,
+    useComputedColorScheme,
+    useMantineColorScheme,
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { MdLogout, MdSettings } from 'react-icons/md';
+import { MdDarkMode, MdLightMode, MdLogout, MdSettings } from 'react-icons/md';
 import { useNavigate } from 'react-router-dom';
 
 import { authClient, useSession } from '@/lib/auth';
@@ -22,6 +24,8 @@ interface HeaderProps {
 export function Header({ opened, onMenuClick }: HeaderProps) {
     const { data: session } = useSession();
     const navigate = useNavigate();
+    const { setColorScheme } = useMantineColorScheme();
+    const colorScheme = useComputedColorScheme('light');
 
     const name = session?.user.name ?? 'Admin';
     const email = session?.user.email ?? '';
@@ -114,6 +118,15 @@ export function Header({ opened, onMenuClick }: HeaderProps) {
                     >
                         Settings
                     </Menu.Item>
+                    <Menu.Item
+                        leftSection={colorScheme === 'dark'
+                            ? <MdLightMode size={16} />
+                            : <MdDarkMode size={16} />}
+                        onClick={() => setColorScheme(colorScheme === 'dark' ? 'light' : 'dark')}
+                    >
+                        Switch to {colorScheme === 'dark' ? 'light' : 'dark'} mode
+                    </Menu.Item>
+                    <Menu.Divider />
                     <Menu.Item
                         color='red'
                         leftSection={<MdLogout size={16} />}

@@ -52,6 +52,7 @@ import { PaymentRefCell } from '@/components/Payments/PaymentRefCell';
 import { ArchivedPackageBadge } from '@/components/Packages/ArchivedPackageBadge';
 import { CustomerAudienceTags } from './CustomerAudienceTags';
 import { TablePagination } from '@/components/TablePagination';
+import { ThroughputChart } from '@/components/Sessions/ThroughputChart';
 import {
     activateActivation,
     addUserFlag,
@@ -90,6 +91,7 @@ import {
     formatDateTime,
     formatMoney,
     formatPackageRate,
+    formatPackageTitle,
     formatPaymentAmount,
     formatSeconds,
 } from '@/lib/format';
@@ -182,6 +184,7 @@ export function UserDetailsDrawer({
     const [paymentsPage, setPaymentsPage] = useState(1);
     const [paymentsLoading, setPaymentsLoading] = useState(false);
     const [busy, setBusy] = useState(false);
+    const detailRequest = useRef(0);
     const activationsRequest = useRef(0);
     const paymentsRequest = useRef(0);
 
@@ -246,8 +249,9 @@ export function UserDetailsDrawer({
     const navigate = useNavigate();
 
     const loadDetail = useCallback(async (id: string) => {
-        setError(null);
+        const requestId = ++detailRequest.current;
         const res = await getAdminUser(id);
+        if (requestId !== detailRequest.current) return;
         if (!res.success) {
             setError(res.message || 'Failed to load user');
             return;
@@ -256,13 +260,14 @@ export function UserDetailsDrawer({
             setError('Failed to load user');
             return;
         }
+        setError(null);
         setDetail(res.data);
     }, []);
 
     const loadActivations = useCallback(
-        async (id: string, page: number) => {
+        async (id: string, page: number, background = false) => {
             const requestId = ++activationsRequest.current;
-            setActivationsLoading(true);
+            if (!background) setActivationsLoading(true);
             const res = await getUserActivations(id, {
                 page,
                 perPage: activationsPerPage,
@@ -278,9 +283,9 @@ export function UserDetailsDrawer({
     );
 
     const loadPayments = useCallback(
-        async (id: string, page: number) => {
+        async (id: string, page: number, background = false) => {
             const requestId = ++paymentsRequest.current;
-            setPaymentsLoading(true);
+            if (!background) setPaymentsLoading(true);
             const res = await getUserPayments(id, {
                 page,
                 perPage: paymentsPerPage,
@@ -315,17 +320,45 @@ export function UserDetailsDrawer({
         setPppoeLabelModal(null);
         setActivationModal(false);
         void loadDetail(userId);
+        let refreshing = false;
+        const timer = setInterval(async () => {
+            if (refreshing) return;
+            refreshing = true;
+            await loadDetail(userId);
+            refreshing = false;
+        }, 10_000);
+        return () => {
+            clearInterval(timer);
+            detailRequest.current += 1;
+            activationsRequest.current += 1;
+            paymentsRequest.current += 1;
+        };
     }, [userId, loadDetail]);
 
+    const detailLoaded = detail !== null;
     useEffect(() => {
-        if (!userId || !detail) return;
-        if (tab === 'activations')
-            void loadActivations(userId, activationsPage);
-        if (tab === 'payments') void loadPayments(userId, paymentsPage);
+        if (!userId || !detailLoaded) return;
+        let refreshing = false;
+        const load = async (background = false) => {
+            if (refreshing) return;
+            refreshing = true;
+            if (tab === 'activations')
+                await loadActivations(userId, activationsPage, background);
+            if (tab === 'payments')
+                await loadPayments(userId, paymentsPage, background);
+            refreshing = false;
+        };
+        void load();
+        const timer = setInterval(() => void load(true), 10_000);
+        return () => {
+            clearInterval(timer);
+            activationsRequest.current += 1;
+            paymentsRequest.current += 1;
+        };
     }, [
         tab,
         userId,
-        detail,
+        detailLoaded,
         activationsPage,
         paymentsPage,
         loadActivations,
@@ -899,7 +932,7 @@ export function UserDetailsDrawer({
                 </Group>
             }
         >
-            {error ? (
+            {error && !detail ? (
                 <Text c='red'>{error}</Text>
             ) : !detail ? (
                 <Center py='xl'>
@@ -944,7 +977,7 @@ export function UserDetailsDrawer({
                                     </Badge>
                                 </Group>
                                 <Group gap={4}>
-                                    <Text size='lg' fw={700} ff='monospace'>
+                                    <Text size='lg' fw={700}>
                                         {detail.pinResetOtp}
                                     </Text>
                                     <CopyButton value={detail.pinResetOtp}>
@@ -973,6 +1006,8 @@ export function UserDetailsDrawer({
                             </Text>
                         </Card>
                     ) : null}
+
+                    {userId ? <ThroughputChart key={userId} kind='customer' id={userId} /> : null}
 
                     <Tabs value={tab} onChange={setTab}>
                         <Tabs.List>
@@ -1182,12 +1217,16 @@ export function UserDetailsDrawer({
                                                         )}
                                                     </Table.Td>
                                                     <Table.Td>
-                                                        <Group gap={4} wrap='nowrap'>
+                                                        <Group gap={4} wrap='nowrap' maw={360} className='admin-package-label'>
                                                             <Text
                                                                 size='sm'
                                                                 fw={500}
+                                                                truncate
+                                                                maw={220}
+                                                                style={{ minWidth: 0, flexShrink: 1 }}
+                                                                title={formatPackageTitle(a.packageTitle, a.packageCategory)}
                                                             >
-                                                                {a.packageTitle}
+                                                                {formatPackageTitle(a.packageTitle, a.packageCategory)}
                                                             </Text>
                                                             <ArchivedPackageBadge
                                                                 archivedAt={
@@ -1313,7 +1352,7 @@ export function UserDetailsDrawer({
                                                                 mt={5}
                                                             >
                                                                 <Progress
-                                                                    aria-label={`Fair usage for ${a.packageTitle}`}
+                                                                    aria-label={`Fair usage for ${formatPackageTitle(a.packageTitle, a.packageCategory)}`}
                                                                     value={Math.min(
                                                                         100,
                                                                         (a
@@ -1436,7 +1475,7 @@ export function UserDetailsDrawer({
                                                                     : !a.expired
                                                                       ? [{
                                                                             label: 'Deactivate client package',
-                                                                            ariaLabel: `Deactivate ${a.packageTitle}`,
+                                                                            ariaLabel: `Deactivate ${formatPackageTitle(a.packageTitle, a.packageCategory)}`,
                                                                             icon: <MdBlock size={16} />,
                                                                             color: 'red',
                                                                             onClick: () =>
@@ -1444,7 +1483,7 @@ export function UserDetailsDrawer({
                                                                                     activationId:
                                                                                         a.activationId,
                                                                                     packageTitle:
-                                                                                        a.packageTitle,
+                                                                                        formatPackageTitle(a.packageTitle, a.packageCategory),
                                                                                 }),
                                                                         }]
                                                                       : []),
@@ -1553,9 +1592,15 @@ export function UserDetailsDrawer({
                                                         </Text>
                                                     </Table.Td>
                                                     <Table.Td>
-                                                        <Group gap={4} wrap='nowrap'>
-                                                            <Text size='sm'>
-                                                                {p.packageTitle}
+                                                        <Group gap={4} wrap='nowrap' maw={300} className='admin-package-label'>
+                                                            <Text
+                                                                size='sm'
+                                                                truncate
+                                                                maw={220}
+                                                                style={{ minWidth: 0, flexShrink: 1 }}
+                                                                title={formatPackageTitle(p.packageTitle, p.packageCategory)}
+                                                            >
+                                                                {formatPackageTitle(p.packageTitle, p.packageCategory)}
                                                             </Text>
                                                             <ArchivedPackageBadge
                                                                 archivedAt={
@@ -2038,7 +2083,7 @@ export function UserDetailsDrawer({
                             placeholder='Select any package'
                             data={activationPackages.map((pkg) => ({
                                 value: pkg.id,
-                                label: `${pkg.title} · ${pkg.type}${pkg.archivedAt ? ' · archived' : ''}`,
+                                label: `${formatPackageTitle(pkg.title, pkg.category)} · ${pkg.type}${pkg.archivedAt ? ' · archived' : ''}`,
                             }))}
                             value={activationPackageId}
                             onChange={selectActivationPackage}

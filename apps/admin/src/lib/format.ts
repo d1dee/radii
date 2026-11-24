@@ -42,9 +42,9 @@ export function formatDateTime(value: ConfigType, withSeconds = false): string {
         .format(`DD MMM YYYY ${timeToken(withSeconds)}`);
 }
 
-// Day + time without the year (compact table cells).
+// Table timestamps use the same full date format as other displays.
 export function formatDayTime(value: ConfigType): string {
-    return dayjs(value).tz(appearance.timezone).format(`D MMM ${timeToken()}`);
+    return formatDateTime(value);
 }
 
 export function formatTime(value: ConfigType, withSeconds = false): string {
@@ -73,6 +73,13 @@ export function formatMoney(amount: number | string): string {
 
 export function formatPackagePrice(price: number | string): string {
     return Number(price) === 0 ? 'Free' : formatMoney(price);
+}
+
+export function formatPackageTitle(
+    title: string,
+    category: string | null | undefined,
+): string {
+    return category ? `${category} · ${title}` : title;
 }
 
 // Payment amounts: a zero-amount payment (free package purchase) shows

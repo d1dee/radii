@@ -39,7 +39,6 @@ import {
     refreshPppoeAccounts,
     refreshPppoeQuota,
     selectPppoeAccount,
-    useNasScope,
     usePppoeAccounts,
 } from '../../lib/store.ts';
 import classes from './PppoeAccountCard.module.css';
@@ -54,18 +53,11 @@ export function PppoeAccountCard() {
         selectedAccountId,
         error: accountsError,
     } = usePppoeAccounts();
-    const { nasDeviceId } = useNasScope();
     const [rotating, setRotating] = useState<string | null>(null);
     const [disconnecting, setDisconnecting] = useState<string | null>(null);
     const [expanded, setExpanded] = useState(false);
     const [chooserOpened, setChooserOpened] = useState(false);
     const prompted = useRef(false);
-
-    // Refresh on sign-in and on every network change so availability
-    // (availableOnPortal) reflects the NAS the portal is scoped to.
-    useEffect(() => {
-        if (session?.session) void refreshPppoeAccounts();
-    }, [session?.session, nasDeviceId]);
 
     // First-visit chooser when the customer has multiple service accounts.
     useEffect(() => {
@@ -433,6 +425,7 @@ export function PppoeAccountCard() {
                 opened={chooserOpened}
                 onClose={() => setChooserOpened(false)}
                 title='Choose a service line'
+                size='lg'
                 centered
                 radius='lg'
             >
@@ -517,8 +510,12 @@ function AccountOption({
     client: PppoeClient;
     selected: boolean;
 }) {
+    const packageName = client.activeActivation
+        ? `${client.activeActivation.packageCategory ? `${client.activeActivation.packageCategory} · ` : ''}${client.activeActivation.packageTitle}`
+        : 'No active package';
+
     return (
-        <Group wrap='nowrap' gap='sm' w='100%'>
+        <Group wrap='nowrap' gap='sm' w='100%' miw={0}>
             <Box
                 c={client.online ? 'green.7' : 'gray.6'}
                 bg={
@@ -527,7 +524,7 @@ function AccountOption({
                         : 'var(--mantine-color-default-hover)'
                 }
                 p={8}
-                style={{ borderRadius: '50%', lineHeight: 0 }}
+                style={{ borderRadius: '50%', lineHeight: 0, flexShrink: 0 }}
             >
                 <MdSettingsEthernet size={18} />
             </Box>
@@ -547,9 +544,8 @@ function AccountOption({
                 <Text size='xs' c='dimmed' truncate>
                     {client.nasName || client.tenantName} · {client.username}
                 </Text>
-                <Text size='xs' c='dimmed' truncate>
-                    {client.activeActivation?.packageTitle ??
-                        'No active package'}
+                <Text size='xs' c='dimmed' truncate title={packageName}>
+                    {packageName}
                 </Text>
             </Stack>
             <AccountStatus client={client} />

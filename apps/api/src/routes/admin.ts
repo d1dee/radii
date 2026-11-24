@@ -10,6 +10,7 @@ import {
 } from '@radii/shared';
 import { Hono } from 'hono';
 import { z } from 'zod';
+import { nasThroughputQuerySchema } from '../lib/nasThroughput';
 import { getAdminSettings, saveAdminSettings } from '../lib/adminSettings';
 import { createAdminActivation } from '../lib/adminActivations';
 import {
@@ -17,10 +18,12 @@ import {
     canAdminManageActivation,
     canAdminManageGlobalUser,
     deleteAdminUser,
+    getAdminCustomerOptions,
     getAdminNasAddresses,
     getAdminPaymentDetail,
     getAdminReports,
     getAdminSessionDetail,
+    getAdminThroughputObservations,
     getAdminUserDetail,
     getOwnedActivationIds,
     getUserPayments,
@@ -39,6 +42,7 @@ import {
     createNasDevice,
     deleteNasDevice,
     getNasDeviceById,
+    getNasDeviceThroughput,
     getNasDevices,
     listAdminNasDevices,
     updateNasDevice,
@@ -236,6 +240,10 @@ app.get('/packages', requireAdmin, async (c) => {
     ) {
         return jsonError(c, 400, 'Invalid package archive filter');
     }
+    const categories = [...new Set(c.req.queries('category') ?? [])];
+    if (categories.some((category) => !category.trim() || category.includes('\0'))) {
+        return jsonError(c, 400, 'Invalid package category filter');
+    }
     const { page, perPage } = paginationParams(
         c.req.query('page'),
         c.req.query('perPage'),
@@ -243,6 +251,7 @@ app.get('/packages', requireAdmin, async (c) => {
     const { total, rows } = await listAdminPackages({
         ownerId: c.var.adminSession.userId,
         type: typeParam as 'hotspot' | 'pppoe' | undefined,
+        categories,
         q: c.req.query('q')?.trim() || undefined,
         archived: archivedParam as
             | 'current'
@@ -523,6 +532,18 @@ app.get('/nas-devices/:id/analytics', requireAdmin, async (c) => {
     return c.json({ success: true, data });
 });
 
+app.get('/nas-devices/:id/throughput', requireAdmin, async (c) => {
+    const id = z.uuid().safeParse(c.req.param('id'));
+    if (!id.success) return jsonError(c, 400, 'Invalid NAS id');
+    const range = nasThroughputQuerySchema.safeParse(c.req.query());
+    if (!range.success) return jsonError(c, 400, 'Invalid throughput range');
+    const adminId = c.get('adminSession').userId;
+    const device = await getNasDeviceById(id.data, adminId);
+    if (!device) return jsonError(c, 404, 'NAS device not found');
+    const data = await getNasDeviceThroughput(adminId, device.id, range.data);
+    return c.json({ success: true, data });
+});
+
 // Non-secret fields of a nas_setup_script row that the admin frontend
 // consumes (NasSetupScriptRow in apps/admin/src/lib/api.ts): the rendered
 // script, status/timestamps, WG tunnel facts and the persisted generation
@@ -747,6 +768,26 @@ app.delete('/nas-devices/:id', requireAdmin, async (c) => {
 
 const userTypeFilterSchema = z.enum(['hotspot', 'pppoe']);
 
+const customerOptionsQuerySchema = z.object({
+    q: z.string().trim().max(200).refine((value) => !value.includes('\0')).optional(),
+    ids: z.array(z.string().trim().min(1).max(200).refine((value) => !value.includes('\0')))
+        .min(1).max(500).optional(),
+}).refine((query) => query.q === undefined || query.ids === undefined, {
+    message: 'Use either q or ids, not both',
+});
+
+app.get('/customer-options', requireAdmin, async (c) => {
+    const parsed = customerOptionsQuerySchema.safeParse({
+        q: c.req.query('q'),
+        ids: c.req.queries('ids'),
+    });
+    if (!parsed.success || (c.req.queries('q')?.length ?? 0) > 1) {
+        return jsonError(c, 400, 'Invalid customer options query');
+    }
+    const data = await getAdminCustomerOptions(c.get('adminSession').userId, parsed.data);
+    return c.json({ success: true, data });
+});
+
 // Customer list with lifetime value aggregates; supports search, service-type
 // and flagged filters, paginated.
 app.get('/users', requireAdmin, async (c) => {
@@ -766,6 +807,11 @@ app.get('/users', requireAdmin, async (c) => {
         return jsonError(c, 400, 'Invalid flagged user filter');
     }
     const flagged = flaggedParam === '1' || flaggedParam === 'true';
+    const summaryParam = c.req.query('eligibilitySummary');
+    if (summaryParam !== undefined && !['1', '0', 'true', 'false'].includes(summaryParam)) {
+        return jsonError(c, 400, 'Invalid eligibility summary flag');
+    }
+    const eligibilitySummary = summaryParam === '1' || summaryParam === 'true';
     const typeParam = c.req.query('type');
     const type = typeParam
         ? userTypeFilterSchema.safeParse(typeParam).success
@@ -784,6 +830,7 @@ app.get('/users', requireAdmin, async (c) => {
         q,
         type,
         flagged,
+        eligibilitySummary,
         ...sort.data,
         page,
         perPage,
@@ -793,6 +840,20 @@ app.get('/users', requireAdmin, async (c) => {
 
 // One customer's valuation: identity, moderation state, lifetime payments,
 // activations, usage, flags and PPPoE credentials.
+app.get('/users/:id/throughput', requireAdmin, async (c) => {
+    const range = z.enum(['hour', 'day', 'month'])
+        .default('hour')
+        .safeParse(c.req.query('range'));
+    if (!range.success) return jsonError(c, 400, 'Invalid throughput range');
+    const userId = c.req.param('id');
+    const adminId = c.get('adminSession').userId;
+    if (!userId || !(await isAdminUserVisible(adminId, userId))) {
+        return jsonError(c, 404, 'User not found');
+    }
+    const data = await getAdminThroughputObservations(adminId, { userId }, range.data);
+    return c.json({ success: true, data });
+});
+
 app.get('/users/:id', requireAdmin, async (c) => {
     const id = c.req.param('id');
     if (!id) return jsonError(c, 404, 'User not found');
@@ -1055,6 +1116,8 @@ const provisionPppoeSchema = z.object({
     // network's packages.
     nasDeviceId: z.uuid(),
     label: z.string().trim().max(80).optional(),
+    name: z.string().trim().max(80).optional(),
+    location: z.string().trim().max(120).optional(),
 });
 
 app.post('/pppoe-accounts/provision', requireAdmin, async (c) => {
@@ -1075,6 +1138,7 @@ app.post('/pppoe-accounts/provision', requireAdmin, async (c) => {
             parsed.data.nasDeviceId,
             parsed.data.phoneNumber,
             parsed.data.label,
+            { name: parsed.data.name, location: parsed.data.location },
         );
         return c.json(
             {
@@ -1463,23 +1527,29 @@ app.put('/activations/:id', requireAdmin, async (c) => {
 
 // --- RADIUS -----------------------------------------------------------------
 
-// Open-session accounting totals and lifetime average speeds. The window
-// scopes session starts/top users only. ?windowMinutes=<n> (default 60).
+// Historical accounting activity scoped to the dashboard's selected date range.
 app.get('/radius/summary', requireAdmin, async (c) => {
-    const raw = Number(c.req.query('windowMinutes') ?? 60);
-    const windowMinutes =
-        Number.isFinite(raw) && raw > 0 ? Math.min(raw, 1440) : 60;
+    const range = z
+        .object({ from: z.iso.datetime(), to: z.iso.datetime() })
+        .safeParse(c.req.query());
+    if (!range.success) return jsonError(c, 400, 'Invalid date range');
+    const from = new Date(range.data.from);
+    const to = new Date(range.data.to);
+    if (from > to) return jsonError(c, 400, 'Invalid date range');
     const addresses = await getAdminNasAddresses(c.get('adminSession').userId);
-    const data = await radiusClient.getNetworkUsage(windowMinutes, [
-        ...addresses,
-    ]);
+    const data = await radiusClient.getNetworkUsage(
+        from,
+        to,
+        [...addresses],
+        c.get('adminSession').userId,
+    );
     return c.json({ success: true, data });
 });
 
 // RADIUS accounting sessions, most recent first, limited to sessions on the
 // requesting admin's NAS devices
 // (matched on NAS-IP-Address: direct IP or WireGuard tunnel address).
-// Supports q/live/type filters and page/perPage pagination.
+// Supports q/live/type/from/to filters and page/perPage pagination.
 app.get('/radius/sessions', requireAdmin, async (c) => {
     const sort = sessionSortSchema.safeParse({
         sortBy: c.req.query('sortBy'),
@@ -1496,6 +1566,17 @@ app.get('/radius/sessions', requireAdmin, async (c) => {
     if (typeParam && !['hotspot', 'pppoe'].includes(typeParam)) {
         return jsonError(c, 400, 'Invalid session type filter');
     }
+    const fromParam = c.req.query('from');
+    const toParam = c.req.query('to');
+    const from = fromParam ? new Date(fromParam) : undefined;
+    const to = toParam ? new Date(toParam) : undefined;
+    if (
+        (fromParam && Number.isNaN(from?.getTime())) ||
+        (toParam && Number.isNaN(to?.getTime())) ||
+        (from && to && from > to)
+    ) {
+        return jsonError(c, 400, 'Invalid date range');
+    }
     const { page, perPage } = paginationParams(
         c.req.query('page'),
         c.req.query('perPage'),
@@ -1509,6 +1590,8 @@ app.get('/radius/sessions', requireAdmin, async (c) => {
                 ? undefined
                 : liveParam === '1' || liveParam === 'true',
         sessionType: typeParam as 'hotspot' | 'pppoe' | undefined,
+        from,
+        to,
         ...sort.data,
         page,
         perPage,
@@ -1517,6 +1600,20 @@ app.get('/radius/sessions', requireAdmin, async (c) => {
         success: true,
         data: { ...data, page, perPage },
     });
+});
+
+app.get('/radius/sessions/:radacctId/throughput', requireAdmin, async (c) => {
+    const range = z.enum(['hour', 'day', 'month'])
+        .default('hour')
+        .safeParse(c.req.query('range'));
+    if (!range.success) return jsonError(c, 400, 'Invalid throughput range');
+    const radacctId = c.req.param('radacctId');
+    const adminId = c.get('adminSession').userId;
+    if (!radacctId || !/^\d+$/.test(radacctId) || !(await isAdminRadacctVisible(adminId, radacctId))) {
+        return jsonError(c, 404, 'Unknown session');
+    }
+    const data = await getAdminThroughputObservations(adminId, { radacctId }, range.data);
+    return c.json({ success: true, data });
 });
 
 app.get('/radius/sessions/:radacctId', requireAdmin, async (c) => {

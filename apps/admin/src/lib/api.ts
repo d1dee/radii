@@ -245,6 +245,7 @@ export type AdminPackageList = {
 
 export type ListAdminPackagesQuery = PaginationQuery & {
     type?: PackageType;
+    categories?: string[];
     q?: string;
     archived?: 'current' | 'archived' | 'all';
     sortBy?: PackageSortKey;
@@ -262,6 +263,9 @@ export type PackageSortKey =
 export function getAdminPackages(query: ListAdminPackagesQuery = {}) {
     const params = new URLSearchParams();
     if (query.type) params.set('type', query.type);
+    for (const category of query.categories ?? []) {
+        params.append('category', category);
+    }
     if (query.q) params.set('q', query.q);
     if (query.archived) params.set('archived', query.archived);
     if (query.sortBy) params.set('sortBy', query.sortBy);
@@ -569,6 +573,7 @@ export type NasDeviceAnalytics = {
             amount: string;
             status: PackagePaymentStatus;
             packageTitle: string;
+            packageCategory: string;
             packageArchivedAt: string | null;
             createdAt: string;
         }>;
@@ -585,6 +590,31 @@ export function getNasDeviceAnalytics(id: string, query: PaginationQuery = {}) {
 
 // --- Users (hotspot + PPPoE management) ------------------------------------
 
+export type AdminCustomerOption = {
+    value: string;
+    label: string;
+    displayName: string;
+    phoneNumber: string;
+    summary: {
+        spend30Days: number;
+        dataUsageBytes30Days: number | null;
+        dataUsageBytes30DaysLowerBound: number;
+        dataUsageBytes30DaysComplete: boolean;
+        services: ('hotspot' | 'pppoe')[];
+    };
+};
+
+export function getAdminCustomerOptions(
+    query: { q?: string; ids?: string[] } = {},
+): Promise<ApiEnvelope<AdminCustomerOption[]>> {
+    if (query.ids?.length === 0) return Promise.resolve({ success: true, data: [] });
+    const params = new URLSearchParams();
+    if (query.q !== undefined) params.set('q', query.q);
+    for (const id of query.ids ?? []) params.append('ids', id);
+    const qs = params.toString();
+    return request<AdminCustomerOption[]>(`/admin/customer-options${qs ? `?${qs}` : ''}`);
+}
+
 export type AdminUserRow = {
     id: string;
     // True for PPPoE accounts provisioned by phone that no customer has
@@ -600,6 +630,13 @@ export type AdminUserRow = {
     createdAt: string;
     flags: number;
     online: boolean;
+    eligibilitySummary?: {
+        spend30Days: number;
+        dataUsageBytes30Days: number | null;
+        dataUsageBytes30DaysLowerBound: number;
+        dataUsageBytes30DaysComplete: boolean;
+        services: ('hotspot' | 'pppoe')[];
+    };
     payments: {
         total: number;
         paid: number;
@@ -713,6 +750,7 @@ export type ListAdminUsersQuery = {
     q?: string;
     type?: PackageType;
     flagged?: boolean;
+    eligibilitySummary?: boolean;
     page?: number;
     perPage?: PageSize;
     sortBy?: AdminUserSortKey;
@@ -732,6 +770,7 @@ export function getAdminUsers(query: ListAdminUsersQuery = {}) {
     if (query.q) params.set('q', query.q);
     if (query.type) params.set('type', query.type);
     if (query.flagged) params.set('flagged', '1');
+    if (query.eligibilitySummary) params.set('eligibilitySummary', '1');
     if (query.page) params.set('page', String(query.page));
     if (query.perPage) params.set('perPage', String(query.perPage));
     if (query.sortBy) params.set('sortBy', query.sortBy);
@@ -742,6 +781,45 @@ export function getAdminUsers(query: ListAdminUsersQuery = {}) {
 
 export function getAdminUser(id: string) {
     return request<AdminUserDetail>(`/admin/users/${id}`);
+}
+
+export type ThroughputObservation = {
+    intervalStartedAt: string | null;
+    observedAt: string;
+    inputOctets: string;
+    outputOctets: string;
+};
+
+export type ThroughputRange = 'hour' | 'day' | 'month';
+
+export type ThroughputDateRange = { from: string; to: string };
+
+export type NasThroughput = {
+    bucketSeconds: number;
+    points: { at: number; Upload: number | null; Download: number | null }[];
+};
+
+export function getNasThroughput(
+    id: string,
+    range: ThroughputRange | ThroughputDateRange,
+) {
+    const params = new URLSearchParams(
+        typeof range === 'string' ? { range } : range,
+    );
+    return request<NasThroughput>(
+        `/admin/nas-devices/${encodeURIComponent(id)}/throughput?${params}`,
+    );
+}
+
+export function getThroughputObservations(
+    kind: 'customer' | 'session',
+    id: string,
+    range: ThroughputRange,
+) {
+    const path = kind === 'customer' ? 'users' : 'radius/sessions';
+    return request<ThroughputObservation[]>(
+        `/admin/${path}/${encodeURIComponent(id)}/throughput?range=${range}`,
+    );
 }
 
 export function deleteAdminUser(id: string) {
@@ -795,6 +873,7 @@ export type AdminPaymentRow = {
     amount: string;
     status: PackagePaymentStatus;
     packageTitle: string | null;
+    packageCategory: string | null;
     packageType: PackageType | null;
     packageArchivedAt: string | null;
     nasDeviceName: string;
@@ -842,6 +921,7 @@ export type AdminPaymentDetail = {
     amount: string;
     status: PackagePaymentStatus;
     packageTitle: string;
+    packageCategory: string;
     packageType: PackageType;
     packageArchivedAt: string | null;
     nasDeviceName: string;
@@ -863,6 +943,7 @@ export type UserPaymentRow = {
     status: PackagePaymentStatus;
     phoneNumber: string;
     packageTitle: string;
+    packageCategory: string;
     packageType: PackageType;
     packageArchivedAt: string | null;
     provider: string | null;
@@ -924,6 +1005,7 @@ export type AdminActivationRow = {
     username: string;
     packageId: string;
     packageTitle: string;
+    packageCategory: string;
     packageType: PackageType;
     packageArchivedAt: string | null;
     paymentId: string;
@@ -1042,6 +1124,8 @@ export function provisionPppoeAccount(body: {
     phoneNumber: string;
     nasDeviceId: string;
     label?: string;
+    name?: string;
+    location?: string;
 }) {
     return request<ProvisionedPppoeAccount>(
         '/admin/pppoe-accounts/provision',
@@ -1176,6 +1260,7 @@ export type AdminReports = {
         buyers: number;
         newUsers: number;
         newActivations: number;
+        newActivationsByType: { pppoe: number; hotspot: number };
     };
     daily: Array<{
         day: string;
@@ -1184,9 +1269,23 @@ export type AdminReports = {
         failed: number;
         revenue: number;
     }>;
+    revenueTimeline: {
+        unit: 'minute' | 'hour' | 'day' | 'week';
+        items: Array<{ start: string; hotspot: number; pppoe: number }>;
+    };
+    packageRevenue: Array<{
+        packageId: string;
+        title: string;
+        type: PackageType;
+        category: string;
+        archivedAt: string | null;
+        paid: number;
+        revenue: number;
+    }>;
     topPackages: PaginatedItems<{
         packageId: string;
         title: string;
+        category: string;
         type: PackageType;
         archivedAt: string | null;
         paid: number;
@@ -1283,6 +1382,8 @@ export type ListRadiusSessionsQuery = PaginationQuery & {
     q?: string;
     live?: boolean;
     sessionType?: SessionTypeFilter;
+    from?: string;
+    to?: string;
     sortBy?: SessionSortKey;
     sortDirection?: SortDirection;
 };
@@ -1302,6 +1403,8 @@ export function getRadiusSessions(query: ListRadiusSessionsQuery = {}) {
     if (query.q) params.set('q', query.q);
     if (query.live !== undefined) params.set('live', query.live ? '1' : '0');
     if (query.sessionType) params.set('type', query.sessionType);
+    if (query.from) params.set('from', query.from);
+    if (query.to) params.set('to', query.to);
     if (query.sortBy) params.set('sortBy', query.sortBy);
     if (query.sortDirection) params.set('sortDirection', query.sortDirection);
     const qs = params.toString();
@@ -1423,21 +1526,18 @@ export function getAdminSession(id: string) {
 
 // Mirrors the API's NetworkUsage (apps/api/src/lib/radius/client.ts).
 export type NetworkUsage = {
-    windowMinutes: number;
-    liveSessions: number;
-    liveUsers: number;
-    liveOctets: number;
-    // Sum and mean of open sessions' lifetime averages, not current throughput.
-    aggregateThroughputBps: number;
-    avgSpeedPerSessionBps: number;
-    sessionsStartedInWindow: number;
+    sessions: number;
+    sessionsByType: { pppoe: number; hotspot: number };
+    pppoeAccounts: { withActivity: number; withoutActivity: number };
+    octets: number;
+    averageThroughputBps: number;
     avgSessionSeconds: number;
-    topUsers: Array<{ username: string; octets: number; sessions: number }>;
 };
 
-export function getRadiusSummary(windowMinutes = 60) {
+export function getRadiusSummary(from: string, to: string) {
+    const params = new URLSearchParams({ from, to });
     return request<NetworkUsage>(
-        `/admin/radius/summary?windowMinutes=${windowMinutes}`,
+        `/admin/radius/summary?${params}`,
     );
 }
 

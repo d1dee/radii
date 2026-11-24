@@ -154,6 +154,7 @@ export type AdminContactsSettings = z.output<
 // time-bank (noExpiry) package stays usable after activation.
 export const adminPackagesSettingsSchema = z.object({
     noExpiryValidityMonths: z.number().int().min(1).max(120).nullish(),
+    pppoeConnectionFeeAmount: z.number().int().min(0).max(99999999).default(0),
 });
 
 export const adminPppoeSettingsSchema = z.object({

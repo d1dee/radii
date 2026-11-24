@@ -38,6 +38,8 @@
 
 import type { PageSize } from '@radii/shared';
 import dayjs from 'dayjs';
+import timezone from 'dayjs/plugin/timezone';
+import utc from 'dayjs/plugin/utc';
 import {
     and,
     asc,
@@ -52,6 +54,7 @@ import {
     inArray,
     isNotNull,
     isNull,
+    lte,
     ne,
     notExists,
     or,
@@ -60,6 +63,7 @@ import {
 import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
 import * as dgram from 'node:dgram';
 import { db } from '../../db';
+import { getCurrentSessionSpeeds } from './usageLedger';
 import { env } from '../../env';
 import { apiLogger } from '../../logging';
 import { getAdminSettings } from '../adminSettings';
@@ -102,7 +106,11 @@ import {
 } from './fairUsage';
 import { portalStatusIsVisible, sessionRemainingSeconds } from './sessionStatus';
 import { additionalBankTime, bankSessionTimeout, bankSessionUsage } from './bankUsage';
-import { summarizeOpenSessions } from './networkUsage';
+import { summarizeSessionsInRange } from './networkUsage';
+import { recordAccountingUsage } from './usageLedger';
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
 
 const logger = apiLogger.getChild('radius');
 const PPPOE_EXPIRED_PROFILE = 'radii-ppp-expired';
@@ -423,6 +431,7 @@ export interface SessionInfo {
     // Average speed across the session's lifetime so far (closed sessions use
     // their final counters).
     avgSpeedBps: number;
+    currentSpeedBps: number | null;
     fupWindowStart: Date | null;
     fupRateLimit: string | null;
     fupForced: boolean;
@@ -467,6 +476,7 @@ export interface ActivationStatus {
     username: string;
     packageId: string;
     packageTitle: string;
+    packageCategory: string;
     paymentId: string;
     activatedAt: Date;
     expireAt: Date;
@@ -517,17 +527,12 @@ export interface AdminActivationStatus extends ActivationStatus {
 }
 
 export interface NetworkUsage {
-    windowMinutes: number;
-    liveSessions: number;
-    liveUsers: number;
-    liveOctets: number;
-    // Sum of lifetime average speeds for open sessions, NOT current throughput.
-    aggregateThroughputBps: number;
-    // Mean of lifetime average speeds for open sessions.
-    avgSpeedPerSessionBps: number;
-    sessionsStartedInWindow: number;
+    sessions: number;
+    sessionsByType: { pppoe: number; hotspot: number };
+    pppoeAccounts: { withActivity: number; withoutActivity: number };
+    octets: number;
+    averageThroughputBps: number;
     avgSessionSeconds: number;
-    topUsers: Array<{ username: string; octets: number; sessions: number }>;
 }
 
 // Rejection sampling: bytes >= limit would make the first (256 % n)
@@ -2846,6 +2851,7 @@ export class RadiusClient {
                     this.sessionInfoFromRow(row),
                     rateLimit,
                     opts.adminId,
+                    tx,
                 );
                 if (!acknowledged)
                     return { ok: false, message: 'NAS answered CoA-NAK' };
@@ -2990,73 +2996,81 @@ export class RadiusClient {
     // Metrics
     // =========================================================================
 
-    // Open-session lifetime totals and averages. The trailing window applies
-    // only to session starts and the start-time-based top-user ranking.
+    // Historical sessions overlapping the selected range, including ended ones.
     async getNetworkUsage(
-        windowMinutes: number,
+        from: Date,
+        to: Date,
         nasIpAddresses: string[],
+        adminId: string,
     ): Promise<NetworkUsage> {
-        const windowMs = Math.max(1, windowMinutes) * 60_000;
-        const windowStart = new Date(Date.now() - windowMs);
-
-        const liveRows = await db
-            .select()
-            .from(radacct)
-            .where(
-                and(
-                    isNull(radacct.acctstoptime),
-                    isNotNull(radacct.acctstarttime),
-                    nasIpAddresses.length > 0
-                        ? inArray(radacct.nasipaddress, nasIpAddresses)
-                        : sql`false`,
-                ),
-            );
-
-        const liveStats = summarizeOpenSessions(liveRows);
-
-        const [windowStats] = await db
+        const now = Date.now();
+        const rangeEnd = new Date(Math.min(to.getTime(), now));
+        const sessionScope = and(
+            from > rangeEnd ? sql`false` : undefined,
+            isNotNull(radacct.acctstarttime),
+            lte(radacct.acctstarttime, rangeEnd),
+            or(isNull(radacct.acctstoptime), gte(radacct.acctstoptime, from)),
+            nasIpAddresses.length > 0
+                ? inArray(radacct.nasipaddress, nasIpAddresses)
+                : sql`false`,
+        );
+        const usageTotals = db
             .select({
-                sessions: sql<number>`count(*)`,
+                radacctId: radiusUsageDelta.radacctId,
+                capturedOctets: sql<number>`sum(${radiusUsageDelta.inputOctets} + ${radiusUsageDelta.outputOctets})::float8`.as('captured_octets'),
+                rangeOctets: sql<number>`coalesce(sum(${radiusUsageDelta.inputOctets} + ${radiusUsageDelta.outputOctets}) filter (where ${radiusUsageDelta.observedAt} >= ${from} and ${radiusUsageDelta.observedAt} <= ${rangeEnd}), 0)::float8`.as('range_octets'),
             })
-            .from(radacct)
-            .where(
-                and(
-                    gte(radacct.acctstarttime, windowStart),
-                    nasIpAddresses.length > 0
-                        ? inArray(radacct.nasipaddress, nasIpAddresses)
-                        : sql`false`,
-                ),
-            );
+            .from(radiusUsageDelta)
+            .innerJoin(radacct, eq(radiusUsageDelta.radacctId, radacct.radacctid))
+            .where(sessionScope)
+            .groupBy(radiusUsageDelta.radacctId)
+            .as('usage_totals');
 
-        const totalOctets = sql<number>`coalesce(sum(coalesce(${radacct.acctinputoctets}, 0) + coalesce(${radacct.acctoutputoctets}, 0)), 0)::float8`;
-        const topUsers = await db
-            .select({
-                username: radacct.username,
-                octets: totalOctets,
-                sessions: sql<number>`count(*)`,
-            })
-            .from(radacct)
-            .where(
-                and(
-                    gte(radacct.acctstarttime, windowStart),
-                    nasIpAddresses.length > 0
-                        ? inArray(radacct.nasipaddress, nasIpAddresses)
-                        : sql`false`,
+        const [rows, accounts] = await Promise.all([
+            db
+                .select({
+                    username: radacct.username,
+                    acctstarttime: radacct.acctstarttime,
+                    acctstoptime: radacct.acctstoptime,
+                    acctupdatetime: radacct.acctupdatetime,
+                    acctinputoctets: radacct.acctinputoctets,
+                    acctoutputoctets: radacct.acctoutputoctets,
+                    capturedOctets: sql<number>`coalesce(${usageTotals.capturedOctets}, 0)::float8`,
+                    rangeOctets: sql<number>`coalesce(${usageTotals.rangeOctets}, 0)::float8`,
+                    isPppoe: sql<boolean>`${exists(
+                        db.select({ id: pppoeServiceAccounts.id })
+                            .from(pppoeServiceAccounts)
+                            .where(
+                                eq(pppoeServiceAccounts.username, radacct.username),
+                            ),
+                    )}`,
+                })
+                .from(radacct)
+                .leftJoin(usageTotals, eq(usageTotals.radacctId, radacct.radacctid))
+                .where(sessionScope),
+            db
+                .select({ username: pppoeServiceAccounts.username })
+                .from(pppoeServiceAccounts)
+                .where(
+                    and(
+                        eq(pppoeServiceAccounts.tenantAdminId, adminId),
+                        lte(pppoeServiceAccounts.createdAt, rangeEnd),
+                    ),
                 ),
-            )
-            .groupBy(radacct.username)
-            .orderBy(desc(totalOctets))
-            .limit(10);
+        ]);
+        const activeUsernames = new Set(
+            rows.filter((row) => row.isPppoe).map((row) => row.username),
+        );
+        const withActivity = accounts.filter((account) =>
+            activeUsernames.has(account.username),
+        ).length;
 
         return {
-            windowMinutes,
-            ...liveStats,
-            sessionsStartedInWindow: Number(windowStats?.sessions ?? 0),
-            topUsers: topUsers.map((u) => ({
-                username: u.username ?? '',
-                octets: Number(u.octets),
-                sessions: Number(u.sessions),
-            })),
+            ...summarizeSessionsInRange(rows, from, to, now),
+            pppoeAccounts: {
+                withActivity,
+                withoutActivity: accounts.length - withActivity,
+            },
         };
     }
 
@@ -3069,6 +3083,8 @@ export class RadiusClient {
             q?: string;
             live?: boolean;
             sessionType?: 'hotspot' | 'pppoe';
+            from?: Date;
+            to?: Date;
             sortBy?: AdminSessionSortBy;
             sortDirection?: 'asc' | 'desc';
             page: number;
@@ -3152,6 +3168,13 @@ export class RadiusClient {
         const where = and(
             isNotNull(radacct.acctstarttime),
             inArray(radacct.nasipaddress, nasIpAddresses),
+            opts.from
+                ? or(
+                      isNull(radacct.acctstoptime),
+                      gte(radacct.acctstoptime, opts.from),
+                  )
+                : undefined,
+            opts.to ? lte(radacct.acctstarttime, opts.to) : undefined,
             opts.live === undefined
                 ? undefined
                 : opts.live
@@ -3389,13 +3412,23 @@ export class RadiusClient {
                 : pkg.fairUsageWindowUnit === 'weeks'
                   ? 'week'
                   : 'month';
-        const anchor = dayjs(activation.activatedAt);
-        const elapsed = dayjs(now).diff(anchor, unit, true);
+        // Do calendar arithmetic on UTC copies of the EAT dates so the host's
+        // daylight-saving transitions cannot shift the midnight boundaries.
+        const anchor = dayjs.utc(dayjs(activation.activatedAt).tz('Africa/Nairobi').format('YYYY-MM-DD'));
+        const current = dayjs.utc(dayjs(now).tz('Africa/Nairobi').format('YYYY-MM-DD'));
+        // Month-end boundaries clamp to the last day of shorter months.
+        const elapsed = unit === 'month'
+            ? (current.year() - anchor.year()) * 12 + current.month() - anchor.month()
+            : current.diff(anchor, unit, true);
         const periods = Math.max(
             0,
             Math.floor(elapsed / pkg.fairUsageWindowValue),
         );
-        return anchor.add(periods * pkg.fairUsageWindowValue, unit).toDate();
+        let windowStart = anchor.add(periods * pkg.fairUsageWindowValue, unit);
+        if (periods > 0 && windowStart.isAfter(current)) {
+            windowStart = anchor.add((periods - 1) * pkg.fairUsageWindowValue, unit);
+        }
+        return dayjs.tz(windowStart.format('YYYY-MM-DD'), 'Africa/Nairobi').toDate();
     }
 
     private async fairUsageState(
@@ -3403,7 +3436,11 @@ export class RadiusClient {
         pkg: typeof packages.$inferSelect,
         session?: SessionInfo,
     ): Promise<{ windowStart: Date; usedBytes: number; throttled: boolean }> {
-        await this.captureFairUsageDeltas(activation.id, session);
+        await recordAccountingUsage(
+            db,
+            activation.id,
+            session ? BigInt(session.radacctId) : undefined,
+        );
         const windowStart = this.fairUsageWindowStart(
             activation,
             pkg,
@@ -3464,84 +3501,8 @@ export class RadiusClient {
         return state;
     }
 
-    private async captureFairUsageDeltas(
-        activationId: string,
-        session?: SessionInfo,
-    ): Promise<void> {
-        await db.transaction(async (tx) => {
-            // REST authorization and the periodic reconciler can overlap. One
-            // activation-scoped transaction lock keeps both from inserting the
-            // same uncaptured counter increment.
-            await tx.execute(
-                sql`select pg_advisory_xact_lock(hashtext(${activationId}))`,
-            );
-
-            const accountingRows = await tx
-                .select({
-                    radacctId: radacct.radacctid,
-                    inputOctets: radacct.acctinputoctets,
-                    outputOctets: radacct.acctoutputoctets,
-                    observedAt: sql<Date>`coalesce(${radacct.acctupdatetime}, ${radacct.acctstoptime}, ${radacct.acctstarttime}, now())`,
-                })
-                .from(radacct)
-                .where(
-                    and(
-                        eq(radacct.class, activationId),
-                        isNotNull(radacct.acctstarttime),
-                        session
-                            ? eq(radacct.radacctid, BigInt(session.radacctId))
-                            : undefined,
-                    ),
-                );
-            if (accountingRows.length === 0) return;
-
-            const radacctIds = accountingRows.map((row) => row.radacctId);
-            const capturedRows = await tx
-                .select({
-                    radacctId: radiusUsageDelta.radacctId,
-                    inputOctets: sql<number>`coalesce(sum(${radiusUsageDelta.inputOctets}), 0)::float8`,
-                    outputOctets: sql<number>`coalesce(sum(${radiusUsageDelta.outputOctets}), 0)::float8`,
-                })
-                .from(radiusUsageDelta)
-                .where(
-                    and(
-                        eq(radiusUsageDelta.activationId, activationId),
-                        inArray(radiusUsageDelta.radacctId, radacctIds),
-                    ),
-                )
-                .groupBy(radiusUsageDelta.radacctId);
-            const capturedBySession = new Map(
-                capturedRows.map((row) => [String(row.radacctId), row]),
-            );
-
-            const deltas = accountingRows.flatMap((row) => {
-                const captured = capturedBySession.get(String(row.radacctId));
-                const inputOctets = Math.max(
-                    0,
-                    Number(row.inputOctets ?? 0) -
-                        Number(captured?.inputOctets ?? 0),
-                );
-                const outputOctets = Math.max(
-                    0,
-                    Number(row.outputOctets ?? 0) -
-                        Number(captured?.outputOctets ?? 0),
-                );
-                return inputOctets > 0 || outputOctets > 0
-                    ? [
-                          {
-                              radacctId: row.radacctId,
-                              activationId,
-                              observedAt: row.observedAt,
-                              inputOctets,
-                              outputOctets,
-                          },
-                      ]
-                    : [];
-            });
-            if (deltas.length > 0) {
-                await tx.insert(radiusUsageDelta).values(deltas);
-            }
-        });
+    async reconcileAccountingUsage(): Promise<number> {
+        return recordAccountingUsage(db);
     }
 
     private rateLimitValue(
@@ -3575,6 +3536,9 @@ export class RadiusClient {
                     gte(activatedPackages.expireAt, new Date()),
                     or(
                         gt(packages.fairUsageLimit, 0),
+                        isNotNull(activatedPackages.fupEffectiveRateLimit),
+                        // Even disabled policies can have a late Accounting-Start
+                        // for a session authorized with the old throttled tier.
                         exists(
                             db
                                 .select({ one: sql`1` })
@@ -3584,7 +3548,6 @@ export class RadiusClient {
                                         sql`${radacct.class} = ${activatedPackages.id}::text`,
                                         isNull(radacct.acctstoptime),
                                         isNotNull(radacct.acctstarttime),
-                                        isNotNull(radacct.fupRateLimit),
                                     ),
                                 ),
                         ),
@@ -3605,9 +3568,108 @@ export class RadiusClient {
                     username,
                     activationId: row.activation.id,
                     liveOnly: true,
+                    limit: null,
                 });
                 const enabled = row.pkg.fairUsageLimit > 0;
-                if (!enabled) {
+                const sharedState =
+                    !enabled || row.pkg.fairUsageWindowUnit === 'session'
+                        ? null
+                        : await this.fairUsageState(row.activation, row.pkg);
+
+                let reconciliationFailed = false;
+                for (const cachedSession of sessions) {
+                    try {
+                        // Usage capture uses its own transaction. Do not reserve a
+                        // session transaction connection while waiting for it.
+                        const state = enabled
+                            ? (sharedState ?? await this.fairUsageState(
+                                row.activation, row.pkg, cachedSession,
+                            ))
+                            : null;
+                        touched += await db.transaction(async (tx) => {
+                            await tx.execute(
+                                sql`select pg_advisory_xact_lock(hashtext(${`fup-session:${cachedSession.radacctId}`}))`,
+                            );
+                            const [current] = await tx
+                                .select()
+                                .from(radacct)
+                                .where(
+                                    and(
+                                        eq(
+                                            radacct.radacctid,
+                                            BigInt(cachedSession.radacctId),
+                                        ),
+                                        isNull(radacct.acctstoptime),
+                                        isNotNull(radacct.acctstarttime),
+                                    ),
+                                )
+                                .limit(1);
+                            if (!current) return 0;
+                            const session = this.sessionInfoFromRow(current);
+                            const rateLimit =
+                                session.fupForced &&
+                                !manualFairUsageAvailable(row.pkg)
+                                    ? (session.fupRateLimit ??
+                                      this.rateLimitValue(row.pkg, true))
+                                    : this.rateLimitValue(
+                                          row.pkg,
+                                          effectiveFairUsageThrottled(
+                                              state?.throttled ?? false,
+                                              session.fupForced,
+                                          ),
+                                      );
+                            // A missing checkpoint is unknown: authorization may have
+                            // installed a different tier before a reset or package edit.
+                            if (enabled) {
+                                if (
+                                    session.fupRateLimit === rateLimit &&
+                                    session.fupWindowStart?.getTime() ===
+                                        state!.windowStart.getTime()
+                                ) {
+                                    return 0;
+                                }
+                            } else if (session.fupRateLimit === rateLimit) {
+                                return 0;
+                            }
+
+                            const acknowledged = await this.coaRateLimit(
+                                username,
+                                session,
+                                rateLimit,
+                                undefined,
+                                tx,
+                            );
+                            if (!acknowledged) {
+                                reconciliationFailed = true;
+                                return 0;
+                            }
+                            await tx
+                                .update(radacct)
+                                .set({
+                                    fupWindowStart: state?.windowStart ?? null,
+                                    fupRateLimit: rateLimit,
+                                    fupUsedBytes: state?.usedBytes ?? 0,
+                                    fupThresholdReached: state?.throttled ?? false,
+                                    fupEvaluatedAt: new Date(),
+                                })
+                                .where(
+                                    eq(
+                                        radacct.radacctid,
+                                        BigInt(session.radacctId),
+                                    ),
+                                );
+                            return 1;
+                        });
+                    } catch (err) {
+                        reconciliationFailed = true;
+                        logger.error('Fair-usage session reconciliation failed', {
+                            activationId: row.activation.id,
+                            radacctId: cachedSession.radacctId,
+                            error: err,
+                        });
+                    }
+                }
+                if (!enabled && !reconciliationFailed) {
                     await db
                         .update(activatedPackages)
                         .set({
@@ -3618,124 +3680,6 @@ export class RadiusClient {
                             fupEvaluatedAt: new Date(),
                         })
                         .where(eq(activatedPackages.id, row.activation.id));
-                }
-                if (!enabled && sessions.every((s) => s.fupRateLimit === null)) {
-                    continue;
-                }
-                const sharedState =
-                    !enabled || row.pkg.fairUsageWindowUnit === 'session'
-                        ? null
-                        : await this.fairUsageState(row.activation, row.pkg);
-
-                for (const cachedSession of sessions) {
-                    touched += await db.transaction(async (tx) => {
-                        await tx.execute(
-                            sql`select pg_advisory_xact_lock(hashtext(${`fup-session:${cachedSession.radacctId}`}))`,
-                        );
-                        const [current] = await tx
-                            .select()
-                            .from(radacct)
-                            .where(
-                                and(
-                                    eq(
-                                        radacct.radacctid,
-                                        BigInt(cachedSession.radacctId),
-                                    ),
-                                    isNull(radacct.acctstoptime),
-                                    isNotNull(radacct.acctstarttime),
-                                ),
-                            )
-                            .limit(1);
-                        if (!current) return 0;
-                        const session = this.sessionInfoFromRow(current);
-                        const state = enabled
-                            ? (sharedState ??
-                              (await this.fairUsageState(
-                                  row.activation,
-                                  row.pkg,
-                                  session,
-                              )))
-                            : null;
-                        const rateLimit =
-                            session.fupForced &&
-                            !manualFairUsageAvailable(row.pkg)
-                                ? (session.fupRateLimit ??
-                                  this.rateLimitValue(row.pkg, true))
-                                : this.rateLimitValue(
-                                      row.pkg,
-                                      effectiveFairUsageThrottled(
-                                          state?.throttled ?? false,
-                                          session.fupForced,
-                                      ),
-                                  );
-                        if (
-                            enabled &&
-                            session.fupRateLimit === null &&
-                            !state!.throttled &&
-                            !session.fupForced
-                        ) {
-                            // Access-Accept already installed the normal package
-                            // rate. Record that baseline without sending a no-op
-                            // CoA; the first CoA is reserved for a real transition.
-                            await tx
-                                .update(radacct)
-                                .set({
-                                    fupWindowStart: state!.windowStart,
-                                    fupRateLimit: rateLimit,
-                                    fupUsedBytes: state!.usedBytes,
-                                    fupThresholdReached: false,
-                                    fupEvaluatedAt: new Date(),
-                                })
-                                .where(
-                                    eq(
-                                        radacct.radacctid,
-                                        BigInt(session.radacctId),
-                                    ),
-                                );
-                            return 0;
-                        }
-                        if (enabled) {
-                            if (
-                                session.fupRateLimit === rateLimit &&
-                                session.fupWindowStart?.getTime() ===
-                                    state!.windowStart.getTime()
-                            ) {
-                                return 0;
-                            }
-                        } else if (
-                            session.fupRateLimit === null ||
-                            (session.fupForced &&
-                                session.fupRateLimit === rateLimit)
-                        ) {
-                            return 0;
-                        }
-
-                        const acknowledged = await this.coaRateLimit(
-                            username,
-                            session,
-                            rateLimit,
-                        );
-                        if (!acknowledged) return 0;
-                        await tx
-                            .update(radacct)
-                            .set({
-                                fupWindowStart: state?.windowStart ?? null,
-                                fupRateLimit:
-                                    enabled || session.fupForced
-                                        ? rateLimit
-                                        : null,
-                                fupUsedBytes: state?.usedBytes ?? 0,
-                                fupThresholdReached: state?.throttled ?? false,
-                                fupEvaluatedAt: new Date(),
-                            })
-                            .where(
-                                eq(
-                                    radacct.radacctid,
-                                    BigInt(session.radacctId),
-                                ),
-                            );
-                        return 1;
-                    });
                 }
             } catch (err) {
                 logger.error('Fair-usage reconciliation failed', {
@@ -4225,6 +4169,13 @@ export class RadiusClient {
             },
         ];
 
+        // HotSpot otherwise falls back to the built-in default user profile,
+        // bypassing the managed FQ-CoDel queue type. PPP inherits its server
+        // profile, with a separate group override for expired subscribers.
+        if (pkg.type === 'hotspot') {
+            attrs.push({ attribute: 'Mikrotik-Group', value: 'radii-default' });
+        }
+
         if (
             pkg.uploadRate > 0 ||
             pkg.downloadRate > 0 ||
@@ -4549,12 +4500,13 @@ export class RadiusClient {
     private async nasTargetForSession(
         session: SessionInfo,
         adminId?: string,
+        database: Pick<typeof db, 'select'> = db,
     ): Promise<{
         host: string;
         port: number;
         secret: string;
     }> {
-        const [row] = await db
+        const [row] = await database
             .select({
                 wgClientIp: nasSetupScript.wgClientIp,
                 radiusSecret: nasSetupScript.radiusSecret,
@@ -4702,8 +4654,9 @@ export class RadiusClient {
         session: SessionInfo,
         rateLimit: string,
         adminId?: string,
+        database: Pick<typeof db, 'select' | 'update'> = db,
     ): Promise<boolean> {
-        const target = await this.nasTargetForSession(session, adminId);
+        const target = await this.nasTargetForSession(session, adminId, database);
         const attrs = this.sessionCoaIdentity(username, session);
         attrs.push({
             vendor: MIKROTIK_VENDOR_ID,
@@ -4717,7 +4670,11 @@ export class RadiusClient {
                 await this.closeSessionRecord(
                     session,
                     'Session-Context-Not-Found',
+                    database,
                 );
+                // Commit the stale-session closure even when called inside the
+                // FUP transaction; throwing would roll that closure back.
+                return false;
             }
             throw error;
         }
@@ -4728,8 +4685,9 @@ export class RadiusClient {
     private async closeSessionRecord(
         session: SessionInfo,
         cause = 'Admin-Reset',
+        database: Pick<typeof db, 'update'> = db,
     ): Promise<void> {
-        await db
+        await database
             .update(radacct)
             .set({
                 acctstoptime: new Date(),
@@ -4783,7 +4741,7 @@ export class RadiusClient {
                         : undefined,
                 ),
             )
-            .orderBy(desc(radacct.acctstarttime));
+            .orderBy(desc(radacct.acctstarttime), desc(radacct.radacctid));
         const rows = await (opts.limit === null ? query : query.limit(opts.limit ?? 200));
         return rows.map((row) => this.sessionInfoFromRow(row));
     }
@@ -4820,6 +4778,7 @@ export class RadiusClient {
             terminateCause: row.acctterminatecause,
             avgSpeedBps:
                 seconds > 0 ? Math.round((totalOctets * 8) / seconds) : 0,
+            currentSpeedBps: null,
             fupWindowStart: row.fupWindowStart,
             fupRateLimit: row.fupRateLimit,
             fupForced: row.fupForced,
@@ -4846,6 +4805,13 @@ export class RadiusClient {
             limit: null,
         });
         const liveSessions = sessions.filter((s) => s.live);
+
+        const speeds = await getCurrentSessionSpeeds(
+            db, activationId, liveSessions.map((session) => BigInt(session.radacctId)),
+        );
+        for (const session of liveSessions) {
+            session.currentSpeedBps = speeds.get(session.radacctId) ?? null;
+        }
 
         const cumulativeUsed = sessions.reduce((sum, s) => sum + (pkg.noExpiry ? s.bankChargedSeconds : s.seconds), 0);
         const usedSeconds = Math.round(cumulativeUsed);
@@ -4919,6 +4885,7 @@ export class RadiusClient {
             username,
             packageId: pkg.id,
             packageTitle: pkg.title,
+            packageCategory: pkg.category,
             paymentId: activation.packagePaymentId,
             activatedAt: activation.activatedAt,
             expireAt,

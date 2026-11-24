@@ -1,4 +1,4 @@
-import { AreaChart, BarChart, DonutChart } from '@mantine/charts';
+import { AreaChart, DonutChart } from '@mantine/charts';
 import {
     ActionIcon,
     Badge,
@@ -16,19 +16,29 @@ import {
     Title,
     Tooltip,
 } from '@mantine/core';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { MdRefresh } from 'react-icons/md';
+import {
+    useCallback,
+    useEffect,
+    useRef,
+    useState,
+    type ReactNode,
+} from 'react';
+import { MdChevronLeft, MdChevronRight, MdRefresh } from 'react-icons/md';
 
 import { PageLayout } from '@/components/Layout/PageLayout';
 import { PageTableScrollContainer } from '@/components/PageTableScrollContainer';
+import { RevenueCharts } from '@/components/RevenueCharts';
+import { RevenueTimelineChart } from '@/components/RevenueTimelineChart';
+import { ThroughputChart } from '@/components/Sessions/ThroughputChart';
 import { TablePagination } from '@/components/TablePagination';
 import {
     getAdminReports,
+    getAllNasDevices,
     getRadiusSummary,
     type AdminReports,
     type NetworkUsage,
+    type NasDeviceRow,
 } from '@/lib/api';
-import { useAutoRefresh } from '@/lib/autoRefresh';
 import { warnBackgroundFailure } from '@/lib/clientError';
 import { dayjs } from '@/lib/dayjs';
 import {
@@ -64,10 +74,12 @@ function StatCard({
     label,
     value,
     sub,
+    color,
 }: {
     label: string;
-    value: string;
+    value: ReactNode;
     sub: string;
+    color?: string;
 }) {
     return (
         <Card withBorder padding='md' radius='md' miw={0}>
@@ -77,6 +89,7 @@ function StatCard({
             <Text
                 size='lg'
                 fw={700}
+                c={color}
                 mt={2}
                 style={{ overflowWrap: 'anywhere' }}
             >
@@ -86,6 +99,124 @@ function StatCard({
                 {sub}
             </Text>
         </Card>
+    );
+}
+
+function NasThroughputCard({ from, to }: { from: Date; to: Date }) {
+    const [devices, setDevices] = useState<NasDeviceRow[] | null>(null);
+    const [nasIndex, setNasIndex] = useState(0);
+    const [error, setError] = useState(false);
+    const [retry, setRetry] = useState(0);
+
+    useEffect(() => {
+        let disposed = false;
+        setError(false);
+        async function load() {
+            try {
+                const result = await getAllNasDevices();
+                if (disposed) return;
+                if (!result.success || !result.data)
+                    throw new Error('Unavailable');
+                setDevices(
+                    [...result.data].sort((a, b) => a.name.localeCompare(b.name)),
+                );
+                setNasIndex(0);
+            } catch {
+                if (!disposed) setError(true);
+            }
+        }
+        void load();
+        return () => {
+            disposed = true;
+        };
+    }, [retry]);
+
+    const deviceCount = devices?.length ?? 0;
+    const device = devices?.[nasIndex];
+    if (!device) {
+        return (
+            <Card withBorder padding='md' radius='md'>
+                <Stack gap='xs'>
+                    <Text fw={600}>NAS Average Thoughput</Text>
+                    <Group>
+                        <Text
+                            size='sm'
+                            c={error ? 'red' : 'dimmed'}
+                            role='status'
+                        >
+                            {error
+                                ? 'Unable to load NAS devices.'
+                                : devices
+                                  ? 'No NAS devices available.'
+                                  : 'Loading NAS devices...'}
+                        </Text>
+                        {error ? (
+                            <ActionIcon
+                                variant='subtle'
+                                aria-label='Retry loading NAS devices'
+                                onClick={() => setRetry((value) => value + 1)}
+                            >
+                                <MdRefresh size={18} />
+                            </ActionIcon>
+                        ) : null}
+                    </Group>
+                </Stack>
+            </Card>
+        );
+    }
+
+    return (
+        <ThroughputChart
+            key={device.id}
+            kind='nas'
+            id={device.id}
+            dateRange={{ from: from.toISOString(), to: to.toISOString() }}
+            header={
+                <Group justify='space-between' wrap='nowrap'>
+                    <Stack gap={2} style={{ minWidth: 0 }}>
+                        <Text fw={600}>NAS Average Thoughput</Text>
+                        <Text
+                            fw={600}
+                            style={{ overflowWrap: 'anywhere' }}
+                            aria-live='polite'
+                        >
+                            {device.name}
+                        </Text>
+                    </Stack>
+                    <Group gap='xs' wrap='nowrap'>
+                        <ActionIcon
+                            variant='subtle'
+                            aria-label='Previous NAS'
+                            disabled={deviceCount < 2}
+                            onClick={() =>
+                                setNasIndex((index) =>
+                                    (index - 1 + deviceCount) % deviceCount,
+                                )
+                            }
+                        >
+                            <MdChevronLeft size={22} />
+                        </ActionIcon>
+                        <Text
+                            size='xs'
+                            c='dimmed'
+                            style={{ whiteSpace: 'nowrap' }}
+                        >
+                            {nasIndex + 1} / {deviceCount}
+                        </Text>
+                        <ActionIcon
+                            variant='subtle'
+                            aria-label='Next NAS'
+                            disabled={deviceCount < 2}
+                            onClick={() =>
+                                setNasIndex((index) => (index + 1) % deviceCount)
+                            }
+                        >
+                            <MdChevronRight size={22} />
+                        </ActionIcon>
+                    </Group>
+                </Group>
+            }
+        />
     );
 }
 
@@ -103,23 +234,30 @@ export default function DashboardPage() {
     const [topUsersPerPage, setTopUsersPerPage] = useTablePageSize(6);
     const reportsRequest = useRef(0);
 
-    const loadReports = useCallback(
+    const loadData = useCallback(
         async (rangeFrom: Date, rangeTo: Date, silent = false) => {
             const requestId = ++reportsRequest.current;
-            if (!silent) setLoading(true);
+            if (!silent) {
+                setLoading(true);
+                setReports(null);
+                setUsage(null);
+            }
             setError(null);
-            const res = await getAdminReports(
-                rangeFrom.toISOString(),
-                rangeTo.toISOString(),
-                {
-                    topPackagesPerPage: 10,
-                    topUsersPage,
-                    topUsersPerPage,
-                    heavyUsersPerPage: 10,
-                },
-            );
+            const [res, usageRes] = await Promise.all([
+                getAdminReports(
+                    rangeFrom.toISOString(),
+                    rangeTo.toISOString(),
+                    {
+                        topPackagesPerPage: 10,
+                        topUsersPage,
+                        topUsersPerPage,
+                        heavyUsersPerPage: 10,
+                    },
+                ),
+                getRadiusSummary(rangeFrom.toISOString(), rangeTo.toISOString()),
+            ]);
             if (requestId !== reportsRequest.current) return;
-            if (!silent) setLoading(false);
+            setLoading(false);
             if (!res.success) {
                 if (silent)
                     warnBackgroundFailure('refresh dashboard reports', res);
@@ -132,16 +270,24 @@ export default function DashboardPage() {
                 else setError('Failed to load dashboard data');
                 return;
             }
+            if (!usageRes.success || !usageRes.data) {
+                if (silent)
+                    warnBackgroundFailure(
+                        'refresh dashboard network activity',
+                        usageRes,
+                    );
+                else
+                    setError(
+                        (!usageRes.success && usageRes.message) ||
+                            'Failed to load network activity',
+                    );
+                return;
+            }
             setReports(res.data);
+            setUsage(usageRes.data);
         },
         [topUsersPage, topUsersPerPage],
     );
-
-    const loadUsage = useCallback(async () => {
-        const res = await getRadiusSummary(60);
-        if (res.success && res.data) setUsage(res.data);
-        else warnBackgroundFailure('load dashboard network usage', res);
-    }, []);
 
     // Initial load waits for the admin's saved settings so their default
     // date range applies; presets/Apply drive the rest.
@@ -155,28 +301,25 @@ export default function DashboardPage() {
         setFrom(range.from);
         setTo(range.to);
 
-        void loadReports(range.from, range.to);
-    }, [loaded, settings, loadReports]);
-
-    // Live network figures and the current report range refresh together on
-    // the admin's configured cadence.
-    useEffect(() => {
-        void loadUsage();
-    }, [loadUsage]);
+        void loadData(range.from, range.to);
+    }, [loaded, settings, loadData]);
 
     const autoRefreshData = useCallback(() => {
-        void loadUsage();
         const days = rangePresets.find((p) => p.label === preset)?.days ?? 30;
         const range = presetRange(days);
         setFrom(range.from);
         setTo(range.to);
-        void loadReports(range.from, range.to, true);
-    }, [loadUsage, loadReports, preset]);
-    useAutoRefresh(autoRefreshData);
+        void loadData(range.from, range.to, true);
+    }, [loadData, preset]);
+    useEffect(() => {
+        if (!loaded) return;
+        const timer = setInterval(autoRefreshData, 10_000);
+        return () => clearInterval(timer);
+    }, [autoRefreshData, loaded]);
 
     useEffect(() => {
         if (!loaded || !reports) return;
-        void loadReports(from, to);
+        void loadData(from, to);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [topUsersPage, topUsersPerPage]);
 
@@ -189,7 +332,7 @@ export default function DashboardPage() {
         setFrom(range.from);
         setTo(range.to);
 
-        void loadReports(range.from, range.to);
+        void loadData(range.from, range.to);
     };
 
     const statusBreakdown = reports
@@ -212,12 +355,6 @@ export default function DashboardPage() {
           ]
         : [];
 
-    const packageChartData = (reports?.topPackages.items ?? []).map((p) => ({
-        package: p.archivedAt ? `${p.title} (Archived)` : p.title,
-        revenue: p.revenue,
-        paid: p.paid,
-    }));
-
     return (
         <PageLayout
             label='Dashboard page content'
@@ -226,7 +363,7 @@ export default function DashboardPage() {
                     <Stack gap={4}>
                         <Title order={3}>Dashboard</Title>
                         <Text size='sm' c='dimmed'>
-                            Current accounting sessions and revenue overview for
+                            Historical network activity and revenue overview for
                             the selected date range.
                         </Text>
                     </Stack>
@@ -246,71 +383,132 @@ export default function DashboardPage() {
                 </Group>
             }
         >
-            {/* Accounting totals are independent of the revenue date range. */}
             <Card withBorder padding='md' radius='md'>
                 <Group justify='space-between' mb='xs'>
                     <Group gap='xs'>
                         <Badge color='green' variant='dot' size='lg'>
-                            Network accounting
+                            Revenue & network overview
                         </Badge>
                         <Text size='xs' c='dimmed'>
-                            Latest reported counters; refreshes every{' '}
-                            {settings.dashboard.usageRefreshSeconds}s
+                            Refreshes every 10 seconds
                         </Text>
                     </Group>
                     <Tooltip label='Refresh now'>
                         <ActionIcon
-                            aria-label='Refresh live network'
+                            aria-label='Refresh revenue and network overview'
                             size='lg'
                             variant='subtle'
-                            onClick={() => void loadUsage()}
+                            onClick={autoRefreshData}
                         >
                             <MdRefresh size={18} />
                         </ActionIcon>
                     </Tooltip>
                 </Group>
-                {!reports ? (
-                    <SimpleGrid cols={{ base: 2, lg: 5 }}>
-                        {Array.from({ length: 5 }).map((_, i) => (
-                            <Skeleton key={i} height={48} radius='sm' />
-                        ))}
-                    </SimpleGrid>
-                ) : (
-                    <SimpleGrid cols={{ base: 2, lg: 5 }}>
-                        <StatCard
-                            label='Revenue'
-                            value={formatMoney(reports.totals.revenue)}
-                            sub={`${reports.totals.payments} payments in the selected range`}
-                        />
-                        <StatCard
-                            label='Buyers'
-                            value={String(reports.totals.buyers)}
-                            sub='Distinct customers with paid orders, including free grants'
-                        />
-                        <StatCard
-                            label='New users'
-                            value={String(reports.totals.newUsers)}
-                            sub='Visible customers registered in the selected range'
-                        />
-                        <StatCard
-                            label='New activations'
-                            value={String(reports.totals.newActivations)}
-                            sub='Packages activated in the selected range'
-                        />
-                        <StatCard
-                            label='Avg per buyer'
-                            value={
-                                reports.totals.buyers > 0
-                                    ? formatMoney(
-                                          reports.totals.revenue /
-                                              reports.totals.buyers,
-                                      )
-                                    : '—'
-                            }
-                            sub='Selected-range revenue divided by buyers'
-                        />
-                    </SimpleGrid>
-                )}
+                <Group>
+                    {!reports ? (
+                        <SimpleGrid cols={{ base: 2, lg: 5 }}>
+                            {Array.from({ length: 5 }).map((_, i) => (
+                                <Skeleton key={i} height={48} radius='sm' />
+                            ))}
+                        </SimpleGrid>
+                    ) : (
+                        <SimpleGrid cols={{ base: 2, lg: 5 }}>
+                            <StatCard
+                                label='Revenue'
+                                color='teal'
+                                value={formatMoney(reports.totals.revenue)}
+                                sub={`${reports.totals.payments} payments in the selected range`}
+                            />
+                            <StatCard
+                                label='Buyers'
+                                color='blue'
+                                value={String(reports.totals.buyers)}
+                                sub='Distinct customers with paid orders, including free grants'
+                            />
+                            <StatCard
+                                label='New users'
+                                color='cyan'
+                                value={String(reports.totals.newUsers)}
+                                sub='Visible customers registered in the selected range'
+                            />
+                            <StatCard
+                                label='New activations'
+                                color='violet'
+                                value={String(reports.totals.newActivations)}
+                                sub={`PPPoE ${reports.totals.newActivationsByType.pppoe} / Hotspot ${reports.totals.newActivationsByType.hotspot} in the selected range`}
+                            />
+                            <StatCard
+                                label='Avg per buyer'
+                                color='teal'
+                                value={
+                                    reports.totals.buyers > 0
+                                        ? formatMoney(
+                                              reports.totals.revenue /
+                                                  reports.totals.buyers,
+                                          )
+                                        : '—'
+                                }
+                                sub='Selected-range revenue divided by buyers'
+                            />
+                        </SimpleGrid>
+                    )}{' '}
+                    {!usage ? (
+                        <SimpleGrid cols={{ base: 2, lg: 5 }}>
+                            {Array.from({ length: 5 }).map((_, i) => (
+                                <Skeleton key={i} height={48} radius='sm' />
+                            ))}
+                        </SimpleGrid>
+                    ) : (
+                        <SimpleGrid cols={{ base: 2, lg: 5 }}>
+                            <StatCard
+                                label='Sessions in range'
+                                color='green'
+                                value={String(usage.sessions)}
+                                sub={`PPPoE ${usage.sessionsByType.pppoe} / Hotspot ${usage.sessionsByType.hotspot}`}
+                            />
+                            <StatCard
+                                label='PPPoE activity / no activity'
+                                value={
+                                    <>
+                                        <Text
+                                            component='span'
+                                            inherit
+                                            c='green'
+                                        >
+                                            {usage.pppoeAccounts.withActivity} active
+                                        </Text>
+                                        {' / '}
+                                        <Text component='span' inherit c='red'>
+                                            {usage.pppoeAccounts.withoutActivity}{' '}
+                                            inactive
+                                        </Text>
+                                    </>
+                                }
+                                sub='Accounts created by range end, with / without sessions in range'
+                            />
+                            <StatCard
+                                label='Average throughput in range'
+                                color='cyan'
+                                value={formatSpeed(
+                                    usage.averageThroughputBps,
+                                )}
+                                sub='Recorded data divided by elapsed time in the selected range'
+                            />
+                            <StatCard
+                                label='Data in range'
+                                color='blue'
+                                value={formatBytes(usage.octets)}
+                                sub='Upload + download attributed to accounting reports in range'
+                            />
+                            <StatCard
+                                label='Average session time in range'
+                                color='orange'
+                                value={formatSeconds(usage.avgSessionSeconds)}
+                                sub='Average session duration overlapping the selected range'
+                            />
+                        </SimpleGrid>
+                    )}
+                </Group>
             </Card>
 
             {error ? (
@@ -321,42 +519,13 @@ export default function DashboardPage() {
                 </Center>
             ) : !reports ? null : (
                 <>
-                    {!usage ? (
-                        <SimpleGrid cols={{ base: 2, lg: 5 }}>
-                            {Array.from({ length: 5 }).map((_, i) => (
-                                <Skeleton key={i} height={48} radius='sm' />
-                            ))}
-                        </SimpleGrid>
-                    ) : (
-                        <SimpleGrid cols={{ base: 2, lg: 5 }}>
-                            <StatCard
-                                label='Open sessions'
-                                value={String(usage.liveSessions)}
-                                sub={`${usage.sessionsStartedInWindow} started in last ${usage.windowMinutes} minutes`}
-                            />
-                            <StatCard
-                                label='Users with open sessions'
-                                value={String(usage.liveUsers)}
-                                sub='Distinct usernames across open sessions'
-                            />
-                            <StatCard
-                                label='Combined avg speed'
-                                value={formatSpeed(usage.aggregateThroughputBps)}
-                                sub={`Lifetime avg ${formatSpeed(usage.avgSpeedPerSessionBps)}/session, not current throughput`}
-                            />
-                            <StatCard
-                                label='Open-session data'
-                                value={formatBytes(usage.liveOctets)}
-                                sub='Upload + download since session start'
-                            />
-                            <StatCard
-                                label='Avg open session age'
-                                value={formatSeconds(usage.avgSessionSeconds)}
-                                sub='Average elapsed time since session start'
-                            />
-                        </SimpleGrid>
-                    )}
-
+                    <Stack gap='md' miw={0}>
+                        <RevenueTimelineChart
+                            timeline={reports.revenueTimeline}
+                            hasPaidPurchases={reports.packageRevenue.length > 0}
+                        />
+                        <RevenueCharts packages={reports.packageRevenue} />
+                    </Stack>
                     <Grid>
                         <Grid.Col span={{ base: 12, lg: 8 }}>
                             <Card withBorder padding='md' h='100%'>
@@ -432,34 +601,12 @@ export default function DashboardPage() {
                                 </Group>
                             </Card>
                         </Grid.Col>
-                        <Grid.Col span={{ base: 12, lg: 6 }}>
-                            <Card withBorder padding='md' h='100%'>
-                                <Text fw={600} mb='sm'>
-                                    Top packages by revenue
-                                </Text>
-                                {packageChartData.length === 0 ? (
-                                    <Text size='sm' c='dimmed'>
-                                        No paid purchases in this range.
-                                    </Text>
-                                ) : (
-                                    <BarChart
-                                        h={260}
-                                        data={packageChartData}
-                                        dataKey='package'
-                                        series={[
-                                            {
-                                                name: 'revenue',
-                                                color: 'blue.6',
-                                                label: 'Revenue',
-                                            },
-                                        ]}
-                                        yAxisProps={{ width: 60 }}
-                                        mb='xs'
-                                    />
-                                )}
-                            </Card>
-                        </Grid.Col>
-                        <Grid.Col span={{ base: 12, lg: 6 }}>
+                        {loaded ? (
+                            <Grid.Col span={12}>
+                                <NasThroughputCard from={from} to={to} />
+                            </Grid.Col>
+                        ) : null}
+                        <Grid.Col span={12}>
                             <Card withBorder padding='md' h='100%'>
                                 <Text fw={600} mb='sm'>
                                     Top customers

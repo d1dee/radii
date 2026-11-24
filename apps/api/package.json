@@ -8,7 +8,7 @@
         "serve": "bun run src/index.ts",
         "typecheck": "tsc --noEmit",
         "db:generate": "drizzle-kit generate",
-        "db:migrate": "drizzle-kit migrate",
+        "db:migrate": "bun run src/scripts/migrate.ts",
         "wg:reconcile": "bun run src/scripts/reconcileWg.ts"
     },
     "dependencies": {

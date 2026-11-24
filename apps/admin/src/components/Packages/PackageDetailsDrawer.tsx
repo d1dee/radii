@@ -145,7 +145,10 @@ export function PackageDetailsDrawer({
         setAnalytics(null);
         setError(null);
 
-        (async () => {
+        let refreshing = false;
+        const load = async () => {
+            if (refreshing) return;
+            refreshing = true;
             const [pkgRes, analyticsRes] = await Promise.all([
                 getAdminPackage(packageId),
                 getPackageAnalytics(packageId, {
@@ -153,6 +156,7 @@ export function PackageDetailsDrawer({
                     perPage,
                 }),
             ]);
+            refreshing = false;
             if (requestId !== loadRequest.current) return;
             if (!pkgRes.success) {
                 setError(pkgRes.message);
@@ -166,9 +170,16 @@ export function PackageDetailsDrawer({
                 setError('Failed to load package details');
                 return;
             }
+            setError(null);
             setPkg(pkgRes.data);
             setAnalytics(analyticsRes.data);
-        })();
+        };
+        void load();
+        const timer = setInterval(() => void load(), 10_000);
+        return () => {
+            clearInterval(timer);
+            loadRequest.current += 1;
+        };
     }, [packageId, paymentsPage, perPage]);
 
     const repeatRate =
@@ -194,7 +205,8 @@ export function PackageDetailsDrawer({
                     <Title
                         component='span'
                         order={4}
-                        style={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere' }}
+                        title={pkg?.title}
+                        style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
                     >
                         {pkg?.title ?? 'Package details'}
                     </Title>
@@ -236,7 +248,7 @@ export function PackageDetailsDrawer({
                 </Group>
             }
         >
-            {error ? (
+            {error && !pkg ? (
                 <Text c='red'>{error}</Text>
             ) : !pkg || !analytics ? (
                 <Center py='xl'>
@@ -248,7 +260,12 @@ export function PackageDetailsDrawer({
                         <Badge variant='light' color='grape'>
                             {pkg.type.toUpperCase()}
                         </Badge>
-                        <Badge variant='light'>{pkg.category}</Badge>
+                        <Badge variant='light' maw='100%' title={pkg.category}>{pkg.category}</Badge>
+                        {pkg.fairUsageLimit > 0 ? (
+                            <Badge color='orange' variant='light'>
+                                FUP enabled
+                            </Badge>
+                        ) : null}
                         <Badge
                             variant='light'
                             color={pkg.archivedAt ? 'gray' : 'green'}

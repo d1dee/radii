@@ -1,10 +1,12 @@
 import '@mantine/core/styles.css';
 import '@mantine/notifications/styles.css';
+import '@radii/ui/fonts.css';
 
 import { Alert, Button, Container, MantineProvider, Stack } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import { Notifications } from '@mantine/notifications';
 import type { Package } from '@radii/shared';
+import { typography } from '@radii/ui';
 import {
     createContext,
     useCallback,
@@ -78,6 +80,7 @@ function pkgPrice(
 export default function App() {
     const [havingIssues, setHavingIssues] = useState(false);
     const { data, isPending } = useSession();
+    const userId = data?.user?.id ?? null;
     const loginRequestId = localStorage.getItem(LOGIN_REQUEST_KEY);
     const {
         client: clientData,
@@ -88,16 +91,16 @@ export default function App() {
         contacts: adminContacts,
         contactsError,
     } = useHotspotPortal({
-        userId: data?.user.id ?? null,
+        userId,
         loginRequestId,
         pending: isPending,
     });
 
     useEffect(() => {
         if (!isPending) {
-            void loadHotspotPortal(data?.user.id ?? null, loginRequestId);
+            void loadHotspotPortal(userId, loginRequestId);
         }
-    }, [data?.user.id, isPending, loginRequestId]);
+    }, [userId, isPending, loginRequestId]);
 
     // Resume an interrupted purchase on first load (e.g. after a login
     // redirect). localStorage is synchronous, so the initial modal state can
@@ -166,7 +169,7 @@ export default function App() {
     }, [storedPackageId]);
 
     return (
-        <MantineProvider defaultColorScheme='auto'>
+        <MantineProvider theme={typography} defaultColorScheme='auto'>
             <Notifications position='top-center' />
             <Container
                 size='sm'
@@ -188,7 +191,7 @@ export default function App() {
                                                 color='orange'
                                                 onClick={() =>
                                                     void loadHotspotPortal(
-                                                        data?.user.id ?? null,
+                                                        userId,
                                                         loginRequestId,
                                                         true,
                                                     )
@@ -218,7 +221,7 @@ export default function App() {
                                     loading={packagesLoading}
                                     onRetry={() =>
                                         void loadHotspotPortal(
-                                            data?.user.id ?? null,
+                                            userId,
                                             loginRequestId,
                                             true,
                                         )

@@ -19,6 +19,7 @@ import { bankSessionUsage } from './radius/bankUsage';
 export type PackageAudienceExecutor = Pick<typeof db, 'select'>;
 export type AudiencePackage = { id: string; audienceId?: string | null; eligibility?: unknown };
 export type PackageEligibilityResult = { eligible: boolean; reasons: string[] };
+export type PackageAudienceMetricValue = number | boolean | string[] | { value: number; complete: false } | null;
 type Payment = {
     id: string; packageId: string; category: string; type: string;
     status: string; amount: number; createdAt: Date; reversed: boolean;
@@ -105,19 +106,11 @@ async function loadPackageAudienceFacts(executor: PackageAudienceExecutor, provi
             .leftJoin(nasDevice, eq(packagePayments.nasDeviceId, nasDevice.id))
             .where(and(eq(activatedPackages.userId, userId), eq(packagePayments.userId, userId), ownedPayment)),
         executor.select({ accounting: radacct }).from(radacct)
-            .leftJoin(activatedPackages, sql`${radacct.class} = ${activatedPackages.id}::text or
-                (nullif(${radacct.class}, '') is null and ${radacct.username} = 'PK-' || upper(left(replace(${activatedPackages.id}::text, '-', ''), 10)))`)
+            .innerJoin(activatedPackages, sql`${radacct.class} = ${activatedPackages.id}::text`)
             .leftJoin(packagePayments, eq(activatedPackages.packagePaymentId, packagePayments.id))
             .leftJoin(nasDevice, eq(packagePayments.nasDeviceId, nasDevice.id))
-            .where(and(isNotNull(radacct.acctstarttime), scopedNasHistoryAddress(sql`${radacct.nasipaddress}`, providerId), sql`(
-                (${activatedPackages.userId} = ${userId} and ${packagePayments.userId} = ${userId} and ${ownedPayment})
-                or (nullif(${radacct.class}, '') is null and (
-                    exists (select 1 from ${pppoeServiceAccounts} account where account.username = ${radacct.username}
-                        and account.customer_user_id = ${userId} and account.tenant_admin_id = ${providerId})
-                    or exists (select 1 from ${hotspotLoginRequest} login inner join nas_device device on device.id = login.nas_device_id
-                        where login.hotspot_username = ${radacct.username} and login.user_id = ${userId} and device.owner_id = ${providerId})
-                ))
-            )`)),
+            .where(and(isNotNull(radacct.acctstarttime), scopedNasHistoryAddress(sql`${radacct.nasipaddress}`, providerId),
+                eq(activatedPackages.userId, userId), eq(packagePayments.userId, userId), ownedPayment)),
         executor.select({ createdAt: hotspotLoginRequest.createdAt, username: hotspotLoginRequest.hotspotUsername }).from(hotspotLoginRequest)
             .innerJoin(nasDevice, eq(hotspotLoginRequest.nasDeviceId, nasDevice.id))
             .where(and(eq(hotspotLoginRequest.userId, userId), eq(nasDevice.ownerId, providerId))),
@@ -128,14 +121,7 @@ async function loadPackageAudienceFacts(executor: PackageAudienceExecutor, provi
     ]);
     const relationshipTimes = [...payments.map((row) => row.payment.createdAt), ...logins.map((row) => row.createdAt), ...accounts.map((row) => row.createdAt), ...sessions.flatMap((row) => row.accounting.acctstarttime ? [row.accounting.acctstarttime] : [])];
     const serviceByActivation = new Map(activations.map((row) => [row.activation.id, row.package.type]));
-    const serviceByUsername = new Map<string, 'hotspot' | 'pppoe' | null>();
-    const recordUsernameService = (username: string, service: 'hotspot' | 'pppoe') => {
-        serviceByUsername.set(username, serviceByUsername.has(username) && serviceByUsername.get(username) !== service ? null : service);
-    };
-    for (const account of accounts) recordUsernameService(account.username, 'pppoe');
-    for (const login of logins) if (login.username) recordUsernameService(login.username, 'hotspot');
-    for (const row of activations) if (row.package.type === 'hotspot') recordUsernameService(`PK-${row.activation.id.replace(/-/g, '').slice(0, 10).toUpperCase()}`, 'hotspot');
-    const attributedSessions = sessions.map(({ accounting }) => ({ ...accounting, audienceService: serviceByActivation.get(accounting.class ?? '') ?? serviceByUsername.get(accounting.username ?? '') ?? undefined }));
+    const attributedSessions = sessions.map(({ accounting }) => ({ ...accounting, audienceService: serviceByActivation.get(accounting.class ?? '') }));
     const first = (dates: Date[]) => dates.length ? new Date(dates.reduce((earliest, date) => Math.min(earliest, date.getTime()), Infinity)) : null;
     const relationshipStartedAtByService = {
         hotspot: first([
@@ -168,8 +154,8 @@ function sessionSeconds(session: Session, now: Date): number {
         : Math.max(0, session.acctsessiontime ?? ((session.acctstoptime.getTime() - session.acctstarttime.getTime()) / 1000));
 }
 
-/** Pure metric resolver. Null means unknown/not applicable, never numeric zero. */
-export function packageAudienceMetricValue(facts: PackageAudienceFacts, rule: PackageAudienceRule, packageId: string, userId: string, now: Date): number | boolean | string[] | null {
+/** Null is unknown/not applicable; incomplete usage is a known nonnegative lower bound. */
+export function packageAudienceMetricValue(facts: PackageAudienceFacts, rule: PackageAudienceRule, packageId: string, userId: string, now: Date): PackageAudienceMetricValue {
     const cutoff = rule.windowDays == null ? -Infinity : now.getTime() - rule.windowDays * DAY;
     const service = rule.serviceScope && rule.serviceScope !== 'all' ? rule.serviceScope : null;
     const stateMetric = ['active_subscription_count', 'current_package_ids', 'current_package_categories', 'expired_subscription_count', 'expiring_subscription_count', 'quota_consumption_percent', 'time_consumption_percent'].includes(rule.metric);
@@ -239,15 +225,19 @@ export function packageAudienceMetricValue(facts: PackageAudienceFacts, rule: Pa
         case 'customer_tags': return facts.tags;
         case 'data_usage_bytes': {
             let bytes = 0;
+            let complete = true;
             for (const session of sessions) {
                 if ((session.acctstoptime?.getTime() ?? now.getTime()) <= cutoff) continue;
                 const total = Math.max(0, session.acctinputoctets ?? 0) + Math.max(0, session.acctoutputoctets ?? 0);
                 // A cumulative counter cannot be accurately split at a rolling
                 // boundary. The lazy FUP ledger is not a complete byte meter.
-                if (session.acctstarttime!.getTime() < cutoff && total > 0) return null;
+                if (session.acctstarttime!.getTime() < cutoff) {
+                    if (total > 0) complete = false;
+                    continue;
+                }
                 bytes += total;
             }
-            return bytes;
+            return complete ? bytes : { value: bytes, complete: false };
         }
         case 'connected_seconds': return sessions.reduce((total, session) => {
             const start = session.acctstarttime!.getTime();
@@ -268,13 +258,27 @@ export function packageAudienceMetricValue(facts: PackageAudienceFacts, rule: Pa
     }
 }
 
-export function evaluatePackageAudienceConditions(conditions: unknown, resolve: (rule: PackageAudienceRule) => number | boolean | string[] | null): PackageEligibilityResult {
+export function evaluatePackageAudienceConditions(conditions: unknown, resolve: (rule: PackageAudienceRule) => PackageAudienceMetricValue): PackageEligibilityResult {
     const parsed = packageAudienceConditionsSchema.safeParse(conditions);
     if (!parsed.success) return { eligible: false, reasons: ['Invalid audience conditions'] };
     const results = parsed.data.rules.map((rule) => {
         const actual = resolve(rule);
         let matches = false;
-        if (actual !== null && !(typeof actual === 'number' && !Number.isFinite(actual))) {
+        let unknown = actual === null || (typeof actual === 'number' && !Number.isFinite(actual));
+        if (actual !== null && typeof actual === 'object' && !Array.isArray(actual)) {
+            const lowerBound = actual.value;
+            const threshold = rule.value;
+            unknown = true;
+            if (rule.metric === 'data_usage_bytes' && Number.isFinite(lowerBound) && lowerBound >= 0 && typeof threshold === 'number') {
+                // The omitted crossing counters may add any nonnegative amount.
+                // Only a lower-bound proof can make an incomplete rule match.
+                matches = rule.operator === 'gte' ? lowerBound >= threshold
+                    : (rule.operator === 'gt' || rule.operator === 'ne') && lowerBound > threshold;
+                const disproven = (rule.operator === 'eq' || rule.operator === 'lte') && lowerBound > threshold
+                    || rule.operator === 'lt' && lowerBound >= threshold;
+                unknown = !matches && !disproven;
+            }
+        } else if (!unknown) {
             switch (rule.operator) {
                 case 'eq': matches = actual === rule.value; break;
                 case 'ne': matches = actual !== rule.value; break;
@@ -291,7 +295,7 @@ export function evaluatePackageAudienceConditions(conditions: unknown, resolve: 
         const unavailable = rule.metric === 'data_usage_bytes' && rule.windowDays != null
             ? `${label} is unavailable: recorded accounting cannot reliably establish usage for this window`
             : `${label} is unavailable`;
-        return { matches, reason: actual === null ? unavailable : rule.metric === 'user_ids'
+        return { matches, reason: unknown ? unavailable : rule.metric === 'user_ids'
             ? 'Customer number does not match the selected customer rule'
             : `${label} does not meet ${rule.operator} ${JSON.stringify(rule.value)}` };
     });

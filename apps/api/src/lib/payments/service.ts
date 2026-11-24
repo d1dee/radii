@@ -191,12 +191,12 @@ export class PaymentService {
         pkg: PackageRow,
         loginRequestId?: string | null,
     ): Promise<{ success: boolean; message: string }> {
-        const amount = Number(pkg.price);
+        const amount = Number(payment.amount);
         if (!Number.isSafeInteger(amount) || amount < 1) {
             paymentLogError('invalid_package_amount', {
                 paymentId: payment.id,
                 packageId: pkg.id,
-                amount: pkg.price,
+                amount: payment.amount,
             });
             await db
                 .update(packagePayments)
@@ -272,6 +272,8 @@ export class PaymentService {
                     metadata: {
                         packagePaymentId: payment.id,
                         packageId: pkg.id,
+                        packagePrice: Number(pkg.price),
+                        connectionFee: Math.max(0, amount - Number(pkg.price)),
                         ...(loginRequestId ? { loginRequestId } : {}),
                     },
                 })
@@ -1385,7 +1387,7 @@ export class PaymentService {
             active = Boolean(usage && usage.remainingSeconds > 0);
         }
         return {
-            activationId: activation.id, packageTitle: pkg.title,
+            activationId: activation.id, packageTitle: pkg.title, packageCategory: pkg.category,
             nasDeviceName: row.nasDeviceName ?? '',
             activatedAt: activation.activatedAt.toISOString(), expireAt: activation.expireAt.toISOString(),
             noExpiry: pkg.noExpiry, sessionLength: pkg.sessionLength, active,

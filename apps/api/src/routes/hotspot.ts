@@ -266,6 +266,7 @@ app.get('/status', requireAuth, async (c) => {
                     ?.callingStationId ?? null,
             packageId: a.packageId,
             packageTitle: a.packageTitle,
+            packageCategory: a.packageCategory,
             username: a.username,
             usedSeconds: a.usedSeconds,
             sessionLimitSeconds: a.sessionLimitSeconds,
@@ -276,6 +277,9 @@ app.get('/status', requireAuth, async (c) => {
             octetsLimit: a.octetsLimit,
             remainingOctets: a.remainingOctets,
             avgSpeedBps: a.avgSpeedBps,
+            currentSpeedBps: a.liveSessions.find(
+                (session) => session.radacctId === currentDeviceSessionId(a.liveSessions, clientMac),
+            )?.currentSpeedBps ?? null,
             liveSessions: a.liveSessions,
         }));
     return c.json({ success: true, data });

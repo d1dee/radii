@@ -1,0 +1,104 @@
+name: radii
+
+services:
+    postgres:
+        image: postgres:18
+        restart: unless-stopped
+        stop_grace_period: 30s
+        ports:
+            # Restrict access with the host/cloud firewall; use 127.0.0.1 for SSH tunnels.
+            - '${POSTGRES_BIND_ADDRESS:-0.0.0.0}:${POSTGRES_PORT:-5432}:5432'
+        environment:
+            POSTGRES_DB: ${POSTGRES_DB:-radii}
+            POSTGRES_USER: ${POSTGRES_USER:-radii}
+            POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env to a strong URL-safe password}
+        volumes:
+            # PostgreSQL 18 stores version-specific data under this directory.
+            - postgres_data:/var/lib/postgresql
+        networks:
+            - database
+        healthcheck:
+            test:
+                [
+                    'CMD-SHELL',
+                    'pg_isready -h 127.0.0.1 -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"',
+                ]
+            interval: 5s
+            timeout: 5s
+            retries: 12
+            start_period: 10s
+        logging:
+            driver: journald
+            options:
+                tag: radii-postgres
+
+    radii:
+        build:
+            context: .
+            dockerfile: deploy/Dockerfile
+            args:
+                API_URL: ${API_URL:-}
+        image: radii:latest
+        restart: unless-stopped
+        stop_grace_period: 30s
+        depends_on:
+            postgres:
+                condition: service_healthy
+        env_file:
+            # Parse dotenv quotes rather than passing them into URLs and numbers.
+            # Single-quote values containing literal $ characters.
+            - path: ${RADII_ENV_FILE:-.env}
+        environment:
+            # Use URL-safe credentials (e.g. openssl rand -hex 32).
+            # Override any external DATABASE_URL from env_file.
+            DATABASE_URL: postgresql://${POSTGRES_USER:-radii}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env to a strong URL-safe password}@postgres:5432/${POSTGRES_DB:-radii}
+            SERVER_ADDRESS: 0.0.0.0
+            SERVER_PORT: '8080'
+            WG_IFACE: wg0
+            WG_MANAGE_PEERS: 'true'
+            WG_USE_SUDO: 'false'
+            RADIUS_CONFIG_DIR: /etc/raddb
+        cap_add:
+            - NET_ADMIN
+        networks:
+            - default
+            - database
+            - dokploy-network
+        ports:
+            # RADIUS is reached through WireGuard; HTTP is reached through Traefik.
+            - '${WG_PUBLIC_PORT:-5138}:51820/udp'
+        expose:
+            - '8080'
+            - '8081'
+            - '8082'
+            - '8083'
+        volumes:
+            # Existing certificates are supplied by raddb/certs; do not hide them.
+            - type: bind
+              source: /home/radii/raddb
+              target: /etc/raddb
+              read_only: true
+              bind:
+                  create_host_path: false
+                  selinux: Z
+            - type: bind
+              source: /home/radii/wireguard
+              target: /etc/wireguard
+              read_only: true
+              bind:
+                  create_host_path: false
+                  selinux: Z
+        logging:
+            driver: journald
+            options:
+                tag: radii
+
+volumes:
+    postgres_data:
+
+networks:
+    dokploy-network:
+        external: true
+    database:
+        # Other Compose projects can join this as an external network.
+        name: ${POSTGRES_NETWORK:-radii-db}

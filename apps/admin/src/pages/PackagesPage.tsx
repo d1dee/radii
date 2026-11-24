@@ -6,6 +6,7 @@ import {
     Group,
     Loader,
     Modal,
+    MultiSelect,
     Select,
     SimpleGrid,
     Stack,
@@ -40,6 +41,7 @@ import { TableRowActions } from '@/components/TableRowActions';
 import {
     archiveAdminPackage,
     getAdminPackages,
+    getAllAdminPackages,
     restoreAdminPackage,
     type PackageRow,
     type PackageSortKey,
@@ -53,6 +55,7 @@ import {
     formatPackagePrice,
     formatPackageQuota,
     formatPackageRate,
+    formatPackageTitle,
     formatSeconds,
 } from '@/lib/format';
 import { notifyResult } from '@/lib/notify';
@@ -98,6 +101,9 @@ export default function PackagesPage() {
         loaded,
     );
     const [typeFilter, setTypeFilter] = useState<PackageType | null>(null);
+    const [categoryFilter, setCategoryFilter] = useState<string[]>([]);
+    const [categoryOptions, setCategoryOptions] = useState<string[]>([]);
+    const [categoryError, setCategoryError] = useState<string | null>(null);
     const [packages, setPackages] = useState<PackageRow[]>([]);
     const [total, setTotal] = useState(0);
     const [page, setPage] = useState(1);
@@ -116,6 +122,27 @@ export default function PackagesPage() {
     const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
     const loadRequest = useRef(0);
 
+    useEffect(() => {
+        if (!loaded) return;
+        let cancelled = false;
+        void getAllAdminPackages({ archived: 'all' }).then((result) => {
+            if (cancelled) return;
+            if (!result.success) {
+                setCategoryError(result.message || 'Failed to load categories');
+                return;
+            }
+            setCategoryError(null);
+            setCategoryOptions(
+                [...new Set(result.data.map((pkg) => pkg.category))]
+                    .filter(Boolean)
+                    .sort((a, b) => a.localeCompare(b)),
+            );
+        });
+        return () => {
+            cancelled = true;
+        };
+    }, [loaded]);
+
     const load = useCallback(
         async (pageToLoad: number, silent = false) => {
             const requestId = ++loadRequest.current;
@@ -125,6 +152,7 @@ export default function PackagesPage() {
             }
             const result = await getAdminPackages({
                 type: typeFilter ?? undefined,
+                categories: categoryFilter,
                 q: debouncedSearch.trim() || undefined,
                 archived,
                 sortBy: sortBy ?? undefined,
@@ -145,6 +173,7 @@ export default function PackagesPage() {
         },
         [
             typeFilter,
+            categoryFilter,
             debouncedSearch,
             archived,
             sortBy,
@@ -308,6 +337,30 @@ export default function PackagesPage() {
                         ]}
                         w={{ base: '100%', sm: 140 }}
                     />
+                    <MultiSelect
+                        aria-label='Filter packages by category'
+                        placeholder='Categories'
+                        searchable
+                        clearable
+                        clearButtonProps={{ 'aria-label': 'Clear category filter' }}
+                        data={categoryOptions}
+                        value={categoryFilter}
+                        onChange={(values) => {
+                            setCategoryFilter(values);
+                            setPage(1);
+                        }}
+                        error={categoryError}
+                        nothingFoundMessage='No categories found'
+                        w={{ base: '100%', sm: 240 }}
+                        styles={{
+                            pillsList: {
+                                flexWrap: 'nowrap',
+                                overflowX: 'auto',
+                                scrollbarWidth: 'none',
+                            },
+                            pill: { flexShrink: 0 },
+                        }}
+                    />
                     <Select
                         aria-label='Filter packages by archive state'
                         value={archived}
@@ -335,7 +388,10 @@ export default function PackagesPage() {
                     <Text c='red'>{error}</Text>
                 ) : packages.length === 0 ? (
                     <Text c='dimmed' py='xl' ta='center'>
-                        {debouncedSearch || typeFilter || archived !== 'current'
+                        {debouncedSearch ||
+                        typeFilter ||
+                        categoryFilter.length > 0 ||
+                        archived !== 'current'
                             ? 'No packages match.'
                             : 'No packages yet.'}
                     </Text>
@@ -421,9 +477,14 @@ export default function PackagesPage() {
                                             <UnstyledButton
                                                 fz='sm'
                                                 fw={500}
-                                                aria-label={`View details for ${pkg.title}`}
+                                                maw={220}
+                                                style={{ display: 'block', minWidth: 0 }}
+                                                title={pkg.title}
+                                                aria-label={`View details for ${formatPackageTitle(pkg.title, pkg.category)}`}
                                             >
-                                                {pkg.title}
+                                                <Text size='sm' fw={500} truncate maw={220}>
+                                                    {pkg.title}
+                                                </Text>
                                             </UnstyledButton>
                                         </Table.Td>
                                         <Table.Td>
@@ -440,7 +501,11 @@ export default function PackagesPage() {
                                                     : 'PPPoE'}
                                             </Badge>
                                         </Table.Td>
-                                        <Table.Td>{pkg.category}</Table.Td>
+                                        <Table.Td>
+                                            <Text size='sm' truncate maw={220} title={pkg.category}>
+                                                {pkg.category}
+                                            </Text>
+                                        </Table.Td>
                                         <Table.Td className='admin-table-value'>
                                             {formatPackagePrice(pkg.price)}
                                         </Table.Td>
@@ -468,7 +533,7 @@ export default function PackagesPage() {
                                         </Table.Td>
                                         <Table.Td>
                                             {pkg.noExpiry
-                                                ? 'Unlimited'
+                                                ? 'No Expiry'
                                                 : 'Expires'}
                                         </Table.Td>
                                         <Table.Td>
@@ -487,7 +552,7 @@ export default function PackagesPage() {
                                                         ? [
                                                               {
                                                                   label: 'Restore package',
-                                                                  ariaLabel: `Restore ${pkg.title}`,
+                                                                  ariaLabel: `Restore ${formatPackageTitle(pkg.title, pkg.category)}`,
                                                                   icon: <MdRestore size={16} />,
                                                                   loading:
                                                                       actionBusyId ===
@@ -501,14 +566,14 @@ export default function PackagesPage() {
                                                         : [
                                                               {
                                                                   label: 'Edit package',
-                                                                  ariaLabel: `Edit ${pkg.title}`,
+                                                                  ariaLabel: `Edit ${formatPackageTitle(pkg.title, pkg.category)}`,
                                                                   icon: <MdEdit size={16} />,
                                                                   onClick: () =>
                                                                       handleEdit(pkg),
                                                               },
                                                               {
                                                                   label: 'Archive package',
-                                                                  ariaLabel: `Archive ${pkg.title}`,
+                                                                  ariaLabel: `Archive ${formatPackageTitle(pkg.title, pkg.category)}`,
                                                                   icon: <MdArchive size={16} />,
                                                                   color: 'red',
                                                                   onClick: () =>
@@ -561,7 +626,11 @@ export default function PackagesPage() {
                     <Text size='sm'>
                         Archive{' '}
                         <Text span fw={600}>
-                            {archiveTarget?.title}
+                            {archiveTarget &&
+                                formatPackageTitle(
+                                    archiveTarget.title,
+                                    archiveTarget.category,
+                                )}
                         </Text>{' '}
                         ?
                     </Text>

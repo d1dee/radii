@@ -199,7 +199,8 @@ th.admin-table-actions {
     }
 }
 
-.admin-table-cell .mantine-Badge-root {
+.admin-table-cell .mantine-Badge-root,
+.admin-package-label .mantine-Badge-root {
     flex-shrink: 0;
     min-width: max-content;
 }

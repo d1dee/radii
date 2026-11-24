@@ -33,7 +33,7 @@ export function UserAccount({
                             color='orange'
                             onClick={() =>
                                 void loadPppoePortal(
-                                    data?.user.id ?? null,
+                                    data?.user?.id ?? null,
                                     nasDeviceId,
                                     true,
                                 )

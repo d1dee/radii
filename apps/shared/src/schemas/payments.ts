@@ -39,6 +39,7 @@ export type PaymentClaimOutcome =
 export type PaymentClaimActivationDetails = {
     activationId: string;
     packageTitle: string;
+    packageCategory: string;
     nasDeviceName: string;
     activatedAt: string;
     expireAt: string | null;

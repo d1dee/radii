@@ -658,7 +658,7 @@ export default function NasDevicesPage() {
                 title={
                     <Text fw={600}>Setup script — {scriptDevice?.name}</Text>
                 }
-                size='xl'
+                size='lg'
             >
                 {scriptLoading ? (
                     <Center py='xl'>

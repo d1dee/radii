@@ -8,7 +8,7 @@ const durationUnits = [
 ] as const;
 
 export function formatDuration(totalSeconds: number, noExpiry = false): string {
-    if (noExpiry) return 'Unlimited';
+    if (noExpiry) return 'No Expiry';
     if (!Number.isFinite(totalSeconds) || totalSeconds <= 0) return '0 seconds';
 
     // Duration months use the same 30-day convention as package configuration.

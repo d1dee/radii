@@ -21,11 +21,18 @@ import { PageLayout } from '@/components/Layout/PageLayout';
 import { PageTableScrollContainer } from '@/components/PageTableScrollContainer';
 import { ArchivedPackageBadge } from '@/components/Packages/ArchivedPackageBadge';
 import { TablePagination } from '@/components/TablePagination';
+import { RevenueCharts } from '@/components/RevenueCharts';
+import { RevenueTimelineChart } from '@/components/RevenueTimelineChart';
 import { getAdminReports, type AdminReports } from '@/lib/api';
 import { useAutoRefresh } from '@/lib/autoRefresh';
 import { warnBackgroundFailure } from '@/lib/clientError';
 import { dayjs } from '@/lib/dayjs';
-import { formatBytes, formatMoney, formatSeconds } from '@/lib/format';
+import {
+    formatBytes,
+    formatMoney,
+    formatPackageTitle,
+    formatSeconds,
+} from '@/lib/format';
 import { tableRowNumber, useTablePageSize } from '@/lib/pagination';
 import { useAdminSettings } from '@/lib/settings';
 
@@ -290,6 +297,12 @@ export default function ReportsPage() {
                         />
                     </SimpleGrid>
                     <Stack gap='md' miw={0}>
+                        <RevenueTimelineChart
+                            timeline={reports.revenueTimeline}
+                            hasPaidPurchases={reports.packageRevenue.length > 0}
+                        />
+                        <RevenueCharts packages={reports.packageRevenue} />
+                        <RevenueCharts packages={reports.packageRevenue} detail />
                         <Grid>
                             <Grid.Col span={{ base: 12, lg: 8 }}>
                                 <Card withBorder padding='md' h='100%'>
@@ -422,8 +435,16 @@ export default function ReportsPage() {
                                                                     )}
                                                                 </Table.Td>
                                                                 <Table.Td>
-                                                                    <Group gap={4} wrap='nowrap'>
-                                                                        {p.title}
+                                                                    <Group gap={4} wrap='nowrap' maw={300} className='admin-package-label'>
+                                                                        <Text
+                                                                            size='sm'
+                                                                            truncate
+                                                                            maw={220}
+                                                                            style={{ minWidth: 0, flexShrink: 1 }}
+                                                                            title={formatPackageTitle(p.title, p.category)}
+                                                                        >
+                                                                            {formatPackageTitle(p.title, p.category)}
+                                                                        </Text>
                                                                         <ArchivedPackageBadge
                                                                             archivedAt={
                                                                                 p.archivedAt

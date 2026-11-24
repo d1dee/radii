@@ -1,10 +1,12 @@
 import '@mantine/core/styles.css';
 import '@mantine/notifications/styles.css';
+import '@radii/ui/fonts.css';
 
 import { Alert, Container, MantineProvider, Stack } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import { Notifications } from '@mantine/notifications';
 import type { Package } from '@radii/shared';
+import { typography } from '@radii/ui';
 import {
     createContext,
     useCallback,
@@ -69,19 +71,16 @@ function pkgPrice(
     dbPackages: Array<[string, Array<Package>]> | undefined,
     packageId: string,
 ) {
-    return String(
-        dbPackages
-            ?.flat(2)
-            .find(
-                (v): v is Package =>
-                    typeof v !== 'string' && v?.packageId === packageId,
-            )?.price ?? '',
-    );
+    const pkg = dbPackages
+        ?.flatMap(([, offers]) => offers)
+        .find((offer) => offer.packageId === packageId);
+    return pkg ? String(pkg.price + (pkg.connectionFee ?? 0)) : '';
 }
 
 export default function App() {
     const [havingIssues, setHavingIssues] = useState(false);
     const { data, isPending } = useSession();
+    const userId = data?.user?.id ?? null;
     // The session is only known once the pending check has settled.
     const signedOut = !isPending && !data?.session;
     const { nasDeviceId } = useNasScope();
@@ -92,11 +91,12 @@ export default function App() {
         packagesLoading,
         contacts: adminContacts,
     } = usePppoePortal({
-        userId: data?.user.id ?? null,
+        userId,
         nasDeviceId,
         pending: isPending,
     });
-    const { clients, selectedAccountId } = usePppoeAccounts();
+    const { clients, selectedAccountId, loading: accountsLoading } =
+        usePppoeAccounts();
     // Purchases land on the account the portal is currently showing (the
     // account switcher selection also sets the NAS scope). If that account is
     // not on the scoped network, pass null so the backend provisions one on
@@ -110,9 +110,9 @@ export default function App() {
 
     useEffect(() => {
         if (!isPending) {
-            void loadPppoePortal(data?.user.id ?? null, nasDeviceId);
+            void loadPppoePortal(userId, nasDeviceId);
         }
-    }, [data?.user.id, isPending, nasDeviceId]);
+    }, [userId, isPending, nasDeviceId]);
 
     // Accounts must load even without a network scope: they drive the
     // auto-scoping of external visits (the account switcher adopts the
@@ -144,6 +144,17 @@ export default function App() {
     );
     // Bumped on each open so PaymentFlow remounts with fresh state.
     const [buyKey, setBuyKey] = useState(resumeBuy ? 1 : 0);
+    // Follow scoped offer updates without unmounting checkout during background
+    // refreshes. The server validates expectedAmount against the payable total.
+    const checkoutLoading = isPending || packagesLoading || accountsLoading;
+    const checkoutPrice = buySeed ? pkgPrice(packages, buySeed.packageId) : '';
+    const checkoutSeed =
+        data?.session &&
+        !checkoutLoading &&
+        checkoutPrice !== '' &&
+        buySeed
+            ? { packageId: buySeed.packageId, price: checkoutPrice }
+            : null;
 
     const [authOpened, { open: openAuth, close: closeAuth }] =
         useDisclosure(false);
@@ -195,7 +206,7 @@ export default function App() {
     }, [storedPackageId]);
 
     return (
-        <MantineProvider defaultColorScheme='auto'>
+        <MantineProvider theme={typography} defaultColorScheme='auto'>
             <Notifications position='top-center' />
             <Container
                 size='sm'
@@ -262,7 +273,7 @@ export default function App() {
                                             loading={packagesLoading}
                                             onRetry={() =>
                                                 void loadPppoePortal(
-                                                    data?.user.id ?? null,
+                                                    userId,
                                                     nasDeviceId,
                                                     true,
                                                 )
@@ -272,16 +283,13 @@ export default function App() {
                                 ) : null}
                             </Stack>
                             <Footer />
-                            {/*
-                      Modals are rendered outside the mutating status polling
-                      and own their state locally, so background polling
-                      cannot mutate data shown inside them.
-                    */}
+                            {/* The payment state is local; checkout pricing follows current offers. */}
                             <PaymentFlow
                                 key={buyKey}
                                 opened={buyOpened}
                                 onClose={closeBuy}
-                                seed={buySeed}
+                                seed={checkoutSeed}
+                                loading={checkoutLoading}
                                 serviceAccountId={purchaseAccountId}
                             />
                             <RegisterModal

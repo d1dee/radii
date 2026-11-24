@@ -243,6 +243,9 @@ export function HavingIssues({ adminContacts }: Props) {
                                 {activationDetails ? (
                                     <Stack gap={4} mt='sm'>
                                         <Text fw={600}>
+                                            {activationDetails.packageCategory
+                                                ? `${activationDetails.packageCategory} · `
+                                                : ''}
                                             {activationDetails.packageTitle}
                                         </Text>
                                         <Text size='sm'>
@@ -255,7 +258,7 @@ export function HavingIssues({ adminContacts }: Props) {
                                             Expires:{' '}
                                             {activationDetails.expireAt
                                                 ? dayjs(activationDetails.expireAt).format('DD MMM YYYY HH:mm:ss')
-                                                : 'Unlimited'}
+                                                : 'No Expiry'}
                                         </Text>
                                         {selectedAccount ? (
                                             <Text size='sm'>
