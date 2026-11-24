@@ -1,3 +1,16 @@
+import classes from '@/components/Accounting/Accounting.module.css';
+import {
+    AccountingRow,
+    AccountingTable,
+} from '@/components/Accounting/AccountingTable';
+import { AgentAccountingDetail } from '@/components/Accounting/AgentAccountingDetail';
+import { AgentForm } from '@/components/Accounting/AgentForm';
+import { PageLayout } from '@/components/Layout/PageLayout';
+import { listAgents, type AgentSummary } from '@/lib/accountingApi';
+import { accountingMoney } from '@/lib/accountingMoney';
+import { formatDateTime } from '@/lib/format';
+import { tableRowNumber, useTablePageSize } from '@/lib/pagination';
+import { useAdminSettings } from '@/lib/settings';
 import {
     Alert,
     Badge,
@@ -15,18 +28,6 @@ import {
 import Fuse from 'fuse.js';
 import { useDeferredValue, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import {
-    AccountingRow,
-    AccountingTable,
-} from '@/components/Accounting/AccountingTable';
-import classes from '@/components/Accounting/Accounting.module.css';
-import { AgentForm } from '@/components/Accounting/AgentForm';
-import { AgentAccountingDetail } from '@/components/Accounting/AgentAccountingDetail';
-import { PageLayout } from '@/components/Layout/PageLayout';
-import { listAgents, type Agent } from '@/lib/accountingApi';
-import { formatDateTime } from '@/lib/format';
-import { tableRowNumber, useTablePageSize } from '@/lib/pagination';
-import { useAdminSettings } from '@/lib/settings';
 
 export default function AgentAccountingPage() {
     return <AgentDirectory />;
@@ -35,7 +36,7 @@ export default function AgentAccountingPage() {
 function AgentDirectory() {
     const { agentId } = useParams();
     const navigate = useNavigate();
-    const [agents, setAgents] = useState<Agent[]>([]);
+    const [agents, setAgents] = useState<AgentSummary[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
     const [revision, setRevision] = useState(0);
@@ -54,7 +55,7 @@ function AgentDirectory() {
         setLoading(true);
         setError('');
         void (async () => {
-            const all: Agent[] = [];
+            const all: AgentSummary[] = [];
             for (let next = 1; ; next++) {
                 const response = await listAgents(next);
                 if (cancelled) return;
@@ -105,7 +106,32 @@ function AgentDirectory() {
             header={
                 <Group justify='space-between' align='flex-start'>
                     <Stack gap={4}>
-                        <Title order={3}>Agent accounting</Title>
+                        <Group>
+                            <Title order={3}>Agent accounting</Title>{' '}
+                            {!loading && !error && (
+                                <Group gap='xs'>
+                                    <Badge color='green' variant='light'>
+                                        {
+                                            agents.filter(
+                                                (agent) =>
+                                                    agent.status === 'active',
+                                            ).length
+                                        }{' '}
+                                        active
+                                    </Badge>
+                                    <Badge color='orange' variant='light'>
+                                        {
+                                            agents.filter(
+                                                (agent) =>
+                                                    agent.status === 'archived',
+                                            ).length
+                                        }{' '}
+                                        archived
+                                    </Badge>
+                                </Group>
+                            )}
+                        </Group>
+
                         <Text c='dimmed' size='sm'>
                             Manage agents, commission agreements and manual
                             withdrawals.
@@ -117,36 +143,6 @@ function AgentDirectory() {
                 </Group>
             }
         >
-            <Alert color='blue'>
-                Commissions apply to confirmed gross collections under effective
-                agreements. Payouts are recorded manually; this area never sends
-                money.
-            </Alert>
-            {!loading && !error && (
-                <Group gap='xs'>
-                    <Text size='sm' fw={600}>
-                        {agents.length} agents
-                    </Text>
-                    <Badge color='green' variant='light'>
-                        {
-                            agents.filter((agent) => agent.status === 'active')
-                                .length
-                        }{' '}
-                        active
-                    </Badge>
-                    <Badge color='orange' variant='light'>
-                        {
-                            agents.filter(
-                                (agent) => agent.status === 'archived',
-                            ).length
-                        }{' '}
-                        archived
-                    </Badge>
-                    <Text size='xs' c='dimmed'>
-                        Select a row to view the account.
-                    </Text>
-                </Group>
-            )}
             <Group align='flex-start'>
                 <TextInput
                     pb='xs'
@@ -198,7 +194,15 @@ function AgentDirectory() {
                 </Alert>
             ) : (
                 <AccountingTable
-                    headers={['#', 'Agent', 'Contact', 'Status', 'Created']}
+                    headers={[
+                        '#',
+                        'Agent',
+                        'Contact',
+                        'Status',
+                        'Current agreements',
+                        'Financial summary',
+                        'Created',
+                    ]}
                     total={filtered.length}
                     pageSize={pageSize}
                     onPageSize={(value) => {
@@ -242,9 +246,25 @@ function AgentDirectory() {
                                     >
                                         {agent.name}
                                     </Link>
+                                    {agent.notes && (
+                                        <Text
+                                            c='dimmed'
+                                            size='xs'
+                                            maw={320}
+                                            lineClamp={2}
+                                            style={{ whiteSpace: 'normal', overflowWrap: 'anywhere' }}
+                                        >
+                                            {agent.notes}
+                                        </Text>
+                                    )}
                                 </Table.Td>
                                 <Table.Td>
                                     {agent.phone || 'Not provided'}
+                                    {agent.email && (
+                                        <Text c='dimmed' size='xs'>
+                                            {agent.email}
+                                        </Text>
+                                    )}
                                 </Table.Td>
                                 <Table.Td>
                                     <Badge
@@ -258,6 +278,51 @@ function AgentDirectory() {
                                             ? 'Active'
                                             : 'Archived'}
                                     </Badge>
+                                </Table.Td>
+                                <Table.Td>
+                                    <Text size='sm' fw={600}>
+                                        {agent.currentAgreementCount}{' '}
+                                        {agent.currentAgreementCount === 1
+                                            ? 'agreement'
+                                            : 'agreements'}
+                                    </Text>
+                                </Table.Td>
+                                <Table.Td>
+                                    {agent.balances.length ? (
+                                        <Stack gap='xs'>
+                                            {agent.balances.map((balance) => (
+                                                <div key={balance.currency}>
+                                                    <Text size='sm' fw={600}>
+                                                        {accountingMoney(
+                                                            balance.available,
+                                                            balance.currency,
+                                                        )}{' '}
+                                                        available
+                                                    </Text>
+                                                    <Text c='dimmed' size='xs'>
+                                                        Reserved: {accountingMoney(
+                                                            balance.reserved,
+                                                            balance.currency,
+                                                        )}
+                                                    </Text>
+                                                    <Text c='dimmed' size='xs'>
+                                                        Earned: {accountingMoney(
+                                                            balance.earned,
+                                                            balance.currency,
+                                                        )}
+                                                    </Text>
+                                                    <Text c='dimmed' size='xs'>
+                                                        Paid: {accountingMoney(
+                                                            balance.paid,
+                                                            balance.currency,
+                                                        )}
+                                                    </Text>
+                                                </div>
+                                            ))}
+                                        </Stack>
+                                    ) : (
+                                        <Text size='sm'>No financial activity</Text>
+                                    )}
                                 </Table.Td>
                                 <Table.Td>
                                     {formatDateTime(agent.createdAt)}
@@ -279,11 +344,16 @@ function AgentDirectory() {
                 <AgentAccountingDetail
                     key={agentId}
                     id={agentId}
-                    onClose={() => navigate('/agent-accounting')}
+                    onClose={() => {
+                        navigate('/agent-accounting');
+                        setRevision((value) => value + 1);
+                    }}
                     onAgentUpdated={(updated) =>
                         setAgents((items) =>
                             items.map((agent) =>
-                                agent.id === updated.id ? updated : agent,
+                                agent.id === updated.id
+                                    ? { ...agent, ...updated }
+                                    : agent,
                             ),
                         )
                     }

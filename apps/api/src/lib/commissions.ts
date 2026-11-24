@@ -105,13 +105,16 @@ export async function accrueConfirmedCollection(tx: CommissionTx, collection: ty
     }).onConflictDoNothing({ target: commissionJournal.collectionId });
 }
 
-export async function agentBalances(tx: CommissionTx | typeof db, tenant: string, agentId: string) {
-    const rows = await tx.select({ currency: commissionJournal.currency,
+export const agentBalanceFields = {
+        currency: commissionJournal.currency,
         available: sql<string>`coalesce(sum(case when ${commissionJournal.creditAccount} = 'available' then ${commissionJournal.amount} when ${commissionJournal.debitAccount} = 'available' then -${commissionJournal.amount} else 0.00 end),0.00)::text`,
         reserved: sql<string>`coalesce(sum(case when ${commissionJournal.creditAccount} = 'reserved' then ${commissionJournal.amount} when ${commissionJournal.debitAccount} = 'reserved' then -${commissionJournal.amount} else 0.00 end),0.00)::text`,
         paid: sql<string>`coalesce(sum(case when ${commissionJournal.kind} = 'paid' then ${commissionJournal.amount} else 0.00 end),0.00)::text`,
         earned: sql<string>`coalesce(sum(case when ${commissionJournal.kind} = 'accrual' then ${commissionJournal.amount} else 0.00 end),0.00)::text`,
-    }).from(commissionJournal).where(and(eq(commissionJournal.tenantAdminId, tenant), eq(commissionJournal.agentId, agentId))).groupBy(commissionJournal.currency);
+};
+
+export async function agentBalances(tx: CommissionTx | typeof db, tenant: string, agentId: string) {
+    const rows = await tx.select(agentBalanceFields).from(commissionJournal).where(and(eq(commissionJournal.tenantAdminId, tenant), eq(commissionJournal.agentId, agentId))).groupBy(commissionJournal.currency);
     return rows;
 }
 

@@ -49,6 +49,11 @@ export type AgentBalance = {
     paid: string;
     earned: string;
 };
+export type AgentSummary = Agent & {
+    email: string | null;
+    balances: AgentBalance[];
+    currentAgreementCount: number;
+};
 export type AgentJournal = {
     id: string;
     currency: string;
@@ -130,7 +135,7 @@ export type WithdrawalIntent = {
 const root = '/admin/agents';
 const agentPath = (id: string) => `${root}/${encodeURIComponent(id)}`;
 export const listAgents = (page = 1) =>
-    request<AccountingPage<Agent>>(`${root}?page=${page}&perPage=100`);
+    request<AccountingPage<AgentSummary>>(`${root}?page=${page}&perPage=100`);
 export const listAgentScopes = (
     scopeType: AgentScope['scopeType'],
     page: number,

@@ -1,12 +1,12 @@
 import { TABLE_PAGE_SIZES } from '@radii/shared';
-import { and, count, desc, eq, sql, type SQL } from 'drizzle-orm';
+import { and, count, desc, eq, getTableColumns, inArray, sql, type SQL } from 'drizzle-orm';
 import type { AnyPgColumn, PgTable } from 'drizzle-orm/pg-core';
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { db } from '../db';
-import { adminUser, commissionAgents, commissionAgreements, commissionJournal, commissionWithdrawalEvents, commissionWithdrawals, confirmedCollections, nasDevice, pppoeServiceAccounts, user } from '../db/schema';
+import { adminUser, agentMemberships, agentUser, commissionAgents, commissionAgreements, commissionJournal, commissionWithdrawalEvents, commissionWithdrawals, confirmedCollections, nasDevice, pppoeServiceAccounts, user } from '../db/schema';
 import { env } from '../env';
-import { addAgreement, agentBalances, CommissionError, ownedAgent, reserveWithdrawal, resolveWithdrawalIntent, transitionWithdrawal, updateAgent, withdrawalIntent } from '../lib/commissions';
+import { addAgreement, agentBalanceFields, agentBalances, CommissionError, ownedAgent, reserveWithdrawal, resolveWithdrawalIntent, transitionWithdrawal, updateAgent, withdrawalIntent } from '../lib/commissions';
 import { jsonError } from '../lib/error';
 import { apiLogger } from '../logging';
 import { requireAdmin } from '../middleware/auth';
@@ -57,7 +57,39 @@ async function pageRows(table: PgTable & { id: AnyPgColumn }, where: SQL, order:
     return { items, total: total!.value, page, perPage };
 }
 
-app.get('/', async c => c.json({ success: true, data: await pageRows(commissionAgents, eq(commissionAgents.tenantAdminId, c.var.adminSession.userId), commissionAgents.createdAt, c.req.query()) }));
+app.get('/', async c => {
+    const tenant = c.var.adminSession.userId;
+    const { page, perPage } = pageSchema.parse(c.req.query());
+    const where = eq(commissionAgents.tenantAdminId, tenant);
+    const [total] = await db.select({ value: count() }).from(commissionAgents).where(where);
+    const agents = await db.select({ ...getTableColumns(commissionAgents), email: agentUser.email }).from(commissionAgents)
+        .leftJoin(agentMemberships, and(eq(agentMemberships.agentId, commissionAgents.id), eq(agentMemberships.tenantAdminId, commissionAgents.tenantAdminId)))
+        .leftJoin(agentUser, eq(agentUser.id, agentMemberships.userId))
+        .where(where).orderBy(desc(commissionAgents.createdAt), desc(commissionAgents.id)).limit(perPage).offset((page - 1) * perPage);
+    const balances = agents.length ? await db.select({ agentId: commissionJournal.agentId, ...agentBalanceFields })
+        .from(commissionJournal).where(and(eq(commissionJournal.tenantAdminId, tenant), inArray(commissionJournal.agentId, agents.map(agent => agent.id))))
+        .groupBy(commissionJournal.agentId, commissionJournal.currency).orderBy(commissionJournal.currency) : [];
+    const byAgent = new Map<string, Omit<(typeof balances)[number], 'agentId'>[]>();
+    for (const { agentId, ...balance } of balances) {
+        const entries = byAgent.get(agentId) ?? [];
+        entries.push(balance);
+        byAgent.set(agentId, entries);
+    }
+    // Resolve scope versions across all agents before filtering to this page,
+    // so an agreement reassigned to another agent is not counted twice.
+    const currentAgreements = db.selectDistinctOn([commissionAgreements.scopeType, commissionAgreements.scopeId], {
+        agentId: commissionAgreements.agentId,
+    }).from(commissionAgreements)
+        .where(and(eq(commissionAgreements.tenantAdminId, tenant), sql`${commissionAgreements.effectiveFrom} <= now()`))
+        .orderBy(commissionAgreements.scopeType, commissionAgreements.scopeId, desc(commissionAgreements.effectiveFrom))
+        .as('current_agreements');
+    const agreementCounts = agents.length ? await db.select({ agentId: currentAgreements.agentId, value: count() })
+        .from(currentAgreements).where(inArray(currentAgreements.agentId, agents.map(agent => agent.id)))
+        .groupBy(currentAgreements.agentId) : [];
+    const countsByAgent = new Map(agreementCounts.map(row => [row.agentId, row.value]));
+    const items = agents.map(agent => ({ ...agent, balances: byAgent.get(agent.id) ?? [], currentAgreementCount: countsByAgent.get(agent.id) ?? 0 }));
+    return c.json({ success: true, data: { items, total: total!.value, page, perPage } });
+});
 app.post('/', async c => {
     const input = agentFields.parse(await c.req.json());
     const [agent] = await db.insert(commissionAgents).values({ ...input, tenantAdminId: c.var.adminSession.userId }).returning();

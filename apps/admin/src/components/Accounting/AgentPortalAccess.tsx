@@ -1,4 +1,14 @@
 import {
+    getAgentPortalAccess,
+    linkAgentPortalAccess,
+    revokeAgentPortalAccess,
+    verifyAgentPayoutProfile,
+    type Agent,
+    type AgentPayoutProfile,
+    type AgentPortalAccess as PortalAccess,
+} from '@/lib/accountingApi';
+import { formatDateTime } from '@/lib/format';
+import {
     Alert,
     Badge,
     Button,
@@ -15,16 +25,6 @@ import {
     TextInput,
 } from '@mantine/core';
 import { useEffect, useState } from 'react';
-import {
-    getAgentPortalAccess,
-    linkAgentPortalAccess,
-    revokeAgentPortalAccess,
-    verifyAgentPayoutProfile,
-    type Agent,
-    type AgentPayoutProfile,
-    type AgentPortalAccess as PortalAccess,
-} from '@/lib/accountingApi';
-import { formatDateTime } from '@/lib/format';
 
 type Action =
     | { kind: 'link' }
@@ -58,7 +58,12 @@ export function AgentPortalAccess({
         let cancelled = false;
         setLoading(true);
         setError('');
-        void getAgentPortalAccess(agent.id).then((result) => {
+        let refreshing = false;
+        const load = async () => {
+            if (refreshing) return;
+            refreshing = true;
+            const result = await getAgentPortalAccess(agent.id);
+            refreshing = false;
             if (cancelled) return;
             setLoading(false);
             if (!result.success || !result.data) {
@@ -70,10 +75,14 @@ export function AgentPortalAccess({
                 );
                 return;
             }
+            setError('');
             setData(result.data);
-        });
+        };
+        void load();
+        const timer = setInterval(() => void load(), 10_000);
         return () => {
             cancelled = true;
+            clearInterval(timer);
         };
     }, [agent.id, revision]);
     const membership = data?.membership;
@@ -113,7 +122,7 @@ export function AgentPortalAccess({
         if (!result.success || !result.data) {
             setActionError(
                 result.success
-                    ? 'No confirmation returned. Refresh portal access to check the current state before retrying.'
+                    ? 'No confirmation returned. Portal access refreshes automatically; check the current state before retrying.'
                     : result.message,
             );
             return;
@@ -138,24 +147,11 @@ export function AgentPortalAccess({
                 : 'Link registered agent';
     return (
         <Stack>
-            <Text size='sm' c='dimmed'>
-                Registration alone grants no access. Link a verified registered
-                email only after independently confirming the agent identity.
-                There are no automatic invitations or pending access requests.
-            </Text>
             {notice && (
                 <Alert color='green' role='status'>
                     {notice}
                 </Alert>
             )}
-            <Button
-                variant='default'
-                w='max-content'
-                disabled={loading || busy}
-                onClick={() => setRevision((value) => value + 1)}
-            >
-                Refresh portal access
-            </Button>
             {loading ? (
                 <Center py='lg'>
                     <Loader aria-label='Loading portal access' />

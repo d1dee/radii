@@ -1,4 +1,5 @@
 import {
+    ActionIcon,
     Alert,
     Badge,
     Button,
@@ -8,6 +9,7 @@ import {
     Drawer,
     Group,
     Loader,
+    Menu,
     Modal,
     SimpleGrid,
     Stack,
@@ -17,7 +19,13 @@ import {
     Title,
 } from '@mantine/core';
 import { useEffect, useState } from 'react';
-import { MdCheck, MdClose, MdHistory, MdPayments } from 'react-icons/md';
+import {
+    MdCheck,
+    MdClose,
+    MdHistory,
+    MdMoreVert,
+    MdPayments,
+} from 'react-icons/md';
 import { TableRowActions } from '@/components/TableRowActions';
 import { AccountingRow, AccountingTable } from './AccountingTable';
 import classes from './Accounting.module.css';
@@ -28,6 +36,7 @@ import { WithdrawalAudit } from './WithdrawalAudit';
 import { WithdrawalForm } from './WithdrawalForm';
 import {
     getAgent,
+    getAgentPortalAccess,
     getAgentStatement,
     getWithdrawalIntent,
     listAgreements,
@@ -41,11 +50,13 @@ import {
     type AgentWithdrawal,
 } from '@/lib/accountingApi';
 import { accountingMoney } from '@/lib/accountingMoney';
+import { exportAgentAccounting } from '@/lib/accountingExport';
 import { formatDateTime } from '@/lib/format';
 import { tableRowNumber } from '@/lib/pagination';
 
 type Detail = {
     agent: Agent;
+    email: string | null;
     statement: AgentStatement;
     agreements: AccountingPage<AgentAgreementDetail>;
     withdrawals: AccountingPage<AgentWithdrawal>;
@@ -109,6 +120,8 @@ export function AgentAccountingDetail({
     );
     const [portalDialogOpen, setPortalDialogOpen] = useState(false);
     const [notice, setNotice] = useState('');
+    const [exporting, setExporting] = useState(false);
+    const [exportError, setExportError] = useState('');
     const [tab, setTab] = useState<string | null>('statement');
     const dialogOpen =
         editing ||
@@ -123,12 +136,19 @@ export function AgentAccountingDetail({
         let cancelled = false;
         setLoading(true);
         setError('');
-        void Promise.all([
-            getAgent(id),
-            getAgentStatement(id, statementPage),
-            listAgreements(id, agreementPage),
-            listWithdrawals(id, withdrawalPage),
-        ]).then(([agent, statement, agreements, withdrawals]) => {
+        let refreshing = false;
+        const load = async () => {
+            if (refreshing) return;
+            refreshing = true;
+            const [agent, statement, agreements, withdrawals, portalAccess] =
+                await Promise.all([
+                    getAgent(id),
+                    getAgentStatement(id, statementPage),
+                    listAgreements(id, agreementPage),
+                    listWithdrawals(id, withdrawalPage),
+                    getAgentPortalAccess(id),
+                ]);
+            refreshing = false;
             if (cancelled) return;
             setLoading(false);
             for (const response of [
@@ -155,15 +175,22 @@ export function AgentAccountingDetail({
                 setError('The server returned incomplete accounting data.');
                 return;
             }
+            setError('');
             setData({
                 agent: agent.data,
+                email: portalAccess.success
+                    ? (portalAccess.data?.membership?.email ?? null)
+                    : null,
                 statement: statement.data,
                 agreements: agreements.data,
                 withdrawals: withdrawals.data,
             });
-        });
+        };
+        void load();
+        const timer = setInterval(() => void load(), 10_000);
         return () => {
             cancelled = true;
+            clearInterval(timer);
         };
     }, [id, revision, statementPage, agreementPage, withdrawalPage]);
     const refresh = (message = '') => {
@@ -187,13 +214,29 @@ export function AgentAccountingDetail({
         refresh('Agent status updated.');
     }
     const active = data?.agent.status === 'active';
+    async function exportAccounting(format: 'excel' | 'pdf') {
+        if (!data || exporting) return;
+        setExporting(true);
+        setExportError('');
+        try {
+            await exportAgentAccounting(data.agent, data.email, format);
+        } catch (error) {
+            setExportError(
+                error instanceof Error
+                    ? error.message
+                    : 'Export failed. Please retry.',
+            );
+        } finally {
+            setExporting(false);
+        }
+    }
     return (
         <Drawer
             opened={opened}
             onClose={() => setOpened(false)}
             onExitTransitionEnd={onClose}
             position='right'
-            size='min(1100px, 100%)'
+            size='xl'
             closeOnEscape={!dialogOpen}
             closeOnClickOutside={!dialogOpen}
             styles={{
@@ -211,21 +254,15 @@ export function AgentAccountingDetail({
                         >
                             {data?.agent.name ?? 'Agent accounting'}
                         </Title>
-                        {data?.agent.phone && (
+                        {(data?.agent.phone || data?.email) && (
                             <Text size='xs' c='dimmed'>
-                                {data.agent.phone}
+                                {[data.agent.phone, data.email]
+                                    .filter(Boolean)
+                                    .join(' · ')}
                             </Text>
                         )}
                     </Stack>
                     <Group gap='xs' justify='flex-end' ml='auto' pr='xs'>
-                        <Button
-                            size='xs'
-                            variant='default'
-                            onClick={() => refresh()}
-                            disabled={loading}
-                        >
-                            Refresh account
-                        </Button>
                         {data && (
                             <>
                                 <Button
@@ -236,6 +273,26 @@ export function AgentAccountingDetail({
                                 >
                                     Edit agent
                                 </Button>
+                                {tab === 'agreements' && (
+                                    <Button
+                                        size='xs'
+                                        disabled={loading || !active}
+                                        onClick={() => setAddingAgreement(true)}
+                                    >
+                                        Add agreement
+                                    </Button>
+                                )}
+                                {tab === 'withdrawals' && (
+                                    <Button
+                                        size='xs'
+                                        disabled={loading}
+                                        onClick={() =>
+                                            setAction({ action: 'request' })
+                                        }
+                                    >
+                                        Request withdrawal
+                                    </Button>
+                                )}
                                 <Button
                                     size='xs'
                                     variant='light'
@@ -251,6 +308,63 @@ export function AgentAccountingDetail({
                                         ? 'Archive agent'
                                         : 'Reactivate agent'}
                                 </Button>
+                                <Menu
+                                    position='bottom-end'
+                                    shadow='md'
+                                    withinPortal
+                                >
+                                    <Menu.Target>
+                                        <ActionIcon
+                                            variant='light'
+                                            color='gray'
+                                            aria-label='Agent actions'
+                                            loading={exporting}
+                                            disabled={loading}
+                                        >
+                                            <MdMoreVert size={20} />
+                                        </ActionIcon>
+                                    </Menu.Target>
+                                    <Menu.Dropdown>
+                                        {tab !== 'agreements' && (
+                                            <Menu.Item
+                                                disabled={!active}
+                                                onClick={() =>
+                                                    setAddingAgreement(true)
+                                                }
+                                            >
+                                                Add agreement
+                                            </Menu.Item>
+                                        )}
+                                        {tab !== 'withdrawals' && (
+                                            <Menu.Item
+                                                onClick={() =>
+                                                    setAction({
+                                                        action: 'request',
+                                                    })
+                                                }
+                                            >
+                                                Request withdrawal
+                                            </Menu.Item>
+                                        )}
+                                        <Menu.Divider />
+                                        <Menu.Item
+                                            disabled={exporting}
+                                            onClick={() =>
+                                                void exportAccounting('excel')
+                                            }
+                                        >
+                                            Export to Excel
+                                        </Menu.Item>
+                                        <Menu.Item
+                                            disabled={exporting}
+                                            onClick={() =>
+                                                void exportAccounting('pdf')
+                                            }
+                                        >
+                                            Export to PDF
+                                        </Menu.Item>
+                                    </Menu.Dropdown>
+                                </Menu>
                             </>
                         )}
                     </Group>
@@ -258,6 +372,16 @@ export function AgentAccountingDetail({
             }
         >
             <Stack className={classes.detail} gap='md'>
+                {exportError && (
+                    <Alert
+                        color='red'
+                        role='alert'
+                        withCloseButton
+                        onClose={() => setExportError('')}
+                    >
+                        {exportError}
+                    </Alert>
+                )}
                 {notice && (
                     <Alert
                         color='green'
@@ -473,14 +597,6 @@ export function AgentAccountingDetail({
                                             versions supersede the scope, not
                                             historical earnings.
                                         </Text>
-                                        <Button
-                                            onClick={() =>
-                                                setAddingAgreement(true)
-                                            }
-                                            disabled={!active}
-                                        >
-                                            Add agreement
-                                        </Button>
                                     </Group>
                                     <AccountingTable
                                         headers={[
@@ -589,13 +705,6 @@ export function AgentAccountingDetail({
                                             rejections and externally paid
                                             receipts. No automatic B2C.
                                         </Text>
-                                        <Button
-                                            onClick={() =>
-                                                setAction({ action: 'request' })
-                                            }
-                                        >
-                                            Request withdrawal
-                                        </Button>
                                     </Group>
                                     <AccountingTable
                                         headers={[
