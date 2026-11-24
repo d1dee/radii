@@ -6,6 +6,12 @@
     "workspaces": [
         "apps/*"
     ],
+    "overrides": {
+        "react": "19.3.1",
+        "react-dom": "19.3.1",
+        "@types/react": "19.3.0",
+        "@types/react-dom": "19.3.0"
+    },
     "scripts": {
         "dev:api": "bun run --filter api dev",
         "dev:hotspot": "bun run --filter hotspot dev",

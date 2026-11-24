@@ -14,6 +14,10 @@ export default defineConfig(({ command, mode }) => {
 
     return {
         plugins: [react()],
+        optimizeDeps: {
+            // Bun workspace updates can leave stale optimized React bundles.
+            force: true,
+        },
         resolve: {
             alias: {
                 '@': path.resolve(import.meta.dirname, './src'),
@@ -28,6 +32,7 @@ export default defineConfig(({ command, mode }) => {
         server: {
             host: '0.0.0.0',
             port: APP_PORT,
+            strictPort: true,
             cors: false,
             proxy: {
                 '/api': {

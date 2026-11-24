@@ -47,6 +47,10 @@ export default defineConfig(({ command, mode }) => {
             },
             react(),
         ],
+        optimizeDeps: {
+            // Bun workspace updates can leave stale optimized React bundles.
+            force: true,
+        },
         resolve: {
             alias: {
                 '@': path.resolve(import.meta.dirname, './src'),
