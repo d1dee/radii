@@ -1,3 +1,23 @@
+import { TableRowActions } from '@/components/TableRowActions';
+import {
+    getAgent,
+    getAgentPortalAccess,
+    getAgentStatement,
+    getWithdrawalIntent,
+    listAgreements,
+    listWithdrawals,
+    updateAgent,
+    type AccountingPage,
+    type Agent,
+    type AgentAgreementDetail,
+    type AgentJournal,
+    type AgentStatement,
+    type AgentWithdrawal,
+} from '@/lib/accountingApi';
+import { exportAgentAccounting } from '@/lib/accountingExport';
+import { accountingMoney } from '@/lib/accountingMoney';
+import { formatDateTime } from '@/lib/format';
+import { tableRowNumber } from '@/lib/pagination';
 import {
     ActionIcon,
     Alert,
@@ -26,33 +46,13 @@ import {
     MdMoreVert,
     MdPayments,
 } from 'react-icons/md';
-import { TableRowActions } from '@/components/TableRowActions';
-import { AccountingRow, AccountingTable } from './AccountingTable';
 import classes from './Accounting.module.css';
+import { AccountingRow, AccountingTable } from './AccountingTable';
 import { AgentForm } from './AgentForm';
 import { AgentPortalAccess } from './AgentPortalAccess';
 import { AgreementForm } from './AgreementForm';
 import { WithdrawalAudit } from './WithdrawalAudit';
 import { WithdrawalForm } from './WithdrawalForm';
-import {
-    getAgent,
-    getAgentPortalAccess,
-    getAgentStatement,
-    getWithdrawalIntent,
-    listAgreements,
-    listWithdrawals,
-    updateAgent,
-    type AccountingPage,
-    type Agent,
-    type AgentAgreementDetail,
-    type AgentJournal,
-    type AgentStatement,
-    type AgentWithdrawal,
-} from '@/lib/accountingApi';
-import { accountingMoney } from '@/lib/accountingMoney';
-import { exportAgentAccounting } from '@/lib/accountingExport';
-import { formatDateTime } from '@/lib/format';
-import { tableRowNumber } from '@/lib/pagination';
 
 type Detail = {
     agent: Agent;
@@ -119,6 +119,7 @@ export function AgentAccountingDetail({
         null,
     );
     const [portalDialogOpen, setPortalDialogOpen] = useState(false);
+    const [linkAccountRequest, setLinkAccountRequest] = useState(0);
     const [notice, setNotice] = useState('');
     const [exporting, setExporting] = useState(false);
     const [exportError, setExportError] = useState('');
@@ -265,14 +266,6 @@ export function AgentAccountingDetail({
                     <Group gap='xs' justify='flex-end' ml='auto' pr='xs'>
                         {data && (
                             <>
-                                <Button
-                                    size='xs'
-                                    variant='light'
-                                    onClick={() => setEditing(true)}
-                                    disabled={loading}
-                                >
-                                    Edit agent
-                                </Button>
                                 {tab === 'agreements' && (
                                     <Button
                                         size='xs'
@@ -293,6 +286,27 @@ export function AgentAccountingDetail({
                                         Request withdrawal
                                     </Button>
                                 )}
+                                {tab === 'portal' && !data.email && (
+                                    <Button
+                                        size='xs'
+                                        disabled={loading || !active}
+                                        onClick={() => {
+                                            setLinkAccountRequest(
+                                                (value) => value + 1,
+                                            );
+                                        }}
+                                    >
+                                        Link agent account
+                                    </Button>
+                                )}
+                                <Button
+                                    size='xs'
+                                    variant='light'
+                                    onClick={() => setEditing(true)}
+                                    disabled={loading}
+                                >
+                                    Edit agent
+                                </Button>
                                 <Button
                                     size='xs'
                                     variant='light'
@@ -325,27 +339,35 @@ export function AgentAccountingDetail({
                                         </ActionIcon>
                                     </Menu.Target>
                                     <Menu.Dropdown>
-                                        {tab !== 'agreements' && (
-                                            <Menu.Item
-                                                disabled={!active}
-                                                onClick={() =>
-                                                    setAddingAgreement(true)
-                                                }
-                                            >
-                                                Add agreement
-                                            </Menu.Item>
-                                        )}
-                                        {tab !== 'withdrawals' && (
-                                            <Menu.Item
-                                                onClick={() =>
-                                                    setAction({
-                                                        action: 'request',
-                                                    })
-                                                }
-                                            >
-                                                Request withdrawal
-                                            </Menu.Item>
-                                        )}
+                                        <Menu.Item
+                                            disabled={!active || !!data.email}
+                                            onClick={() => {
+                                                setTab('portal');
+                                                setLinkAccountRequest(
+                                                    (value) => value + 1,
+                                                );
+                                            }}
+                                        >
+                                            Link agent account
+                                        </Menu.Item>
+                                        <Menu.Item
+                                            disabled={!active}
+                                            onClick={() =>
+                                                setAddingAgreement(true)
+                                            }
+                                        >
+                                            Add agreement
+                                        </Menu.Item>
+
+                                        <Menu.Item
+                                            onClick={() =>
+                                                setAction({
+                                                    action: 'request',
+                                                })
+                                            }
+                                        >
+                                            Request withdrawal
+                                        </Menu.Item>
                                         <Menu.Divider />
                                         <Menu.Item
                                             disabled={exporting}
@@ -432,6 +454,12 @@ export function AgentAccountingDetail({
                                 remain available.
                             </Alert>
                         )}
+
+                        <Text size='xs' c='dimmed'>
+                            Balances are derived from the immutable journal,
+                            separated by currency. Reserved funds include
+                            approved withdrawals. No balance can be edited here.
+                        </Text>
                         <Stack gap='sm' aria-label='Agent balances'>
                             {data.statement.balances.length === 0 ? (
                                 <Alert color='gray'>
@@ -484,11 +512,6 @@ export function AgentAccountingDetail({
                                 ))
                             )}
                         </Stack>
-                        <Text size='xs' c='dimmed'>
-                            Balances are derived from the immutable journal,
-                            separated by currency. Reserved funds include
-                            approved withdrawals. No balance can be edited here.
-                        </Text>
                         <Tabs value={tab} onChange={setTab} keepMounted={false}>
                             <Tabs.List className={classes.tabs}>
                                 <Tabs.Tab value='statement'>Statement</Tabs.Tab>
@@ -874,6 +897,10 @@ export function AgentAccountingDetail({
                                 <AgentPortalAccess
                                     key={id}
                                     agent={data.agent}
+                                    linkRequest={linkAccountRequest}
+                                    onLinkRequestHandled={() =>
+                                        setLinkAccountRequest(0)
+                                    }
                                     onDialogChange={setPortalDialogOpen}
                                 />
                             </Tabs.Panel>

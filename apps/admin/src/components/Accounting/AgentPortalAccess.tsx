@@ -33,9 +33,13 @@ type Action =
 
 export function AgentPortalAccess({
     agent,
+    linkRequest = 0,
+    onLinkRequestHandled,
     onDialogChange,
 }: {
     agent: Agent;
+    linkRequest?: number;
+    onLinkRequestHandled?: () => void;
     onDialogChange?: (opened: boolean) => void;
 }) {
     const [data, setData] = useState<PortalAccess | null>(null);
@@ -87,6 +91,16 @@ export function AgentPortalAccess({
     }, [agent.id, revision]);
     const membership = data?.membership;
     const profile = data?.payoutProfile;
+    useEffect(() => {
+        if (!linkRequest || loading || !data) return;
+        onLinkRequestHandled?.();
+        if (membership || agent.status !== 'active') return;
+        setEmail('');
+        setEvidence('');
+        setConfirmed(false);
+        setActionError('');
+        setAction({ kind: 'link' });
+    }, [linkRequest, loading, data, membership, agent.status, onLinkRequestHandled]);
     function open(next: Action) {
         setEmail(membership?.email ?? '');
         setEvidence('');
@@ -217,16 +231,14 @@ export function AgentPortalAccess({
                                     >
                                         Revoke portal access
                                     </Button>
-                                ) : (
+                                ) : membership ? (
                                     <Button
                                         disabled={agent.status !== 'active'}
                                         onClick={() => open({ kind: 'link' })}
                                     >
-                                        {membership
-                                            ? 'Reactivate portal access'
-                                            : 'Link registered agent'}
+                                        Reactivate portal access
                                     </Button>
-                                )}
+                                ) : null}
                             </Group>
                             {agent.status === 'archived' && (
                                 <Alert color='orange'>
