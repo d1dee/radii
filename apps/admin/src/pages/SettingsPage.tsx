@@ -233,25 +233,24 @@ function CategoryForm({
             <CategoryFormProvider form={form}>
                 <form onSubmit={form.onSubmit(handleSubmit)}>
                     <Stack gap='xl'>
-                        <Group justify='space-between'>
-                            <Title order={3} size='h4'>
-                                {category.label}
-                            </Title>
-                            <Badge
-                                color={dirty ? 'yellow' : 'gray'}
-                                variant='light'
-                                role='status'
-                            >
-                                {saving
-                                    ? 'Saving changes'
-                                    : dirty
-                                      ? 'Unsaved changes'
-                                      : 'All changes saved'}
-                            </Badge>
-                        </Group>
                         {sections[category.id].map((Section, index) => (
                             <Box key={index}>
                                 {index > 0 && <Divider mb='xl' />}
+                                {index === 0 && (
+                                    <Badge
+                                        color={dirty ? 'yellow' : 'gray'}
+                                        variant='light'
+                                        role='status'
+                                        ml='sm'
+                                        style={{ float: 'right' }}
+                                    >
+                                        {saving
+                                            ? 'Saving changes'
+                                            : dirty
+                                              ? 'Unsaved changes'
+                                              : 'All changes saved'}
+                                    </Badge>
+                                )}
                                 <Section />
                             </Box>
                         ))}
