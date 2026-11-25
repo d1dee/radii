@@ -6,24 +6,23 @@
 // provider cache keyed off these settings is invalidated here on save (see
 // lib/payments/adminProviders.ts).
 
-import { desc, eq } from 'drizzle-orm';
 import {
     adminSettingsSchema,
     mergeAdminSettingsSecrets,
     type AdminSettings,
 } from '@radii/shared';
+import { desc, eq, sql } from 'drizzle-orm';
 import { db } from '../db';
-import {
-    adminSetting,
-    nasDevice,
-    packagePayments,
-} from '../db/schema';
+import { adminSetting, nasDevice, packagePayments } from '../db/schema';
 import { invalidateAdminMpesaProvider } from './payments/adminProviders';
 
 // Loads (and normalizes) the settings row for an admin. Missing rows simply
 // yield the schema defaults; nothing is written until the admin saves.
-export async function getAdminSettings(adminId: string): Promise<AdminSettings> {
-    const [row] = await db
+export async function getAdminSettings(
+    adminId: string,
+    executor: Pick<typeof db, 'select'> = db,
+): Promise<AdminSettings> {
+    const [row] = await executor
         .select({ settings: adminSetting.settings })
         .from(adminSetting)
         .where(eq(adminSetting.adminUserId, adminId))
@@ -41,17 +40,26 @@ export async function getAdminSettings(adminId: string): Promise<AdminSettings> 
 export async function saveAdminSettings(
     adminId: string,
     input: unknown,
+    executor: Pick<typeof db, 'select' | 'insert'> = db,
 ): Promise<AdminSettings> {
-    const existing = await getAdminSettings(adminId);
+    const existing = await getAdminSettings(adminId, executor);
     const settings = adminSettingsSchema.parse(
         mergeAdminSettingsSecrets(input, existing),
     );
-    await db
+    await executor
         .insert(adminSetting)
-        .values({ adminUserId: adminId, settings })
+        // Bind serialized JSON as text so Bun SQL does not encode it twice.
+        .values({
+            adminUserId: adminId,
+            settings: sql`${JSON.stringify(settings)}::text::jsonb`,
+        })
         .onConflictDoUpdate({
             target: adminSetting.adminUserId,
-            set: { settings },
+            // WAHA is a private backend-only section, not part of the public
+            // console settings schema. Preserve it atomically on normal saves.
+            set: {
+                settings: sql`${JSON.stringify(settings)}::text::jsonb || jsonb_build_object('whatsapp', coalesce((case when jsonb_typeof(${adminSetting.settings}) = 'string' then (${adminSetting.settings} #>> '{}')::jsonb else ${adminSetting.settings} end)->'whatsapp', '{}'::jsonb))`,
+            },
         });
     invalidateAdminMpesaProvider(adminId);
     return settings;

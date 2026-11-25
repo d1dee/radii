@@ -1636,3 +1636,76 @@ export function getAdminSettings() {
 export function updateAdminSettings(body: AdminSettingsInput) {
     return request<AdminSettings>('/admin/settings', body, { method: 'PUT' });
 }
+
+export type WhatsAppStatus = 'DISABLED' | 'NOT_CREATED' | 'STOPPED' | 'STARTING'
+    | 'SCAN_QR_CODE' | 'WORKING' | 'FAILED' | 'PASSKEY_REQUIRED'
+    | 'PASSKEY_CONFIRMATION_REQUIRED';
+export type WhatsAppSession = { configured: boolean; status: WhatsAppStatus };
+export type WhatsAppAction = 'create' | 'start' | 'restart' | 'logout' | 'delete';
+
+export type WhatsAppConfig = {
+    baseUrl: string;
+    useGlobalConfig: boolean;
+    hasApiKey: boolean;
+    apiKeyPreview: string | null;
+    globalConfigured: boolean;
+    configured: boolean;
+    safety: WhatsAppSafetySettings;
+};
+export type WhatsAppSafetySettings = {
+    minDelaySeconds: number;
+    maxDelaySeconds: number;
+    batchSize: number;
+    restMinutes: number;
+    perContactHourlyLimit: number;
+};
+export type WhatsAppConfigInput = {
+    useGlobalConfig: boolean;
+    baseUrl?: string;
+    apiKey?: string;
+    clearApiKey?: boolean;
+    safety?: WhatsAppSafetySettings;
+};
+
+export function getWhatsAppConfig(signal: AbortSignal) {
+    return request<WhatsAppConfig>('/admin/whatsapp/config', undefined, { signal, cache: 'no-store' });
+}
+
+export function updateWhatsAppConfig(body: WhatsAppConfigInput, signal: AbortSignal) {
+    return request<WhatsAppConfig>('/admin/whatsapp/config', body, { method: 'PUT', signal, cache: 'no-store' });
+}
+
+export function getWhatsAppSession(signal: AbortSignal) {
+    return request<WhatsAppSession>('/admin/whatsapp/session', undefined, { signal, cache: 'no-store' });
+}
+
+export function getWhatsAppQr(signal: AbortSignal) {
+    return request<{ mimetype: 'image/png'; data: string }>('/admin/whatsapp/session/qr', undefined, { signal, cache: 'no-store' });
+}
+
+export function controlWhatsAppSession(action: WhatsAppAction, signal: AbortSignal) {
+    const suffix = action === 'create' || action === 'delete' ? '' : `/${action}`;
+    return request<{ ok: true }>(`/admin/whatsapp/session${suffix}`, undefined, {
+        method: action === 'delete' ? 'DELETE' : 'POST', signal,
+    });
+}
+
+export type WhatsAppOutboxJob = {
+    id: string; batchId: string; phone: string;
+    status: 'queued' | 'processing' | 'accepted' | 'failed' | 'uncertain' | 'cancelled';
+    createdAt: number; expiresAt: number; startedAt?: number; result?: string;
+    preview?: string; sentAt?: number; ack?: number; receiptCheckedAt?: number;
+};
+export type WhatsAppOutbox = { paused: boolean; nextAt: number; jobs: WhatsAppOutboxJob[] };
+
+export function getWhatsAppOutbox(signal: AbortSignal) {
+    return request<WhatsAppOutbox>('/admin/whatsapp/outbox', undefined, { signal, cache: 'no-store' });
+}
+
+export function cancelWhatsAppOutbox(signal: AbortSignal) {
+    return request<{ ok: true }>('/admin/whatsapp/outbox', undefined, { method: 'DELETE', signal });
+}
+
+export function sendWhatsAppText(body: { phones: string[]; text: string; requestId: string }, signal: AbortSignal) {
+    return request<{ ok: true; queued: true; batchId: string }>('/admin/whatsapp/send-text', body, { method: 'POST', signal });
+}

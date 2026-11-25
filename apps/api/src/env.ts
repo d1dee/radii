@@ -3,6 +3,7 @@
 
 import { resolve } from 'node:path';
 import { apiLogger } from './logging';
+import { parseWahaConfig } from './lib/waha';
 
 const logger = apiLogger.getChild('config');
 
@@ -33,6 +34,9 @@ function requiredSecret(name: string): string {
 }
 
 export const env = {
+    // Only used when an admin explicitly selects useGlobalConfig.
+    waha: parseWahaConfig(process.env.WAHA_BASE_URL, process.env.WAHA_API_KEY),
+    wahaSettingsEncryptionKey: process.env.WAHA_SETTINGS_ENCRYPTION_KEY || '',
     isProduction: process.env.NODE_ENV === 'production',
     apiUrl: required('API_URL'),
     // BetterAuth signing secrets. Deliberately independent (no cross-fallback)

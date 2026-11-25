@@ -318,15 +318,14 @@ export async function logoutPhonePin(c: AppContext) {
     }
 }
 
-// --- Forget-PIN (SMS OTP) -----------------------------------------------------
+// --- Forget-PIN (WhatsApp OTP) ------------------------------------------------
 
 function otpFieldError(message: string) {
     return { otp: message };
 }
 
 // POST /forgot-pin equivalent: requests a 6-digit reset code for the phone
-// number. The code is delivered over the portal's OTP channel (SMS once the
-// provider is integrated; server console + admin user drawer for now).
+// number. The code is delivered through the owning admin's WhatsApp session.
 // Unknown numbers answer success too, so the endpoint is not enumerable.
 export async function forgotPinPhoneOtp(c: AppContext) {
     const parsed = forgotPinSchema.safeParse(
@@ -351,7 +350,7 @@ export async function forgotPinPhoneOtp(c: AppContext) {
     }
 }
 
-// POST /reset-pin equivalent: redeems the SMS code for a new 4-digit PIN
+// POST /reset-pin equivalent: redeems the WhatsApp code for a new 4-digit PIN
 // (better-auth emailOTP reset-password, which also revokes stale sessions
 // when configured). The user signs in again with the new PIN afterwards.
 export async function resetPinPhoneOtp(c: AppContext) {

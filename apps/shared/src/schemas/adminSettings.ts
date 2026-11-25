@@ -163,6 +163,86 @@ export const adminPppoeSettingsSchema = z.object({
     showPasswordsInPortal: z.boolean().default(false),
 });
 
+export const pppoeExpiryReminderPlaceholders = [
+    'customer_name',
+    'username',
+    'package_name',
+    'expiry_date',
+    'expiry_time',
+    'amount',
+    'support_phone',
+] as const;
+
+export type PppoeExpiryReminderValues = Record<
+    (typeof pppoeExpiryReminderPlaceholders)[number],
+    string
+>;
+
+export const defaultPppoeExpiryReminderTemplate =
+    'Hello {{customer_name}}, your {{package_name}} subscription for {{username}} expires on {{expiry_date}} at {{expiry_time}}. Please renew for {{amount}} to stay connected. For assistance, contact {{support_phone}}.';
+
+export const pppoeExpiryReminderTemplateSchema = z
+    .string()
+    .trim()
+    .min(1, 'Enter a reminder message.')
+    .max(4096, 'Reminder messages must be 4096 characters or fewer.')
+    .superRefine((template, ctx) => {
+        const remaining = template.replace(
+            /\{\{\s*([a-z_]+)\s*\}\}/g,
+            (token, name: string) => {
+                if (!(pppoeExpiryReminderPlaceholders as readonly string[]).includes(name)) {
+                    ctx.addIssue({
+                        code: 'custom',
+                        message: `Unsupported placeholder ${token}. Use one of the listed placeholders.`,
+                    });
+                }
+                return '';
+            },
+        );
+        if (/[{}]/.test(remaining)) {
+            ctx.addIssue({
+                code: 'custom',
+                message: 'Use placeholders in the form {{customer_name}}; unmatched braces are not supported.',
+            });
+        }
+    });
+
+// Replace only template tokens, never tokens occurring in customer data.
+export function renderPppoeExpiryReminderTemplate(
+    template: string,
+    values: PppoeExpiryReminderValues,
+): string {
+    return pppoeExpiryReminderTemplateSchema.parse(template).replace(
+        /\{\{\s*([a-z_]+)\s*\}\}/g,
+        (_token, name: keyof PppoeExpiryReminderValues) => values[name],
+    );
+}
+
+// The API reminder worker consumes these per-admin settings every minute.
+export const pppoeExpiryReminderScheduleSchema = z.object({
+    enabled: z.boolean().default(false),
+    timingMode: z.enum(['hours', 'percentage']).default('hours'),
+    remainingPercentage: z
+        .number()
+        .int('Enter a whole percentage.')
+        .min(1, 'Enter at least 1% time remaining.')
+        .max(99, 'Enter no more than 99% time remaining.')
+        .default(10),
+    leadTimeHours: z
+        .number()
+        .int('Enter a whole number of hours.')
+        .min(1, 'Enter at least 1 hour before expiry.')
+        .max(720, 'Enter no more than 720 hours (30 days) before expiry.')
+        .default(24),
+});
+
+export const adminMessagingSettingsSchema = z.object({
+    pppoeExpiryReminderSchedule: pppoeExpiryReminderScheduleSchema.prefault({}),
+    pppoeExpiryReminderTemplate: pppoeExpiryReminderTemplateSchema.default(
+        defaultPppoeExpiryReminderTemplate,
+    ),
+});
+
 export const adminSettingsSchema = z.object({
     appearance: adminAppearanceSettingsSchema.prefault({}),
     dashboard: adminDashboardSettingsSchema.prefault({}),
@@ -170,6 +250,7 @@ export const adminSettingsSchema = z.object({
     contacts: adminContactsSettingsSchema.prefault({}),
     packages: adminPackagesSettingsSchema.prefault({}),
     pppoe: adminPppoeSettingsSchema.prefault({}),
+    messaging: adminMessagingSettingsSchema.prefault({}),
 });
 
 export type AdminSettings = z.output<typeof adminSettingsSchema>;
