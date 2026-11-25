@@ -1,19 +1,26 @@
 import { useAdminSettings } from '@/lib/settings';
 import {
+    Alert,
     Button,
     Card,
     Code,
+    Combobox,
     Group,
+    NumberInput,
     Paper,
     Stack,
+    Switch,
     Text,
     Textarea,
     Title,
+    UnstyledButton,
+    useCombobox,
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import {
     defaultPppoeExpiryReminderTemplate,
     pppoeExpiryReminderPlaceholders,
+    pppoeExpiryReminderScheduleSchema,
     pppoeExpiryReminderTemplateSchema,
     renderPppoeExpiryReminderTemplate,
     type PppoeExpiryReminderValues,
@@ -42,11 +49,47 @@ export function PppoeExpiryReminderSettings({
         settings.messaging.pppoeExpiryReminderTemplate,
     );
     const [savedTemplate, setSavedTemplate] = useState(template);
+    const [enabled, setEnabled] = useState(
+        settings.messaging.pppoeExpiryReminderSchedule.enabled,
+    );
+    const [leadTimeDays, setLeadTimeDays] = useState<number | string>(
+        settings.messaging.pppoeExpiryReminderSchedule.leadTimeHours / 24,
+    );
+    const [timingMode, setTimingMode] = useState(
+        settings.messaging.pppoeExpiryReminderSchedule.timingMode,
+    );
+    const unitCombobox = useCombobox({
+        onDropdownClose: () => unitCombobox.resetSelectedOption(),
+        onDropdownOpen: () => unitCombobox.selectActiveOption(),
+    });
+    const [remainingPercentage, setRemainingPercentage] = useState<
+        number | string
+    >(settings.messaging.pppoeExpiryReminderSchedule.remainingPercentage);
+    const [savedSchedule, setSavedSchedule] = useState(
+        settings.messaging.pppoeExpiryReminderSchedule,
+    );
     const [saving, setSaving] = useState(false);
     const savingRef = useRef(false);
-    const dirty = template !== savedTemplate;
+    const dirty =
+        template !== savedTemplate ||
+        enabled !== savedSchedule.enabled ||
+        timingMode !== savedSchedule.timingMode ||
+        remainingPercentage !== savedSchedule.remainingPercentage ||
+        leadTimeDays !== savedSchedule.leadTimeHours / 24;
     const parsed = pppoeExpiryReminderTemplateSchema.safeParse(template);
     const error = parsed.success ? undefined : parsed.error.issues[0]?.message;
+    const parsedSchedule = pppoeExpiryReminderScheduleSchema.safeParse({
+        enabled,
+        leadTimeHours:
+            typeof leadTimeDays === 'number' ? leadTimeDays * 24 : leadTimeDays,
+        timingMode,
+        remainingPercentage,
+    });
+    const scheduleError = parsedSchedule.success
+        ? undefined
+        : parsedSchedule.error.issues[0]?.path[0] === 'leadTimeHours'
+          ? 'Enter up to 30 days in whole-hour increments (for example, 0.5 days = 12 hours).'
+          : parsedSchedule.error.issues[0]?.message;
 
     useEffect(() => {
         // Refresh after initial load or another settings save, preserving a draft.
@@ -54,8 +97,14 @@ export function PppoeExpiryReminderSettings({
         if (!dirty) {
             setTemplate(next);
             setSavedTemplate(next);
+            const nextSchedule = settings.messaging.pppoeExpiryReminderSchedule;
+            setEnabled(nextSchedule.enabled);
+            setSavedSchedule(nextSchedule);
+            setLeadTimeDays(nextSchedule.leadTimeHours / 24);
+            setTimingMode(nextSchedule.timingMode);
+            setRemainingPercentage(nextSchedule.remainingPercentage);
         }
-    }, [settings.messaging.pppoeExpiryReminderTemplate, dirty]);
+    }, [settings.messaging, dirty]);
 
     useEffect(() => {
         onDraftChange?.(dirty, saving);
@@ -67,7 +116,8 @@ export function PppoeExpiryReminderSettings({
             !loaded ||
             savingRef.current ||
             !dirty ||
-            !parsed.success
+            !parsed.success ||
+            !parsedSchedule.success
         )
             return;
         savingRef.current = true;
@@ -78,6 +128,7 @@ export function PppoeExpiryReminderSettings({
                 messaging: {
                     ...settings.messaging,
                     pppoeExpiryReminderTemplate: parsed.data,
+                    pppoeExpiryReminderSchedule: parsedSchedule.data,
                 },
             });
             if (result.success) {
@@ -86,19 +137,27 @@ export function PppoeExpiryReminderSettings({
                     parsed.data;
                 setTemplate(saved);
                 setSavedTemplate(saved);
+                const savedPreferences =
+                    result.data?.messaging.pppoeExpiryReminderSchedule ??
+                    parsedSchedule.data;
+                setEnabled(savedPreferences.enabled);
+                setSavedSchedule(savedPreferences);
+                setLeadTimeDays(savedPreferences.leadTimeHours / 24);
+                setTimingMode(savedPreferences.timingMode);
+                setRemainingPercentage(savedPreferences.remainingPercentage);
             }
             notifications.show({
                 title: result.success
-                    ? 'Reminder template saved'
-                    : 'Could not save reminder template',
+                    ? 'Reminder settings saved'
+                    : 'Could not save reminder settings',
                 message: result.success
-                    ? 'Your PPPoE expiry reminder template was saved. Automatic reminders are not enabled.'
+                    ? 'Your template and scheduling preferences were saved. Automatic delivery is unavailable; no reminders have been scheduled or sent.'
                     : result.message || 'Please try again.',
                 color: result.success ? 'green' : 'red',
             });
         } catch {
             notifications.show({
-                title: 'Could not save reminder template',
+                title: 'Could not save reminder settings',
                 message: 'The request failed. Please try again.',
                 color: 'red',
             });
@@ -118,12 +177,104 @@ export function PppoeExpiryReminderSettings({
             >
                 <Stack gap='md'>
                     <div>
-                        <Title order={4}>PPPoE Expiry Reminder Template</Title>
+                        <Title order={4}>PPPoE Expiry Reminders</Title>
                         <Text size='sm' c='dimmed' mt={4}>
-                            Write the reminder message for your PPPoE customers.
-                            This template is private to your admin account.
+                            Manage the reminder template and scheduling
+                            preferences for your PPPoE customers. These settings
+                            are private to your admin account.
                         </Text>
                     </div>
+                    <Alert
+                        color='yellow'
+                        title='Automatic delivery unavailable'
+                    >
+                        No automatic reminder scheduler is installed. Saving
+                        these preferences does not schedule or send customer
+                        messages, even when the preference below is enabled.
+                    </Alert>
+                    <Title order={5}>Scheduling Preferences</Title>
+                    <Switch
+                        label='Enable expiry reminders (preference only)'
+                        description='Stores your preference for a future automatic reminder scheduler.'
+                        checked={enabled}
+                        onChange={(event) =>
+                            setEnabled(event.currentTarget.checked)
+                        }
+                        disabled={disabled || saving || !loaded}
+                    />
+                    <NumberInput
+                        label='Reminder timing'
+                        description={
+                            timingMode === 'percentage'
+                                ? 'Remind when 1-99% of the subscription period remains. For example, 10% of 30 days is 3 days before expiry.'
+                                : 'Days before expiry, up to 30 days, in whole-hour increments. For example, 0.5 days is 12 hours.'
+                        }
+                        value={
+                            timingMode === 'percentage'
+                                ? remainingPercentage
+                                : leadTimeDays
+                        }
+                        onChange={(value) => {
+                            if (timingMode === 'percentage')
+                                setRemainingPercentage(value);
+                            else setLeadTimeDays(value);
+                        }}
+                        min={timingMode === 'percentage' ? 1 : 1 / 24}
+                        max={timingMode === 'percentage' ? 99 : 30}
+                        allowDecimal={timingMode !== 'percentage'}
+                        allowNegative={false}
+                        clampBehavior='none'
+                        hideControls
+                        rightSectionWidth={90}
+                        rightSectionPointerEvents='all'
+                        styles={{
+                            section: {
+                                borderInlineStart: '1px solid var(--mantine-color-default-border)',
+                            },
+                        }}
+                        rightSection={
+                            <Combobox
+                                store={unitCombobox}
+                                width={110}
+                                position='bottom-end'
+                                withArrow
+                                shadow='md'
+                                onOptionSubmit={(value) => {
+                                    if (value === 'hours' || value === 'percentage') setTimingMode(value);
+                                    unitCombobox.closeDropdown();
+                                }}
+                            >
+                                <Combobox.Target targetType='button' withAriaAttributes={false}>
+                                    <UnstyledButton
+                                        type='button'
+                                        aria-label='Reminder timing unit'
+                                        aria-expanded={unitCombobox.dropdownOpened}
+                                        aria-haspopup='listbox'
+                                        onClick={() => unitCombobox.toggleDropdown()}
+                                        disabled={disabled || saving || !loaded}
+                                        w='100%'
+                                        h='100%'
+                                    >
+                                        <Group gap='xs' justify='center' wrap='nowrap'>
+                                            <Text component='span' size='sm'>
+                                                {timingMode === 'percentage' ? '%' : 'days'}
+                                            </Text>
+                                            <Combobox.Chevron />
+                                        </Group>
+                                    </UnstyledButton>
+                                </Combobox.Target>
+                                <Combobox.Dropdown>
+                                    <Combobox.Options>
+                                        <Combobox.Option value='percentage' active={timingMode === 'percentage'}>%</Combobox.Option>
+                                        <Combobox.Option value='hours' active={timingMode === 'hours'}>days</Combobox.Option>
+                                    </Combobox.Options>
+                                </Combobox.Dropdown>
+                            </Combobox>
+                        }
+                        error={scheduleError}
+                        disabled={disabled || saving || !loaded}
+                    />
+                    <Title order={5}>Reminder Template</Title>
                     <Textarea
                         label='Reminder message'
                         description='Use the placeholders below to personalize the message. Maximum 4096 characters.'
@@ -193,10 +344,14 @@ export function PppoeExpiryReminderSettings({
                             type='submit'
                             loading={saving}
                             disabled={
-                                disabled || !loaded || !dirty || !parsed.success
+                                disabled ||
+                                !loaded ||
+                                !dirty ||
+                                !parsed.success ||
+                                !parsedSchedule.success
                             }
                         >
-                            Save reminder template
+                            Save reminder settings
                         </Button>
                     </Group>
                 </Stack>

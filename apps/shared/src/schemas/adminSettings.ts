@@ -218,7 +218,26 @@ export function renderPppoeExpiryReminderTemplate(
     );
 }
 
+// Scheduling preferences only; no automatic delivery worker currently consumes them.
+export const pppoeExpiryReminderScheduleSchema = z.object({
+    enabled: z.boolean().default(false),
+    timingMode: z.enum(['hours', 'percentage']).default('hours'),
+    remainingPercentage: z
+        .number()
+        .int('Enter a whole percentage.')
+        .min(1, 'Enter at least 1% time remaining.')
+        .max(99, 'Enter no more than 99% time remaining.')
+        .default(10),
+    leadTimeHours: z
+        .number()
+        .int('Enter a whole number of hours.')
+        .min(1, 'Enter at least 1 hour before expiry.')
+        .max(720, 'Enter no more than 720 hours (30 days) before expiry.')
+        .default(24),
+});
+
 export const adminMessagingSettingsSchema = z.object({
+    pppoeExpiryReminderSchedule: pppoeExpiryReminderScheduleSchema.prefault({}),
     pppoeExpiryReminderTemplate: pppoeExpiryReminderTemplateSchema.default(
         defaultPppoeExpiryReminderTemplate,
     ),

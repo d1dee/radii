@@ -23,6 +23,6 @@ export const settingsCategories = [
         id: 'messaging',
         label: 'Messaging',
         icon: MdMessage,
-        description: 'Manage WhatsApp configuration, sending protection, and PPPoE expiry reminder templates.',
+        description: 'Manage WhatsApp configuration, sending protection, and PPPoE reminder templates and scheduling preferences.',
     },
 ] as const;
