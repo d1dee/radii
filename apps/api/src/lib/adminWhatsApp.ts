@@ -84,6 +84,7 @@ export function createPostgresWhatsAppOutboxStore(database: typeof db): WhatsApp
 const outboxStore = createPostgresWhatsAppOutboxStore(db);
 const outbox = createWhatsAppOutbox(outboxStore, {
     configIdentity: async (adminId) => wahaConfigIdentity(await configuredSession(adminId)),
+    safety: async (adminId) => (await adminWhatsAppSettings.get(adminId)).safety,
 });
 
 async function configuredSession(adminId: string) {

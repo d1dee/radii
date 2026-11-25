@@ -1,11 +1,13 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import { z } from 'zod';
+import { wahaSafetySchema } from './wahaSafety';
 import { adminWhatsAppSessionName, createWahaClient, parseWahaConfig, WahaError, type WahaConfig, type WahaSessionConfig } from './waha';
 
 const storedSchema = z.object({
     baseUrl: z.string().default(''),
     apiKeyEncrypted: z.string().default(''),
     useGlobalConfig: z.boolean().default(false),
+    safety: wahaSafetySchema.default(() => wahaSafetySchema.parse({})),
     sessionName: z.union([z.literal(''), z.string().regex(/^radii_admin_[A-Za-z0-9_-]{8}$/)]).default(''),
 });
 export type StoredWahaSettings = z.infer<typeof storedSchema>;
@@ -15,6 +17,7 @@ export const wahaSettingsInputSchema = z
         apiKey: z.string().max(4096).optional(),
         useGlobalConfig: z.boolean(),
         clearApiKey: z.boolean().optional(),
+        safety: wahaSafetySchema.optional(),
     })
     .strict();
 
@@ -90,6 +93,7 @@ export function createWahaSettingsService(
             configured: settings.useGlobalConfig
                 ? globalConfigured
                 : Boolean(settings.baseUrl && settings.apiKeyEncrypted),
+            safety: settings.safety,
         };
     }
     return {
@@ -105,7 +109,7 @@ export function createWahaSettingsService(
                 throw new WahaError(
                     'WAHA_INVALID_INPUT',
                     400,
-                    'Invalid WhatsApp configuration.',
+                    'Invalid WhatsApp configuration. Use a random delay of 30-3600 seconds (maximum greater than minimum), 1-10 messages per batch, 60-1440 rest minutes and 1-4 messages per contact per hour.',
                 );
             const next = parsed.data;
             if (next.clearApiKey && next.apiKey)
@@ -147,6 +151,7 @@ export function createWahaSettingsService(
                 apiKeyEncrypted,
                 useGlobalConfig: next.useGlobalConfig,
                 sessionName: current.sessionName || adminWhatsAppSessionName(),
+                safety: next.safety ?? current.safety,
             };
             // Explicit removal disables private integration without contacting a provider.
             // Otherwise partial active configuration is an error, not a saved draft.
@@ -165,7 +170,8 @@ export function createWahaSettingsService(
             const settings = await store.update(adminId, (previous) => {
                 const latest = storedSchema.parse(previous ?? {});
                 if (latest.baseUrl !== current.baseUrl || latest.apiKeyEncrypted !== current.apiKeyEncrypted
-                    || latest.useGlobalConfig !== current.useGlobalConfig || latest.sessionName !== current.sessionName)
+                    || latest.useGlobalConfig !== current.useGlobalConfig || latest.sessionName !== current.sessionName
+                    || JSON.stringify(latest.safety) !== JSON.stringify(current.safety))
                     throw new WahaError('WAHA_CONFLICT', 409, 'WhatsApp settings changed while checking the connection. Reload settings and try again.');
                 return candidate;
             });

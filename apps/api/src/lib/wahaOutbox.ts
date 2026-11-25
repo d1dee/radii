@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { defaultWahaSafety, wahaSafetySchema, type WahaSafetySettings } from './wahaSafety';
 import { adminWhatsAppBatchSchema, WahaError, type WhatsAppAccepted, type WhatsAppReceipt, type WahaSessionConfig } from './waha';
 
 // Safety follows the persisted tenant/session, never an editable URL alias.
@@ -56,10 +57,12 @@ export interface WhatsAppOutboxStore {
 // All mutations must be serialized by a database row lock, not a process-local mutex.
 export function createWhatsAppOutbox(store: WhatsAppOutboxStore, options: {
     configIdentity: (adminId: string) => Promise<string>;
+    safety?: (adminId: string) => Promise<WahaSafetySettings>;
     now?: () => number; random?: () => number;
 }) {
     const now = options.now ?? Date.now;
-    const gap = () => 30_000 + Math.floor((options.random ?? Math.random)() * 30_001);
+    const gap = (safety = defaultWahaSafety) => safety.minDelaySeconds * 1000
+        + Math.floor((options.random ?? Math.random)() * ((safety.maxDelaySeconds - safety.minDelaySeconds) * 1000 + 1));
     const settle = (s: WhatsAppOutboxState) => {
         const time = now();
         s.attempts = s.attempts.filter((a) => a.at > time - 3_600_000);
@@ -173,19 +176,20 @@ export function createWhatsAppOutbox(store: WhatsAppOutboxStore, options: {
         },
         async run(key: string, adminId: string, deliver: (job: WhatsAppJob, authorize: () => Promise<void>) => Promise<WhatsAppReceipt | void>) {
             const configIdentity = await options.configIdentity(adminId);
+            const safety = wahaSafetySchema.parse(await options.safety?.(adminId) ?? defaultWahaSafety);
             const job = await store.change(key, adminId, (s) => {
                 settle(s);
                 invalidateWhatsAppConfiguration(s, configIdentity);
                 const time = now();
                 if (s.paused) { s.nextAt = Math.max(s.nextAt, time + 60_000); return null; }
                 if (s.nextAt > time || s.jobs.some((j) => j.status === 'processing')) return null;
-                // A genuinely idle hour already counts as a rest; do not delay a
-                // new message for another hour after an overnight pause.
-                if (s.nextAt <= time - 3_600_000) { s.count = 0; s.windowStart = 0; }
-                if (s.count >= 10 || (s.windowStart && time - s.windowStart >= 3_600_000)) {
-                    s.nextAt = time + 3_600_000 + gap(); s.count = 0; s.windowStart = 0; return null;
+                // An idle rest interval already counts as a break; do not add
+                // another full rest when sending resumes after a long pause.
+                if (s.nextAt <= time - safety.restMinutes * 60_000) { s.count = 0; s.windowStart = 0; }
+                if (s.count >= safety.batchSize || (s.windowStart && time - s.windowStart >= 3_600_000)) {
+                    s.nextAt = time + safety.restMinutes * 60_000 + gap(safety); s.count = 0; s.windowStart = 0; return null;
                 }
-                const next = s.jobs.find((j) => j.status === 'queued' && s.attempts.filter((a) => a.phone === j.phone).length < 4);
+                const next = s.jobs.find((j) => j.status === 'queued' && s.attempts.filter((a) => a.phone === j.phone).length < safety.perContactHourlyLimit);
                 if (!next) {
                     s.nextAt = time + 60_000;
                     return null;
@@ -227,9 +231,9 @@ export function createWhatsAppOutbox(store: WhatsAppOutboxStore, options: {
                     }
                 }
                 s.paused ||= restricted;
-                if (s.count >= 10) {
-                    s.nextAt = now() + 3_600_000 + gap(); s.count = 0; s.windowStart = 0;
-                } else s.nextAt = now() + gap();
+                if (s.count >= safety.batchSize) {
+                    s.nextAt = now() + safety.restMinutes * 60_000 + gap(safety); s.count = 0; s.windowStart = 0;
+                } else s.nextAt = now() + gap(safety);
             });
         },
     };

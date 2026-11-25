@@ -35,7 +35,6 @@ import {
     useState,
 } from 'react';
 import {
-    Link,
     useBeforeUnload,
     useBlocker,
     useLocation,
@@ -43,6 +42,7 @@ import {
 } from 'react-router-dom';
 
 import { PageLayout } from '@/components/Layout/PageLayout';
+import { PppoeExpiryReminderSettings } from '@/components/PppoeExpiryReminderSettings';
 import {
     getWhatsAppConfig,
     updateWhatsAppConfig,
@@ -311,6 +311,13 @@ function WhatsAppSettingsForm() {
             baseUrl: '',
             useGlobalConfig: false,
             clearApiKey: false,
+            safety: {
+                minDelaySeconds: 30,
+                maxDelaySeconds: 60,
+                batchSize: 10,
+                restMinutes: 60,
+                perContactHourlyLimit: 4,
+            },
         },
     });
     const dirty = form.isDirty() || hasReplacementKey;
@@ -326,6 +333,7 @@ function WhatsAppSettingsForm() {
             baseUrl: saved.baseUrl,
             useGlobalConfig: saved.useGlobalConfig,
             clearApiKey: false,
+            safety: saved.safety,
         };
         form.setValues(values);
         form.resetDirty(values);
@@ -361,6 +369,7 @@ function WhatsAppSettingsForm() {
             return;
         const input = {
             useGlobalConfig: form.values.useGlobalConfig,
+            safety: form.values.safety,
             // Global mode preserves the server's saved private settings.
             ...(!form.values.useGlobalConfig
                 ? {
@@ -565,27 +574,86 @@ function WhatsAppSettingsForm() {
                                             clearKey();
                                         }}
                                     />
-                                    <Alert color='yellow'>
-                                        Changing configuration does not
-                                        disconnect or remove the former
-                                        provider's WhatsApp session. Disconnect
-                                        it before switching if needed. Saving
-                                        first checks the connection using a
-                                        read-only session request and does not
-                                        create, disconnect or delete sessions.
-                                        Clear the private URL or remove its saved
-                                        key to disable without a connection check.
-                                    </Alert>
+                                    <Divider />
+                                    <SectionHeader
+                                        title='Sending protection'
+                                        description='Random pacing applies to single and bulk messages, including queued system messages. These controls reduce risk; they cannot guarantee WhatsApp will not block an account.'
+                                    />
+                                    <Grid>
+                                        <Grid.Col span={{ base: 12, sm: 6 }}>
+                                            <NumberInput
+                                                label='Minimum delay (seconds)'
+                                                description='At least 30 seconds between messages.'
+                                                min={30}
+                                                max={3599}
+                                                allowDecimal={false}
+                                                {...form.getInputProps(
+                                                    'safety.minDelaySeconds',
+                                                )}
+                                            />
+                                        </Grid.Col>
+                                        <Grid.Col span={{ base: 12, sm: 6 }}>
+                                            <NumberInput
+                                                label='Maximum delay (seconds)'
+                                                description='Greater than the minimum; a random delay is chosen each time.'
+                                                min={31}
+                                                max={3600}
+                                                allowDecimal={false}
+                                                {...form.getInputProps(
+                                                    'safety.maxDelaySeconds',
+                                                )}
+                                            />
+                                        </Grid.Col>
+                                        <Grid.Col span={{ base: 12, sm: 6 }}>
+                                            <NumberInput
+                                                label='Messages per batch'
+                                                description='Pause for a rest after 1-10 messages.'
+                                                min={1}
+                                                max={10}
+                                                allowDecimal={false}
+                                                {...form.getInputProps(
+                                                    'safety.batchSize',
+                                                )}
+                                            />
+                                        </Grid.Col>
+                                        <Grid.Col span={{ base: 12, sm: 6 }}>
+                                            <NumberInput
+                                                label='Rest between batches (minutes)'
+                                                description='At least one hour of rest between batches.'
+                                                min={60}
+                                                max={1440}
+                                                allowDecimal={false}
+                                                {...form.getInputProps(
+                                                    'safety.restMinutes',
+                                                )}
+                                            />
+                                        </Grid.Col>
+                                        <Grid.Col span={{ base: 12, sm: 6 }}>
+                                            <NumberInput
+                                                label='Messages per contact per hour'
+                                                description='Maximum of four send attempts to the same contact per rolling hour.'
+                                                min={1}
+                                                max={4}
+                                                allowDecimal={false}
+                                                {...form.getInputProps(
+                                                    'safety.perContactHourlyLimit',
+                                                )}
+                                            />
+                                        </Grid.Col>
+                                    </Grid>
+                                    <Text size='sm' c='dimmed'>
+                                        Restriction detection is always enabled.
+                                        Sending pauses when WAHA reports a
+                                        restriction, including reachout
+                                        timelocks (463) and message caps (475).
+                                        Do not restart, log out or re-pair to
+                                        bypass restrictions. Changes apply to
+                                        subsequent send attempts without
+                                        clearing queued messages or existing
+                                        rests.
+                                    </Text>
                                 </Stack>
                             </Fieldset>
-                            <Button
-                                component={Link}
-                                to='/messaging'
-                                variant='subtle'
-                                w='fit-content'
-                            >
-                                Manage WhatsApp connection
-                            </Button>
                         </Stack>
                     </Box>
                     <Divider />
@@ -620,6 +688,27 @@ function WhatsAppSettingsForm() {
                 </Stack>
             </form>
         </Card>
+    );
+}
+
+function MessagingSettingsForms() {
+    const isSaving = useContext(SettingsSavingContext);
+    const setDraft = useContext(SettingsDraftContext);
+    const onReminderDraftChange = useCallback(
+        (dirty: boolean, saving: boolean) => {
+            setDraft('messaging-reminders', dirty, saving);
+        },
+        [setDraft],
+    );
+
+    return (
+        <Stack gap='lg'>
+            <WhatsAppSettingsForm />
+            <PppoeExpiryReminderSettings
+                disabled={isSaving}
+                onDraftChange={onReminderDraftChange}
+            />
+        </Stack>
     );
 }
 
@@ -774,7 +863,7 @@ export default function SettingsPage() {
                                     style={{ border: 0, minWidth: 0 }}
                                 >
                                     {item.id === 'messaging' ? (
-                                        <WhatsAppSettingsForm />
+                                        <MessagingSettingsForms />
                                     ) : (
                                         <CategoryForm category={item} />
                                     )}

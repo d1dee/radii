@@ -23,6 +23,6 @@ export const settingsCategories = [
         id: 'messaging',
         label: 'Messaging',
         icon: MdMessage,
-        description: 'Manage the WAHA provider configuration for your WhatsApp account.',
+        description: 'Manage WhatsApp configuration, sending protection, and PPPoE expiry reminder templates.',
     },
 ] as const;

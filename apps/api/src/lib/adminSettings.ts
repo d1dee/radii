@@ -20,8 +20,9 @@ import { invalidateAdminMpesaProvider } from './payments/adminProviders';
 // yield the schema defaults; nothing is written until the admin saves.
 export async function getAdminSettings(
     adminId: string,
+    executor: Pick<typeof db, 'select'> = db,
 ): Promise<AdminSettings> {
-    const [row] = await db
+    const [row] = await executor
         .select({ settings: adminSetting.settings })
         .from(adminSetting)
         .where(eq(adminSetting.adminUserId, adminId))
@@ -39,12 +40,13 @@ export async function getAdminSettings(
 export async function saveAdminSettings(
     adminId: string,
     input: unknown,
+    executor: Pick<typeof db, 'select' | 'insert'> = db,
 ): Promise<AdminSettings> {
-    const existing = await getAdminSettings(adminId);
+    const existing = await getAdminSettings(adminId, executor);
     const settings = adminSettingsSchema.parse(
         mergeAdminSettingsSecrets(input, existing),
     );
-    await db
+    await executor
         .insert(adminSetting)
         // Bind serialized JSON as text so Bun SQL does not encode it twice.
         .values({

@@ -1650,12 +1650,21 @@ export type WhatsAppConfig = {
     apiKeyPreview: string | null;
     globalConfigured: boolean;
     configured: boolean;
+    safety: WhatsAppSafetySettings;
+};
+export type WhatsAppSafetySettings = {
+    minDelaySeconds: number;
+    maxDelaySeconds: number;
+    batchSize: number;
+    restMinutes: number;
+    perContactHourlyLimit: number;
 };
 export type WhatsAppConfigInput = {
     useGlobalConfig: boolean;
     baseUrl?: string;
     apiKey?: string;
     clearApiKey?: boolean;
+    safety?: WhatsAppSafetySettings;
 };
 
 export function getWhatsAppConfig(signal: AbortSignal) {
