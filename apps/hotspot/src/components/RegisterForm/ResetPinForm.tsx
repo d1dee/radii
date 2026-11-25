@@ -14,7 +14,7 @@ type ResetValues = {
     verifyPin: string;
 };
 
-// Forget-PIN flow: request a 6-digit SMS code by phone, then redeem it for a
+// Forget-PIN flow: request a 6-digit WhatsApp code by phone, then redeem it for a
 // new 4-digit PIN. Three local steps: request -> reset -> done.
 export function ResetPinForm({
     onModeChange,
@@ -111,8 +111,8 @@ export function ResetPinForm({
             <form onSubmit={resetForm.onSubmit(handleReset)}>
                 <Stack gap='md'>
                     <Text size='sm' c='dimmed'>
-                        Code sent to {resetForm.values.phoneNumber}. It expires
-                        in 5 minutes.
+                        If delivery is available, a WhatsApp code will arrive at{' '}
+                        {resetForm.values.phoneNumber}. It expires in 5 minutes.
                     </Text>
 
                     <Input.Wrapper
@@ -224,7 +224,7 @@ export function ResetPinForm({
                 ) : null}
 
                 <Button type='submit' loading={submitting} mt='sm'>
-                    {submitting ? 'Please wait…' : 'Send code'}
+                    {submitting ? 'Please wait…' : 'Send WhatsApp code'}
                 </Button>
             </Stack>
         </form>

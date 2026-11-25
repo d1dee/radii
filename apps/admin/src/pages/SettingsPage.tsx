@@ -5,8 +5,10 @@ import {
     Button,
     Card,
     Center,
+    Checkbox,
     Container,
     Divider,
+    Fieldset,
     Grid,
     Group,
     Loader,
@@ -33,6 +35,7 @@ import {
     useState,
 } from 'react';
 import {
+    Link,
     useBeforeUnload,
     useBlocker,
     useLocation,
@@ -40,10 +43,16 @@ import {
 } from 'react-router-dom';
 
 import { PageLayout } from '@/components/Layout/PageLayout';
+import {
+    getWhatsAppConfig,
+    updateWhatsAppConfig,
+    type WhatsAppConfig,
+} from '@/lib/api';
 import { previewDateTime } from '@/lib/format';
 import { fuseOptionsFilter } from '@/lib/fuseOptionsFilter';
 import { useAdminSettings } from '@/lib/settings';
 import { settingsCategories } from '@/lib/settingsCategories';
+import { isWhatsAppConfig, validateWhatsAppConfig } from '@/lib/whatsapp';
 import { TbInfoTriangle } from 'react-icons/tb';
 
 const SettingsDraftContext = createContext<
@@ -64,7 +73,11 @@ const sections = {
     payments: [MpesaSection],
 };
 
-type CategoryId = (typeof settingsCategories)[number]['id'];
+type PreferenceCategory = Exclude<
+    (typeof settingsCategories)[number],
+    { id: 'messaging' }
+>;
+type CategoryId = PreferenceCategory['id'];
 type CategoryFormValues = Omit<AdminSettings, 'dashboard' | 'packages'> & {
     dashboard: {
         usageRefreshSeconds: number | '';
@@ -171,11 +184,7 @@ const categorySchemas = {
     payments: adminSettingsSchema.pick({ mpesa: true }),
 };
 
-function CategoryForm({
-    category,
-}: {
-    category: (typeof settingsCategories)[number];
-}) {
+function CategoryForm({ category }: { category: PreferenceCategory }) {
     const { settings, saveSettings } = useAdminSettings();
     const isSaving = useContext(SettingsSavingContext);
     const [saving, setSaving] = useState(false);
@@ -283,6 +292,315 @@ function CategoryForm({
                     </Stack>
                 </form>
             </CategoryFormProvider>
+        </Card>
+    );
+}
+
+function WhatsAppSettingsForm() {
+    const isSaving = useContext(SettingsSavingContext);
+    const [config, setConfig] = useState<WhatsAppConfig | null>(null);
+    const [loading, setLoading] = useState(true);
+    const [saving, setSaving] = useState(false);
+    const [error, setError] = useState('');
+    const [revision, setRevision] = useState(0);
+    const [hasReplacementKey, setHasReplacementKey] = useState(false);
+    const apiKeyInput = useRef<HTMLInputElement>(null);
+    const operation = useRef<AbortController | null>(null);
+    const form = useForm({
+        initialValues: {
+            baseUrl: '',
+            useGlobalConfig: false,
+            clearApiKey: false,
+        },
+    });
+    const dirty = form.isDirty() || hasReplacementKey;
+    useSettingsDraft('messaging', dirty, saving);
+
+    function clearKey() {
+        if (apiKeyInput.current) apiKeyInput.current.value = '';
+        setHasReplacementKey(false);
+    }
+
+    function resetConfig(saved: WhatsAppConfig) {
+        const values = {
+            baseUrl: saved.baseUrl,
+            useGlobalConfig: saved.useGlobalConfig,
+            clearApiKey: false,
+        };
+        form.setValues(values);
+        form.resetDirty(values);
+        form.clearErrors();
+        clearKey();
+    }
+
+    useEffect(() => {
+        const controller = new AbortController();
+        setLoading(true);
+        void getWhatsAppConfig(controller.signal).then((result) => {
+            if (controller.signal.aborted) return;
+            if (result.success && isWhatsAppConfig(result.data)) {
+                setConfig(result.data);
+                resetConfig(result.data);
+                setError('');
+            } else {
+                setError(
+                    result.success
+                        ? 'The server returned invalid configuration.'
+                        : result.message,
+                );
+            }
+            setLoading(false);
+        });
+        return () => controller.abort();
+    }, [revision]);
+
+    useEffect(() => () => operation.current?.abort(), []);
+
+    async function saveConfig() {
+        if (operation.current || isSaving || !config || loading || !dirty)
+            return;
+        const input = {
+            useGlobalConfig: form.values.useGlobalConfig,
+            // Global mode preserves the server's saved private settings.
+            ...(!form.values.useGlobalConfig
+                ? {
+                      baseUrl: form.values.baseUrl,
+                      apiKey: apiKeyInput.current?.value || undefined,
+                      clearApiKey: form.values.clearApiKey,
+                  }
+                : {}),
+        };
+        const validation = validateWhatsAppConfig(input);
+        if (validation) {
+            setError(validation);
+            return;
+        }
+        const controller = new AbortController();
+        operation.current = controller;
+        setSaving(true);
+        setError('');
+        // Credentials never enter form snapshots or remain in the input after submission.
+        clearKey();
+        try {
+            const pending = updateWhatsAppConfig(input, controller.signal);
+            delete input.apiKey;
+            const result = await pending;
+            if (controller.signal.aborted) return;
+            if (result.success && isWhatsAppConfig(result.data)) {
+                setConfig(result.data);
+                resetConfig(result.data);
+                notifySaved('Messaging saved', true);
+            } else {
+                const message = `${result.success ? 'The server returned invalid configuration.' : result.message} Re-enter any replacement API key before retrying.`;
+                setError(message);
+                notifySaved('Could not save Messaging', false, message);
+            }
+        } finally {
+            if (!controller.signal.aborted) {
+                operation.current = null;
+                setSaving(false);
+            }
+        }
+    }
+
+    return (
+        <Card p={{ base: 'md', sm: 'lg' }} radius='md' withBorder>
+            <form
+                onSubmit={form.onSubmit(() => void saveConfig())}
+                autoComplete='off'
+            >
+                <Stack gap='xl'>
+                    <Group justify='space-between'>
+                        <Title order={3} size='h4'>
+                            Messaging
+                        </Title>
+                        <Badge
+                            color={dirty ? 'yellow' : 'gray'}
+                            variant='light'
+                            role='status'
+                        >
+                            {loading
+                                ? 'Loading configuration'
+                                : saving
+                                  ? 'Saving changes'
+                                  : dirty
+                                    ? 'Unsaved changes'
+                                    : config
+                                      ? 'All changes saved'
+                                      : 'Configuration unavailable'}
+                        </Badge>
+                    </Group>
+                    <Box>
+                        <SectionHeader
+                            title='WAHA configuration'
+                            description='Use your own WAHA server for this admin account. Global configuration is only used when explicitly selected.'
+                        />
+                        <Stack>
+                            {config && (
+                                <Badge
+                                    color={config.configured ? 'blue' : 'gray'}
+                                    w='fit-content'
+                                >
+                                    {config.useGlobalConfig
+                                        ? 'Global configuration'
+                                        : 'Admin configuration'}
+                                </Badge>
+                            )}
+                            {loading && (
+                                <Group>
+                                    <Loader size='sm' />
+                                    <Text size='sm' role='status'>
+                                        Loading configuration...
+                                    </Text>
+                                </Group>
+                            )}
+                            {error && (
+                                <Alert
+                                    color='red'
+                                    title='Configuration error'
+                                    role='alert'
+                                >
+                                    {error}
+                                </Alert>
+                            )}
+                            {!config && !loading && (
+                                <Button
+                                    variant='default'
+                                    onClick={() => setRevision((n) => n + 1)}
+                                >
+                                    Retry configuration
+                                </Button>
+                            )}
+                            <Fieldset
+                                disabled={
+                                    !config || loading || isSaving || saving
+                                }
+                                variant='unstyled'
+                            >
+                                <Stack>
+                                    <Switch
+                                        label='Use global configuration'
+                                        description='Use the WAHA URL and API key from the server environment. Your private URL and saved key remain stored.'
+                                        {...form.getInputProps(
+                                            'useGlobalConfig',
+                                            { type: 'checkbox' },
+                                        )}
+                                        onChange={(event) => {
+                                            form.setFieldValue(
+                                                'useGlobalConfig',
+                                                event.currentTarget.checked,
+                                            );
+                                            clearKey();
+                                        }}
+                                    />
+                                    {config && !config.globalConfigured && (
+                                        <Alert
+                                            color='yellow'
+                                            title='Global configuration unavailable'
+                                        >
+                                            The server environment does not have
+                                            a complete WAHA configuration.
+                                            Selecting it will leave messaging
+                                            unavailable.
+                                        </Alert>
+                                    )}
+                                    <TextInput
+                                        label='Private WAHA URL'
+                                        description='HTTP(S) origin only, for example https://waha.example.com or http://192.168.1.10:3000. Leave empty to clear the saved URL.'
+                                        maxLength={2048}
+                                        disabled={form.values.useGlobalConfig}
+                                        autoComplete='off'
+                                        {...form.getInputProps('baseUrl')}
+                                    />
+                                    <PasswordInput
+                                        ref={apiKeyInput}
+                                        label='Private WAHA API key'
+                                        description='Enter a replacement key, or leave blank to keep the saved key. Key entry is cleared when saving or switching modes.'
+                                        autoComplete='new-password'
+                                        maxLength={4096}
+                                        disabled={
+                                            form.values.useGlobalConfig ||
+                                            form.values.clearApiKey
+                                        }
+                                        onChange={(event) =>
+                                            setHasReplacementKey(
+                                                event.currentTarget.value
+                                                    .length > 0,
+                                            )
+                                        }
+                                    />{' '}
+                                    <Text size='sm' role='status'>
+                                        {config?.hasApiKey
+                                            ? 'A private API key is saved. It is never displayed.'
+                                            : 'No private API key is saved.'}
+                                    </Text>
+                                    <Checkbox
+                                        label='Remove saved private API key on save'
+                                        disabled={
+                                            form.values.useGlobalConfig ||
+                                            !config?.hasApiKey
+                                        }
+                                        {...form.getInputProps('clearApiKey', {
+                                            type: 'checkbox',
+                                        })}
+                                        onChange={(event) => {
+                                            form.setFieldValue(
+                                                'clearApiKey',
+                                                event.currentTarget.checked,
+                                            );
+                                            clearKey();
+                                        }}
+                                    />
+                                    <Alert color='yellow'>
+                                        Changing configuration does not
+                                        disconnect or remove the former
+                                        provider's WhatsApp session. Disconnect
+                                        it before switching if needed. Saving
+                                        does not perform any session actions.
+                                    </Alert>
+                                </Stack>
+                            </Fieldset>
+                            <Button
+                                component={Link}
+                                to='/messaging'
+                                variant='subtle'
+                                w='fit-content'
+                            >
+                                Manage WhatsApp connection
+                            </Button>
+                        </Stack>
+                    </Box>
+                    <Divider />
+                    <Group justify='flex-end'>
+                        <Button
+                            type='button'
+                            variant='default'
+                            disabled={!dirty || isSaving || saving || !config}
+                            w={{ base: '100%', sm: 'auto' }}
+                            onClick={() => {
+                                if (config) resetConfig(config);
+                                setError('');
+                            }}
+                        >
+                            Reset changes
+                        </Button>
+                        <Button
+                            type='submit'
+                            loading={saving}
+                            disabled={
+                                !dirty ||
+                                isSaving ||
+                                saving ||
+                                loading ||
+                                !config
+                            }
+                            w={{ base: '100%', sm: 'auto' }}
+                        >
+                            Save changes
+                        </Button>
+                    </Group>
+                </Stack>
+            </form>
         </Card>
     );
 }
@@ -437,7 +755,11 @@ export default function SettingsPage() {
                                     p={0}
                                     style={{ border: 0, minWidth: 0 }}
                                 >
-                                    <CategoryForm category={item} />
+                                    {item.id === 'messaging' ? (
+                                        <WhatsAppSettingsForm />
+                                    ) : (
+                                        <CategoryForm category={item} />
+                                    )}
                                 </Box>
                             );
                         })}

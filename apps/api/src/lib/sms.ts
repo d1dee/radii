@@ -1,19 +1,11 @@
-// Customer (portal) transactional SMS — PIN reset one-time codes.
-//
-// Portal users authenticate with phone+PIN and have no email channel, so the
-// forget-PIN flow delivers its 6-digit code by SMS. The provider integration
-// is NOT wired yet: delivery is logged without exposing the code (unless
-// DEBUG_LOG_OTP=true) and, because
-// the better-auth emailOTP plugin stores OTPs in plain text in the
-// `verification` table, admins can also read the pending code from the
-// customer detail endpoint (admin user drawer) for debugging.
-//
-// When the real SMS provider lands, implement delivery here and switch the
-// emailOTP `storeOTP` option to "hashed" so plaintext codes stop persisting.
+// Customer PIN resets use the owning admin's WhatsApp session. The module
+// path remains unchanged; OTP storage and the admin support UI are unchanged.
 
 import { apiLogger, logOtpForDebug } from '../logging';
+import { sendAdminWhatsAppText } from './adminWhatsApp';
+import { resolvePortalOtpOwner } from './portalOtpOwner';
 
-const logger = apiLogger.getChild('sms');
+const logger = apiLogger.getChild('portal-otp');
 
 export type SmsOtpType =
     | 'email-verification'
@@ -33,11 +25,21 @@ export function phoneFromPortalEmail(email: string): string {
     return email.split('@')[0] ?? email;
 }
 
-export async function sendPortalOtpSms(input: SmsOtpInput): Promise<void> {
+export async function sendPortalOtpWhatsApp(input: SmsOtpInput): Promise<void> {
     if (input.type !== 'forget-password') return;
+    if (!/^[1-9]\d{7,14}@hotspot\.local$/.test(input.email)) return;
     logOtpForDebug('portal', input.type, input.otp);
-    // TODO: deliver via the SMS provider once integrated.
-    logger.warn('Portal OTP delivery skipped; SMS provider is not configured', {
-        otpType: input.type,
-    });
+    try {
+        const adminId = await resolvePortalOtpOwner(input.email);
+        if (!adminId) {
+            logger.warn('Portal reset code delivery skipped; no unambiguous network owner');
+            return;
+        }
+        await sendAdminWhatsAppText(adminId, phoneFromPortalEmail(input.email),
+            `Your PIN reset code is ${input.otp}. It expires in 5 minutes. Do not share this code.`);
+    } catch {
+        // Never log upstream exceptions: they may contain the OTP, recipient,
+        // credentials or provider response. Public reset requests stay generic.
+        logger.warn('Portal reset code WhatsApp delivery failed');
+    }
 }

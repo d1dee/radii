@@ -6,7 +6,7 @@
 // provider cache keyed off these settings is invalidated here on save (see
 // lib/payments/adminProviders.ts).
 
-import { desc, eq } from 'drizzle-orm';
+import { desc, eq, sql } from 'drizzle-orm';
 import {
     adminSettingsSchema,
     mergeAdminSettingsSecrets,
@@ -51,7 +51,9 @@ export async function saveAdminSettings(
         .values({ adminUserId: adminId, settings })
         .onConflictDoUpdate({
             target: adminSetting.adminUserId,
-            set: { settings },
+            // WAHA is a private backend-only section, not part of the public
+            // console settings schema. Preserve it atomically on normal saves.
+            set: { settings: sql`${JSON.stringify(settings)}::jsonb || jsonb_build_object('whatsapp', coalesce(${adminSetting.settings}->'whatsapp', '{}'::jsonb))` },
         });
     invalidateAdminMpesaProvider(adminId);
     return settings;

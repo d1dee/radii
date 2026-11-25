@@ -1,4 +1,4 @@
-import { MdPayment, MdRouter, MdSettings } from 'react-icons/md';
+import { MdMessage, MdPayment, MdRouter, MdSettings } from 'react-icons/md';
 
 export const settingsCategories = [
     {
@@ -18,5 +18,11 @@ export const settingsCategories = [
         label: 'Payments',
         icon: MdPayment,
         description: 'Manage payment credentials and transaction settings.',
+    },
+    {
+        id: 'messaging',
+        label: 'Messaging',
+        icon: MdMessage,
+        description: 'Manage the WAHA provider configuration for your WhatsApp account.',
     },
 ] as const;

@@ -1636,3 +1636,50 @@ export function getAdminSettings() {
 export function updateAdminSettings(body: AdminSettingsInput) {
     return request<AdminSettings>('/admin/settings', body, { method: 'PUT' });
 }
+
+export type WhatsAppStatus = 'DISABLED' | 'NOT_CREATED' | 'STOPPED' | 'STARTING'
+    | 'SCAN_QR_CODE' | 'WORKING' | 'FAILED' | 'PASSKEY_REQUIRED'
+    | 'PASSKEY_CONFIRMATION_REQUIRED';
+export type WhatsAppSession = { configured: boolean; status: WhatsAppStatus };
+export type WhatsAppAction = 'create' | 'start' | 'restart' | 'logout' | 'delete';
+
+export type WhatsAppConfig = {
+    baseUrl: string;
+    useGlobalConfig: boolean;
+    hasApiKey: boolean;
+    globalConfigured: boolean;
+    configured: boolean;
+};
+export type WhatsAppConfigInput = {
+    useGlobalConfig: boolean;
+    baseUrl?: string;
+    apiKey?: string;
+    clearApiKey?: boolean;
+};
+
+export function getWhatsAppConfig(signal: AbortSignal) {
+    return request<WhatsAppConfig>('/admin/whatsapp/config', undefined, { signal, cache: 'no-store' });
+}
+
+export function updateWhatsAppConfig(body: WhatsAppConfigInput, signal: AbortSignal) {
+    return request<WhatsAppConfig>('/admin/whatsapp/config', body, { method: 'PUT', signal, cache: 'no-store' });
+}
+
+export function getWhatsAppSession(signal: AbortSignal) {
+    return request<WhatsAppSession>('/admin/whatsapp/session', undefined, { signal, cache: 'no-store' });
+}
+
+export function getWhatsAppQr(signal: AbortSignal) {
+    return request<{ mimetype: 'image/png'; data: string }>('/admin/whatsapp/session/qr', undefined, { signal, cache: 'no-store' });
+}
+
+export function controlWhatsAppSession(action: WhatsAppAction, signal: AbortSignal) {
+    const suffix = action === 'create' || action === 'delete' ? '' : `/${action}`;
+    return request<{ ok: true }>(`/admin/whatsapp/session${suffix}`, undefined, {
+        method: action === 'delete' ? 'DELETE' : 'POST', signal,
+    });
+}
+
+export function sendWhatsAppText(body: { phone: string; text: string }, signal: AbortSignal) {
+    return request<{ ok: true }>('/admin/whatsapp/send-text', body, { method: 'POST', signal });
+}

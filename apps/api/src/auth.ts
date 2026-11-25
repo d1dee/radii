@@ -8,7 +8,8 @@ import {
 import { db } from './db';
 import * as schema from './db/schema/auth-schema';
 import { env } from './env';
-import { sendPortalOtpSms } from './lib/sms';
+import { sendPortalOtpWhatsApp } from './lib/sms';
+import { apiLogger } from './logging';
 
 export const auth = betterAuth({
     database: drizzleAdapter(db, {
@@ -42,17 +43,24 @@ export const auth = betterAuth({
         }),
         // OTP channel for the phone+PIN forget-PIN flow. The "email" is the
         // synthetic per-phone address (`<digits>@hotspot.local`) created at
-        // registration; delivery converts it back to an SMS (lib/sms.ts).
-        // OTPs are stored in plain text so admins can surface a pending code
-        // on the customer detail view until the SMS provider is integrated.
+        // registration; delivery uses the owning admin's WhatsApp session.
+        // Preserve OTP storage and the existing admin support code view.
         emailOTP({
             otpLength: 6,
             expiresIn: 300,
             allowedAttempts: 5,
             // Never create accounts through OTP sign-in portals.
             disableSignUp: true,
-            sendVerificationOTP: async ({ email, otp, type }) => {
-                void sendPortalOtpSms({ email, otp, type });
+            sendVerificationOTP: async (input) => {
+                // Do not expose customer existence through SQL/WAHA latency.
+                // Handle even unexpected failures outside the delivery try/catch.
+                void Promise.resolve().then(() => sendPortalOtpWhatsApp(input)).catch(() => {
+                    try {
+                        apiLogger.warn('Portal reset code background delivery failed');
+                    } catch {
+                        // A failing log sink must not create an unhandled rejection.
+                    }
+                });
             },
         }),
     ],

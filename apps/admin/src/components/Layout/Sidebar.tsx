@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import {
     MdBarChart,
     MdDashboard,
+    MdMessage,
     MdPeople,
     MdReceiptLong,
     MdRouter,
@@ -26,6 +27,7 @@ const links = [
     { to: '/payments', label: 'Payments', icon: MdReceiptLong },
     { to: '/nas-devices', label: 'NAS Devices', icon: MdStorage },
     { to: '/reports', label: 'Reports', icon: MdBarChart },
+    { to: '/messaging', label: 'Messaging', icon: MdMessage },
 ];
 
 export function Sidebar({ onNavClick }: SidebarProps) {
