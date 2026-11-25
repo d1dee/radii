@@ -166,6 +166,8 @@ export const adminPppoeSettingsSchema = z.object({
 export const pppoeExpiryReminderPlaceholders = [
     'customer_name',
     'username',
+    'account_label',
+    'location',
     'package_name',
     'expiry_date',
     'expiry_time',

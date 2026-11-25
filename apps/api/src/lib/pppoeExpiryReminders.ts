@@ -67,6 +67,8 @@ function reminderText(row: Awaited<ReturnType<typeof candidates>>[number], setti
     const time = new Intl.DateTimeFormat('en-GB', { timeZone: timezone, hour: '2-digit', minute: '2-digit', hour12: timeFormat === '12h' }).format(expiry);
     return renderPppoeExpiryReminderTemplate(settings.messaging.pppoeExpiryReminderTemplate, {
         customer_name: row.customerName?.trim() || row.account.customerName?.trim() || row.portalName?.trim() || 'Customer',
+        account_label: row.account.label?.trim() || '',
+        location: row.account.location?.trim() || '',
         username: row.account.username, package_name: row.pkg.title, expiry_date: date, expiry_time: time,
         amount: `${currencyLabel} ${new Intl.NumberFormat('en-KE', { maximumFractionDigits: 2 }).format(Number(row.pkg.price))}`,
         support_phone: settings.contacts.adminTel || settings.contacts.adminWhatsapp || 'your service provider',

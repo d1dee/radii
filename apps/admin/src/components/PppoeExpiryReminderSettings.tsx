@@ -29,7 +29,9 @@ import { useEffect, useRef, useState } from 'react';
 
 const sampleValues: PppoeExpiryReminderValues = {
     customer_name: 'Alex Maina',
-    username: 'alex-home',
+    username: 'PPP-235343455',
+    account_label: 'Home connection',
+    location: 'Westlands, Nairobi',
     package_name: 'Home 10 Mbps',
     expiry_date: '30 Nov 2026',
     expiry_time: '14:30',
@@ -182,19 +184,17 @@ export function PppoeExpiryReminderSettings({
                         <Title order={4}>PPPoE Expiry Reminders</Title>
                         <Text size='sm' c='dimmed' mt={4}>
                             Manage automatic expiry reminders for your PPPoE
-                            customers. These settings
-                            are private to your admin account.
+                            customers. These settings are private to your admin
+                            account.
                         </Text>
                     </div>
-                    <Alert
-                        color='blue'
-                        title='Automatic WhatsApp reminders'
-                    >
-                        When enabled, eligible subscriptions are checked every minute.
-                        One reminder per subscription cycle is placed in your WhatsApp
-                        queue using your sending protections. Configure WhatsApp to
-                        enable delivery; offline sessions wait in the queue. Reminders
-                        are discarded at expiry or when the subscription is no longer current.
+                    <Alert color='blue' title='Automatic WhatsApp reminders'>
+                        When enabled, eligible subscriptions are checked every
+                        minute. One reminder per subscription cycle is placed in
+                        your WhatsApp queue using your sending protections.
+                        Configure WhatsApp to enable delivery; offline sessions
+                        wait in the queue. Reminders are discarded at expiry or
+                        when the subscription is no longer current.
                     </Alert>
                     <Title order={5}>Reminder Schedule</Title>
                     <Switch
@@ -233,7 +233,8 @@ export function PppoeExpiryReminderSettings({
                         rightSectionPointerEvents='all'
                         styles={{
                             section: {
-                                borderInlineStart: '1px solid var(--mantine-color-default-border)',
+                                borderInlineStart:
+                                    '1px solid var(--mantine-color-default-border)',
                             },
                         }}
                         rightSection={
@@ -244,24 +245,41 @@ export function PppoeExpiryReminderSettings({
                                 withArrow
                                 shadow='md'
                                 onOptionSubmit={(value) => {
-                                    if (value === 'hours' || value === 'percentage') setTimingMode(value);
+                                    if (
+                                        value === 'hours' ||
+                                        value === 'percentage'
+                                    )
+                                        setTimingMode(value);
                                     unitCombobox.closeDropdown();
                                 }}
                             >
-                                <Combobox.Target targetType='button' withAriaAttributes={false}>
+                                <Combobox.Target
+                                    targetType='button'
+                                    withAriaAttributes={false}
+                                >
                                     <UnstyledButton
                                         type='button'
                                         aria-label='Reminder timing unit'
-                                        aria-expanded={unitCombobox.dropdownOpened}
+                                        aria-expanded={
+                                            unitCombobox.dropdownOpened
+                                        }
                                         aria-haspopup='listbox'
-                                        onClick={() => unitCombobox.toggleDropdown()}
+                                        onClick={() =>
+                                            unitCombobox.toggleDropdown()
+                                        }
                                         disabled={disabled || saving || !loaded}
                                         w='100%'
                                         h='100%'
                                     >
-                                        <Group gap='xs' justify='center' wrap='nowrap'>
+                                        <Group
+                                            gap='xs'
+                                            justify='center'
+                                            wrap='nowrap'
+                                        >
                                             <Text component='span' size='sm'>
-                                                {timingMode === 'percentage' ? '%' : 'days'}
+                                                {timingMode === 'percentage'
+                                                    ? '%'
+                                                    : 'days'}
                                             </Text>
                                             <Combobox.Chevron />
                                         </Group>
@@ -269,8 +287,18 @@ export function PppoeExpiryReminderSettings({
                                 </Combobox.Target>
                                 <Combobox.Dropdown>
                                     <Combobox.Options>
-                                        <Combobox.Option value='percentage' active={timingMode === 'percentage'}>%</Combobox.Option>
-                                        <Combobox.Option value='hours' active={timingMode === 'hours'}>days</Combobox.Option>
+                                        <Combobox.Option
+                                            value='percentage'
+                                            active={timingMode === 'percentage'}
+                                        >
+                                            %
+                                        </Combobox.Option>
+                                        <Combobox.Option
+                                            value='hours'
+                                            active={timingMode === 'hours'}
+                                        >
+                                            days
+                                        </Combobox.Option>
                                     </Combobox.Options>
                                 </Combobox.Dropdown>
                             </Combobox>
@@ -281,6 +309,7 @@ export function PppoeExpiryReminderSettings({
                     <Title order={5}>Reminder Template</Title>
                     <Textarea
                         label='Reminder message'
+                        placeholder='Hello {{customer_name}}, your {{account_label}} connection at {{location}} ({{username}}) expires on {{expiry_date}} at {{expiry_time}}.'
                         description='Use the placeholders below to personalize the message. Maximum 4096 characters.'
                         pb='xs'
                         autosize
