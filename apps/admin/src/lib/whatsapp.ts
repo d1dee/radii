@@ -1,4 +1,5 @@
-import type { WhatsAppConfig, WhatsAppConfigInput, WhatsAppSession, WhatsAppStatus } from './api';
+import type { WhatsAppConfig, WhatsAppConfigInput, WhatsAppOutbox, WhatsAppOutboxJob, WhatsAppSession, WhatsAppStatus } from './api';
+import { formatDateTime } from './format';
 
 export const whatsAppStates: Record<WhatsAppStatus, { label: string; color: string; description: string }> = {
     DISABLED: { label: 'Not configured', color: 'gray', description: 'Set your WAHA URL and API key in Settings / Messaging, or explicitly select an available global configuration there.' },
@@ -50,4 +51,44 @@ export function validateWhatsAppText({ phone, text }: { phone: string; text: str
         text: text.length >= 1 && text.length <= 4096 && text.trim().length > 0 && !text.includes('\0')
             ? null : 'Enter 1-4096 characters, not just whitespace, without NUL characters.',
     };
+}
+
+export function createWhatsAppRequestId(): string {
+    // Unlike randomUUID(), getRandomValues() is available on HTTP LAN origins.
+    const bytes = crypto.getRandomValues(new Uint8Array(16));
+    bytes[6] = (bytes[6]! & 0x0f) | 0x40;
+    bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+    const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+export function isWhatsAppOutbox(value: unknown): value is WhatsAppOutbox {
+    if (!value || typeof value !== 'object') return false;
+    const outbox = value as WhatsAppOutbox;
+    return typeof outbox.paused === 'boolean' && Number.isFinite(outbox.nextAt)
+        && Array.isArray(outbox.jobs) && outbox.jobs.length <= 100
+        && outbox.jobs.every((j) => j && typeof j.id === 'string' && typeof j.batchId === 'string'
+            && typeof j.phone === 'string' && /^\d{8,15}$/.test(j.phone)
+            && ['queued', 'processing', 'accepted', 'failed', 'uncertain', 'cancelled'].includes(j.status)
+            && Number.isFinite(j.createdAt) && (j.result === undefined || typeof j.result === 'string')
+            && (j.preview === undefined || (typeof j.preview === 'string' && j.preview.length <= 4096))
+            && (j.sentAt === undefined || (Number.isFinite(j.sentAt) && j.sentAt > 0 && j.sentAt < 8_640_000_000_000_000))
+            && (j.receiptCheckedAt === undefined || Number.isFinite(j.receiptCheckedAt))
+            && (j.ack === undefined || (Number.isInteger(j.ack) && j.ack >= -1 && j.ack <= 4)));
+}
+
+export function whatsAppReceiptDisplay(job: WhatsAppOutboxJob) {
+    if (job.status === 'accepted') {
+        if (job.ack === 3 || job.ack === 4) return { label: 'Read', detail: 'WhatsApp confirmed the recipient read the message.', ticks: 2, color: 'blue' };
+        if (job.ack === 2) return { label: 'Delivered', detail: 'WhatsApp confirmed delivery to the recipient device.', ticks: 2, color: 'green' };
+        if (job.ack === 1) return { label: 'Sent', detail: 'WhatsApp server received the message; recipient delivery is not confirmed.', ticks: 1, color: 'dimmed' };
+        if (job.ack === -1) return { label: 'Delivery error', detail: 'WhatsApp reported a message acknowledgement error. Never automatically resent.', ticks: 0, color: 'red' };
+        return { label: 'Service accepted', detail: 'Accepted by the service; sent, delivery and read confirmation are not available yet.', ticks: 0, color: 'dimmed' };
+    }
+    return { label: job.status, detail: job.result ?? 'Waiting for processing; not confirmed sent.', ticks: 0,
+        color: ['failed', 'uncertain'].includes(job.status) ? 'red' : 'dimmed' };
+}
+
+export function whatsAppMessageTime(job: WhatsAppOutboxJob) {
+    return `${job.sentAt ? 'Sent' : 'Queued'} ${formatDateTime(job.sentAt ?? job.createdAt)}`;
 }

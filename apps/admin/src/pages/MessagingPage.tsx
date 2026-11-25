@@ -13,31 +13,42 @@ import {
     Loader,
     Menu,
     Modal,
+    Progress,
+    ScrollArea,
+    SegmentedControl,
     Stack,
     Text,
     Textarea,
     Title,
+    Tooltip,
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
 import { PhoneNumberInput } from '@radii/ui';
 import { useEffect, useRef, useState } from 'react';
-import { MdMoreVert } from 'react-icons/md';
+import { MdMoreVert, MdCheck, MdDoneAll, MdSchedule } from 'react-icons/md';
 import { Link } from 'react-router-dom';
 
 import { PageLayout } from '@/components/Layout/PageLayout';
 import {
     controlWhatsAppSession,
+    cancelWhatsAppOutbox,
+    getWhatsAppOutbox,
     getWhatsAppQr,
     getWhatsAppSession,
     sendWhatsAppText,
     type WhatsAppAction,
     type WhatsAppSession,
+    type WhatsAppOutbox,
 } from '@/lib/api';
 import {
+    createWhatsAppRequestId,
     isWhatsAppSession,
+    isWhatsAppOutbox,
     validateWhatsAppText,
     whatsAppStates,
+    whatsAppReceiptDisplay,
+    whatsAppMessageTime,
 } from '@/lib/whatsapp';
 
 export default function MessagingPage() {
@@ -49,12 +60,22 @@ export default function MessagingPage() {
     const [cooldown, setCooldown] = useState(false);
     const [revision, setRevision] = useState(0);
     const [confirm, setConfirm] = useState<WhatsAppAction | null>(null);
+    const [mode, setMode] = useState('single');
+    const [recipients, setRecipients] = useState<string[]>([]);
+    const [confirmSend, setConfirmSend] = useState(false);
+    const [outbox, setOutbox] = useState<WhatsAppOutbox | null>(null);
+    const [outboxError, setOutboxError] = useState('');
+    const pendingRequest = useRef({ fingerprint: '', id: '' });
+    const watchedBatches = useRef(new Set<string>());
     const operation = useRef<AbortController | null>(null);
     const reading = useRef<AbortController | null>(null);
     const blockedUntil = useRef(0);
     const form = useForm({
         initialValues: { phone: '', text: '' },
-        validate: validateWhatsAppText,
+        validate: (values) => ({
+            ...validateWhatsAppText({ ...values, phone: mode === 'multiple' ? recipients[0] ?? '' : values.phone }),
+            ...(mode === 'multiple' && values.phone ? { phone: 'Add this phone to the recipient list, or clear it before reviewing.' } : {}),
+        }),
     });
 
     useEffect(() => () => operation.current?.abort(), []);
@@ -76,7 +97,26 @@ export default function MessagingPage() {
             let delay = 15_000;
             // A hidden tab never needs a fresh pairing secret or background reads.
             if (!document.hidden) {
-                const result = await getWhatsAppSession(controller.signal);
+                const queueRead = getWhatsAppOutbox(controller.signal).then((queue) => {
+                    if (controller.signal.aborted) return;
+                    if (queue.success && isWhatsAppOutbox(queue.data)) {
+                        setOutbox(queue.data); setOutboxError('');
+                        for (const batchId of watchedBatches.current) {
+                            const jobs = queue.data.jobs.filter((j) => j.batchId === batchId);
+                            if (jobs.length && jobs.every((j) => !['queued', 'processing'].includes(j.status))) {
+                                const accepted = jobs.filter((j) => j.status === 'accepted').length;
+                                notifications.show({ title: 'WhatsApp batch finished',
+                                    message: `${accepted} of ${jobs.length} accepted by WhatsApp service. Check recipient receipt indicators for delivery confirmation before retrying.`,
+                                    color: accepted === jobs.length ? 'green' : 'yellow' });
+                                watchedBatches.current.delete(batchId);
+                            }
+                        }
+                        if (queue.data.jobs.some((j) => ['queued', 'processing'].includes(j.status))) delay = 5000;
+                    } else {
+                        setOutboxError(queue.success ? 'The server returned an invalid queue status.' : queue.message);
+                    }
+                });
+                const [result] = await Promise.all([getWhatsAppSession(controller.signal), queueRead]);
                 if (controller.signal.aborted) return;
                 if (!result.success || !isWhatsAppSession(result.data)) {
                     setSession(null);
@@ -166,17 +206,16 @@ export default function MessagingPage() {
         };
     }, [busy, revision]);
 
-    async function perform(action: WhatsAppAction | 'send') {
+    async function perform(action: WhatsAppAction | 'send' | 'cancel') {
         if (
             operation.current ||
-            Date.now() < blockedUntil.current ||
-            !session?.configured ||
-            error
+            (action !== 'send' && Date.now() < blockedUntil.current) ||
+            (action !== 'send' && action !== 'cancel' && (!session?.configured || error))
         )
             return;
         if (
             action === 'send' &&
-            (session.status !== 'WORKING' || form.validate().hasErrors)
+            form.validate().hasErrors
         )
             return;
         const controller = new AbortController();
@@ -186,33 +225,64 @@ export default function MessagingPage() {
         setQr(null);
         setQrError('');
         setConfirm(null);
+        setConfirmSend(false);
         try {
+            const phones = mode === 'multiple' ? recipients : [form.values.phone];
+            const fingerprint = JSON.stringify({ phones, text: form.values.text });
+            if (action === 'send' && pendingRequest.current.fingerprint !== fingerprint)
+                pendingRequest.current = { fingerprint, id: createWhatsAppRequestId() };
             const result =
                 action === 'send'
-                    ? await sendWhatsAppText(form.values, controller.signal)
+                    ? await sendWhatsAppText({ phones, text: form.values.text, requestId: pendingRequest.current.id }, controller.signal)
+                    : action === 'cancel' ? await cancelWhatsAppOutbox(controller.signal)
                     : await controlWhatsAppSession(action, controller.signal);
             if (controller.signal.aborted) return;
-            const ok = result.success && result.data?.ok === true;
+            const ok = result.success && result.data?.ok === true && (action !== 'send' || ('queued' in result.data && result.data.queued === true && 'batchId' in result.data && typeof result.data.batchId === 'string'));
             const message = ok
                 ? action === 'send'
-                    ? 'Message accepted for sending. Delivery is not confirmed.'
+                    ? 'Recipients queued. Messages are processed with pacing and safety checks. Review results below; delivery is not confirmed.'
+                    : action === 'cancel' ? 'Queued recipients cancelled. An in-progress send may still finish.'
                     : 'Session action accepted. Checking connection status...'
                 : `${result.success ? 'The server returned an invalid response.' : result.message}${action === 'send' ? ' Sending was not confirmed. Check WhatsApp before retrying to avoid a duplicate.' : ''}`;
             notifications.show({
                 title: action === 'send'
-                    ? ok ? 'Message accepted' : 'Sending not confirmed'
+                     ? ok ? 'Message queued' : 'Queueing not confirmed'
                     : ok ? 'Session action accepted' : 'Session action failed',
                 message,
                 color: ok ? 'green' : 'red',
             });
             if (action === 'send') {
-                if (ok) form.setFieldValue('text', '');
+                if (ok) {
+                    watchedBatches.current.add(pendingRequest.current.id);
+                    pendingRequest.current = { fingerprint: '', id: '' };
+                    form.setFieldValue('text', '');
+                }
             } else {
                 setSession(null);
             }
-            // Keep rapid clicks below the backend limits; failures get a full-minute cooldown.
-            blockedUntil.current = Date.now() + (ok ? 7_000 : 60_000);
-            setCooldown(true);
+            if (ok && (action === 'send' || action === 'cancel')) {
+                const queue = await getWhatsAppOutbox(controller.signal);
+                if (controller.signal.aborted) return;
+                if (queue.success && isWhatsAppOutbox(queue.data)) {
+                    setOutbox(queue.data);
+                    setOutboxError('');
+                } else {
+                    setOutboxError(queue.success ? 'The server returned an invalid queue status.' : queue.message);
+                }
+            }
+            // Session management retains its cooldown; sending is paced by the outbox.
+            if (action !== 'send') {
+                blockedUntil.current = Date.now() + (ok ? 7_000 : 60_000);
+                setCooldown(true);
+            }
+        } catch {
+            if (!controller.signal.aborted) notifications.show({
+                title: action === 'send' ? 'Queueing not confirmed' : 'Action not confirmed',
+                message: action === 'send'
+                    ? 'The queue request could not complete. Check the outbox before retrying to avoid a duplicate.'
+                    : 'The request could not complete. Refresh the status before retrying.',
+                color: 'red',
+            });
         } finally {
             if (!controller.signal.aborted) {
                 operation.current = null;
@@ -235,8 +305,7 @@ export default function MessagingPage() {
                         Messaging
                     </Title>
                     <Text c='dimmed' size='sm'>
-                        Connect your WhatsApp account and send individual
-                        messages.
+                        Connect WhatsApp and send messages to one or more recipients.
                     </Text>
                 </Stack>
             }
@@ -251,7 +320,7 @@ export default function MessagingPage() {
                         >
                             <form
                                 onSubmit={form.onSubmit(
-                                    () => void perform('send'),
+                                    () => setConfirmSend(true),
                                 )}
                             >
                                 <Stack>
@@ -259,25 +328,30 @@ export default function MessagingPage() {
                                         Send a message
                                     </Title>
                                     <Text size='sm' c='dimmed'>
-                                        Messages are sent from your connected
-                                        WhatsApp account. Only contact
-                                        recipients who expect to hear from you.
+                                        Messages are sent from your connected WhatsApp account. Only contact recipients who expect to hear from you.
                                     </Text>
-                                    {session?.status !== 'WORKING' || error ? (
-                                        <Alert color='gray'>
-                                            Connect WhatsApp before sending a
-                                            message.
-                                        </Alert>
-                                    ) : null}
+                                    <SegmentedControl fullWidth value={mode} onChange={setMode} disabled={!!busy}
+                                        data={[{ value: 'single', label: 'Single recipient' }, { value: 'multiple', label: 'Multiple recipients' }]} />
                                     <PhoneNumberInput
                                         label='Recipient phone'
                                         description='Select the country and enter the recipient phone number.'
                                         autoComplete='off'
-                                        required
+                                        required={mode === 'single' || recipients.length === 0}
                                         disabled={!!busy}
                                         {...form.getInputProps('phone')}
                                         onChange={(value) => form.setFieldValue('phone', value ?? '')}
                                     />
+                                    {mode === 'multiple' && <>
+                                        <Button variant='light' disabled={!!busy || recipients.length >= 50} onClick={() => {
+                                            const error = validateWhatsAppText({ phone: form.values.phone, text: 'message' }).phone;
+                                            if (error) { form.setFieldError('phone', error); return; }
+                                            const phone = form.values.phone.replace(/^\+/, '');
+                                            setRecipients((previous) => previous.includes(phone) ? previous : [...previous, phone]);
+                                            form.setFieldValue('phone', ''); form.clearFieldError('phone');
+                                        }}>Add recipient ({recipients.length} / 50)</Button>
+                                        <Group gap='xs'>{recipients.map((phone) => <Button key={phone} size='compact-xs' variant='default'
+                                            disabled={!!busy} aria-label={`Remove +${phone}`} onClick={() => setRecipients((previous) => previous.filter((p) => p !== phone))}>+{phone} (remove)</Button>)}</Group>
+                                    </>}
                                     <Textarea
                                         label='Message'
                                         required
@@ -295,14 +369,11 @@ export default function MessagingPage() {
                                     <Group justify='flex-end'>
                                         <Button
                                             type='submit'
-                                            disabled={
-                                                disabled ||
-                                                session?.status !== 'WORKING'
-                                            }
+                                            disabled={!!busy}
                                             loading={busy === 'send'}
                                             w={{ base: '100%', sm: 'auto' }}
                                         >
-                                            Send message
+                                            Review and queue message
                                         </Button>
                                     </Group>
                                 </Stack>
@@ -333,7 +404,7 @@ export default function MessagingPage() {
                                 </Group>
                                 <Text size='sm' c='dimmed'>
                                     {status?.description ??
-                                        'Checking your admin connection. Sending is unavailable until the connection is confirmed.'}
+                                        'Checking your admin connection. Queued messages will wait until the connection is ready.'}
                                 </Text>
                                 {error && (
                                     <Alert
@@ -452,7 +523,7 @@ export default function MessagingPage() {
                                         <Button
                                             variant='default'
                                             miw={120}
-                                            disabled={disabled}
+                                            disabled={disabled || outbox?.paused}
                                             loading={busy === 'restart'}
                                             onClick={() =>
                                                 setConfirm('restart')
@@ -466,7 +537,7 @@ export default function MessagingPage() {
                                             color='red'
                                             variant='light'
                                             miw={120}
-                                            disabled={disabled}
+                                            disabled={disabled || outbox?.paused}
                                             onClick={() => setConfirm('logout')}
                                         >
                                             Disconnect
@@ -513,7 +584,7 @@ export default function MessagingPage() {
                                             {exists && (
                                                 <Menu.Item
                                                     color='red'
-                                                    disabled={disabled}
+                                                    disabled={disabled || outbox?.paused}
                                                     onClick={() =>
                                                         setConfirm('delete')
                                                     }
@@ -535,7 +606,54 @@ export default function MessagingPage() {
                         </Card>
                     </Grid.Col>
                 </Grid>
+                <Card withBorder mt='md' p={{ base: 'md', sm: 'lg' }}>
+                    <Stack>
+                        <Group justify='space-between'>
+                            <Title order={3} size='h4'>WhatsApp outbox</Title>
+                            <Button variant='light' color='red' disabled={!!busy || cooldown || !outbox?.jobs.some((j) => j.status === 'queued')}
+                                onClick={() => void perform('cancel')}>Cancel queued messages</Button>
+                        </Group>
+                        {outboxError && <Alert color='red'>{outboxError} Queue status will retry automatically. Check this before queueing again.</Alert>}
+                        {outbox?.paused && <Alert color='orange' title='Sending paused'>WhatsApp reported a restriction (463/475). Do not restart, log out or re-pair. The operator must review the restriction before sending can resume.</Alert>}
+                        {outbox && outbox.jobs.length > 0 ? <>
+                            <Text size='sm' role='status'>{outbox.jobs.filter((j) => j.status === 'accepted').length} accepted by service; {outbox.jobs.filter((j) => ['queued', 'processing'].includes(j.status)).length} pending. Accepted does not mean delivered.</Text>
+                            {!outbox.paused && outbox.jobs.some((j) => j.status === 'queued') && outbox.nextAt > Date.now() && <Text size='xs' c='dimmed'>Pacing or rest break active. Next processing opportunity in about {Math.max(1, Math.ceil((outbox.nextAt - Date.now()) / 60_000))} minute(s).</Text>}
+                            <Progress aria-label='Completed recipient attempts' value={100 * outbox.jobs.filter((j) => !['queued', 'processing'].includes(j.status)).length / outbox.jobs.length} />
+                            <Text size='xs' c='dimmed'>Single tick: sent to WhatsApp. Green double tick: delivered to device. Blue double tick: read. Previews are retained for 24 hours; private short-lived messages are not shown.</Text>
+                            <ScrollArea.Autosize mah={480}>
+                                <Stack gap='sm'>{outbox.jobs.map((job) => {
+                                    const receipt = whatsAppReceiptDisplay(job);
+                                    return <Card key={job.id} withBorder radius='md' p='sm' style={{ minWidth: 0 }}>
+                                        <Stack gap={6}>
+                                            <Text size='sm' fw={600}>+{job.phone}</Text>
+                                            <Text size='sm' style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{job.preview ?? 'Message preview unavailable or expired.'}</Text>
+                                            <Group justify='space-between' gap='xs' align='center'>
+                                                <Text size='xs' c='dimmed'>{whatsAppMessageTime(job)}</Text>
+                                                <Tooltip label={receipt.detail} multiline maw={280} withArrow>
+                                                    <Group gap={4} c={receipt.color} tabIndex={0} aria-label={receipt.detail}>
+                                                        {receipt.ticks === 2 ? <MdDoneAll size={18} aria-hidden /> : receipt.ticks === 1 ? <MdCheck size={18} aria-hidden /> : <MdSchedule size={16} aria-hidden />}
+                                                        <Text size='xs' fw={500}>{receipt.label}</Text>
+                                                    </Group>
+                                                </Tooltip>
+                                            </Group>
+                                            {!job.sentAt && job.status === 'accepted' && <Text size='xs' c='dimmed'>Actual sent time is not available.</Text>}
+                                            {job.result && job.status !== 'accepted' && <Text size='xs' c='dimmed' style={{ overflowWrap: 'anywhere' }}>{job.result}</Text>}
+                                        </Stack>
+                                    </Card>;
+                                })}</Stack>
+                            </ScrollArea.Autosize>
+                        </> : <Text size='sm' c='dimmed'>{outboxError ? 'Queue contents could not be loaded.' : outbox ? 'No recent messages queued. Results remain available after leaving this page.' : 'Loading queued messages...'}</Text>}
+                    </Stack>
+                </Card>
             </Container>
+            <Modal opened={confirmSend} onClose={() => setConfirmSend(false)} title='Queue WhatsApp message?' centered>
+                <Stack>
+                    <Text size='sm'>Queue this message for {mode === 'multiple' ? recipients.length : 1} {mode === 'multiple' && recipients.length !== 1 ? 'recipients' : 'recipient'}?</Text>
+                    <Text size='sm' style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{form.values.text}</Text>
+                    <Text size='xs' c='dimmed'>You can leave this page after queueing. Processing includes random pacing and hour-long rest breaks. Failed or uncertain attempts are never automatically resent.</Text>
+                    <Group justify='flex-end'><Button variant='default' onClick={() => setConfirmSend(false)}>Cancel</Button><Button disabled={!!busy} onClick={() => void perform('send')}>Queue message</Button></Group>
+                </Stack>
+            </Modal>
             <Modal
                 opened={confirm !== null}
                 onClose={() => setConfirm(null)}

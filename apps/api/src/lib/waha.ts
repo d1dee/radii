@@ -44,6 +44,28 @@ export const adminWhatsAppTextSchema = z
     })
     .strict();
 export type AdminWhatsAppTextInput = z.infer<typeof adminWhatsAppTextSchema>;
+export const adminWhatsAppBatchSchema = z.object({
+    phones: z.array(adminWhatsAppTextSchema.shape.phone).min(1).max(50),
+    text: adminWhatsAppTextSchema.shape.text,
+    requestId: z.uuid(),
+}).strict();
+export type WhatsAppAccepted = { ok: true; queued: true; batchId: string };
+export type WhatsAppReceipt = { messageId: string; messageTimestamp?: number; sentAt?: number; ack?: number };
+
+// Only normalized public fields, never engine-specific _data or message bodies.
+export function parseWhatsAppReceipt(value: unknown, phone: string, expectedId?: string): WhatsAppReceipt | undefined {
+    const parsed = z.object({ id: z.string().min(1).max(512), fromMe: z.literal(true),
+        to: z.string(), timestamp: z.number().finite().positive().optional(),
+        ack: z.number().int().min(-1).max(4).optional() }).safeParse(value);
+    if (!parsed.success) return;
+    const message = parsed.data;
+    if (message.to.replace(/@s\.whatsapp\.net$/, '@c.us') !== `${phone.replace(/^\+/, '')}@c.us`
+        || (expectedId !== undefined && message.id !== expectedId)) return;
+    const timestamp = message.timestamp === undefined ? undefined : message.timestamp * 1000;
+    return { messageId: message.id, ...(timestamp && timestamp < 8_640_000_000_000_000
+        ? { messageTimestamp: timestamp, ...((message.ack ?? 0) >= 1 ? { sentAt: timestamp } : {}) } : {}),
+        ...(message.ack === undefined ? {} : { ack: message.ack }) };
+}
 
 const sessionStatusSchema = z.enum([
     'STOPPED',
@@ -70,7 +92,8 @@ export type WahaErrorCode =
     | 'WAHA_CONFLICT'
     | 'WAHA_NOT_READY'
     | 'WAHA_INVALID_INPUT'
-    | 'WAHA_RATE_LIMITED';
+    | 'WAHA_RATE_LIMITED'
+    | 'WAHA_RESTRICTED';
 
 export class WahaError extends Error {
     constructor(
@@ -98,6 +121,11 @@ export function createWahaClient(
         fetch?: Transport;
         timeoutMs?: number;
         now?: () => number;
+        random?: () => number;
+        wait?: (ms: number) => Promise<void>;
+        enqueue?: (adminId: string, phone: string, text: string) => Promise<WhatsAppAccepted>;
+        authorizeDelivery?: (adminId: string, phone: string, text: string) => Promise<void>;
+        authorizeSessionChange?: (adminId: string, action: 'create' | 'start' | 'restart' | 'logout' | 'delete') => Promise<void>;
     } = {},
 ) {
     const transport = options.fetch ?? ((url, init) => fetch(url, init));
@@ -191,6 +219,11 @@ export function createWahaClient(
             const errorBody = response.ok
                 ? null
                 : await readJson(response, 16_384).catch(() => null);
+            if (!response.ok && (response.status === 463 || response.status === 475 ||
+                /(?:error|code|status)[^\d]{0,30}(?:463|475)\b/i.test(JSON.stringify(errorBody)))) {
+                throw new WahaError('WAHA_RESTRICTED', 409,
+                    'WhatsApp has restricted messaging (463/475). Sending is paused. Do not restart, log out or re-pair; wait for the restriction to lift and contact the operator.');
+            }
 
             const details = z
                 .object({
@@ -277,7 +310,12 @@ export function createWahaClient(
                 return undefined;
             }
             const data = response.ok
-                ? await readJson(response, 512_000)
+                ? await readJson(response, 512_000).catch((error) => {
+                    // A successful send with no usable metadata is still accepted.
+                    // Never turn missing receipt support into another send attempt.
+                    if (path === '/api/sendText') return undefined;
+                    throw error;
+                })
                 : errorBody;
             if (validationName && response.status === 404) {
                 // A generic proxy/router 404 does not prove this is a WAHA endpoint.
@@ -415,6 +453,7 @@ export function createWahaClient(
         },
         async createSession(adminId: string): Promise<{ ok: true }> {
             limit(adminId, 'manage');
+            await options.authorizeSessionChange?.(adminId, 'create');
             const config = await resolveConfig(adminId);
             const name = config.sessionName;
             const current = await status(config, name);
@@ -433,7 +472,7 @@ export function createWahaClient(
                     {
                         name,
                         start: true,
-                        config: { metadata: { 'radii.adminId': adminId } },
+                        config: { metadata: { 'radii.adminId': adminId }, noweb: { store: { enabled: true, fullSync: false } } },
                     },
                     false,
                 );
@@ -463,6 +502,7 @@ export function createWahaClient(
                     400,
                     'Invalid WhatsApp session action.',
                 );
+            await options.authorizeSessionChange?.(adminId, action);
             const config = await resolveConfig(adminId);
             const name = config.sessionName;
             try {
@@ -542,7 +582,7 @@ export function createWahaClient(
             adminId: string,
             phone: string,
             text: string,
-        ): Promise<{ ok: true }> {
+        ): Promise<WhatsAppAccepted> {
             const parsed = adminWhatsAppTextSchema.safeParse({ phone, text });
             if (!parsed.success)
                 throw new WahaError(
@@ -551,6 +591,21 @@ export function createWahaClient(
                     'Provide an international phone number (8-15 digits, optional +) and 1-4096 characters of text.',
                 );
             limit(adminId, 'send');
+            if (!options.enqueue) throw new WahaError('WAHA_NOT_READY', 503, 'The safe WhatsApp outbox is not configured.');
+            return options.enqueue(adminId, parsed.data.phone, parsed.data.text);
+        },
+        async getMessageReceipt(adminId: string, phone: string, messageId: string): Promise<WhatsAppReceipt | undefined> {
+            limit(adminId, 'read');
+            if (!/^\d{8,15}$/.test(phone) || !messageId || messageId.length > 512) return;
+            const config = await resolveConfig(adminId);
+            const path = `/api/${encodeURIComponent(config.sessionName)}/chats/${encodeURIComponent(`${phone}@c.us`)}/messages/${encodeURIComponent(messageId)}?downloadMedia=false`;
+            return parseWhatsAppReceipt(await request(config, path), phone, messageId);
+        },
+        // Worker-only delivery. A durable claim is checked again immediately before text submission.
+        async deliverMessage(adminId: string, phone: string, text: string): Promise<WhatsAppReceipt | undefined> {
+            adminWhatsAppTextSchema.parse({ phone, text });
+            if (!options.authorizeDelivery) throw new WahaError('WAHA_NOT_READY', 503, 'WhatsApp delivery requires a durable outbox claim.');
+            await options.authorizeDelivery(adminId, phone, text);
             const config = await resolveConfig(adminId);
             const name = config.sessionName;
             const current = await status(config, name);
@@ -566,19 +621,30 @@ export function createWahaClient(
                     409,
                     'Pair and start your WhatsApp session before sending messages.',
                 );
-            await request(
+            const chatId = `${phone.replace(/^\+/, '')}@c.us`;
+            const presence = { session: name, chatId };
+            await request(config, '/api/sendSeen', 'POST', presence, false);
+            await request(config, '/api/startTyping', 'POST', presence, false);
+            try {
+                const typingMs = Math.min(20_000, 1000 + text.length * (35 + (options.random ?? Math.random)() * 45));
+                await (options.wait ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms))))(typingMs);
+            } finally {
+                await request(config, '/api/stopTyping', 'POST', presence, false);
+            }
+            await options.authorizeDelivery(adminId, phone, text);
+            const response = await request(
                 config,
                 '/api/sendText',
                 'POST',
                 {
                     session: name,
-                    chatId: `${phone.replace(/^\+/, '')}@c.us`,
+                    chatId,
                     text,
                     linkPreview: false,
                 },
-                false,
+                true,
             );
-            return { ok: true };
+            return parseWhatsAppReceipt(response, phone);
         },
     };
 }

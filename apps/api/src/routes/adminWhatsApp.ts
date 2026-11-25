@@ -1,8 +1,8 @@
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
-import { adminWhatsApp, adminWhatsAppSettings, sendAdminWhatsAppText } from '../lib/adminWhatsApp';
+import { adminWhatsApp, adminWhatsAppSettings, enqueueAdminWhatsApp, getAdminWhatsAppOutbox, cancelAdminWhatsAppOutbox } from '../lib/adminWhatsApp';
 import { jsonError } from '../lib/error';
-import { adminWhatsAppTextSchema, WahaError } from '../lib/waha';
+import { adminWhatsAppBatchSchema, WahaError } from '../lib/waha';
 import { requireAdmin } from '../middleware/auth';
 import type { AppVariables } from '../types';
 
@@ -34,9 +34,11 @@ for (const action of ['start', 'restart', 'logout'] as const) {
 }
 app.delete('/session', async (c) => c.json({ success: true, data: await adminWhatsApp.sessionAction(c.var.admin.id, 'delete') }));
 app.post('/send-text', async (c) => {
-    const parsed = adminWhatsAppTextSchema.safeParse(await c.req.json().catch(() => null));
-    if (!parsed.success) return jsonError(c, 400, 'Provide an international phone number (8-15 digits, optional +) and 1-4096 characters of text.');
-    return c.json({ success: true, data: await sendAdminWhatsAppText(c.var.admin.id, parsed.data.phone, parsed.data.text) });
+    const parsed = adminWhatsAppBatchSchema.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return jsonError(c, 400, 'Provide 1-50 international recipients, 1-4096 text characters and a request ID.');
+    return c.json({ success: true, data: await enqueueAdminWhatsApp(c.var.admin.id, parsed.data) }, 202);
 });
+app.get('/outbox', async (c) => c.json({ success: true, data: await getAdminWhatsAppOutbox(c.var.admin.id) }));
+app.delete('/outbox', async (c) => c.json({ success: true, data: await cancelAdminWhatsAppOutbox(c.var.admin.id) }));
 
 export default app;

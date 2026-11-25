@@ -5,6 +5,7 @@ import { adminAuth } from './adminAuth';
 import { auth } from './auth';
 import { closeDb } from './db';
 import { env } from './env';
+import { startWhatsAppOutboxWorker } from './lib/adminWhatsApp';
 import { radiusClient } from './lib/radius';
 import { startNasSessionReconciliation } from './lib/radius/sessionReconcile';
 import { reconcileWireGuardPeers } from './lib/wgReconcile';
@@ -144,6 +145,7 @@ void reconcileWireGuardPeers()
 
 
 // Flush the Bun SQL connection pool on shutdown.
+const stopWhatsAppOutboxWorker = startWhatsAppOutboxWorker();
 const shutdownFlags = globalThis as unknown as {
     __pgShutdownRegistered?: boolean;
 };
@@ -152,6 +154,7 @@ if (!shutdownFlags.__pgShutdownRegistered) {
     const shutdown = async (signal: string): Promise<void> => {
         logger.info('Shutting down API server', { signal });
         try {
+            await stopWhatsAppOutboxWorker();
             await closeDb();
         } catch (err) {
             logger.error('Database pool shutdown failed', { error: err });

@@ -8,6 +8,13 @@
       "when": 1795463794563,
       "tag": "0000_wild_princess_powerful",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1795627841154,
+      "tag": "0001_cloudy_roland_deschain",
+      "breakpoints": true
     }
   ]
 }
