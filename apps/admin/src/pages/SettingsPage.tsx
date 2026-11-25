@@ -409,14 +409,13 @@ function WhatsAppSettingsForm() {
                 autoComplete='off'
             >
                 <Stack gap='xl'>
-                    <Group justify='space-between'>
-                        <Title order={3} size='h4'>
-                            Messaging
-                        </Title>
+                    <Box>
                         <Badge
                             color={dirty ? 'yellow' : 'gray'}
                             variant='light'
                             role='status'
+                            ml='sm'
+                            style={{ float: 'right' }}
                         >
                             {loading
                                 ? 'Loading configuration'
@@ -428,8 +427,6 @@ function WhatsAppSettingsForm() {
                                       ? 'All changes saved'
                                       : 'Configuration unavailable'}
                         </Badge>
-                    </Group>
-                    <Box>
                         <SectionHeader
                             title='WAHA configuration'
                             description='Use your own WAHA server for this admin account. Global configuration is only used when explicitly selected.'
