@@ -11,6 +11,7 @@ export default function MessagingPage() {
     const [session, setSession] = useState<WhatsAppSession | null>(null);
     const [qr, setQr] = useState<string | null>(null);
     const [error, setError] = useState('');
+    const [qrError, setQrError] = useState('');
     const [notice, setNotice] = useState('');
     const [sendResult, setSendResult] = useState<{ ok: boolean; message: string } | null>(null);
     const [busy, setBusy] = useState('');
@@ -38,28 +39,48 @@ export default function MessagingPage() {
             let delay = 15_000;
             // A hidden tab never needs a fresh pairing secret or background reads.
             if (!document.hidden) {
-                setQr(null);
                 const result = await getWhatsAppSession(controller.signal);
                 if (controller.signal.aborted) return;
                 if (!result.success || !isWhatsAppSession(result.data)) {
                     setSession(null);
+                    setQr(null);
+                    setQrError('');
                     setError(result.success ? 'The server returned an invalid connection status.' : result.message);
                     delay = 60_000;
                 } else {
-                    setSession(result.data);
+                    const nextSession = result.data;
+                    setSession((previous) => previous?.configured === nextSession.configured && previous.status === nextSession.status ? previous : nextSession);
                     setError('');
+                    if (result.data.status === 'STARTING') delay = 3_000;
                     if (result.data.configured && result.data.status === 'SCAN_QR_CODE') {
+                        delay = 5_000;
                         const image = await getWhatsAppQr(controller.signal);
                         if (controller.signal.aborted) return;
                         if (image.success && image.data?.mimetype === 'image/png'
                             && typeof image.data.data === 'string' && image.data.data.length <= 500_000
                             && /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(image.data.data)
                             && image.data.data.length >= 4) {
-                            setQr(`data:image/png;base64,${image.data.data}`);
+                            const src = `data:image/png;base64,${image.data.data}`;
+                            // Keep the current QR painted until its replacement is ready.
+                            const replacement = new window.Image();
+                            replacement.src = src;
+                            try {
+                                await replacement.decode();
+                                if (controller.signal.aborted) return;
+                                if (!document.hidden) setQr(src);
+                                setQrError('');
+                            } catch {
+                                if (controller.signal.aborted) return;
+                                setQr(null);
+                                setQrError('The QR image could not be displayed.');
+                            }
                         } else {
-                            setError(image.success ? 'The server returned an invalid QR image.' : image.message);
-                            delay = 60_000;
+                            setQr(null);
+                            setQrError(image.success ? 'The server returned an invalid QR image.' : image.message);
                         }
+                    } else {
+                        setQr(null);
+                        setQrError('');
                     }
                 }
             }
@@ -67,9 +88,9 @@ export default function MessagingPage() {
         }
         // Refresh immediately on return, including after settings changed in another tab.
         const refresh = () => {
-            if (!document.hidden) {
-                setSession(null);
+            if (document.hidden) {
                 setQr(null);
+            } else {
                 setConfirm(null);
                 setRevision((n) => n + 1);
             }
@@ -91,6 +112,7 @@ export default function MessagingPage() {
         reading.current?.abort();
         setBusy(action);
         setQr(null);
+        setQrError('');
         setNotice('');
         setConfirm(null);
         if (action === 'send') setSendResult(null);
@@ -145,11 +167,12 @@ export default function MessagingPage() {
                                 <Text size='sm' c='dimmed'>{status?.description ?? 'Checking your admin connection. Sending is unavailable until the connection is confirmed.'}</Text>
                                 <Button component={Link} to='/settings/messaging' variant='subtle' size='compact-sm' w='fit-content'>Messaging settings</Button>
                                 {error && <Alert color='red' title='Could not refresh connection' role='alert'>{error} Status will retry automatically in one minute.</Alert>}
+                                {qrError && <Alert color='yellow' title='Pairing QR unavailable' role='status'>{qrError} Connection status and QR will retry automatically in a few seconds.</Alert>}
                                 {notice && <Alert color={notice.startsWith('Action failed:') ? 'red' : 'blue'} role='status'>{notice}</Alert>}
                                 {session?.status === 'SCAN_QR_CODE' && !busy && !error && (
                                     <>
                                         <Box bg='white' p='md' mx='auto' w='100%' maw={300} style={{ aspectRatio: '1', display: 'grid', placeItems: 'center' }}>
-                                            {qr ? <Image src={qr} alt='Scan this QR code with WhatsApp to link your account' w='100%' style={{ imageRendering: 'pixelated' }} onError={() => { setQr(null); setError('The QR image could not be displayed.'); }} /> : <Loader aria-label='Loading pairing QR code' />}
+                                            {qr ? <Image src={qr} alt='Scan this QR code with WhatsApp to link your account' w='100%' style={{ imageRendering: 'pixelated' }} onError={() => { setQr(null); setQrError('The QR image could not be displayed.'); }} /> : <Loader aria-label='Loading pairing QR code' />}
                                         </Box>
                                         <List size='sm' type='ordered' spacing='xs'>
                                             <List.Item>Open WhatsApp on your phone.</List.Item>
@@ -157,7 +180,7 @@ export default function MessagingPage() {
                                             <List.Item>Choose Linked devices, then Link a device. Unlock your phone if prompted.</List.Item>
                                             <List.Item>Scan this code with the WhatsApp camera. Use a second screen if you are viewing this page on your phone.</List.Item>
                                         </List>
-                                        <Text size='xs' c='dimmed'>Keep this code private. A new code is retrieved about every 15 seconds while this page is visible.</Text>
+                                        <Text size='xs' c='dimmed'>Keep this code private. The latest code is retrieved about every 5 seconds while this page is visible.</Text>
                                     </>
                                 )}
                                 <Group>
@@ -191,7 +214,7 @@ export default function MessagingPage() {
                 </Grid>
             </Container>
             <Modal opened={confirm !== null} onClose={() => setConfirm(null)} title={confirm === 'restart' ? 'Restart WhatsApp connection?' : confirm === 'delete' ? 'Remove WhatsApp connection?' : 'Disconnect WhatsApp?'} centered>
-                <Text size='sm'>{confirm === 'restart' ? 'This temporarily interrupts messaging. You may need to scan a new QR code.' : confirm === 'delete' ? 'This removes the session and stops messaging. Add your account again and link your phone to reconnect.' : 'This signs out your WhatsApp account and stops messaging. You will need to link your phone again to reconnect.'}</Text>
+                <Text size='sm'>{confirm === 'restart' ? 'This temporarily interrupts messaging. You may need to scan a new QR code.' : confirm === 'delete' ? 'This removes the session and stops messaging. Add your account again and link your phone to reconnect.' : 'This signs out your WhatsApp account. WAHA may immediately show a new QR code to link an account again. Use Remove connection to delete the session instead.'}</Text>
                 <Group justify='flex-end' mt='lg'>
                     <Button variant='default' data-autofocus onClick={() => setConfirm(null)}>Cancel</Button>
                     <Button color={confirm === 'restart' ? undefined : 'red'} disabled={disabled} onClick={() => { if (confirm) void perform(confirm); }}>{confirm === 'restart' ? 'Restart' : confirm === 'delete' ? 'Remove connection' : 'Disconnect'}</Button>

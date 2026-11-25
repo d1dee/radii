@@ -1,11 +1,12 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import { z } from 'zod';
-import { createWahaClient, parseWahaConfig, WahaError, type WahaConfig } from './waha';
+import { adminWhatsAppSessionName, createWahaClient, parseWahaConfig, WahaError, type WahaConfig, type WahaSessionConfig } from './waha';
 
 const storedSchema = z.object({
     baseUrl: z.string().default(''),
     apiKeyEncrypted: z.string().default(''),
     useGlobalConfig: z.boolean().default(false),
+    sessionName: z.union([z.literal(''), z.string().regex(/^radii_admin_[A-Za-z0-9_-]{8}$/)]).default(''),
 });
 export type StoredWahaSettings = z.infer<typeof storedSchema>;
 export const wahaSettingsInputSchema = z
@@ -145,6 +146,7 @@ export function createWahaSettingsService(
                 baseUrl: normalizedUrl,
                 apiKeyEncrypted,
                 useGlobalConfig: next.useGlobalConfig,
+                sessionName: current.sessionName || adminWhatsAppSessionName(),
             };
             // Explicit removal disables private integration without contacting a provider.
             // Otherwise partial active configuration is an error, not a saved draft.
@@ -158,30 +160,39 @@ export function createWahaSettingsService(
                     throw new WahaError('WAHA_INVALID_INPUT', 400, next.useGlobalConfig
                         ? 'Global WhatsApp configuration is incomplete. Ask the server operator to configure the WAHA URL and API key, or turn off global configuration.'
                         : 'Enter both a WAHA server URL and API key, or clear the URL or remove the saved key to disable WhatsApp.');
-                await createWahaClient(effective, transportOptions).validateConnection(adminId);
+                await createWahaClient({ ...effective, sessionName: candidate.sessionName }, transportOptions).validateConnection(adminId);
             }
             const settings = await store.update(adminId, (previous) => {
                 const latest = storedSchema.parse(previous ?? {});
                 if (latest.baseUrl !== current.baseUrl || latest.apiKeyEncrypted !== current.apiKeyEncrypted
-                    || latest.useGlobalConfig !== current.useGlobalConfig)
+                    || latest.useGlobalConfig !== current.useGlobalConfig || latest.sessionName !== current.sessionName)
                     throw new WahaError('WAHA_CONFLICT', 409, 'WhatsApp settings changed while checking the connection. Reload settings and try again.');
                 return candidate;
             });
             // Validation is read-only. Old sessions remain untouched.
             return publicSettings(adminId, settings);
         },
-        async resolve(adminId: string): Promise<WahaConfig> {
-            const settings = storedSchema.parse(
+        async resolve(adminId: string): Promise<WahaSessionConfig> {
+            let settings = storedSchema.parse(
                 (await store.read(adminId)) ?? {},
             );
-            if (settings.useGlobalConfig) return globalConfig;
+            if (!settings.useGlobalConfig && (!settings.baseUrl || !settings.apiKeyEncrypted))
+                return { baseUrl: '', apiKey: '', sessionName: settings.sessionName };
+            if (!settings.sessionName) {
+                // The store locks the admin row, so concurrent first reads reuse one name.
+                settings = await store.update(adminId, (previous) => {
+                    const latest = storedSchema.parse(previous ?? {});
+                    return { ...latest, sessionName: latest.sessionName || adminWhatsAppSessionName() };
+                });
+            }
+            if (settings.useGlobalConfig) return { ...globalConfig, sessionName: settings.sessionName };
             if (!settings.baseUrl || !settings.apiKeyEncrypted)
-                return { baseUrl: '', apiKey: '' };
+                return { baseUrl: '', apiKey: '', sessionName: settings.sessionName };
             try {
-                return parseWahaConfig(
+                return { ...parseWahaConfig(
                     settings.baseUrl,
                     decrypt(adminId, settings.apiKeyEncrypted),
-                );
+                ), sessionName: settings.sessionName };
             } catch {
                 // Never retry or fall back to global configuration on private errors.
                 throw new WahaError(
