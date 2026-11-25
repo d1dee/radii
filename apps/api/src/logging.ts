@@ -147,6 +147,17 @@ await globalRef.__apiLoggingConfigured;
 export const apiLogger = getLogger(['radii', 'api']);
 export { dispose as disposeLogging };
 
+// Explicit opt-in only: these codes grant account access. Keep ordinary OTP
+// fields redacted even when this dedicated debug entry is enabled.
+export function logOtpForDebug(channel: 'admin' | 'agent' | 'portal', type: string, code: string): void {
+    if (process.env.DEBUG_LOG_OTP !== 'true') return;
+    apiLogger.getChild('otp-debug').warn('Sensitive one-time debug code: {debugCode}', {
+        channel,
+        otpType: type,
+        debugCode: code,
+    });
+}
+
 export const httpLogger = honoLogger({
     category: ['radii', 'api', 'http'],
     format: (c, responseTime) => ({

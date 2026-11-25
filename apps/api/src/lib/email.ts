@@ -1,15 +1,11 @@
-// Admin-console transactional email, delivered through the Resend HTTP API.
-//
-// This is the ONLY email pipeline in the product: customer (portal) users
-// authenticate with phone+PIN and never receive email. Admin verification
-// uses 2FA-style one-time codes rendered by a dedicated admin template, so
-// admin and customer email concerns cannot collide.
+// Admin and external-agent transactional email through Resend. Customer
+// phone+PIN accounts remain separate and never receive these emails.
 //
 // When RESEND_API_KEY is not set, delivery is skipped and logged without
-// exposing the recipient or one-time code.
+// exposing the recipient or one-time code unless DEBUG_LOG_OTP=true.
 
 import { env } from '../env';
-import { apiLogger } from '../logging';
+import { apiLogger, logOtpForDebug } from '../logging';
 
 const logger = apiLogger.getChild('email');
 
@@ -78,6 +74,7 @@ function htmlFor({ email, otp, type }: AdminOtpEmailInput): string {
 export async function sendAdminOtpEmail(
     input: AdminOtpEmailInput,
 ): Promise<void> {
+    logOtpForDebug('admin', input.type, input.otp);
     if (!env.resend.apiKey) {
         logger.warn('Admin OTP email delivery skipped; Resend is not configured', {
             otpType: input.type,
@@ -107,4 +104,22 @@ export async function sendAdminOtpEmail(
     } catch (err) {
         logger.error('Could not reach Resend', { error: err });
     }
+}
+
+export async function sendAgentOtpEmail(input: AdminOtpEmailInput): Promise<void> {
+    logOtpForDebug('agent', input.type, input.otp);
+    if (!env.resend.apiKey) {
+        logger.warn('Agent OTP email delivery unavailable; Resend is not configured', { otpType: input.type });
+        return;
+    }
+    try {
+        const res = await fetch('https://api.resend.com/emails', {
+            method: 'POST', headers: { Authorization: `Bearer ${env.resend.apiKey}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ from: env.resend.from, to: input.email,
+                subject: input.type === 'forget-password' ? 'Your Radii agent password reset code' : 'Verify your Radii agent email',
+                text: `Radii Agent Portal\n\nYour ${input.type === 'forget-password' ? 'password reset' : 'email verification'} code is ${input.otp}. It expires in 5 minutes.\n\nIf you did not request this, ignore this email. Never share this code.`,
+            }),
+        });
+        if (!res.ok) logger.error('Resend rejected agent OTP email', { status: res.status });
+    } catch (error) { logger.error('Could not deliver agent OTP email', { error }); }
 }
