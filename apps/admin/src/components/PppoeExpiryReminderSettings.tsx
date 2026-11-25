@@ -151,7 +151,9 @@ export function PppoeExpiryReminderSettings({
                     ? 'Reminder settings saved'
                     : 'Could not save reminder settings',
                 message: result.success
-                    ? 'Your template and scheduling preferences were saved. Automatic delivery is unavailable; no reminders have been scheduled or sent.'
+                    ? parsedSchedule.data.enabled
+                        ? 'Automatic reminders are enabled. Eligible subscriptions are checked every minute and messages use your WhatsApp sending queue.'
+                        : 'Your reminder settings were saved. Automatic reminders are disabled.'
                     : result.message || 'Please try again.',
                 color: result.success ? 'green' : 'red',
             });
@@ -179,23 +181,25 @@ export function PppoeExpiryReminderSettings({
                     <div>
                         <Title order={4}>PPPoE Expiry Reminders</Title>
                         <Text size='sm' c='dimmed' mt={4}>
-                            Manage the reminder template and scheduling
-                            preferences for your PPPoE customers. These settings
+                            Manage automatic expiry reminders for your PPPoE
+                            customers. These settings
                             are private to your admin account.
                         </Text>
                     </div>
                     <Alert
-                        color='yellow'
-                        title='Automatic delivery unavailable'
+                        color='blue'
+                        title='Automatic WhatsApp reminders'
                     >
-                        No automatic reminder scheduler is installed. Saving
-                        these preferences does not schedule or send customer
-                        messages, even when the preference below is enabled.
+                        When enabled, eligible subscriptions are checked every minute.
+                        One reminder per subscription cycle is placed in your WhatsApp
+                        queue using your sending protections. Configure WhatsApp to
+                        enable delivery; offline sessions wait in the queue. Reminders
+                        are discarded at expiry or when the subscription is no longer current.
                     </Alert>
-                    <Title order={5}>Scheduling Preferences</Title>
+                    <Title order={5}>Reminder Schedule</Title>
                     <Switch
-                        label='Enable expiry reminders (preference only)'
-                        description='Stores your preference for a future automatic reminder scheduler.'
+                        label='Enable expiry reminders'
+                        description='Automatically queue reminders for your active, expiring PPPoE subscriptions.'
                         checked={enabled}
                         onChange={(event) =>
                             setEnabled(event.currentTarget.checked)
@@ -206,7 +210,7 @@ export function PppoeExpiryReminderSettings({
                         label='Reminder timing'
                         description={
                             timingMode === 'percentage'
-                                ? 'Remind when 1-99% of the subscription period remains. For example, 10% of 30 days is 3 days before expiry.'
+                                ? 'Remind when 1-99% of the saved activation-to-expiry period remains. For example, 10% of 30 days is 3 days before expiry.'
                                 : 'Days before expiry, up to 30 days, in whole-hour increments. For example, 0.5 days is 12 hours.'
                         }
                         value={

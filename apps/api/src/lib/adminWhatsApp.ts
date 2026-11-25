@@ -7,6 +7,7 @@ import { apiLogger } from '../logging';
 import { createWahaClient, WahaError, type WhatsAppAccepted, type WahaSessionConfig } from './waha';
 import { createWahaSettingsService } from './wahaSettings';
 import { createWhatsAppOutbox, emptyWhatsAppOutbox, invalidateWhatsAppConfiguration, wahaSafetyKey, wahaConfigIdentity, type WhatsAppOutboxStore } from './wahaOutbox';
+import { createPppoeExpiryReminderScheduler, isPppoeReminderCurrent } from './pppoeExpiryReminders';
 
 // Older Bun SQL writes could persist the document as a JSON string.
 const settingsDocument = sql`(case when jsonb_typeof(${adminSetting.settings}) = 'string' then (${adminSetting.settings} #>> '{}')::jsonb else ${adminSetting.settings} end)`;
@@ -66,20 +67,23 @@ export const adminWhatsAppSettings = createWahaSettingsService(
     env.wahaSettingsEncryptionKey,
 );
 
-export function createPostgresWhatsAppOutboxStore(database: typeof db): WhatsAppOutboxStore {
+// For callers already in a transaction, including atomic reminder+queue writes.
+export function createTransactionalWhatsAppOutboxStore(tx: Pick<typeof db, 'insert' | 'select' | 'update'>): WhatsAppOutboxStore {
     return {
         async change(key, adminId, change) {
-            return database.transaction(async (tx) => {
-                await tx.insert(whatsappOutbox).values({ sessionKey: key, adminId,
-                    state: sql`${JSON.stringify(emptyWhatsAppOutbox())}::text::jsonb` }).onConflictDoNothing();
-                const [row] = await tx.select().from(whatsappOutbox).where(eq(whatsappOutbox.sessionKey, key)).for('update');
-                if (!row || row.adminId !== adminId) throw new WahaError('WAHA_CONFLICT', 409, 'This WhatsApp session belongs to another admin.');
-                const result = change(row.state);
-                await tx.update(whatsappOutbox).set({ state: sql`${JSON.stringify(row.state)}::text::jsonb` }).where(eq(whatsappOutbox.sessionKey, key));
-                return result;
-            });
+            await tx.insert(whatsappOutbox).values({ sessionKey: key, adminId,
+                state: sql`${JSON.stringify(emptyWhatsAppOutbox())}::text::jsonb` }).onConflictDoNothing();
+            const [row] = await tx.select().from(whatsappOutbox).where(eq(whatsappOutbox.sessionKey, key)).for('update');
+            if (!row || row.adminId !== adminId) throw new WahaError('WAHA_CONFLICT', 409, 'This WhatsApp session belongs to another admin.');
+            const result = change(row.state);
+            await tx.update(whatsappOutbox).set({ state: sql`${JSON.stringify(row.state)}::text::jsonb` }).where(eq(whatsappOutbox.sessionKey, key));
+            return result;
         },
     };
+}
+export function createPostgresWhatsAppOutboxStore(database: typeof db): WhatsAppOutboxStore {
+    return { change: (key, adminId, change) => database.transaction((tx) =>
+        createTransactionalWhatsAppOutboxStore(tx).change(key, adminId, change)) };
 }
 const outboxStore = createPostgresWhatsAppOutboxStore(db);
 const outbox = createWhatsAppOutbox(outboxStore, {
@@ -199,6 +203,8 @@ export function startWhatsAppOutboxWorker() {
                         authorizeDelivery: async () => {
                             if (stopped || wahaConfigIdentity(await configuredSession(row.adminId)) !== job.configIdentity)
                                 throw new WahaError('WAHA_NOT_READY', 409, 'WhatsApp configuration changed or worker stopped before sending.');
+                            if (job.reminder && !await isPppoeReminderCurrent(db, row.adminId, job))
+                                throw new WahaError('WAHA_NOT_READY', 409, 'Subscription reminder is no longer applicable.');
                             await authorize();
                         },
                     });
@@ -240,6 +246,35 @@ export function startWhatsAppOutboxWorker() {
         } finally {
             if (!stopped) timer = setTimeout(() => { active = tick(); }, 5000);
         }
+    };
+    active = tick();
+    return async () => { stopped = true; clearTimeout(timer); await active; };
+}
+
+export function startPppoeExpiryReminderWorker() {
+    const scheduler = createPppoeExpiryReminderScheduler(db, {
+        enqueue: async (tx, adminId, input, reminder) => {
+            const config = await configuredSession(adminId);
+            const queue = createWhatsAppOutbox(createTransactionalWhatsAppOutboxStore(tx), {
+                configIdentity: async () => wahaConfigIdentity(config),
+            });
+            return queue.enqueue(wahaSafetyKey(adminId, config), adminId, input,
+                reminder.expiresAt - Date.now(), reminder);
+        },
+    });
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let active: Promise<void>;
+    let warnedAt = 0;
+    const warn = () => {
+        if (Date.now() - warnedAt < 300_000) return;
+        warnedAt = Date.now();
+        apiLogger.getChild('pppoe-reminders').warn('Some expiry reminders could not be queued. Check migrations, WhatsApp configuration and queue capacity; eligible reminders will be retried.');
+    };
+    const tick = async () => {
+        try { if ((await scheduler.tick()).failed) warn(); }
+        catch { warn(); }
+        finally { if (!stopped) timer = setTimeout(() => { active = tick(); }, 60_000); }
     };
     active = tick();
     return async () => { stopped = true; clearTimeout(timer); await active; };

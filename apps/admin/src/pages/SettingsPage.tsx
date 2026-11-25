@@ -691,19 +691,19 @@ function WhatsAppSettingsForm() {
     );
 }
 
-function MessagingSettingsForms() {
+function PackagesSettingsForms({ category }: { category: PreferenceCategory }) {
     const isSaving = useContext(SettingsSavingContext);
     const setDraft = useContext(SettingsDraftContext);
     const onReminderDraftChange = useCallback(
         (dirty: boolean, saving: boolean) => {
-            setDraft('messaging-reminders', dirty, saving);
+            setDraft('packages-reminders', dirty, saving);
         },
         [setDraft],
     );
 
     return (
         <Stack gap='lg'>
-            <WhatsAppSettingsForm />
+            <CategoryForm category={category} />
             <PppoeExpiryReminderSettings
                 disabled={isSaving}
                 onDraftChange={onReminderDraftChange}
@@ -863,7 +863,9 @@ export default function SettingsPage() {
                                     style={{ border: 0, minWidth: 0 }}
                                 >
                                     {item.id === 'messaging' ? (
-                                        <MessagingSettingsForms />
+                                        <WhatsAppSettingsForm />
+                                    ) : item.id === 'packages' ? (
+                                        <PackagesSettingsForms category={item} />
                                     ) : (
                                         <CategoryForm category={item} />
                                     )}

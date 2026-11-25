@@ -11,7 +11,7 @@ export const settingsCategories = [
         id: 'packages',
         label: 'Packages & PPPoE',
         icon: MdRouter,
-        description: 'Manage package validity, connection fees, and PPPoE self-service.',
+        description: 'Manage package validity, connection fees, PPPoE self-service, and expiry reminders.',
     },
     {
         id: 'payments',
@@ -23,6 +23,6 @@ export const settingsCategories = [
         id: 'messaging',
         label: 'Messaging',
         icon: MdMessage,
-        description: 'Manage WhatsApp configuration, sending protection, and PPPoE reminder templates and scheduling preferences.',
+        description: 'Manage WhatsApp configuration and sending protection.',
     },
 ] as const;

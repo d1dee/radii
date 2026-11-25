@@ -17,6 +17,7 @@ export type WhatsAppJob = {
     createdAt: number; expiresAt: number; startedAt?: number; result?: string;
     requestHash: string;
     configIdentity: string;
+    reminder?: { activationId: string; activatedAt: number; expiresAt: number };
     preview?: string; previewExpiresAt?: number;
     messageId?: string; messageTimestamp?: number; sentAt?: number; ack?: number; receiptCheckedAt?: number; nextReceiptAt?: number;
 };
@@ -82,7 +83,7 @@ export function createWhatsAppOutbox(store: WhatsAppOutboxStore, options: {
         }
     };
     return {
-        async enqueue(key: string, adminId: string, input: unknown, lifetimeMs = 86_400_000): Promise<WhatsAppAccepted> {
+        async enqueue(key: string, adminId: string, input: unknown, lifetimeMs = 86_400_000, reminder?: WhatsAppJob['reminder']): Promise<WhatsAppAccepted> {
             const parsed = adminWhatsAppBatchSchema.safeParse(input);
             if (!parsed.success) throw new WahaError('WAHA_INVALID_INPUT', 400, 'Provide 1-50 international recipients, 1-4096 text characters and a request ID.');
             const data = parsed.data;
@@ -103,7 +104,8 @@ export function createWhatsAppOutbox(store: WhatsAppOutboxStore, options: {
                 if (s.jobs.length + phones.length > 500)
                     throw new WahaError('WAHA_RATE_LIMITED', 429, 'Daily WhatsApp outbox limit reached. Rest and try tomorrow.');
                 for (const phone of phones) s.jobs.push({ id: randomUUID(), batchId: data.requestId, phone,
-                    text: data.text, requestHash, configIdentity, status: 'queued', createdAt: now(), expiresAt: now() + lifetimeMs,
+                    text: data.text, requestHash, configIdentity, status: 'queued', createdAt: now(), expiresAt: Math.min(now() + lifetimeMs, reminder?.expiresAt ?? Infinity),
+                    ...(reminder ? { reminder } : {}),
                     ...(lifetimeMs >= 86_400_000 ? { preview: data.text, previewExpiresAt: now() + 86_400_000 } : {}) });
                 return { ok: true, queued: true, batchId: data.requestId };
             });

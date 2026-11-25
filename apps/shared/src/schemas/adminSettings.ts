@@ -218,7 +218,7 @@ export function renderPppoeExpiryReminderTemplate(
     );
 }
 
-// Scheduling preferences only; no automatic delivery worker currently consumes them.
+// The API reminder worker consumes these per-admin settings every minute.
 export const pppoeExpiryReminderScheduleSchema = z.object({
     enabled: z.boolean().default(false),
     timingMode: z.enum(['hours', 'percentage']).default('hours'),
