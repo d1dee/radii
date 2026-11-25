@@ -1647,6 +1647,7 @@ export type WhatsAppConfig = {
     baseUrl: string;
     useGlobalConfig: boolean;
     hasApiKey: boolean;
+    apiKeyPreview: string | null;
     globalConfigured: boolean;
     configured: boolean;
 };

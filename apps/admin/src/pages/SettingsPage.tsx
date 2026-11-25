@@ -373,8 +373,10 @@ function WhatsAppSettingsForm() {
         const validation = validateWhatsAppConfig(input);
         if (validation) {
             setError(validation);
+            notifySaved('Could not save Messaging', false, validation);
             return;
         }
+        const replacingKey = Boolean(input.apiKey);
         const controller = new AbortController();
         operation.current = controller;
         setSaving(true);
@@ -391,7 +393,7 @@ function WhatsAppSettingsForm() {
                 resetConfig(result.data);
                 notifySaved('Messaging saved', true);
             } else {
-                const message = `${result.success ? 'The server returned invalid configuration.' : result.message} Re-enter any replacement API key before retrying.`;
+                const message = `${result.success ? 'The server returned invalid configuration.' : result.message}${replacingKey ? ' Re-enter the replacement API key before retrying.' : ''}`;
                 setError(message);
                 notifySaved('Could not save Messaging', false, message);
             }
@@ -568,7 +570,11 @@ function WhatsAppSettingsForm() {
                                         disconnect or remove the former
                                         provider's WhatsApp session. Disconnect
                                         it before switching if needed. Saving
-                                        does not perform any session actions.
+                                        first checks the connection using a
+                                        read-only session request and does not
+                                        create, disconnect or delete sessions.
+                                        Clear the private URL or remove its saved
+                                        key to disable without a connection check.
                                     </Alert>
                                 </Stack>
                             </Fieldset>

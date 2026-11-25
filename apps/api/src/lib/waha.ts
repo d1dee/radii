@@ -73,7 +73,7 @@ export function createWahaClient(source: WahaConfig | ((adminId: string) => Prom
         }
         return name;
     }
-    async function request(config: WahaConfig, path: string, method = 'GET', body?: unknown, json = true): Promise<unknown> {
+    async function request(config: WahaConfig, path: string, method = 'GET', body?: unknown, json = true, validationName?: string): Promise<unknown> {
         if (!config.baseUrl || !config.apiKey) throw new WahaError('WAHA_DISABLED', 503, 'WhatsApp integration is not configured.');
         const signal = AbortSignal.timeout(options.timeoutMs ?? 10_000);
         try {
@@ -82,7 +82,22 @@ export function createWahaClient(source: WahaConfig | ((adminId: string) => Prom
                 headers: { 'X-Api-Key': config.apiKey, Accept: 'application/json', ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
                 body: body === undefined ? undefined : JSON.stringify(body),
             });
-            if (!response.ok) {
+            if (validationName && !response.ok && response.status !== 404) {
+                await response.body?.cancel();
+                const message = response.status === 401
+                    ? 'WAHA rejected the API key. Check the key and try again.'
+                    : response.status === 403
+                      ? 'WAHA denied access to this admin session. Check the API key permissions and session scope.'
+                      : response.status >= 500
+                        ? 'The WAHA server reported an error. Check the service and try again.'
+                        : response.status === 429
+                          ? 'WAHA is limiting requests. Wait a moment and try again.'
+                          : response.status >= 300 && response.status < 400
+                            ? 'The WAHA URL redirects elsewhere. Enter the final WAHA server origin.'
+                            : 'WAHA could not read this named session. Check the URL, API key scope and support for multiple named sessions.';
+                throw new WahaError('WAHA_UNAVAILABLE', 502, message);
+            }
+            if (!response.ok && !(validationName && response.status === 404)) {
                 await response.body?.cancel();
                 if (response.status === 404) throw new WahaError('WAHA_NOT_FOUND', 404, 'WhatsApp session not found.');
                 if ([409, 422].includes(response.status)) throw new WahaError('WAHA_CONFLICT', 409, 'WhatsApp session cannot perform this operation. Check its status and that WAHA supports multiple named sessions.');
@@ -101,10 +116,44 @@ export function createWahaClient(source: WahaConfig | ((adminId: string) => Prom
                 if (size > 512_000) { await reader.cancel(); throw new Error(); }
                 chunks.push(value);
             }
-            return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+            const data: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+            if (validationName && response.status === 404) {
+                // A generic proxy/router 404 does not prove this is a WAHA endpoint.
+                const missing = z.object({ statusCode: z.literal(404), error: z.literal('Not Found'), message: z.literal('Session not found') }).safeParse(data);
+                if (missing.success) return undefined;
+                throw new WahaError('WAHA_UNAVAILABLE', 502, 'The URL did not return a recognizable WAHA session response. Check the server URL and named-session support.');
+            }
+            return data;
         } catch (error) {
             if (error instanceof WahaError) throw error;
             if (signal.aborted) throw new WahaError('WAHA_TIMEOUT', 504, 'WhatsApp service request timed out.');
+            if (validationName) {
+                // Inspect only to classify; never expose transport messages, URLs or bodies.
+                const details: string[] = [];
+                let cause: unknown = error;
+                for (let depth = 0; depth < 4 && cause && typeof cause === 'object'; depth++) {
+                    const item = cause as { code?: unknown; message?: unknown; cause?: unknown };
+                    details.push(String(item.code ?? ''), String(item.message ?? ''));
+                    cause = item.cause;
+                }
+                const diagnostic = details.join(' ');
+                const message = /ALTNAME|HOSTNAME|hostname.*(match|mismatch)/i.test(diagnostic)
+                    ? 'The WAHA HTTPS certificate does not match the server hostname. Ask the server operator to fix the certificate or URL.'
+                    : /CERT_HAS_EXPIRED|certificate.*expired/i.test(diagnostic)
+                      ? 'The WAHA HTTPS certificate has expired. Ask the server operator to renew it.'
+                      : /CERT|TLS|SSL|SELF_SIGNED|UNABLE_TO_VERIFY|LOCAL_ISSUER/i.test(diagnostic)
+                        ? 'The WAHA HTTPS certificate could not be verified. Ask the server operator to install a valid certificate and complete certificate chain.'
+                        : /ENOTFOUND|EAI_AGAIN|DNS/i.test(diagnostic)
+                          ? 'The WAHA server hostname could not be resolved. Check the URL and server DNS.'
+                          : /ECONNREFUSED/i.test(diagnostic)
+                            ? 'The WAHA server refused the connection. Check the server port and that WAHA is running.'
+                            : /TIMEOUT|TIMEDOUT/i.test(diagnostic)
+                              ? 'The WAHA connection timed out. Check server connectivity and try again.'
+                              : /ENETUNREACH|EHOSTUNREACH|ECONNRESET|connection.*closed|fetch failed|failed to fetch|unable to connect/i.test(diagnostic)
+                                ? 'The WAHA server could not be reached. Check the URL, network and firewall.'
+                                : 'The server did not return a valid WAHA session response. Check that the URL points to WAHA.';
+                throw new WahaError('WAHA_UNAVAILABLE', 502, message);
+            }
             throw new WahaError('WAHA_UNAVAILABLE', 502, 'WhatsApp service returned an invalid response or is unavailable.');
         }
     }
@@ -120,6 +169,12 @@ export function createWahaClient(source: WahaConfig | ((adminId: string) => Prom
         }
     }
     return {
+        async validateConnection(adminId: string): Promise<void> {
+            const name = adminWhatsAppSessionName(adminId);
+            const data = await request(await resolveConfig(adminId), `/api/sessions/${name}`, 'GET', undefined, true, name);
+            if (data !== undefined && !z.object({ name: z.literal(name), status: sessionStatusSchema }).safeParse(data).success)
+                throw new WahaError('WAHA_UNAVAILABLE', 502, 'The server did not return a valid WAHA session response. Check that the URL points to WAHA.');
+        },
         async getStatus(adminId: string) {
             const name = limit(adminId, 'read');
             return status(await resolveConfig(adminId), name);

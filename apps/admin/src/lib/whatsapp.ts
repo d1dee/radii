@@ -17,6 +17,8 @@ export function isWhatsAppConfig(value: unknown): value is WhatsAppConfig {
     const config = value as WhatsAppConfig;
     return typeof config.baseUrl === 'string' && typeof config.useGlobalConfig === 'boolean'
         && typeof config.hasApiKey === 'boolean' && typeof config.globalConfigured === 'boolean'
+        && (config.apiKeyPreview === null || (config.hasApiKey && typeof config.apiKeyPreview === 'string'
+            && /^[\x21-\x7e]{0,4}\*{3,}$/.test(config.apiKeyPreview)))
         && typeof config.configured === 'boolean';
 }
 
