@@ -54,6 +54,7 @@ import { useAdminSettings } from '@/lib/settings';
 import { settingsCategories } from '@/lib/settingsCategories';
 import { isWhatsAppConfig, validateWhatsAppConfig } from '@/lib/whatsapp';
 import { TbInfoTriangle } from 'react-icons/tb';
+import classes from './SettingsPage.module.css';
 
 const SettingsDraftContext = createContext<
     (category: string, dirty: boolean, saving: boolean) => void
@@ -512,6 +513,13 @@ function WhatsAppSettingsForm() {
                                         ref={apiKeyInput}
                                         label='Private WAHA API key'
                                         description='Enter a replacement key, or leave blank to keep the saved key. Key entry is cleared when saving or switching modes.'
+                                        placeholder={
+                                            config?.apiKeyPreview ?? undefined
+                                        }
+                                        classNames={{
+                                            innerInput:
+                                                classes.privateApiKeyInput,
+                                        }}
                                         autoComplete='new-password'
                                         maxLength={4096}
                                         disabled={
@@ -524,10 +532,18 @@ function WhatsAppSettingsForm() {
                                                     .length > 0,
                                             )
                                         }
-                                    />{' '}
-                                    <Text size='sm' role='status'>
+                                    />
+                                    <Text
+                                        size='sm'
+                                        role='status'
+                                        c={
+                                            config?.hasApiKey
+                                                ? 'green'
+                                                : 'orange'
+                                        }
+                                    >
                                         {config?.hasApiKey
-                                            ? 'A private API key is saved. It is never displayed.'
+                                            ? 'A private API key is saved.'
                                             : 'No private API key is saved.'}
                                     </Text>
                                     <Checkbox

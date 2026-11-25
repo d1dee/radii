@@ -1,0 +1,4 @@
+.privateApiKeyInput::placeholder {
+    -webkit-text-security: none;
+    font-family: var(--mantine-font-family);
+}
