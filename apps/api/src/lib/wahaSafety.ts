@@ -6,7 +6,7 @@ export const wahaSafetySchema = z.preprocess((value) => {
     const { batchSize: _batch, restMinutes: _rest, ...settings } = value as Record<string, unknown>;
     return settings;
 }, z.object({
-    minDelaySeconds: z.number().int().min(30).max(3599).default(30),
+    minDelaySeconds: z.number().int().min(0).max(3599).default(30),
     maxDelaySeconds: z.number().int().min(31).max(3600).default(60),
     perContactHourlyLimit: z.number().int().min(1).max(4).default(4),
 }).strict().refine((value) => value.maxDelaySeconds > value.minDelaySeconds, {

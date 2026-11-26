@@ -60,7 +60,9 @@ export default function MessagingPage() {
     const [busy, setBusy] = useState('');
     const [cooldown, setCooldown] = useState(false);
     const [revision, setRevision] = useState(0);
-    const [confirm, setConfirm] = useState<WhatsAppAction | 'resume' | null>(null);
+    const [confirm, setConfirm] = useState<WhatsAppAction | 'resume' | null>(
+        null,
+    );
     const [mode, setMode] = useState('single');
     const [recipients, setRecipients] = useState<string[]>([]);
     const [confirmSend, setConfirmSend] = useState(false);
@@ -180,7 +182,9 @@ export default function MessagingPage() {
                     setError('');
                     if (
                         result.data.configured &&
-                        ['STARTING', 'SCAN_QR_CODE'].includes(result.data.status)
+                        ['STARTING', 'SCAN_QR_CODE'].includes(
+                            result.data.status,
+                        )
                     ) {
                         delay = 5_000;
                         const image = await getWhatsAppQr(controller.signal);
@@ -215,8 +219,8 @@ export default function MessagingPage() {
                             setQr(null);
                             setQrError(
                                 !image.success &&
-                                nextSession.status === 'STARTING' &&
-                                image.data?.code === 'WAHA_NOT_READY'
+                                    nextSession.status === 'STARTING' &&
+                                    image.data?.code === 'WAHA_NOT_READY'
                                     ? ''
                                     : image.success
                                       ? 'The server returned an invalid QR image.'
@@ -250,7 +254,9 @@ export default function MessagingPage() {
         };
     }, [busy, revision]);
 
-    async function perform(action: WhatsAppAction | 'send' | 'cancel' | 'resume') {
+    async function perform(
+        action: WhatsAppAction | 'send' | 'cancel' | 'resume',
+    ) {
         if (
             operation.current ||
             (action !== 'send' && Date.now() < blockedUntil.current) ||
@@ -297,7 +303,10 @@ export default function MessagingPage() {
                       ? await cancelWhatsAppOutbox(controller.signal)
                       : action === 'resume'
                         ? await resumeWhatsAppOutbox(controller.signal)
-                        : await controlWhatsAppSession(action, controller.signal);
+                        : await controlWhatsAppSession(
+                              action,
+                              controller.signal,
+                          );
             if (controller.signal.aborted) return;
             const ok =
                 result.success &&
@@ -343,7 +352,9 @@ export default function MessagingPage() {
             }
             if (
                 ok &&
-                (action === 'send' || action === 'cancel' || action === 'resume')
+                (action === 'send' ||
+                    action === 'cancel' ||
+                    action === 'resume')
             ) {
                 const queue = await getWhatsAppOutbox(controller.signal);
                 if (controller.signal.aborted) return;
@@ -826,11 +837,11 @@ export default function MessagingPage() {
                             <Alert color='orange' title='Sending paused'>
                                 <Stack gap='sm'>
                                     <Text size='sm'>
-                                        WhatsApp reported a restriction (463/475).
-                                        Do not restart, log out or re-pair. After
-                                        the operator has reviewed and resolved
-                                        the restriction, check the connection
-                                        and resume the queue below.
+                                        WhatsApp reported a restriction
+                                        (463/475). Do not restart, log out or
+                                        re-pair. After the operator has reviewed
+                                        and resolved the restriction, check the
+                                        connection and resume the queue below.
                                     </Text>
                                     <Button
                                         variant='light'
@@ -916,10 +927,9 @@ export default function MessagingPage() {
                                     }
                                 />
                                 <Text size='xs' c='dimmed'>
-                                    Single tick: sent to WhatsApp. Green double
-                                    tick: delivered to device. Blue double tick:
-                                    read. Previews are retained for 24 hours;
-                                    private short-lived messages are not shown.
+                                    Service accepted: accepted for sending, not
+                                    confirmed delivered. Queued: waiting to send.
+                                    Cancelled: sending cancelled.
                                 </Text>
                                 <ScrollArea.Autosize mah={480}>
                                     <Stack gap='sm'>
@@ -1078,8 +1088,8 @@ export default function MessagingPage() {
                     </Text>
                     <Text size='xs' c='dimmed'>
                         You can leave this page after queueing. Processing
-                        includes random pacing and per-contact limits. Failed
-                        or uncertain attempts are never automatically resent.
+                        includes random pacing and per-contact limits. Failed or
+                        uncertain attempts are never automatically resent.
                     </Text>
                     <Group justify='flex-end'>
                         <Button
@@ -1138,7 +1148,8 @@ export default function MessagingPage() {
                         }
                         disabled={
                             disabled ||
-                            (confirm === 'resume' && session?.status !== 'WORKING')
+                            (confirm === 'resume' &&
+                                session?.status !== 'WORKING')
                         }
                         onClick={() => {
                             if (confirm) void perform(confirm);

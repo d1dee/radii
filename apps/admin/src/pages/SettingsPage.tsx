@@ -581,8 +581,8 @@ function WhatsAppSettingsForm() {
                                         <Grid.Col span={{ base: 12, sm: 6 }}>
                                             <NumberInput
                                                 label='Minimum delay (seconds)'
-                                                description='At least 30 seconds between messages.'
-                                                min={30}
+                                                description='Minimum wait between messages; can be 0 seconds.'
+                                                min={0}
                                                 max={3599}
                                                 allowDecimal={false}
                                                 {...form.getInputProps(
