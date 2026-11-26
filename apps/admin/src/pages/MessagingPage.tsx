@@ -36,6 +36,7 @@ import {
     getWhatsAppOutbox,
     getWhatsAppQr,
     getWhatsAppSession,
+    resumeWhatsAppOutbox,
     sendWhatsAppText,
     type WhatsAppAction,
     type WhatsAppOutbox,
@@ -59,7 +60,7 @@ export default function MessagingPage() {
     const [busy, setBusy] = useState('');
     const [cooldown, setCooldown] = useState(false);
     const [revision, setRevision] = useState(0);
-    const [confirm, setConfirm] = useState<WhatsAppAction | null>(null);
+    const [confirm, setConfirm] = useState<WhatsAppAction | 'resume' | null>(null);
     const [mode, setMode] = useState('single');
     const [recipients, setRecipients] = useState<string[]>([]);
     const [confirmSend, setConfirmSend] = useState(false);
@@ -249,7 +250,7 @@ export default function MessagingPage() {
         };
     }, [busy, revision]);
 
-    async function perform(action: WhatsAppAction | 'send' | 'cancel') {
+    async function perform(action: WhatsAppAction | 'send' | 'cancel' | 'resume') {
         if (
             operation.current ||
             (action !== 'send' && Date.now() < blockedUntil.current) ||
@@ -294,7 +295,9 @@ export default function MessagingPage() {
                       )
                     : action === 'cancel'
                       ? await cancelWhatsAppOutbox(controller.signal)
-                      : await controlWhatsAppSession(action, controller.signal);
+                      : action === 'resume'
+                        ? await resumeWhatsAppOutbox(controller.signal)
+                        : await controlWhatsAppSession(action, controller.signal);
             if (controller.signal.aborted) return;
             const ok =
                 result.success &&
@@ -309,7 +312,9 @@ export default function MessagingPage() {
                     ? 'Recipients queued. Messages are processed with pacing and safety checks. Review results below; delivery is not confirmed.'
                     : action === 'cancel'
                       ? 'Queued recipients cancelled. An in-progress send may still finish.'
-                      : 'Session action accepted. Checking connection status...'
+                      : action === 'resume'
+                        ? 'Queue resumed after checking the connection. Pacing and contact limits still apply; failed or uncertain messages are not retried.'
+                        : 'Session action accepted. Checking connection status...'
                 : `${result.success ? 'The server returned an invalid response.' : result.message}${action === 'send' ? ' Sending was not confirmed. Check WhatsApp before retrying to avoid a duplicate.' : ''}`;
             notifications.show({
                 title:
@@ -317,9 +322,13 @@ export default function MessagingPage() {
                         ? ok
                             ? 'Message queued'
                             : 'Queueing not confirmed'
-                        : ok
-                          ? 'Session action accepted'
-                          : 'Session action failed',
+                        : action === 'resume' || action === 'cancel'
+                          ? ok
+                              ? 'Queue updated'
+                              : 'Queue action failed'
+                          : ok
+                            ? 'Session action accepted'
+                            : 'Session action failed',
                 message,
                 color: ok ? 'green' : 'red',
             });
@@ -329,10 +338,13 @@ export default function MessagingPage() {
                     pendingRequest.current = { fingerprint: '', id: '' };
                     form.setFieldValue('text', '');
                 }
-            } else {
+            } else if (action !== 'cancel' && action !== 'resume') {
                 setSession(null);
             }
-            if (ok && (action === 'send' || action === 'cancel')) {
+            if (
+                ok &&
+                (action === 'send' || action === 'cancel' || action === 'resume')
+            ) {
                 const queue = await getWhatsAppOutbox(controller.signal);
                 if (controller.signal.aborted) return;
                 if (queue.success && isWhatsAppOutbox(queue.data)) {
@@ -812,10 +824,34 @@ export default function MessagingPage() {
                         )}
                         {outbox?.paused && (
                             <Alert color='orange' title='Sending paused'>
-                                WhatsApp reported a restriction (463/475). Do
-                                not restart, log out or re-pair. The operator
-                                must review the restriction before sending can
-                                resume.
+                                <Stack gap='sm'>
+                                    <Text size='sm'>
+                                        WhatsApp reported a restriction (463/475).
+                                        Do not restart, log out or re-pair. After
+                                        the operator has reviewed and resolved
+                                        the restriction, check the connection
+                                        and resume the queue below.
+                                    </Text>
+                                    <Button
+                                        variant='light'
+                                        color='orange'
+                                        disabled={
+                                            disabled ||
+                                            session?.status !== 'WORKING'
+                                        }
+                                        loading={busy === 'resume'}
+                                        onClick={() => setConfirm('resume')}
+                                        style={{ alignSelf: 'flex-start' }}
+                                    >
+                                        Review and resume queue
+                                    </Button>
+                                    {session?.status !== 'WORKING' && (
+                                        <Text size='xs'>
+                                            The connection must report Connected
+                                            before the queue can resume.
+                                        </Text>
+                                    )}
+                                </Stack>
                             </Alert>
                         )}
                         {outbox && outbox.jobs.length > 0 ? (
@@ -836,13 +872,23 @@ export default function MessagingPage() {
                                     }{' '}
                                     pending. Accepted does not mean delivered.
                                 </Text>
+                                {!outbox.paused && outbox.waitingReason && (
+                                    <Alert
+                                        color='yellow'
+                                        title='Queue waiting'
+                                        role='status'
+                                    >
+                                        {outbox.waitingReason}
+                                    </Alert>
+                                )}
                                 {!outbox.paused &&
+                                    !outbox.waitingReason &&
                                     outbox.jobs.some(
                                         (j) => j.status === 'queued',
                                     ) &&
                                     outbox.nextAt > Date.now() && (
                                         <Text size='xs' c='dimmed'>
-                                            Pacing or rest break active. Next
+                                            Safety pacing active. Next
                                             processing opportunity in about{' '}
                                             {Math.max(
                                                 1,
@@ -1032,7 +1078,7 @@ export default function MessagingPage() {
                     </Text>
                     <Text size='xs' c='dimmed'>
                         You can leave this page after queueing. Processing
-                        includes random pacing and hour-long rest breaks. Failed
+                        includes random pacing and per-contact limits. Failed
                         or uncertain attempts are never automatically resent.
                     </Text>
                     <Group justify='flex-end'>
@@ -1055,20 +1101,24 @@ export default function MessagingPage() {
                 opened={confirm !== null}
                 onClose={() => setConfirm(null)}
                 title={
-                    confirm === 'restart'
-                        ? 'Restart WhatsApp connection?'
-                        : confirm === 'delete'
-                          ? 'Remove WhatsApp connection?'
-                          : 'Disconnect WhatsApp?'
+                    confirm === 'resume'
+                        ? 'Resume WhatsApp queue?'
+                        : confirm === 'restart'
+                          ? 'Restart WhatsApp connection?'
+                          : confirm === 'delete'
+                            ? 'Remove WhatsApp connection?'
+                            : 'Disconnect WhatsApp?'
                 }
                 centered
             >
                 <Text size='sm'>
-                    {confirm === 'restart'
-                        ? 'This temporarily interrupts messaging. You may need to scan a new QR code.'
-                        : confirm === 'delete'
-                          ? 'This removes the session and stops messaging. Add your account again and link your phone to reconnect.'
-                          : 'This signs out your WhatsApp account. WAHA may immediately show a new QR code to link an account again. Use Remove connection to delete the session instead.'}
+                    {confirm === 'resume'
+                        ? 'Only continue after the operator has reviewed and resolved the WhatsApp restriction. The server will verify the connection again before resuming queued messages. Safety pacing and contact limits remain in effect. Failed, uncertain and already accepted messages will not be resent.'
+                        : confirm === 'restart'
+                          ? 'This temporarily interrupts messaging. You may need to scan a new QR code.'
+                          : confirm === 'delete'
+                            ? 'This removes the session and stops messaging. Add your account again and link your phone to reconnect.'
+                            : 'This signs out your WhatsApp account. WAHA may immediately show a new QR code to link an account again. Use Remove connection to delete the session instead.'}
                 </Text>
                 <Group justify='flex-end' mt='lg'>
                     <Button
@@ -1079,17 +1129,28 @@ export default function MessagingPage() {
                         Cancel
                     </Button>
                     <Button
-                        color={confirm === 'restart' ? undefined : 'red'}
-                        disabled={disabled}
+                        color={
+                            confirm === 'resume'
+                                ? 'orange'
+                                : confirm === 'restart'
+                                  ? undefined
+                                  : 'red'
+                        }
+                        disabled={
+                            disabled ||
+                            (confirm === 'resume' && session?.status !== 'WORKING')
+                        }
                         onClick={() => {
                             if (confirm) void perform(confirm);
                         }}
                     >
-                        {confirm === 'restart'
-                            ? 'Restart'
-                            : confirm === 'delete'
-                              ? 'Remove connection'
-                              : 'Disconnect'}
+                        {confirm === 'resume'
+                            ? 'Restriction reviewed, resume'
+                            : confirm === 'restart'
+                              ? 'Restart'
+                              : confirm === 'delete'
+                                ? 'Remove connection'
+                                : 'Disconnect'}
                     </Button>
                 </Group>
             </Modal>

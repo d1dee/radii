@@ -71,6 +71,7 @@ export function isWhatsAppOutbox(value: unknown): value is WhatsAppOutbox {
     if (!value || typeof value !== 'object') return false;
     const outbox = value as WhatsAppOutbox;
     return typeof outbox.paused === 'boolean' && Number.isFinite(outbox.nextAt)
+        && (outbox.waitingReason === undefined || (typeof outbox.waitingReason === 'string' && outbox.waitingReason.length <= 1000))
         && Array.isArray(outbox.jobs) && outbox.jobs.length <= 100
         && outbox.jobs.every((j) => j && typeof j.id === 'string' && typeof j.batchId === 'string'
             && typeof j.phone === 'string' && /^\d{8,15}$/.test(j.phone)

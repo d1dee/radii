@@ -24,11 +24,26 @@ export type WhatsAppJob = {
 };
 export type WhatsAppOutboxState = {
     jobs: WhatsAppJob[]; nextAt: number; paused: boolean;
+    restrictionToken?: string;
+    waitingReason?: string;
     windowStart: number; count: number;
     attempts: { phone: string; at: number }[];
     receiptsNextAt?: number;
     schedulingVersion?: 1;
 };
+export const whatsAppWaitingReasons = {
+    restricted: 'Sending is paused after a WhatsApp restriction. Wait for it to lift, then resume the queue. Do not restart, log out or re-pair.',
+    unavailable: 'Waiting for the WhatsApp service. Check the connection and API credentials.',
+    session: 'Waiting for the configured WhatsApp session to be WORKING.',
+    configuration: 'Waiting for valid WhatsApp configuration.',
+    contact: 'Waiting for the per-contact hourly safety limit.',
+} as const;
+export function restrictWhatsAppOutbox(state: WhatsAppOutboxState) {
+    state.paused = true;
+    // Every restriction observation invalidates in-flight recovery checks.
+    state.restrictionToken = randomUUID();
+    state.waitingReason = whatsAppWaitingReasons.restricted;
+}
 export const emptyWhatsAppOutbox = (): WhatsAppOutboxState => ({
     jobs: [], nextAt: 0, paused: false, windowStart: 0, count: 0, attempts: [], schedulingVersion: 1,
 });
@@ -53,6 +68,9 @@ export function applyWhatsAppReceipt(job: WhatsAppJob, receipt: WhatsAppReceipt)
     if ((job.ack ?? 0) >= 1 && job.messageTimestamp !== undefined) job.sentAt ??= job.messageTimestamp;
 }
 export function invalidateWhatsAppConfiguration(state: WhatsAppOutboxState, currentIdentity: string | null) {
+    // Settings edits invalidate in-flight recovery even when credentials change
+    // back before its final identity check, or the queue has no pending jobs.
+    if (currentIdentity === null) state.restrictionToken = randomUUID();
     for (const job of state.jobs) {
         if (job.configIdentity === currentIdentity) continue;
         if (job.status === 'queued') {
@@ -126,9 +144,35 @@ export function createWhatsAppOutbox(store: WhatsAppOutboxStore, options: {
         async view(key: string, adminId: string) {
             return store.change(key, adminId, (s) => {
                 settle(s);
-                return { paused: s.paused, nextAt: s.nextAt,
+                const waitingReason = !s.jobs.some((job) => job.status === 'queued') ? undefined
+                    : s.paused ? whatsAppWaitingReasons.restricted
+                    : Object.values(whatsAppWaitingReasons).includes(s.waitingReason as typeof whatsAppWaitingReasons[keyof typeof whatsAppWaitingReasons]) ? s.waitingReason : undefined;
+                return { paused: s.paused, nextAt: s.nextAt, ...(waitingReason ? { waitingReason } : {}),
                     jobs: s.jobs.map(({ text: _text, requestHash: _hash, configIdentity: _config,
                         messageId: _id, messageTimestamp: _timestamp, nextReceiptAt: _next, previewExpiresAt: _expiry, ...job }) => job).slice(-100) };
+            });
+        },
+        async resume(key: string, adminId: string, verify: () => Promise<{ configured: boolean; status: string }>, expectedIdentity?: string) {
+            const identity = expectedIdentity ?? await options.configIdentity(adminId);
+            const token = await store.change(key, adminId, (s) => s.restrictionToken);
+            let status: { configured: boolean; status: string };
+            try { status = await verify(); }
+            catch (error) {
+                if (error instanceof WahaError && error.code === 'WAHA_RESTRICTED')
+                    await store.change(key, adminId, restrictWhatsAppOutbox);
+                throw error;
+            }
+            if (!status.configured || status.status !== 'WORKING')
+                throw new WahaError('WAHA_NOT_READY', 409, whatsAppWaitingReasons.session);
+            if (await options.configIdentity(adminId) !== identity)
+                throw new WahaError('WAHA_CONFLICT', 409, 'WhatsApp configuration changed during recovery. Check the current session and try again.');
+            return store.change(key, adminId, (s) => {
+                if (s.restrictionToken !== token)
+                    throw new WahaError('WAHA_RESTRICTED', 409, 'WhatsApp settings or restrictions changed during recovery. Check the connection and restriction before trying again.');
+                s.paused = false;
+                delete s.waitingReason;
+                // Never reset pacing, contact history, claims or terminal results.
+                return { ok: true as const };
             });
         },
         async cancel(key: string, adminId: string) {
@@ -181,7 +225,7 @@ export function createWhatsAppOutbox(store: WhatsAppOutboxStore, options: {
                 await store.change(key, adminId, (s) => {
                     const current = s.jobs.find((j) => j.id === job.id);
                     if (!current || current.status !== 'accepted' || current.configIdentity !== currentIdentity) return;
-                    s.paused ||= restricted;
+                    if (restricted) restrictWhatsAppOutbox(s);
                     current.receiptCheckedAt = now();
                     if (receipt && receipt.messageId === current.messageId) applyWhatsAppReceipt(current, receipt);
                     else current.nextReceiptAt = now() + 900_000;
@@ -204,8 +248,11 @@ export function createWhatsAppOutbox(store: WhatsAppOutboxStore, options: {
                 const next = s.jobs.find((j) => j.priority === 'otp' && eligible(j)) ?? s.jobs.find(eligible);
                 if (!next) {
                     s.nextAt = time + 60_000;
+                    if (s.jobs.some((j) => j.status === 'queued')) s.waitingReason = whatsAppWaitingReasons.contact;
+                    else delete s.waitingReason;
                     return null;
                 }
+                delete s.waitingReason;
                 next.status = 'processing'; next.startedAt = time;
                 s.windowStart ||= time; s.count++;
                 s.attempts.push({ phone: next.phone, at: time });
@@ -242,7 +289,7 @@ export function createWhatsAppOutbox(store: WhatsAppOutboxStore, options: {
                         current.nextReceiptAt = now() + 60_000;
                     }
                 }
-                s.paused ||= restricted;
+                if (restricted) restrictWhatsAppOutbox(s);
                 s.nextAt = now() + gap(safety);
             });
         },

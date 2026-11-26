@@ -6,11 +6,38 @@ import { env } from '../env';
 import { apiLogger } from '../logging';
 import { createWahaClient, WahaError, type WhatsAppAccepted, type WahaSessionConfig } from './waha';
 import { createWahaSettingsService } from './wahaSettings';
-import { createWhatsAppOutbox, emptyWhatsAppOutbox, invalidateWhatsAppConfiguration, migrateWhatsAppScheduling, wahaSafetyKey, wahaConfigIdentity, type WhatsAppJob, type WhatsAppOutboxStore } from './wahaOutbox';
+import { createWhatsAppOutbox, emptyWhatsAppOutbox, invalidateWhatsAppConfiguration, migrateWhatsAppScheduling, restrictWhatsAppOutbox, whatsAppWaitingReasons, wahaSafetyKey, wahaConfigIdentity, type WhatsAppJob, type WhatsAppOutboxStore, type WhatsAppOutboxState } from './wahaOutbox';
 import { createPppoeExpiryReminderScheduler, isPppoeReminderCurrent } from './pppoeExpiryReminders';
 
 // Older Bun SQL writes could persist the document as a JSON string.
 const settingsDocument = sql`(case when jsonb_typeof(${adminSetting.settings}) = 'string' then (${adminSetting.settings} #>> '{}')::jsonb else ${adminSetting.settings} end)`;
+// PostgreSQL 18 is the supported deployment. Reject malformed legacy strings
+// before casting so a single damaged document cannot poison worker discovery.
+const outboxDocument = sql`(case when jsonb_typeof(${whatsappOutbox.state}) = 'string'
+    and pg_input_is_valid(${whatsappOutbox.state} #>> '{}', 'jsonb')
+    then (${whatsappOutbox.state} #>> '{}')::jsonb else ${whatsappOutbox.state} end)`;
+const outboxJobs = sql`(case when jsonb_typeof(${outboxDocument}->'jobs') = 'array' then ${outboxDocument}->'jobs' else '[]'::jsonb end)`;
+const outboxTime = (field: string) => sql`(case when ${outboxDocument}->>${field} ~ '^[0-9]{1,16}$' then (${outboxDocument}->>${field})::bigint else 0 end)`;
+export const whatsAppOutboxDue = (time: number) => and(
+    sql`exists (select 1 from jsonb_array_elements(${outboxJobs}) j where j->>'status' in ('queued', 'processing'))`,
+    // JSONPath comparisons safely ignore malformed timestamp values.
+    sql`((${outboxDocument}->>'schedulingVersion') is null or ${outboxTime('nextAt')} <= ${time} or
+        jsonb_path_exists(${outboxJobs}, '$[*] ? ((@.status == "queued" && @.expiresAt <= $now) || (@.status == "processing" && (!exists(@.startedAt) || @.startedAt < $stale)))',
+            jsonb_build_object('now', ${time}::bigint, 'stale', ${time - 180_000}::bigint), true))`,
+);
+export const whatsAppOutboxReceiptsDue = (time: number) => and(
+    sql`${outboxTime('receiptsNextAt')} <= ${time}`,
+    sql`jsonb_path_exists(${outboxJobs}, '$[*] ? (@.previewExpiresAt <= $now || (@.status == "accepted" && exists(@.messageId) && @.createdAt > $cutoff && (!exists(@.ack) || @.ack < 3) && (!exists(@.nextReceiptAt) || @.nextReceiptAt <= $now)))',
+        jsonb_build_object('now', ${time}::bigint, 'cutoff', ${time - 86_400_000}::bigint), true)`,
+);
+
+export function decodeWhatsAppOutbox(value: unknown): WhatsAppOutboxState {
+    if (typeof value === 'string') value = JSON.parse(value);
+    if (!value || typeof value !== 'object' || !Array.isArray((value as WhatsAppOutboxState).jobs)
+        || !Array.isArray((value as WhatsAppOutboxState).attempts))
+        throw new Error('Invalid persisted WhatsApp outbox.');
+    return value as WhatsAppOutboxState;
+}
 
 export const adminWhatsAppSettings = createWahaSettingsService(
     {
@@ -28,6 +55,8 @@ export const adminWhatsAppSettings = createWahaSettingsService(
         },
         async update(adminId, change) {
             return db.transaction(async (tx) => {
+                await tx.execute(sql`set local lock_timeout = '2s'`);
+                await tx.execute(sql`set local statement_timeout = '5s'`);
                 await tx
                     .insert(adminSetting)
                     .values({ adminUserId: adminId })
@@ -48,6 +77,7 @@ export const adminWhatsAppSettings = createWahaSettingsService(
                     // queued content through a settings edit, even A -> B -> A.
                     const queues = await tx.select().from(whatsappOutbox).where(eq(whatsappOutbox.adminId, adminId)).for('update');
                     for (const queue of queues) {
+                        queue.state = decodeWhatsAppOutbox(queue.state);
                         invalidateWhatsAppConfiguration(queue.state, null);
                         await tx.update(whatsappOutbox).set({ state: sql`${JSON.stringify(queue.state)}::text::jsonb` }).where(eq(whatsappOutbox.sessionKey, queue.sessionKey));
                     }
@@ -68,13 +98,17 @@ export const adminWhatsAppSettings = createWahaSettingsService(
 );
 
 // For callers already in a transaction, including atomic reminder+queue writes.
-export function createTransactionalWhatsAppOutboxStore(tx: Pick<typeof db, 'insert' | 'select' | 'update'>): WhatsAppOutboxStore {
+export function createTransactionalWhatsAppOutboxStore(tx: Pick<typeof db, 'insert' | 'select' | 'update' | 'execute'>): WhatsAppOutboxStore {
     return {
         async change(key, adminId, change) {
+            // SET LOCAL is confined to the caller's transaction, never the pool.
+            await tx.execute(sql`set local lock_timeout = '2s'`);
+            await tx.execute(sql`set local statement_timeout = '5s'`);
             await tx.insert(whatsappOutbox).values({ sessionKey: key, adminId,
                 state: sql`${JSON.stringify(emptyWhatsAppOutbox())}::text::jsonb` }).onConflictDoNothing();
             const [row] = await tx.select().from(whatsappOutbox).where(eq(whatsappOutbox.sessionKey, key)).for('update');
             if (!row || row.adminId !== adminId) throw new WahaError('WAHA_CONFLICT', 409, 'This WhatsApp session belongs to another admin.');
+            row.state = decodeWhatsAppOutbox(row.state);
             const result = change(row.state);
             await tx.update(whatsappOutbox).set({ state: sql`${JSON.stringify(row.state)}::text::jsonb` }).where(eq(whatsappOutbox.sessionKey, key));
             return result;
@@ -106,8 +140,21 @@ export async function getAdminWhatsAppOutbox(adminId: string) {
     // Safety and results remain attached to the persisted tenant/session identity.
     const rows = await db.select().from(whatsappOutbox).where(eq(whatsappOutbox.adminId, adminId));
     const views = await Promise.all(rows.map((r) => outbox.view(r.sessionKey, adminId)));
-    return { paused: views.some((v) => v.paused), nextAt: Math.max(0, ...views.map((v) => v.nextAt)),
+    let currentKey: string | undefined;
+    let waitingReason: string | undefined;
+    try { currentKey = wahaSafetyKey(adminId, await configuredSession(adminId)); }
+    catch { waitingReason = whatsAppWaitingReasons.configuration; }
+    const current = views[rows.findIndex((r) => r.sessionKey === currentKey)];
+    waitingReason ??= current?.waitingReason;
+    if (!(current ? [current] : views).some((view) => view.jobs.some((job) => job.status === 'queued'))) waitingReason = undefined;
+    return { paused: current?.paused ?? false, nextAt: current?.nextAt ?? 0, ...(waitingReason ? { waitingReason } : {}),
         jobs: views.flatMap((v) => v.jobs).sort((a, b) => b.createdAt - a.createdAt).slice(0, 100) };
+}
+
+export async function resumeAdminWhatsAppOutbox(adminId: string) {
+    const config = await configuredSession(adminId);
+    return outbox.resume(wahaSafetyKey(adminId, config), adminId,
+        () => createWahaClient(config).getStatus(adminId), wahaConfigIdentity(config));
 }
 
 export async function cancelAdminWhatsAppOutbox(adminId: string) {
@@ -149,14 +196,23 @@ export async function isWhatsAppOutboxReady(
     });
     if (!pending) return false;
     let restricted = false;
+    let waitingReason: string = whatsAppWaitingReasons.unavailable;
     try {
         const status = await getStatus();
-        if (status.configured && status.status === 'WORKING') return true;
+        if (status.configured && status.status === 'WORKING') {
+            return store.change(key, adminId, (state) => {
+                if (state.paused) return false;
+                delete state.waitingReason;
+                return true;
+            });
+        }
+        waitingReason = status.configured ? whatsAppWaitingReasons.session : whatsAppWaitingReasons.configuration;
     } catch (error) {
         restricted = error instanceof WahaError && error.code === 'WAHA_RESTRICTED';
     }
     await store.change(key, adminId, (state) => {
-        state.paused ||= restricted;
+        if (restricted) restrictWhatsAppOutbox(state);
+        else if (!state.paused) state.waitingReason = waitingReason;
         state.nextAt = Math.max(state.nextAt, now() + 60_000);
     });
     return false;
@@ -176,14 +232,7 @@ export function startWhatsAppOutboxWorker() {
     };
     const tick = async () => {
         try {
-            const rows = await db.select().from(whatsappOutbox).where(and(
-                sql`exists (select 1 from jsonb_array_elements(${whatsappOutbox.state}->'jobs') j where j->>'status' in ('queued', 'processing'))`,
-                // Legacy breaks must migrate before their obsolete nextAt is due.
-                sql`((${whatsappOutbox.state}->>'schedulingVersion') is null or (${whatsappOutbox.state}->>'nextAt')::bigint <= ${Date.now()} or exists
-                    (select 1 from jsonb_array_elements(${whatsappOutbox.state}->'jobs') j where
-                    (j->>'status' = 'queued' and (j->>'expiresAt')::bigint <= ${Date.now()}) or
-                    (j->>'status' = 'processing' and coalesce((j->>'startedAt')::bigint, 0) < ${Date.now() - 180_000})))`,
-            )).orderBy(sql`(${whatsappOutbox.state}->>'nextAt')::bigint`).limit(4);
+            const rows = await db.select().from(whatsappOutbox).where(whatsAppOutboxDue(Date.now())).orderBy(outboxTime('nextAt')).limit(4);
             const results = await Promise.allSettled(rows.map(async (row) => {
                 // Settle expired jobs and interrupted claims even when settings or
                 // the transport cannot currently be resolved.
@@ -195,6 +244,7 @@ export function startWhatsAppOutboxWorker() {
                     // One broken tenant configuration must not starve other sessions.
                     await outboxStore.change(row.sessionKey, row.adminId, (s) => {
                         s.nextAt = Math.max(s.nextAt, Date.now() + 60_000);
+                        if (!s.paused) s.waitingReason = whatsAppWaitingReasons.configuration;
                     });
                     warn(); return;
                 }
@@ -220,15 +270,7 @@ export function startWhatsAppOutboxWorker() {
             if (results.some((r) => r.status === 'rejected')) warn();
             // Completed jobs still need receipts. This separate bounded lane cannot
             // starve sends, and the persisted per-session budget survives restarts.
-            const receiptRows = await db.select().from(whatsappOutbox).where(and(
-                sql`coalesce((${whatsappOutbox.state}->>'receiptsNextAt')::bigint, 0) <= ${Date.now()}`,
-                sql`exists (select 1 from jsonb_array_elements(${whatsappOutbox.state}->'jobs') j where
-                    (j->>'previewExpiresAt')::bigint <= ${Date.now()} or
-                    (j->>'status' = 'accepted' and j->>'messageId' is not null
-                    and (j->>'createdAt')::bigint > ${Date.now() - 86_400_000}
-                    and coalesce((j->>'ack')::int, 0) < 3
-                    and coalesce((j->>'nextReceiptAt')::bigint, 0) <= ${Date.now()}))`,
-            )).orderBy(sql`coalesce((${whatsappOutbox.state}->>'receiptsNextAt')::bigint, 0)`).limit(2);
+            const receiptRows = await db.select().from(whatsappOutbox).where(whatsAppOutboxReceiptsDue(Date.now())).orderBy(outboxTime('receiptsNextAt')).limit(2);
             await Promise.allSettled(receiptRows.map(async (row) => {
                 await outbox.view(row.sessionKey, row.adminId);
                 let config: WahaSessionConfig;

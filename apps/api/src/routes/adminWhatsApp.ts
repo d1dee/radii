@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
-import { adminWhatsApp, adminWhatsAppSettings, enqueueAdminWhatsApp, getAdminWhatsAppOutbox, cancelAdminWhatsAppOutbox } from '../lib/adminWhatsApp';
+import { adminWhatsApp, adminWhatsAppSettings, enqueueAdminWhatsApp, getAdminWhatsAppOutbox, cancelAdminWhatsAppOutbox, resumeAdminWhatsAppOutbox } from '../lib/adminWhatsApp';
 import { jsonError } from '../lib/error';
 import { adminWhatsAppBatchSchema, WahaError } from '../lib/waha';
 import { requireAdmin } from '../middleware/auth';
@@ -40,5 +40,6 @@ app.post('/send-text', async (c) => {
 });
 app.get('/outbox', async (c) => c.json({ success: true, data: await getAdminWhatsAppOutbox(c.var.admin.id) }));
 app.delete('/outbox', async (c) => c.json({ success: true, data: await cancelAdminWhatsAppOutbox(c.var.admin.id) }));
+app.post('/outbox/resume', async (c) => c.json({ success: true, data: await resumeAdminWhatsAppOutbox(c.var.admin.id) }));
 
 export default app;

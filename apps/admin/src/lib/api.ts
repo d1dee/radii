@@ -1694,7 +1694,7 @@ export type WhatsAppOutboxJob = {
     createdAt: number; expiresAt: number; startedAt?: number; result?: string;
     preview?: string; sentAt?: number; ack?: number; receiptCheckedAt?: number;
 };
-export type WhatsAppOutbox = { paused: boolean; nextAt: number; jobs: WhatsAppOutboxJob[] };
+export type WhatsAppOutbox = { paused: boolean; nextAt: number; waitingReason?: string; jobs: WhatsAppOutboxJob[] };
 
 export function getWhatsAppOutbox(signal: AbortSignal) {
     return request<WhatsAppOutbox>('/admin/whatsapp/outbox', undefined, { signal, cache: 'no-store' });
@@ -1702,6 +1702,10 @@ export function getWhatsAppOutbox(signal: AbortSignal) {
 
 export function cancelWhatsAppOutbox(signal: AbortSignal) {
     return request<{ ok: true }>('/admin/whatsapp/outbox', undefined, { method: 'DELETE', signal });
+}
+
+export function resumeWhatsAppOutbox(signal: AbortSignal) {
+    return request<{ ok: true }>('/admin/whatsapp/outbox/resume', undefined, { method: 'POST', signal });
 }
 
 export function sendWhatsAppText(body: { phones: string[]; text: string; requestId: string }, signal: AbortSignal) {
