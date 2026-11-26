@@ -54,6 +54,7 @@ import { formatDateTime, formatDayTime } from '@/lib/format';
 import { notifyResult } from '@/lib/notify';
 import { tableRowNumber, useTablePageSize } from '@/lib/pagination';
 import { useAdminSettings } from '@/lib/settings';
+import { useRememberedState } from '@/lib/tableState';
 import {
     nasDeviceOsLabel,
     nasDeviceStatusColors,
@@ -119,12 +120,20 @@ export default function NasDevicesPage() {
     const [deleteStep, setDeleteStep] = useState<'warning' | 'confirm'>('warning');
     const [deleteName, setDeleteName] = useState('');
 
-    const [search, setSearch] = useState('');
+    const [search, setSearch] = useRememberedState('nasDevices.search', '');
     const [debouncedSearch] = useDebouncedValue(search, 300);
-    const [status, setStatus] = useState<string | null>(null);
-    const [connection, setConnection] = useState<string | null>(null);
-    const [sortBy, setSortBy] = useState<NasDeviceSortKey | null>(null);
-    const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
+    const [status, setStatus] = useRememberedState<string | null>(
+        'nasDevices.status', null,
+    );
+    const [connection, setConnection] = useRememberedState<string | null>(
+        'nasDevices.connection', null,
+    );
+    const [sortBy, setSortBy] = useRememberedState<NasDeviceSortKey | null>(
+        'nasDevices.sortBy', null,
+    );
+    const [sortDirection, setSortDirection] = useRememberedState<SortDirection>(
+        'nasDevices.sortDirection', 'asc',
+    );
     const loadRequest = useRef(0);
 
     const [scriptDevice, setScriptDevice] = useState<NasDeviceRow | null>(null);

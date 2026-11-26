@@ -35,6 +35,7 @@ import {
 } from '@/lib/format';
 import { tableRowNumber, useTablePageSize } from '@/lib/pagination';
 import { useAdminSettings } from '@/lib/settings';
+import { useRememberedState } from '@/lib/tableState';
 
 function SummaryCard({
     label,
@@ -72,14 +73,21 @@ export default function ReportsPage() {
     const [reports, setReports] = useState<AdminReports | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
-    const [from, setFrom] = useState<Date>(
-        dayjs().subtract(30, 'day').startOf('day').toDate(),
+    const [from, setFrom] = useRememberedState<Date>(
+        'reports.from',
+        () => dayjs().subtract(30, 'day').startOf('day').toDate(),
     );
-    const [to, setTo] = useState<Date>(dayjs().endOf('day').toDate());
-    const [dateRange, setDateRange] = useState<[string | null, string | null]>([
-        dayjs(from).format('YYYY-MM-DD'),
-        dayjs(to).format('YYYY-MM-DD'),
-    ]);
+    const [to, setTo] = useRememberedState<Date>(
+        'reports.to',
+        () => dayjs().endOf('day').toDate(),
+    );
+    const [defaultsApplied, setDefaultsApplied] = useRememberedState(
+        'reports.defaultsApplied', false,
+    );
+    const [dateRange, setDateRange] = useRememberedState<[string | null, string | null]>(
+        'reports.dateRange',
+        () => [dayjs(from).format('YYYY-MM-DD'), dayjs(to).format('YYYY-MM-DD')],
+    );
     const [topPackagesPage, setTopPackagesPage] = useState(1);
     const [topUsersPage, setTopUsersPage] = useState(1);
     const [heavyUsersPage, setHeavyUsersPage] = useState(1);
@@ -143,6 +151,10 @@ export default function ReportsPage() {
     // initial load; the Apply button drives the rest.
     useEffect(() => {
         if (!loaded) return;
+        if (defaultsApplied) {
+            void load(from, to);
+            return;
+        }
         const rangeFrom = dayjs()
             .subtract(settings.dashboard.defaultRangeDays, 'day')
             .startOf('day')
@@ -154,6 +166,7 @@ export default function ReportsPage() {
             dayjs(rangeFrom).format('YYYY-MM-DD'),
             dayjs(rangeTo).format('YYYY-MM-DD'),
         ]);
+        setDefaultsApplied(true);
         void load(rangeFrom, rangeTo);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [loaded]);

@@ -54,6 +54,7 @@ import {
 import { notifyResult } from '@/lib/notify';
 import { tableRowNumber, useTablePageSize } from '@/lib/pagination';
 import { useAdminSettings } from '@/lib/settings';
+import { useRememberedState } from '@/lib/tableState';
 import { TableRowActions } from '../components/TableRowActions';
 
 function SummaryCard({ label, value }: { label: string; value: string }) {
@@ -78,6 +79,8 @@ export default function SessionsPage() {
     // Deep links (e.g. "View sessions" from a PPPoE account card) seed the
     // search box via /sessions?q=<username>.
     const [searchParams] = useSearchParams();
+    const query = searchParams.get('q') ?? '';
+    const stateKey = `sessions.${JSON.stringify(query)}`;
     const { settings, loaded } = useAdminSettings();
     const [perPage, setPerPage] = useTablePageSize(
         settings.dashboard.perPage,
@@ -90,20 +93,28 @@ export default function SessionsPage() {
     const [error, setError] = useState<string | null>(null);
     const [detailsId, setDetailsId] = useDrawerHistory();
 
-    const [search, setSearch] = useState(searchParams.get('q') ?? '');
+    const [search, setSearch] = useRememberedState(`${stateKey}.search`, query);
     const [debouncedSearch] = useDebouncedValue(search, 300);
-    const [sessionStatus, setSessionStatus] = useState<string | null>(null);
-    const [sessionType, setSessionType] = useState<SessionTypeFilter | null>(
+    const [sessionStatus, setSessionStatus] = useRememberedState<string | null>(
+        `${stateKey}.status`, null,
+    );
+    const [sessionType, setSessionType] = useRememberedState<SessionTypeFilter | null>(
+        `${stateKey}.type`,
         null,
     );
-    const [sortBy, setSortBy] = useState<SessionSortKey>('startedAt');
-    const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
-    const [from, setFrom] = useState<Date | null>(null);
-    const [to, setTo] = useState<Date | null>(null);
-    const [dateRange, setDateRange] = useState<[string | null, string | null]>([
-        null,
-        null,
-    ]);
+    const [sortBy, setSortBy] = useRememberedState<SessionSortKey>(
+        `${stateKey}.sortBy`, 'startedAt',
+    );
+    const [sortDirection, setSortDirection] = useRememberedState<SortDirection>(
+        `${stateKey}.sortDirection`, 'desc',
+    );
+    const [from, setFrom] = useRememberedState<Date | null>(
+        `${stateKey}.from`, null,
+    );
+    const [to, setTo] = useRememberedState<Date | null>(`${stateKey}.to`, null);
+    const [dateRange, setDateRange] = useRememberedState<
+        [string | null, string | null]
+    >(`${stateKey}.dateRange`, [null, null]);
 
     const [confirmDisconnect, setConfirmDisconnect] =
         useState<SessionInfo | null>(null);

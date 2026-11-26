@@ -51,6 +51,7 @@ import {
 } from '@/lib/format';
 import { tableRowNumber, useTablePageSize } from '@/lib/pagination';
 import { useAdminSettings } from '@/lib/settings';
+import { useRememberedState } from '@/lib/tableState';
 
 const STATUS_BADGE: Record<
     PackagePaymentStatus,
@@ -84,6 +85,7 @@ export default function PaymentsPage() {
     // log to one account via /payments?pppoeAccountId=<id>.
     const [searchParams, setSearchParams] = useSearchParams();
     const pppoeAccountId = searchParams.get('pppoeAccountId') ?? undefined;
+    const stateKey = `payments.${JSON.stringify(pppoeAccountId ?? '')}`;
     const clearPppoeFilter = () => {
         const next = new URLSearchParams(searchParams);
         next.delete('pppoeAccountId');
@@ -99,19 +101,28 @@ export default function PaymentsPage() {
     const [error, setError] = useState<string | null>(null);
     const [detailsId, setDetailsId] = useDrawerHistory();
 
-    const [status, setStatus] = useState<string | null>(null);
-    const [packageType, setPackageType] = useState<string | null>(null);
-    const [search, setSearch] = useState('');
+    const [status, setStatus] = useRememberedState<string | null>(
+        `${stateKey}.status`, null,
+    );
+    const [packageType, setPackageType] = useRememberedState<string | null>(
+        `${stateKey}.type`, null,
+    );
+    const [search, setSearch] = useRememberedState(`${stateKey}.search`, '');
     const [debouncedSearch] = useDebouncedValue(search, 300);
-    const [from, setFrom] = useState<Date | null>(null);
-    const [to, setTo] = useState<Date | null>(null);
-    const [dateRange, setDateRange] = useState<[string | null, string | null]>([
-        null,
-        null,
-    ]);
+    const [from, setFrom] = useRememberedState<Date | null>(
+        `${stateKey}.from`, null,
+    );
+    const [to, setTo] = useRememberedState<Date | null>(`${stateKey}.to`, null);
+    const [dateRange, setDateRange] = useRememberedState<
+        [string | null, string | null]
+    >(`${stateKey}.dateRange`, [null, null]);
     const [page, setPage] = useState(1);
-    const [sortBy, setSortBy] = useState<PaymentSortKey>('createdAt');
-    const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+    const [sortBy, setSortBy] = useRememberedState<PaymentSortKey>(
+        `${stateKey}.sortBy`, 'createdAt',
+    );
+    const [sortDirection, setSortDirection] = useRememberedState<SortDirection>(
+        `${stateKey}.sortDirection`, 'desc',
+    );
     const loadRequest = useRef(0);
 
     const load = useCallback(

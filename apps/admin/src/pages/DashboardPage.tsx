@@ -49,6 +49,7 @@ import {
 } from '@/lib/format';
 import { tableRowNumber, useTablePageSize } from '@/lib/pagination';
 import { useAdminSettings } from '@/lib/settings';
+import { useRememberedState } from '@/lib/tableState';
 
 const rangePresets = [
     { label: 'Today', days: 0 },
@@ -226,7 +227,10 @@ export default function DashboardPage() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [usage, setUsage] = useState<NetworkUsage | null>(null);
-    const [preset, setPreset] = useState('30d');
+    const [rememberedPreset, setPreset] = useRememberedState<string | null>(
+        'dashboard.preset', null,
+    );
+    const preset = rememberedPreset ?? '30d';
     const [from, setFrom] = useState<Date>(() => presetRange(30).from);
     const [to, setTo] = useState<Date>(() => presetRange(30).to);
 
@@ -295,14 +299,15 @@ export default function DashboardPage() {
     useEffect(() => {
         if (!loaded || initialLoadDone.current) return;
         initialLoadDone.current = true;
-        const days = settings.dashboard.defaultRangeDays;
+        const days = rangePresets.find((p) => p.label === rememberedPreset)?.days
+            ?? settings.dashboard.defaultRangeDays;
         setPreset(rangePresets.find((p) => p.days === days)?.label ?? '30d');
         const range = presetRange(days);
         setFrom(range.from);
         setTo(range.to);
 
         void loadData(range.from, range.to);
-    }, [loaded, settings, loadData]);
+    }, [loaded, settings, loadData, rememberedPreset, setPreset]);
 
     const autoRefreshData = useCallback(() => {
         const days = rangePresets.find((p) => p.label === preset)?.days ?? 30;

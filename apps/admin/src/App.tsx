@@ -7,18 +7,21 @@ import './admin.css';
 
 import { Center, Loader, MantineProvider } from '@mantine/core';
 import { Notifications } from '@mantine/notifications';
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, type ReactNode } from 'react';
 import {
     createBrowserRouter,
     createRoutesFromElements,
     Outlet,
     Route,
     RouterProvider,
+    useLocation,
 } from 'react-router-dom';
 
 import { RequireAdmin } from '@/components/Auth/RequireAdmin';
 import { AppLayout } from '@/components/Layout/AppLayout';
+import { useSession } from '@/lib/auth';
 import { SettingsProvider } from '@/lib/settings';
+import { TableStateProvider } from '@/lib/tableState';
 import { adminCssVariables, adminTheme } from './theme';
 
 const DashboardPage = lazy(() => import('@/pages/DashboardPage'));
@@ -40,6 +43,17 @@ const LoginPage = lazy(() => import('@/pages/auth/LoginPage'));
 const RegisterPage = lazy(() => import('@/pages/auth/RegisterPage'));
 const VerifyEmailPage = lazy(() => import('@/pages/auth/VerifyEmailPage'));
 
+function AuthenticatedTableState({ children }: { children: ReactNode }) {
+    const { data: session } = useSession();
+    const { pathname } = useLocation();
+    const branch = pathname.split('/')[1] ?? '';
+    return (
+        <TableStateProvider key={`${session?.user.id}:${session?.session.id}:${branch}`}>
+            {children}
+        </TableStateProvider>
+    );
+}
+
 const router = createBrowserRouter(
     createRoutesFromElements(
         <>
@@ -54,7 +68,9 @@ const router = createBrowserRouter(
                     <RequireAdmin>
                         <SettingsProvider>
                             <AppLayout>
-                                <Outlet />
+                                <AuthenticatedTableState>
+                                    <Outlet />
+                                </AuthenticatedTableState>
                             </AppLayout>
                         </SettingsProvider>
                     </RequireAdmin>

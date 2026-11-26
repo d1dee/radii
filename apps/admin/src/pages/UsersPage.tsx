@@ -78,6 +78,7 @@ import { fuseOptionsFilter } from '@/lib/fuseOptionsFilter';
 import { notifyResult } from '@/lib/notify';
 import { tableRowNumber, useTablePageSize } from '@/lib/pagination';
 import { useAdminSettings } from '@/lib/settings';
+import { useRememberedState } from '@/lib/tableState';
 import { TableRowActions } from '../components/TableRowActions';
 
 type TypeFilter = 'all' | PackageType;
@@ -143,12 +144,20 @@ export default function UsersPage() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
-    const [search, setSearch] = useState('');
+    const [search, setSearch] = useRememberedState('users.search', '');
     const [debouncedSearch] = useDebouncedValue(search, 300);
-    const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
-    const [flaggedOnly, setFlaggedOnly] = useState(false);
-    const [sortBy, setSortBy] = useState<AdminUserSortKey>('createdAt');
-    const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+    const [typeFilter, setTypeFilter] = useRememberedState<TypeFilter>(
+        'users.type', 'all',
+    );
+    const [flaggedOnly, setFlaggedOnly] = useRememberedState(
+        'users.flaggedOnly', false,
+    );
+    const [sortBy, setSortBy] = useRememberedState<AdminUserSortKey>(
+        'users.sortBy', 'createdAt',
+    );
+    const [sortDirection, setSortDirection] = useRememberedState<SortDirection>(
+        'users.sortDirection', 'desc',
+    );
     const [page, setPage] = useState(1);
     const loadRequest = useRef(0);
     const [detailsId, setDetailsId] = useDrawerHistory();

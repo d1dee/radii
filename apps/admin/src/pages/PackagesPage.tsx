@@ -61,6 +61,7 @@ import {
 import { notifyResult } from '@/lib/notify';
 import { tableRowNumber, useTablePageSize } from '@/lib/pagination';
 import { useAdminSettings } from '@/lib/settings';
+import { useRememberedState } from '@/lib/tableState';
 
 function SummaryCard({
     label,
@@ -100,8 +101,12 @@ export default function PackagesPage() {
         settings.dashboard.perPage,
         loaded,
     );
-    const [typeFilter, setTypeFilter] = useState<PackageType | null>(null);
-    const [categoryFilter, setCategoryFilter] = useState<string[]>([]);
+    const [typeFilter, setTypeFilter] = useRememberedState<PackageType | null>(
+        'packages.type', null,
+    );
+    const [categoryFilter, setCategoryFilter] = useRememberedState<string[]>(
+        'packages.categories', [],
+    );
     const [categoryOptions, setCategoryOptions] = useState<string[]>([]);
     const [categoryError, setCategoryError] = useState<string | null>(null);
     const [packages, setPackages] = useState<PackageRow[]>([]);
@@ -113,13 +118,17 @@ export default function PackagesPage() {
     const [archiveTarget, setArchiveTarget] = useState<PackageRow | null>(null);
     const [actionBusyId, setActionBusyId] = useState<string | null>(null);
 
-    const [search, setSearch] = useState('');
+    const [search, setSearch] = useRememberedState('packages.search', '');
     const [debouncedSearch] = useDebouncedValue(search, 300);
-    const [archived, setArchived] = useState<
+    const [archived, setArchived] = useRememberedState<
         'current' | 'archived' | 'all'
-    >('current');
-    const [sortBy, setSortBy] = useState<PackageSortKey | null>(null);
-    const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
+    >('packages.archived', 'current');
+    const [sortBy, setSortBy] = useRememberedState<PackageSortKey | null>(
+        'packages.sortBy', null,
+    );
+    const [sortDirection, setSortDirection] = useRememberedState<SortDirection>(
+        'packages.sortDirection', 'asc',
+    );
     const loadRequest = useRef(0);
 
     useEffect(() => {
