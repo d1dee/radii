@@ -196,7 +196,10 @@ export function PppoeExpiryReminderSettings({
                         minute. One reminder per subscription cycle is placed in
                         your WhatsApp queue using your sending protections.
                     </Alert>
-                    <Title order={5}>Reminder Schedule</Title>
+                    <Divider
+                        label={<Title order={5}>Reminder Schedule</Title>}
+                        labelPosition='left'
+                    />
                     <Switch
                         label='Enable expiry reminders'
                         description='Automatically queue reminders for your active, expiring PPPoE subscriptions.'

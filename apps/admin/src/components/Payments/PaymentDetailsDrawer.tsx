@@ -370,7 +370,10 @@ export function PaymentDetailsDrawer({
                         ) : null}
                     </Grid>
 
-                    <Divider label='Provider references' labelPosition='left' />
+                    <Divider
+                        label={<Title order={5}>Provider references</Title>}
+                        labelPosition='left'
+                    />
 
                     <Grid>
                         <Grid.Col span={{ base: 12, sm: 6 }}>
@@ -401,7 +404,10 @@ export function PaymentDetailsDrawer({
                         </Grid.Col>
                     </Grid>
 
-                    <Divider label='Payment events' labelPosition='left' />
+                    <Divider
+                        label={<Title order={5}>Payment events</Title>}
+                        labelPosition='left'
+                    />
 
                     <Text size='xs' c='dimmed'>
                         Raw callback payloads and customer-sensitive provider

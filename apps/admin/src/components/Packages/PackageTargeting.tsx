@@ -167,7 +167,10 @@ function PackageTargetingContent({
                         packageOptions={packageOptions}
                         categoryOptions={categoryOptions}
                     />
-                    <Divider label='Redemption controls' labelPosition='left' />
+                    <Divider
+                        label={<Title order={5}>Redemption controls</Title>}
+                        labelPosition='left'
+                    />
                     <Grid>
                         <Grid.Col span={{ base: 12, sm: 6 }}>
                             <NumberInput
@@ -226,7 +229,10 @@ function PackageTargetingContent({
             </Text>
             {packageId ? (
                 <Stack gap='xs'>
-                    <Divider label='Test a customer' labelPosition='left' />
+                    <Divider
+                        label={<Title order={5}>Test a customer</Title>}
+                        labelPosition='left'
+                    />
                     <Text size='xs' c='dimmed'>
                         Preview uses the last saved package configuration and
                         current customer history, not unsaved edits. Checkout

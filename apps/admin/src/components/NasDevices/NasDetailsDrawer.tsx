@@ -329,7 +329,10 @@ export function NasDetailsDrawer({
                         </Grid.Col>
                     </Grid>
 
-                    <Divider label='Setup script' labelPosition='left' />
+                    <Divider
+                        label={<Title order={5}>Setup script</Title>}
+                        labelPosition='left'
+                    />
 
                     {scriptRow ? (
                         <Group gap='xs'>
@@ -353,7 +356,10 @@ export function NasDetailsDrawer({
                         </Text>
                     )}
 
-                    <Divider label='WireGuard tunnel' labelPosition='left' />
+                    <Divider
+                        label={<Title order={5}>WireGuard tunnel</Title>}
+                        labelPosition='left'
+                    />
 
                     {device.wgClientIp || device.wgPublicKey ? (
                         <Grid>
@@ -402,7 +408,11 @@ export function NasDetailsDrawer({
                     )}
 
                     <Divider
-                        label={`Packages (${analytics.packages.active} active of ${analytics.packages.total})`}
+                        label={
+                            <Title order={5}>
+                                {`Packages (${analytics.packages.active} active of ${analytics.packages.total})`}
+                            </Title>
+                        }
                         labelPosition='left'
                     />
 
@@ -429,7 +439,10 @@ export function NasDetailsDrawer({
                         </Group>
                     )}
 
-                    <Divider label='Analytics' labelPosition='left' />
+                    <Divider
+                        label={<Title order={5}>Analytics</Title>}
+                        labelPosition='left'
+                    />
 
                     {nasDeviceId ? (
                         <ThroughputChart
@@ -499,7 +512,10 @@ export function NasDetailsDrawer({
                         </Grid.Col>
                     </Grid>
 
-                    <Divider label='Recent payments' labelPosition='left' />
+                    <Divider
+                        label={<Title order={5}>Recent payments</Title>}
+                        labelPosition='left'
+                    />
 
                     {analytics.recentPayments.payments.length === 0 ? (
                         <Text c='dimmed'>No payments yet.</Text>

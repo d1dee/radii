@@ -403,7 +403,10 @@ export function PackageDetailsDrawer({
                         ) : null}
                     </Grid>
 
-                    <Divider label='Analytics' labelPosition='left' />
+                    <Divider
+                        label={<Title order={5}>Analytics</Title>}
+                        labelPosition='left'
+                    />
 
                     <Grid>
                         <Grid.Col span={{ base: 12, xs: 6, sm: 4 }}>
@@ -456,7 +459,10 @@ export function PackageDetailsDrawer({
                         </Grid.Col>
                     </Grid>
 
-                    <Divider label='Recent payments' labelPosition='left' />
+                    <Divider
+                        label={<Title order={5}>Recent payments</Title>}
+                        labelPosition='left'
+                    />
 
                     {analytics.recentPayments.payments.length === 0 ? (
                         <Text c='dimmed'>No payments yet.</Text>

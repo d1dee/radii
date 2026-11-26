@@ -1097,7 +1097,11 @@ function PackageEditor({
                                                     </Alert>
                                                 )}
                                             <Divider
-                                                label='Connection speed'
+                                                label={
+                                                    <Title order={5}>
+                                                        Connection speed
+                                                    </Title>
+                                                }
                                                 labelPosition='left'
                                             />
                                             <Grid>
@@ -1161,7 +1165,11 @@ function PackageEditor({
                                                 </Grid.Col>
                                             </Grid>
                                             <Divider
-                                                label='Data allowance'
+                                                label={
+                                                    <Title order={5}>
+                                                        Data allowance
+                                                    </Title>
+                                                }
                                                 labelPosition='left'
                                             />
                                             <Grid>

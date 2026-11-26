@@ -242,7 +242,10 @@ export function SessionDetailsDrawer({
                         </Group>
                     </Group>
 
-                    <Divider label='Connection' labelPosition='left' />
+                    <Divider
+                        label={<Title order={5}>Connection</Title>}
+                        labelPosition='left'
+                    />
 
                     <Grid>
                         <Grid.Col span={{ base: 12, sm: 6 }}>
@@ -329,7 +332,10 @@ export function SessionDetailsDrawer({
                         </Grid.Col>
                     </Grid>
 
-                    <Divider label='Usage' labelPosition='left' />
+                    <Divider
+                        label={<Title order={5}>Usage</Title>}
+                        labelPosition='left'
+                    />
 
                     <SimpleGrid cols={{ base: 2, sm: 4 }}>
                         <LinkedCard label='Duration'>
@@ -357,7 +363,10 @@ export function SessionDetailsDrawer({
 
                     {sessionId ? <ThroughputChart key={sessionId} kind='session' id={sessionId} /> : null}
 
-                    <Divider label='Linked records' labelPosition='left' />
+                    <Divider
+                        label={<Title order={5}>Linked records</Title>}
+                        labelPosition='left'
+                    />
                     {detail.activation ? (
                         <LinkedCard label='Activation'>
                             <Group justify='space-between' align='flex-start'>
@@ -535,7 +544,7 @@ export function SessionDetailsDrawer({
                     {session.live ? (
                         <>
                             <Divider
-                                label='Adjust session'
+                                label={<Title order={5}>Adjust session</Title>}
                                 labelPosition='left'
                             />
                             <Card withBorder padding='md' radius='md'>
@@ -553,7 +562,7 @@ export function SessionDetailsDrawer({
                     {detail.activation ? (
                         <>
                             <Divider
-                                label='Activation audit'
+                                label={<Title order={5}>Activation audit</Title>}
                                 labelPosition='left'
                             />
                             {auditItems.length === 0 ? (

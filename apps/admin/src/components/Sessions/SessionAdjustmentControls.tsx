@@ -2,10 +2,10 @@ import {
     Badge,
     Button,
     Divider,
-    Group,
     NumberInput,
     Stack,
     Text,
+    Title,
 } from '@mantine/core';
 import { useState } from 'react';
 
@@ -133,23 +133,21 @@ export function SessionAdjustmentControls({
                         : 'Apply remaining time'}
                 </Button>
             </Stack>
-            <Divider />
+            <Divider
+                label={<Title order={5}>Fair Usage Policy (FUP)</Title>}
+                labelPosition='left'
+            />
             <Stack gap='xs'>
-                <Group justify='space-between'>
-                    <Text size='sm' fw={600}>
-                        Fair Usage Policy (FUP)
-                    </Text>
-                    <Badge
-                        color={adjustments.fairUsage.active ? 'orange' : 'gray'}
-                        variant='light'
-                    >
-                        {adjustments.fairUsage.forced
-                            ? 'Manually activated'
-                            : adjustments.fairUsage.active
-                              ? 'Active'
-                              : 'Not active'}
-                    </Badge>
-                </Group>
+                <Badge
+                    color={adjustments.fairUsage.active ? 'orange' : 'gray'}
+                    variant='light'
+                >
+                    {adjustments.fairUsage.forced
+                        ? 'Manually activated'
+                        : adjustments.fairUsage.active
+                          ? 'Active'
+                          : 'Not active'}
+                </Badge>
                 <Text size='sm' c='dimmed'>
                     {adjustments.fairUsage.available
                         ? `Apply the package's FUP speeds now: ${adjustments.fairUsage.downloadRate === 0 ? 'Unlimited' : `${adjustments.fairUsage.downloadRate} Kbps`} download / ${adjustments.fairUsage.uploadRate === 0 ? 'Unlimited' : `${adjustments.fairUsage.uploadRate} Kbps`} upload. This override lasts until the session ends.`

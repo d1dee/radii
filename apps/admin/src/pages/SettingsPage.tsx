@@ -245,7 +245,6 @@ function CategoryForm({ category }: { category: PreferenceCategory }) {
                     <Stack gap='xl'>
                         {sections[category.id].map((Section, index) => (
                             <Box key={index}>
-                                {index > 0 && <Divider mb='xl' />}
                                 {index === 0 && (
                                     <Badge
                                         color={dirty ? 'yellow' : 'gray'}
@@ -572,7 +571,6 @@ function WhatsAppSettingsForm() {
                                             clearKey();
                                         }}
                                     />
-                                    <Divider />
                                     <SectionHeader
                                         title='Sending protection'
                                         description='Random pacing applies to single and bulk messages, including queued system messages. These controls reduce risk; they cannot guarantee WhatsApp will not block an account.'
@@ -624,8 +622,9 @@ function WhatsAppSettingsForm() {
                                         bypass restrictions. Changes apply to
                                         subsequent send attempts without
                                         clearing queued messages. OTP messages
-                                        take priority over other queued messages;
-                                        there are no hour-long batch breaks.
+                                        take priority over other queued
+                                        messages; there are no hour-long batch
+                                        breaks.
                                     </Text>
                                 </Stack>
                             </Fieldset>
@@ -840,7 +839,9 @@ export default function SettingsPage() {
                                     {item.id === 'messaging' ? (
                                         <WhatsAppSettingsForm />
                                     ) : item.id === 'packages' ? (
-                                        <PackagesSettingsForms category={item} />
+                                        <PackagesSettingsForms
+                                            category={item}
+                                        />
                                     ) : (
                                         <CategoryForm category={item} />
                                     )}
@@ -902,9 +903,11 @@ interface SectionHeaderProps {
 function SectionHeader({ title, description }: SectionHeaderProps) {
     return (
         <>
-            <Title order={4} mb={4}>
-                {title}
-            </Title>
+            <Divider
+                label={<Title order={5}>{title}</Title>}
+                labelPosition='left'
+                mb={4}
+            />
             <Text size='sm' c='dimmed' mb='md'>
                 {description}
             </Text>
@@ -1125,7 +1128,7 @@ function PackagesSection() {
                     }}
                     {...form.getInputProps('pppoeConnectionFeeAmount')}
                 />
-                <Divider />
+
                 <NumberInput
                     label='No Expiry validity window (months)'
                     description='How long a hotspot "No Expiry" (time-bank) package stays usable after activation. The customer must consume the session-length time bank within this window. Leave empty to use the server default.'
@@ -1193,7 +1196,6 @@ function MpesaSection() {
                 description='Credentials used for payments made through the NAS devices you own.'
             />
             <Stack gap='md'>
-                <Divider label='Payment Setup' labelPosition='left' />
                 <Switch
                     label='Use my own M-Pesa credentials'
                     description='When off, the server-wide M-Pesa configuration is used for your payments.'
@@ -1245,7 +1247,10 @@ function MpesaSection() {
                                 />
                             </Grid.Col>
                         </Grid>
-                        <Divider label='Credentials' labelPosition='left' />
+                        <Divider
+                            label={<Title order={5}>Credentials</Title>}
+                            labelPosition='left'
+                        />
                         <Grid>
                             <Grid.Col span={{ base: 12, sm: 6 }}>
                                 <TextInput
@@ -1300,7 +1305,11 @@ function MpesaSection() {
                             </Grid.Col>
                         </Grid>
                         <Divider
-                            label='Receipt verification (optional)'
+                            label={
+                                <Title order={5}>
+                                    Receipt verification (optional)
+                                </Title>
+                            }
                             labelPosition='left'
                         />
                         <Text size='xs' c='dimmed'>

@@ -1104,7 +1104,11 @@ export function UserDetailsDrawer({
                                 </Grid>
 
                                 <Divider
-                                    label={`Flags (${detail.flags.length})`}
+                                    label={
+                                        <Title order={5}>
+                                            {`Flags (${detail.flags.length})`}
+                                        </Title>
+                                    }
                                     labelPosition='left'
                                 />
                                 {detail.flags.length === 0 ? (
