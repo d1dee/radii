@@ -28,6 +28,7 @@ import {
 import {
     formatBytes,
     formatDateTime,
+    formatPackageRate,
     formatPaymentAmount,
     formatSeconds,
     formatSpeed,
@@ -693,6 +694,14 @@ export function SessionDetailsDrawer({
                                             event.metadata,
                                             'additionalSeconds',
                                         );
+                                        const rateLimit =
+                                            typeof event.metadata.rateLimit === 'string'
+                                                ? /^(\d+)k\/(\d+)k$/.exec(event.metadata.rateLimit)
+                                                : null;
+                                        const uploadRate = metadataNumber(event.metadata, 'uploadRate')
+                                            ?? (rateLimit ? Number(rateLimit[1]) : null);
+                                        const downloadRate = metadataNumber(event.metadata, 'downloadRate')
+                                            ?? (rateLimit ? Number(rateLimit[2]) : null);
                                         return (
                                             <Card
                                                 key={`event-${event.id}`}
@@ -774,20 +783,15 @@ export function SessionDetailsDrawer({
                                                                 )}
                                                             </Text>
                                                         ) : null}
-                                                        {event.type ===
-                                                            'session_fup_activated' &&
-                                                        typeof event.metadata
-                                                            .rateLimit ===
-                                                            'string' ? (
+                                                        {(event.type === 'session_fup_activated' ||
+                                                            event.type === 'session_bandwidth_adjusted') &&
+                                                        downloadRate !== null && uploadRate !== null ? (
                                                             <Text size='xs'>
-                                                                FUP rate limit:{' '}
-                                                                <Code>
-                                                                    {
-                                                                        event
-                                                                            .metadata
-                                                                            .rateLimit
-                                                                    }
-                                                                </Code>
+                                                                {event.type === 'session_fup_activated'
+                                                                    ? 'FUP rate limit'
+                                                                    : 'Bandwidth limit'}:{' '}
+                                                                Download {formatPackageRate(downloadRate)}
+                                                                {' · '}Upload {formatPackageRate(uploadRate)}
                                                             </Text>
                                                         ) : null}
                                                     </Stack>
