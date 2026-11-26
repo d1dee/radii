@@ -339,7 +339,7 @@ export function login(body: { phoneNumber: string; pin: string }) {
 
 // Forget-PIN: request a 6-digit SMS reset code, then redeem it for a new PIN.
 export function forgotPin(body: { phoneNumber: string }) {
-    return request('/forgot-pin', body, { method: 'POST' });
+    return request(withNas('/forgot-pin'), body, { method: 'POST' });
 }
 
 export function resetPin(body: {

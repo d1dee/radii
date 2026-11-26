@@ -17,6 +17,7 @@ export type WhatsAppJob = {
     createdAt: number; expiresAt: number; startedAt?: number; result?: string;
     requestHash: string;
     configIdentity: string;
+    priority?: 'normal' | 'otp';
     reminder?: { activationId: string; activatedAt: number; expiresAt: number };
     preview?: string; previewExpiresAt?: number;
     messageId?: string; messageTimestamp?: number; sentAt?: number; ack?: number; receiptCheckedAt?: number; nextReceiptAt?: number;
@@ -26,10 +27,20 @@ export type WhatsAppOutboxState = {
     windowStart: number; count: number;
     attempts: { phone: string; at: number }[];
     receiptsNextAt?: number;
+    schedulingVersion?: 1;
 };
 export const emptyWhatsAppOutbox = (): WhatsAppOutboxState => ({
-    jobs: [], nextAt: 0, paused: false, windowStart: 0, count: 0, attempts: [],
+    jobs: [], nextAt: 0, paused: false, windowStart: 0, count: 0, attempts: [], schedulingVersion: 1,
 });
+
+export function migrateWhatsAppScheduling(state: WhatsAppOutboxState, time: number) {
+    if (state.schedulingVersion === 1) return;
+    // Old nextAt had no reason tag. Preserve all bounded readiness/session waits
+    // and active claims; replace only longer legacy breaks with a short gap.
+    if (!state.jobs.some((job) => job.status === 'processing') && state.nextAt > time + 180_000)
+        state.nextAt = time + 60_000;
+    state.schedulingVersion = 1;
+}
 
 export function applyWhatsAppReceipt(job: WhatsAppJob, receipt: WhatsAppReceipt) {
     if (job.messageId && job.messageId !== receipt.messageId) return;
@@ -66,6 +77,7 @@ export function createWhatsAppOutbox(store: WhatsAppOutboxStore, options: {
         + Math.floor((options.random ?? Math.random)() * ((safety.maxDelaySeconds - safety.minDelaySeconds) * 1000 + 1));
     const settle = (s: WhatsAppOutboxState) => {
         const time = now();
+        migrateWhatsAppScheduling(s, time);
         s.attempts = s.attempts.filter((a) => a.at > time - 3_600_000);
         for (const job of s.jobs) {
             if (job.previewExpiresAt !== undefined && job.previewExpiresAt <= time) {
@@ -83,7 +95,7 @@ export function createWhatsAppOutbox(store: WhatsAppOutboxStore, options: {
         }
     };
     return {
-        async enqueue(key: string, adminId: string, input: unknown, lifetimeMs = 86_400_000, reminder?: WhatsAppJob['reminder']): Promise<WhatsAppAccepted> {
+        async enqueue(key: string, adminId: string, input: unknown, lifetimeMs = 86_400_000, reminder?: WhatsAppJob['reminder'], priority: NonNullable<WhatsAppJob['priority']> = 'normal'): Promise<WhatsAppAccepted> {
             const parsed = adminWhatsAppBatchSchema.safeParse(input);
             if (!parsed.success) throw new WahaError('WAHA_INVALID_INPUT', 400, 'Provide 1-50 international recipients, 1-4096 text characters and a request ID.');
             const data = parsed.data;
@@ -97,16 +109,17 @@ export function createWhatsAppOutbox(store: WhatsAppOutboxStore, options: {
                     if (previous[0]?.requestHash !== requestHash) throw new WahaError('WAHA_CONFLICT', 409, 'This request ID was already used for different message content or recipients.');
                     return { ok: true, queued: true, batchId: data.requestId };
                 }
-                if (s.jobs.filter((j) => ['queued', 'processing'].includes(j.status)).length + phones.length > 50)
-                    throw new WahaError('WAHA_RATE_LIMITED', 429, 'The WhatsApp queue is full (50 recipients maximum). Wait for it to finish.');
+                const capacity = priority === 'otp' ? 60 : 50;
+                if (s.jobs.filter((j) => ['queued', 'processing'].includes(j.status)).length + phones.length > capacity)
+                    throw new WahaError('WAHA_RATE_LIMITED', 429, `The WhatsApp queue is full (${capacity} recipients maximum). Wait for it to finish.`);
                 // Bounded 24h admin preview; internal short-lived secrets never get a preview.
                 s.jobs = s.jobs.filter((j) => ['queued', 'processing'].includes(j.status) || j.createdAt > now() - 86_400_000);
                 if (s.jobs.length + phones.length > 500)
                     throw new WahaError('WAHA_RATE_LIMITED', 429, 'Daily WhatsApp outbox limit reached. Rest and try tomorrow.');
                 for (const phone of phones) s.jobs.push({ id: randomUUID(), batchId: data.requestId, phone,
-                    text: data.text, requestHash, configIdentity, status: 'queued', createdAt: now(), expiresAt: Math.min(now() + lifetimeMs, reminder?.expiresAt ?? Infinity),
+                    text: data.text, requestHash, configIdentity, priority, status: 'queued', createdAt: now(), expiresAt: Math.min(now() + lifetimeMs, reminder?.expiresAt ?? Infinity),
                     ...(reminder ? { reminder } : {}),
-                    ...(lifetimeMs >= 86_400_000 ? { preview: data.text, previewExpiresAt: now() + 86_400_000 } : {}) });
+                    ...(priority !== 'otp' && lifetimeMs >= 86_400_000 ? { preview: data.text, previewExpiresAt: now() + 86_400_000 } : {}) });
                 return { ok: true, queued: true, batchId: data.requestId };
             });
         },
@@ -185,13 +198,10 @@ export function createWhatsAppOutbox(store: WhatsAppOutboxStore, options: {
                 const time = now();
                 if (s.paused) { s.nextAt = Math.max(s.nextAt, time + 60_000); return null; }
                 if (s.nextAt > time || s.jobs.some((j) => j.status === 'processing')) return null;
-                // An idle rest interval already counts as a break; do not add
-                // another full rest when sending resumes after a long pause.
-                if (s.nextAt <= time - safety.restMinutes * 60_000) { s.count = 0; s.windowStart = 0; }
-                if (s.count >= safety.batchSize || (s.windowStart && time - s.windowStart >= 3_600_000)) {
-                    s.nextAt = time + safety.restMinutes * 60_000 + gap(safety); s.count = 0; s.windowStart = 0; return null;
-                }
-                const next = s.jobs.find((j) => j.status === 'queued' && s.attempts.filter((a) => a.phone === j.phone).length < safety.perContactHourlyLimit);
+                const eligible = (j: WhatsAppJob) => j.status === 'queued'
+                    && s.attempts.filter((a) => a.phone === j.phone).length < safety.perContactHourlyLimit;
+                // Missing persisted priority is ordinary; preserve FIFO within each lane.
+                const next = s.jobs.find((j) => j.priority === 'otp' && eligible(j)) ?? s.jobs.find(eligible);
                 if (!next) {
                     s.nextAt = time + 60_000;
                     return null;
@@ -233,9 +243,7 @@ export function createWhatsAppOutbox(store: WhatsAppOutboxStore, options: {
                     }
                 }
                 s.paused ||= restricted;
-                if (s.count >= safety.batchSize) {
-                    s.nextAt = now() + safety.restMinutes * 60_000 + gap(safety); s.count = 0; s.windowStart = 0;
-                } else s.nextAt = now() + gap(safety);
+                s.nextAt = now() + gap(safety);
             });
         },
     };

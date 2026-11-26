@@ -1655,8 +1655,6 @@ export type WhatsAppConfig = {
 export type WhatsAppSafetySettings = {
     minDelaySeconds: number;
     maxDelaySeconds: number;
-    batchSize: number;
-    restMinutes: number;
     perContactHourlyLimit: number;
 };
 export type WhatsAppConfigInput = {

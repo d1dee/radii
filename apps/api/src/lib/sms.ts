@@ -1,9 +1,13 @@
 // Customer PIN resets use the owning admin's WhatsApp session. The module
 // path remains unchanged; OTP storage and the admin support UI are unchanged.
 
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { apiLogger, logOtpForDebug } from '../logging';
 import { sendAdminWhatsAppText } from './adminWhatsApp';
-import { resolvePortalOtpOwner } from './portalOtpOwner';
+import { resolvePortalOtpOwner, type PortalOtpConnection } from './portalOtpOwner';
+
+// Request-local context also follows the deferred better-auth delivery callback.
+export const portalOtpConnection = new AsyncLocalStorage<PortalOtpConnection>();
 
 const logger = apiLogger.getChild('portal-otp');
 
@@ -30,9 +34,9 @@ export async function sendPortalOtpWhatsApp(input: SmsOtpInput): Promise<void> {
     if (!/^[1-9]\d{7,14}@hotspot\.local$/.test(input.email)) return;
     logOtpForDebug('portal', input.type, input.otp);
     try {
-        const adminId = await resolvePortalOtpOwner(input.email);
+        const adminId = await resolvePortalOtpOwner(input.email, portalOtpConnection.getStore());
         if (!adminId) {
-            logger.warn('Portal reset code delivery skipped; no unambiguous network owner');
+            logger.warn('Portal reset code delivery skipped; no messaging-enabled connection or payment admin');
             return;
         }
         await sendAdminWhatsAppText(adminId, phoneFromPortalEmail(input.email),

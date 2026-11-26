@@ -109,7 +109,7 @@ export function createWahaSettingsService(
                 throw new WahaError(
                     'WAHA_INVALID_INPUT',
                     400,
-                    'Invalid WhatsApp configuration. Use a random delay of 30-3600 seconds (maximum greater than minimum), 1-10 messages per batch, 60-1440 rest minutes and 1-4 messages per contact per hour.',
+                    'Invalid WhatsApp configuration. Use a random delay of 30-3600 seconds (maximum greater than minimum) and 1-4 messages per contact per hour.',
                 );
             const next = parsed.data;
             if (next.clearApiKey && next.apiKey)

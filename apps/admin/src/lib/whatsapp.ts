@@ -27,10 +27,8 @@ export function isWhatsAppConfig(value: unknown): value is WhatsAppConfig {
 export function validateWhatsAppConfig({ baseUrl, apiKey, clearApiKey, safety }: WhatsAppConfigInput) {
     if (safety && (!Number.isInteger(safety.minDelaySeconds) || safety.minDelaySeconds < 30 || safety.minDelaySeconds > 3599
         || !Number.isInteger(safety.maxDelaySeconds) || safety.maxDelaySeconds <= safety.minDelaySeconds || safety.maxDelaySeconds > 3600
-        || !Number.isInteger(safety.batchSize) || safety.batchSize < 1 || safety.batchSize > 10
-        || !Number.isInteger(safety.restMinutes) || safety.restMinutes < 60 || safety.restMinutes > 1440
         || !Number.isInteger(safety.perContactHourlyLimit) || safety.perContactHourlyLimit < 1 || safety.perContactHourlyLimit > 4))
-        return 'Use a random delay of 30-3600 seconds (maximum greater than minimum), 1-10 messages per batch, 60-1440 rest minutes and 1-4 messages per contact per hour.';
+        return 'Use a random delay of 30-3600 seconds (maximum greater than minimum) and 1-4 messages per contact per hour.';
     if (baseUrl) {
         try {
             const url = new URL(baseUrl);

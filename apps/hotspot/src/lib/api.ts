@@ -311,7 +311,11 @@ export function login(body: { phoneNumber: string; pin: string }) {
 
 // Forget-PIN: request a 6-digit SMS reset code, then redeem it for a new PIN.
 export function forgotPin(body: { phoneNumber: string }) {
-    return request('/forgot-pin', body, { method: 'POST' });
+    const loginRequestId = currentLoginRequestId();
+    const query = loginRequestId
+        ? `?login_request=${encodeURIComponent(loginRequestId)}`
+        : '';
+    return request(`/forgot-pin${query}`, body, { method: 'POST' });
 }
 
 export function resetPin(body: {

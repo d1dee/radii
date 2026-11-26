@@ -16,6 +16,7 @@ import { auth } from '../auth';
 import { apiLogger } from '../logging';
 import type { AppContext } from '../types';
 import { jsonError, jsonFieldErrors } from './error';
+import { portalOtpConnection } from './sms';
 import {
     claimPppoeAccount,
     pendingPppoeClaimExists,
@@ -340,10 +341,13 @@ export async function forgotPinPhoneOtp(c: AppContext) {
     }
 
     try {
-        await auth.api.requestPasswordResetEmailOTP({
+        await portalOtpConnection.run({
+            loginRequestId: c.req.query('login_request'),
+            nasDeviceId: c.req.query('nas'),
+        }, () => auth.api.requestPasswordResetEmailOTP({
             body: { email: portalEmailForPhone(parsed.data.phoneNumber) },
             headers: c.req.raw.headers,
-        });
+        }));
         return c.json({ success: true, data: null });
     } catch (err) {
         return respondAuthError(c, err);

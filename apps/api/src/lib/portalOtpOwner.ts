@@ -1,12 +1,64 @@
 import { sql } from 'drizzle-orm';
 import { db } from '../db';
+import { adminWhatsAppSettings } from './adminWhatsApp';
 import { nasAddressClaims } from './nasHistory';
+
+export interface PortalOtpConnection {
+    loginRequestId?: string;
+    nasDeviceId?: string;
+}
+
+export async function resolvePortalOtpOwner(
+    email: string,
+    connection: PortalOtpConnection = {},
+): Promise<string | null> {
+    // Compare as text so malformed/stale public portal links fall back safely.
+    const linked = await db.execute<{ owner_id: string }>(sql`
+        select distinct admin.id as owner_id from nas_device device
+        join admin_user admin on admin.id = device.owner_id
+        where (device.id::text = ${connection.nasDeviceId ?? ''}
+            or device.id in (select nas_device_id from hotspot_login_request
+                where id::text = ${connection.loginRequestId ?? ''}))
+            and (not coalesce(admin.banned, false) or admin.ban_expires <= now())
+            and exists (select 1 from "user" where email = ${email})
+    `);
+    const owner = (linked.length === 1 ? linked[0]?.owner_id : null)
+        ?? await resolveConnectionOtpOwner(email);
+    const checked = new Set<string>();
+    async function messagingEnabled(adminId: string) {
+        if (checked.has(adminId)) return false;
+        checked.add(adminId);
+        try {
+            return (await adminWhatsAppSettings.get(adminId)).configured;
+        } catch {
+            // A broken tenant configuration must not hide older eligible payments.
+            return false;
+        }
+    }
+    if (owner && await messagingEnabled(owner)) return owner;
+
+    // Do not restrict by portal type or stop at a recent unpaid/disabled tenant.
+    // Persisted payment tenancy wins over a NAS that may have changed owners.
+    const payments = await db.execute<{ owner_id: string }>(sql`
+        select admin.id as owner_id from package_payments payment
+        join "user" customer on customer.id = payment.user_id
+        left join nas_device device on device.id = payment.nas_device_id
+        join admin_user admin on admin.id = coalesce(payment.tenant_admin_id, device.owner_id)
+        where customer.email = ${email} and payment.status = 'paid'
+            and (not coalesce(admin.banned, false) or admin.ban_expires <= now())
+        order by payment.created_at desc, payment.id desc
+    `);
+    for (const payment of payments) {
+        if (await messagingEnabled(payment.owner_id)) return payment.owner_id;
+    }
+    return null;
+}
 
 // Return no owner rather than choosing between tenants at the same priority.
 // Accounting tenancy follows the emitting NAS, never the package/payment owner.
 // Priority: current PPP, latest actual hotspot use, recoverable PPP service,
 // then completed hotspot login only when actual accounting is absent.
-export async function resolvePortalOtpOwner(email: string): Promise<string | null> {
+async function resolveConnectionOtpOwner(email: string): Promise<string | null> {
     const rows = await db.execute<{ owner_id: string | null }>(sql`
         with claims as materialized (${nasAddressClaims}),
         customer as (

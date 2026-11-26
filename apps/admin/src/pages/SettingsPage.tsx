@@ -314,8 +314,6 @@ function WhatsAppSettingsForm() {
             safety: {
                 minDelaySeconds: 30,
                 maxDelaySeconds: 60,
-                batchSize: 10,
-                restMinutes: 60,
                 perContactHourlyLimit: 4,
             },
         },
@@ -606,30 +604,6 @@ function WhatsAppSettingsForm() {
                                         </Grid.Col>
                                         <Grid.Col span={{ base: 12, sm: 6 }}>
                                             <NumberInput
-                                                label='Messages per batch'
-                                                description='Pause for a rest after 1-10 messages.'
-                                                min={1}
-                                                max={10}
-                                                allowDecimal={false}
-                                                {...form.getInputProps(
-                                                    'safety.batchSize',
-                                                )}
-                                            />
-                                        </Grid.Col>
-                                        <Grid.Col span={{ base: 12, sm: 6 }}>
-                                            <NumberInput
-                                                label='Rest between batches (minutes)'
-                                                description='At least one hour of rest between batches.'
-                                                min={60}
-                                                max={1440}
-                                                allowDecimal={false}
-                                                {...form.getInputProps(
-                                                    'safety.restMinutes',
-                                                )}
-                                            />
-                                        </Grid.Col>
-                                        <Grid.Col span={{ base: 12, sm: 6 }}>
-                                            <NumberInput
                                                 label='Messages per contact per hour'
                                                 description='Maximum of four send attempts to the same contact per rolling hour.'
                                                 min={1}
@@ -649,8 +623,9 @@ function WhatsAppSettingsForm() {
                                         Do not restart, log out or re-pair to
                                         bypass restrictions. Changes apply to
                                         subsequent send attempts without
-                                        clearing queued messages or existing
-                                        rests.
+                                        clearing queued messages. OTP messages
+                                        take priority over other queued messages;
+                                        there are no hour-long batch breaks.
                                     </Text>
                                 </Stack>
                             </Fieldset>

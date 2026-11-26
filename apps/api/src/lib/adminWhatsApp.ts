@@ -6,7 +6,7 @@ import { env } from '../env';
 import { apiLogger } from '../logging';
 import { createWahaClient, WahaError, type WhatsAppAccepted, type WahaSessionConfig } from './waha';
 import { createWahaSettingsService } from './wahaSettings';
-import { createWhatsAppOutbox, emptyWhatsAppOutbox, invalidateWhatsAppConfiguration, wahaSafetyKey, wahaConfigIdentity, type WhatsAppOutboxStore } from './wahaOutbox';
+import { createWhatsAppOutbox, emptyWhatsAppOutbox, invalidateWhatsAppConfiguration, migrateWhatsAppScheduling, wahaSafetyKey, wahaConfigIdentity, type WhatsAppJob, type WhatsAppOutboxStore } from './wahaOutbox';
 import { createPppoeExpiryReminderScheduler, isPppoeReminderCurrent } from './pppoeExpiryReminders';
 
 // Older Bun SQL writes could persist the document as a JSON string.
@@ -97,9 +97,9 @@ async function configuredSession(adminId: string) {
     return config;
 }
 
-export async function enqueueAdminWhatsApp(adminId: string, input: unknown, lifetimeMs?: number) {
+export async function enqueueAdminWhatsApp(adminId: string, input: unknown, lifetimeMs?: number, priority: NonNullable<WhatsAppJob['priority']> = 'normal') {
     const config = await configuredSession(adminId);
-    return outbox.enqueue(wahaSafetyKey(adminId, config), adminId, input, lifetimeMs);
+    return outbox.enqueue(wahaSafetyKey(adminId, config), adminId, input, lifetimeMs, undefined, priority);
 }
 
 export async function getAdminWhatsAppOutbox(adminId: string) {
@@ -125,6 +125,11 @@ export const adminWhatsApp = createWahaClient((adminId) => adminWhatsAppSettings
     },
 });
 
+const otpWhatsApp = createWahaClient((adminId) => adminWhatsAppSettings.resolve(adminId), {
+    enqueue: (adminId, phone, text) => enqueueAdminWhatsApp(adminId,
+        { phones: [phone], text, requestId: randomUUID() }, 240_000, 'otp'),
+});
+
 // Probe before claiming content: an unavailable connection is not a send attempt.
 // Delivery still rechecks readiness and all anti-blocking rules after the claim.
 export async function isWhatsAppOutboxReady(
@@ -132,6 +137,7 @@ export async function isWhatsAppOutboxReady(
     getStatus = () => createWahaClient(config).getStatus(adminId), now = Date.now,
 ) {
     const pending = await store.change(key, adminId, (state) => {
+        migrateWhatsAppScheduling(state, now());
         invalidateWhatsAppConfiguration(state, wahaConfigIdentity(config));
         for (const job of state.jobs) if (job.status === 'queued' && job.expiresAt <= now()) {
             job.status = 'cancelled'; job.text = ''; job.result = 'Expired before sending.';
@@ -172,8 +178,8 @@ export function startWhatsAppOutboxWorker() {
         try {
             const rows = await db.select().from(whatsappOutbox).where(and(
                 sql`exists (select 1 from jsonb_array_elements(${whatsappOutbox.state}->'jobs') j where j->>'status' in ('queued', 'processing'))`,
-                // Expired secrets/stale claims must settle even during an hour-long rest.
-                sql`((${whatsappOutbox.state}->>'nextAt')::bigint <= ${Date.now()} or exists
+                // Legacy breaks must migrate before their obsolete nextAt is due.
+                sql`((${whatsappOutbox.state}->>'schedulingVersion') is null or (${whatsappOutbox.state}->>'nextAt')::bigint <= ${Date.now()} or exists
                     (select 1 from jsonb_array_elements(${whatsappOutbox.state}->'jobs') j where
                     (j->>'status' = 'queued' and (j->>'expiresAt')::bigint <= ${Date.now()}) or
                     (j->>'status' = 'processing' and coalesce((j->>'startedAt')::bigint, 0) < ${Date.now() - 180_000})))`,
@@ -286,5 +292,6 @@ export function sendAdminWhatsAppText(
     phone: string,
     text: string,
 ): Promise<WhatsAppAccepted> {
-    return adminWhatsApp.sendText(adminId, phone, text);
+    // This internal entry point is used by portal reset-code delivery, not admin messages.
+    return otpWhatsApp.sendText(adminId, phone, text);
 }

@@ -52,14 +52,15 @@ export const adminWhatsAppBatchSchema = z.object({
 export type WhatsAppAccepted = { ok: true; queued: true; batchId: string };
 export type WhatsAppReceipt = { messageId: string; messageTimestamp?: number; sentAt?: number; ack?: number };
 
-// Only normalized public fields, never engine-specific _data or message bodies.
+// Responses come from a send to this phone or its chat-specific receipt endpoint.
+// Some engines omit `to` (including LID-addressed messages).
 export function parseWhatsAppReceipt(value: unknown, phone: string, expectedId?: string): WhatsAppReceipt | undefined {
     const parsed = z.object({ id: z.string().min(1).max(512), fromMe: z.literal(true),
-        to: z.string(), timestamp: z.number().finite().positive().optional(),
+        to: z.string().optional(), timestamp: z.number().finite().positive().optional(),
         ack: z.number().int().min(-1).max(4).optional() }).safeParse(value);
     if (!parsed.success) return;
     const message = parsed.data;
-    if (message.to.replace(/@s\.whatsapp\.net$/, '@c.us') !== `${phone.replace(/^\+/, '')}@c.us`
+    if ((message.to !== undefined && message.to.replace(/@s\.whatsapp\.net$/, '@c.us') !== `${phone.replace(/^\+/, '')}@c.us`)
         || (expectedId !== undefined && message.id !== expectedId)) return;
     const timestamp = message.timestamp === undefined ? undefined : message.timestamp * 1000;
     return { messageId: message.id, ...(timestamp && timestamp < 8_640_000_000_000_000
