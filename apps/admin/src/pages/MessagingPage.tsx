@@ -416,8 +416,20 @@ export default function MessagingPage() {
             }
         >
             <Container size='lg' mx={0} px={0} w='100%'>
-                <Grid>
-                    <Grid.Col span={{ base: 12, md: 6 }}>
+                <Grid
+                    type='container'
+                    breakpoints={{
+                        xs: '36em',
+                        sm: '48em',
+                        md: '60em',
+                        lg: '75em',
+                        xl: '88em',
+                    }}
+                >
+                    <Grid.Col
+                        span={{ base: 12, md: 6 }}
+                        order={{ base: 2, md: 1 }}
+                    >
                         <Card
                             p={{ base: 'md', sm: 'lg' }}
                             radius='md'
@@ -569,8 +581,11 @@ export default function MessagingPage() {
                                 </Stack>
                             </form>
                         </Card>
-                    </Grid.Col>{' '}
-                    <Grid.Col span={{ base: 12, md: 6 }}>
+                    </Grid.Col>
+                    <Grid.Col
+                        span={{ base: 12, md: 6 }}
+                        order={{ base: 1, md: 2 }}
+                    >
                         <Card
                             p={{ base: 'md', sm: 'lg' }}
                             radius='md'
