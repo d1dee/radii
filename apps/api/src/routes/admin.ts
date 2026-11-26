@@ -13,6 +13,7 @@ import { z } from 'zod';
 import { nasThroughputQuerySchema } from '../lib/nasThroughput';
 import { getAdminSettings, saveAdminSettings } from '../lib/adminSettings';
 import { createAdminActivation } from '../lib/adminActivations';
+import { activationEditSchema } from '../lib/radius/activationLimits';
 import {
     addUserFlag,
     canAdminManageActivation,
@@ -1481,13 +1482,7 @@ app.post('/activations/:id/activate', requireAdmin, async (c) => {
     }
 });
 
-// Edits an activation's calendar expiry and usable online-time balance.
-// RADIUS provisioning and live Session-Timeout caps are updated immediately.
-const activationEditSchema = z.object({
-    expireAt: z.iso.datetime(),
-    remainingSeconds: z.number().int().min(0),
-});
-
+// Edits expiry, usable online time, and optional persistent base bandwidth.
 app.put('/activations/:id', requireAdmin, async (c) => {
     const id = c.req.param('id');
     if (!id) return jsonError(c, 404, 'Unknown activation');
@@ -1506,6 +1501,9 @@ app.put('/activations/:id', requireAdmin, async (c) => {
             new Date(parsed.data.expireAt),
             parsed.data.remainingSeconds,
             {
+                bandwidth: parsed.data.uploadRate !== undefined && parsed.data.downloadRate !== undefined
+                    ? { uploadRate: parsed.data.uploadRate, downloadRate: parsed.data.downloadRate }
+                    : undefined,
                 adminId: c.get('adminSession').userId,
                 actorId: c.get('adminSession').userId,
                 nasIpAddresses: [
@@ -1778,6 +1776,28 @@ app.put('/radius/sessions/:radacctId', requireAdmin, async (c) => {
     } catch (err) {
         logger.error('RADIUS session update failed', { error: err });
         return jsonError(c, 502, 'Could not contact the RADIUS system');
+    }
+});
+
+app.put('/radius/sessions/:radacctId/bandwidth', requireAdmin, async (c) => {
+    const radacctId = c.req.param('radacctId');
+    const adminId = c.get('adminSession').userId;
+    if (!radacctId || !/^\d+$/.test(radacctId) || !(await isAdminRadacctVisible(adminId, radacctId))) {
+        return jsonError(c, 404, 'Unknown session');
+    }
+    const rate = z.number().int().min(0).max(2147483647);
+    const parsed = z.strictObject({ uploadRate: rate, downloadRate: rate })
+        .safeParse(await c.req.json().catch(() => ({})));
+    if (!parsed.success) return jsonError(c, 400, 'Bandwidth rates must be integers from 0 to 2147483647 Kbps');
+    try {
+        const result = await radiusClient.setSessionBandwidthByRadacctId(radacctId, parsed.data, {
+            adminId, actorId: adminId, nasIpAddresses: [...(await getAdminNasAddresses(adminId))],
+        });
+        if (!result.ok) return jsonError(c, 400, result.message);
+        return c.json({ success: true, message: result.message, data: result });
+    } catch (err) {
+        logger.error('RADIUS session bandwidth update failed', { error: err });
+        return jsonError(c, 502, 'Could not update bandwidth on the RADIUS session');
     }
 });
 

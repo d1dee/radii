@@ -1,0 +1,1 @@
+ALTER TABLE "radacct" ADD COLUMN "bandwidth_override" text;

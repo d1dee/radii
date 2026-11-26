@@ -66,6 +66,7 @@ export const radacct = pgTable(
             mode: 'date',
         }),
         fupRateLimit: text('fup_rate_limit'),
+        bandwidthOverride: text('bandwidth_override'),
         // Manual FUP applies only for this accounting session's lifetime.
         fupForced: boolean('fup_forced').default(false).notNull(),
         sessionTimeoutExpiresAt: timestamp('session_timeout_expires_at', {

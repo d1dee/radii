@@ -494,6 +494,11 @@ export interface ActivationStatus {
     octetsUsed: number;
     octetsLimit: number | null; // null = unlimited
     remainingOctets: number | null;
+    bandwidth: {
+        uploadRate: number;
+        downloadRate: number;
+        overridden: boolean;
+    };
     fairUsage: {
         limitBytes: number;
         usedBytes: number;
@@ -2468,14 +2473,15 @@ export class RadiusClient {
                     activationId,
                     pkg,
                     sessionSeconds,
+                    activation,
                 ),
             );
 
         return { ok: true, message: 'Activation restored', expireAt };
     }
 
-    // Updates the activation's calendar expiry and its usable online-time
-    // balance. The allowance stores accounted usage plus the requested
+    // Updates calendar expiry, usable online time, and optional persistent
+    // base rates. The allowance stores accounted usage plus the requested
     // balance, preserving accounting history without mutating old sessions.
     async setActivationLimits(
         activationId: string,
@@ -2485,8 +2491,12 @@ export class RadiusClient {
             adminId: TenantScope;
             actorId?: string;
             nasIpAddresses?: string[];
+            bandwidth?: { uploadRate: number; downloadRate: number };
         },
     ): Promise<{ ok: boolean; message: string }> {
+        if (opts.bandwidth && ![opts.bandwidth.uploadRate, opts.bandwidth.downloadRate].every(
+            (rate) => Number.isInteger(rate) && rate >= 0 && rate <= 2147483647,
+        )) return { ok: false, message: 'Invalid activation bandwidth' };
         const [row] = await db
             .select({ activation: activatedPackages, pkg: packages })
             .from(activatedPackages)
@@ -2520,12 +2530,26 @@ export class RadiusClient {
         const previousExpireAt = row.activation.expireAt;
         const previousTimeAllowanceSeconds =
             row.activation.timeAllowanceSeconds;
+        const previousBandwidth = {
+            uploadRate: row.activation.uploadRateOverride ?? row.pkg.uploadRate,
+            downloadRate: row.activation.downloadRateOverride ?? row.pkg.downloadRate,
+            overridden: row.activation.uploadRateOverride !== null && row.activation.downloadRateOverride !== null,
+        };
         row.activation.expireAt = expireAt;
         row.activation.timeAllowanceSeconds = timeAllowanceSeconds;
+        if (opts.bandwidth) {
+            row.activation.uploadRateOverride = opts.bandwidth.uploadRate;
+            row.activation.downloadRateOverride = opts.bandwidth.downloadRate;
+        }
         await db.transaction(async (tx) => {
             await tx
                 .update(activatedPackages)
-                .set({ expireAt, timeAllowanceSeconds })
+                .set({ expireAt, timeAllowanceSeconds,
+                    ...(opts.bandwidth ? {
+                        uploadRateOverride: opts.bandwidth.uploadRate,
+                        downloadRateOverride: opts.bandwidth.downloadRate,
+                    } : {}),
+                })
                 .where(eq(activatedPackages.id, activationId));
             await tx.insert(activationEvents).values({
                 activationId,
@@ -2540,6 +2564,7 @@ export class RadiusClient {
                     timeAllowanceSeconds,
                     usedSeconds,
                     requestedRemainingSeconds: remainingSeconds,
+                    ...(opts.bandwidth ? { previousBandwidth, bandwidth: { ...opts.bandwidth, overridden: true } } : {}),
                 },
             });
         });
@@ -2565,6 +2590,7 @@ export class RadiusClient {
         if (row.pkg.type === 'pppoe') {
             await this.ensurePppoePassword(username);
             await this.applyPppoeAuthorization(row.activation, row.pkg);
+            if (opts.bandwidth) await this.reconcileFairUsagePackages(activationId);
             return { ok: true, message: 'Activation limits updated' };
         }
 
@@ -2581,7 +2607,13 @@ export class RadiusClient {
             'Expiration',
             dayjs(expireAt).format('DD MMM YYYY HH:mm:ss'),
         );
+        for (const attribute of this.sessionReplyAttributes(activationId, row.pkg, remainingSeconds, false, row.activation)) {
+            if (attribute.attribute === 'Mikrotik-Rate-Limit') {
+                await this.upsertReplyAttribute(username, attribute.attribute, String(attribute.value));
+            }
+        }
         await this.syncBankAuthorization(activationId, row.pkg);
+        if (opts.bandwidth) await this.reconcileFairUsagePackages(activationId);
         return { ok: true, message: 'Activation limits updated' };
     }
 
@@ -2786,6 +2818,54 @@ export class RadiusClient {
         }
     }
 
+    async setSessionBandwidthByRadacctId(
+        radacctId: string,
+        rates: { uploadRate: number; downloadRate: number },
+        opts: { adminId: string; actorId: string; nasIpAddresses: string[] },
+    ): Promise<{ ok: boolean; message: string }> {
+        if (![rates.uploadRate, rates.downloadRate].every(
+            (rate) => Number.isSafeInteger(rate) && rate >= 0 && rate <= 2147483647,
+        )) return { ok: false, message: 'Invalid bandwidth rates' };
+        return db.transaction(async (tx) => {
+            await tx.execute(
+                sql`select pg_advisory_xact_lock(hashtext(${`fup-session:${radacctId}`}))`,
+            );
+            const [row] = await tx.select().from(radacct).where(and(
+                eq(radacct.radacctid, BigInt(radacctId)),
+                opts.nasIpAddresses.length > 0
+                    ? inArray(radacct.nasipaddress, opts.nasIpAddresses)
+                    : sql`false`,
+            )).limit(1);
+            if (!row) return { ok: false, message: 'Unknown session' };
+            if (row.acctstoptime !== null || row.acctstarttime === null) {
+                return { ok: false, message: 'Session is not live' };
+            }
+            const [owned] = await tx.select({ activation: activatedPackages })
+                .from(activatedPackages).where(and(
+                    sql`${activatedPackages.id}::text = ${row.class}`,
+                    activationOwnedByAdmin(opts.adminId),
+                    activeActivationCondition(),
+                )).limit(1);
+            if (!owned) return { ok: false, message: 'Session has no active package activation' };
+            const rateLimit = `${rates.uploadRate}k/${rates.downloadRate}k`;
+            if (!(await this.coaRateLimit(
+                row.username ?? '', this.sessionInfoFromRow(row), rateLimit, opts.adminId, tx,
+            ))) return { ok: false, message: 'NAS answered CoA-NAK' };
+            const updated = await tx.update(radacct).set({ bandwidthOverride: rateLimit })
+                .where(and(eq(radacct.radacctid, row.radacctid),
+                    isNull(radacct.acctstoptime), isNotNull(radacct.acctstarttime)))
+                .returning({ id: radacct.radacctid });
+            if (updated.length === 0) return { ok: false, message: 'Session is no longer live' };
+            await tx.insert(activationEvents).values({
+                activationId: owned.activation.id,
+                eventType: 'session_bandwidth_adjusted',
+                actorType: 'admin', actorId: opts.actorId, source: 'admin_api',
+                metadata: { radacctId, ...rates, rateLimit },
+            });
+            return { ok: true, message: 'Session bandwidth updated' };
+        });
+    }
+
     async activateSessionFairUsageByRadacctId(
         radacctId: string,
         opts: { adminId: string; actorId: string; nasIpAddresses: string[] },
@@ -2845,7 +2925,7 @@ export class RadiusClient {
                 };
             }
             const rateLimit = this.rateLimitValue(owned.pkg, true);
-            if (!row.fupForced || row.fupRateLimit !== rateLimit) {
+            if (row.bandwidthOverride !== null || !row.fupForced || row.fupRateLimit !== rateLimit) {
                 const acknowledged = await this.coaRateLimit(
                     row.username ?? '',
                     this.sessionInfoFromRow(row),
@@ -2859,6 +2939,7 @@ export class RadiusClient {
                     .update(radacct)
                     .set({
                         fupForced: true,
+                        bandwidthOverride: null,
                         fupRateLimit: rateLimit,
                         fupEvaluatedAt: new Date(),
                     })
@@ -3493,6 +3574,7 @@ export class RadiusClient {
                     fupEffectiveRateLimit: this.rateLimitValue(
                         pkg,
                         state.throttled,
+                        activation,
                     ),
                     fupEvaluatedAt: evaluatedAt,
                 })
@@ -3508,7 +3590,12 @@ export class RadiusClient {
     private rateLimitValue(
         pkg: typeof packages.$inferSelect,
         throttled: boolean,
+        activation?: typeof activatedPackages.$inferSelect,
     ): string {
+        // Custom base rates bypass package bursts, but never the FUP tier.
+        if (!throttled && activation?.uploadRateOverride != null && activation.downloadRateOverride != null) {
+            return `${activation.uploadRateOverride}k/${activation.downloadRateOverride}k`;
+        }
         const uploadRate = throttled
             ? pkg.fairUsageUploadRate
             : pkg.uploadRate;
@@ -3525,17 +3612,19 @@ export class RadiusClient {
         return `${base} ${burstUpload}k/${burstDownload}k ${thresholdUpload}k/${thresholdDownload}k ${pkg.burstTime}/${pkg.burstTime}`;
     }
 
-    async reconcileFairUsagePackages(): Promise<number> {
+    async reconcileFairUsagePackages(activationId?: string): Promise<number> {
         const rows = await db
             .select({ activation: activatedPackages, pkg: packages })
             .from(activatedPackages)
             .innerJoin(packages, eq(activatedPackages.packageId, packages.id))
             .where(
                 and(
+                    activationId ? eq(activatedPackages.id, activationId) : undefined,
                     isNull(activatedPackages.deactivatedAt),
                     gte(activatedPackages.expireAt, new Date()),
                     or(
                         gt(packages.fairUsageLimit, 0),
+                        isNotNull(activatedPackages.uploadRateOverride),
                         isNotNull(activatedPackages.fupEffectiveRateLimit),
                         // Even disabled policies can have a late Accounting-Start
                         // for a session authorized with the old throttled tier.
@@ -3604,7 +3693,8 @@ export class RadiusClient {
                                     ),
                                 )
                                 .limit(1);
-                            if (!current) return 0;
+                            // Explicit session rates take precedence over every FUP tier.
+                            if (!current || current.bandwidthOverride !== null) return 0;
                             const session = this.sessionInfoFromRow(current);
                             const rateLimit =
                                 session.fupForced &&
@@ -3617,6 +3707,7 @@ export class RadiusClient {
                                               state?.throttled ?? false,
                                               session.fupForced,
                                           ),
+                                          row.activation,
                                       );
                             // A missing checkpoint is unknown: authorization may have
                             // installed a different tier before a reset or package edit.
@@ -4158,6 +4249,7 @@ export class RadiusClient {
         pkg: typeof packages.$inferSelect,
         sessionSeconds: number,
         throttled = false,
+        activation?: typeof activatedPackages.$inferSelect,
     ): Array<{ attribute: string; value: string | number }> {
         const attrs: Array<{ attribute: string; value: string | number }> = [
             { attribute: 'Session-Timeout', value: sessionSeconds },
@@ -4180,13 +4272,14 @@ export class RadiusClient {
             pkg.uploadRate > 0 ||
             pkg.downloadRate > 0 ||
             pkg.burstTime > 0 ||
+            activation?.uploadRateOverride != null ||
             throttled
         ) {
             // Package rates are Kbps; MikroTik's 'k' suffix denotes thousands.
             // 0 is read as unlimited by RouterOS queuing.
             attrs.push({
                 attribute: 'Mikrotik-Rate-Limit',
-                value: this.rateLimitValue(pkg, throttled),
+                value: this.rateLimitValue(pkg, throttled, activation),
             });
         }
 
@@ -4212,11 +4305,14 @@ export class RadiusClient {
         activationId: string,
         pkg: typeof packages.$inferSelect,
         sessionSeconds: number,
+        activation?: typeof activatedPackages.$inferSelect,
     ): Array<typeof radreply.$inferInsert> {
         return this.sessionReplyAttributes(
             activationId,
             pkg,
             sessionSeconds,
+            false,
+            activation,
         ).map(({ attribute, value }) => ({
             username,
             attribute,
@@ -4245,6 +4341,7 @@ export class RadiusClient {
             pkg,
             sessionSeconds,
             fairUsage?.throttled ?? false,
+            activation,
         )) {
             reply[`reply:${attribute}`] = { op: ':=', value: [value] };
         }
@@ -4903,6 +5000,11 @@ export class RadiusClient {
             remainingOctets:
                 quotaBytes > 0 ? Math.max(0, quotaBytes - octetsUsed) : null,
             fairUsage,
+            bandwidth: {
+                uploadRate: activation.uploadRateOverride ?? pkg.uploadRate,
+                downloadRate: activation.downloadRateOverride ?? pkg.downloadRate,
+                overridden: activation.uploadRateOverride != null && activation.downloadRateOverride != null,
+            },
             online: liveSessions.length > 0,
             liveSessions,
             avgSpeedBps: liveSessions.length

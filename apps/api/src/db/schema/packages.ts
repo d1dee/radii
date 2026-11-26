@@ -213,6 +213,8 @@ export const activatedPackages = pgTable(
             mode: 'date',
         }).notNull(),
         timeAllowanceSeconds: integer('time_allowance_seconds'),
+        uploadRateOverride: integer('upload_rate_override'),
+        downloadRateOverride: integer('download_rate_override'),
         fupWindowStart: timestamp('fup_window_start', {
             withTimezone: true,
             mode: 'date',
@@ -287,6 +289,7 @@ export const activationEvents = pgTable(
                 'deactivated',
                 'limits_adjusted',
                 'session_timeout_adjusted',
+                'session_bandwidth_adjusted',
                 'session_fup_activated',
                 'session_bonus_added',
             ],

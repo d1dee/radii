@@ -22,6 +22,20 @@
       "when": 1795643389298,
       "tag": "0002_true_lyja",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1795708004522,
+      "tag": "0003_lyrical_weapon_omega",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1795710084283,
+      "tag": "0004_groovy_pepper_potts",
+      "breakpoints": true
     }
   ]
 }

@@ -1,3 +1,14 @@
+import { z } from 'zod';
+
+export const activationEditSchema = z.object({
+    expireAt: z.iso.datetime(),
+    remainingSeconds: z.number().int().min(0),
+    uploadRate: z.number().int().min(0).max(2147483647).optional(),
+    downloadRate: z.number().int().min(0).max(2147483647).optional(),
+}).refine((value) => (value.uploadRate === undefined) === (value.downloadRate === undefined), {
+    message: 'Upload and download rates must be supplied together',
+});
+
 export function allowanceForRemainingTime(
     usedSeconds: number,
     remainingSeconds: number,

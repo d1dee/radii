@@ -1377,10 +1377,14 @@ export async function getAdminSessionDetail(
                 expireAt: activatedPackages.expireAt,
                 deactivatedAt: activatedPackages.deactivatedAt,
                 timeAllowanceSeconds: activatedPackages.timeAllowanceSeconds,
+                uploadRateOverride: activatedPackages.uploadRateOverride,
+                downloadRateOverride: activatedPackages.downloadRateOverride,
             },
             packageSessionLength: packages.sessionLength,
             packageNoExpiry: packages.noExpiry,
             fairUsageLimit: packages.fairUsageLimit,
+            packageUploadRate: packages.uploadRate,
+            packageDownloadRate: packages.downloadRate,
             fairUsageUploadRate: packages.fairUsageUploadRate,
             fairUsageDownloadRate: packages.fairUsageDownloadRate,
             customer: {
@@ -1603,6 +1607,9 @@ export async function getAdminSessionDetail(
         };
     })();
 
+    const installedBandwidth = (row.accounting.bandwidthOverride ?? row.accounting.fupRateLimit)
+        ?.match(/^(\d+)k\/(\d+)k(?:\s|$)/);
+
     return {
         session: {
             radacctId: String(row.accounting.radacctid),
@@ -1636,6 +1643,11 @@ export async function getAdminSessionDetail(
                     : 0,
         },
         adjustments: {
+            bandwidth: {
+                uploadRate: installedBandwidth ? Number(installedBandwidth[1]) : (row.activation?.uploadRateOverride ?? row.packageUploadRate ?? 0),
+                downloadRate: installedBandwidth ? Number(installedBandwidth[2]) : (row.activation?.downloadRateOverride ?? row.packageDownloadRate ?? 0),
+                overridden: row.accounting.bandwidthOverride !== null,
+            },
             timeBank: Boolean(row.packageNoExpiry),
             bonusRemainingSeconds: row.packageNoExpiry ? bankSessionUsage(seconds, row.accounting, live).bonusRemainingSeconds : 0,
             bankRemainingSeconds: row.packageNoExpiry && activationDetail

@@ -52,6 +52,7 @@ const EVENT_LABELS: Record<ActivationEvent['type'], string> = {
     limits_adjusted: 'Activation limits adjusted',
     session_timeout_adjusted: 'Session timeout adjusted',
     session_fup_activated: 'Session FUP activated',
+    session_bandwidth_adjusted: 'Session bandwidth adjusted',
     session_bonus_added: 'Additional session time added',
 };
 
