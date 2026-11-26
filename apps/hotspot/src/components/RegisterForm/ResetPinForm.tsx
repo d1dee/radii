@@ -1,4 +1,4 @@
-import { Button, Input, PinInput, Stack, Text } from '@mantine/core';
+import { Button, Group, Input, PinInput, Stack, Text } from '@mantine/core';
 import { schemaResolver, useForm } from '@mantine/form';
 import { forgotPinSchema, hasFieldErrors, resetPinSchema } from '@radii/shared';
 import { PhoneNumberInput } from '@radii/ui';
@@ -16,9 +16,11 @@ type ResetValues = {
 
 // Forget-PIN flow: request a 6-digit WhatsApp code by phone, then redeem it for a
 // new 4-digit PIN. Three local steps: request -> reset -> done.
-export function ResetPinForm() {
+export function ResetPinForm({ onBackToLogin }: { onBackToLogin: () => void }) {
     const [step, setStep] = useState<'request' | 'reset' | 'done'>('request');
     const [submitting, setSubmitting] = useState(false);
+    const [resending, setResending] = useState(false);
+    const [codeResent, setCodeResent] = useState(false);
     const [formError, setFormError] = useState<string | null>(null);
 
     const requestForm = useForm<RequestValues>({
@@ -34,12 +36,18 @@ export function ResetPinForm() {
 
     async function handleRequest(values: RequestValues) {
         setFormError(null);
+        setCodeResent(false);
         setSubmitting(true);
         try {
             const result = await forgotPin(values);
             if (!result.success) {
                 if (hasFieldErrors(result.data)) {
-                    requestForm.setErrors(result.data.fieldErrors);
+                    if (step === 'request')
+                        requestForm.setErrors(result.data.fieldErrors);
+                    else
+                        setFormError(
+                            'Could not resend the code. Try again or contact support.',
+                        );
                 } else {
                     setFormError(
                         result.message ||
@@ -49,6 +57,11 @@ export function ResetPinForm() {
                 return;
             }
             resetForm.setFieldValue('phoneNumber', values.phoneNumber);
+            if (step === 'reset') {
+                resetForm.setFieldValue('otp', '');
+                resetForm.clearFieldError('otp');
+                setCodeResent(true);
+            }
             setStep('reset');
         } catch (error) {
             mutationLogger.warning('Unexpected reset code request failure.', {
@@ -58,6 +71,16 @@ export function ResetPinForm() {
             setFormError('Could not send the reset code. Try again.');
         } finally {
             setSubmitting(false);
+        }
+    }
+
+    async function handleResend() {
+        if (submitting) return;
+        setResending(true);
+        try {
+            await handleRequest({ phoneNumber: resetForm.values.phoneNumber });
+        } finally {
+            setResending(false);
         }
     }
 
@@ -95,6 +118,9 @@ export function ResetPinForm() {
                 <Text size='sm' c='green'>
                     Your PIN was updated. Sign in with your new PIN.
                 </Text>
+                <Button variant='default' onClick={onBackToLogin}>
+                    Back to login
+                </Button>
             </Stack>
         );
     }
@@ -178,19 +204,39 @@ export function ResetPinForm() {
                         </Text>
                     ) : null}
 
-                    <Button type='submit' loading={submitting} mt='sm'>
+                    {codeResent ? (
+                        <Text size='sm' c='green' role='status'>
+                            A new code was requested. Check your WhatsApp
+                            messages.
+                        </Text>
+                    ) : null}
+
+                    <Button
+                        type='submit'
+                        loading={submitting && !resending}
+                        disabled={resending}
+                        mt='sm'
+                    >
                         {submitting ? 'Please wait…' : 'Reset PIN'}
                     </Button>
-                    <Button
-                        variant='subtle'
-                        size='xs'
-                        onClick={() => {
-                            setFormError(null);
-                            setStep('request');
-                        }}
-                    >
-                        Use a different number
-                    </Button>
+                    <Group justify='space-between' grow>
+                        <Button
+                            type='button'
+                            variant='default'
+                            loading={resending}
+                            disabled={submitting && !resending}
+                            onClick={handleResend}
+                        >
+                            Resend code
+                        </Button>
+                        <Button
+                            type='button'
+                            variant='outline'
+                            onClick={onBackToLogin}
+                        >
+                            Back to login
+                        </Button>
+                    </Group>
                 </Stack>
             </form>
         );
@@ -218,6 +264,9 @@ export function ResetPinForm() {
 
                 <Button type='submit' loading={submitting} mt='sm'>
                     {submitting ? 'Please wait…' : 'Send WhatsApp code'}
+                </Button>
+                <Button type='button' variant='default' onClick={onBackToLogin}>
+                    Back to login
                 </Button>
             </Stack>
         </form>
