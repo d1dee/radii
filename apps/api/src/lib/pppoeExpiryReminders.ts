@@ -71,7 +71,8 @@ function reminderText(row: Awaited<ReturnType<typeof candidates>>[number], setti
         location: row.account.location?.trim() || '',
         username: row.account.username, package_name: row.pkg.title, expiry_date: date, expiry_time: time,
         amount: `${currencyLabel} ${new Intl.NumberFormat('en-KE', { maximumFractionDigits: 2 }).format(Number(row.pkg.price))}`,
-        support_phone: settings.contacts.adminTel || settings.contacts.adminWhatsapp || 'your service provider',
+        whatsapp_support: settings.contacts.adminWhatsapp || 'your service provider',
+        tel_support: settings.contacts.adminTel || 'your service provider',
     });
 }
 

@@ -5,9 +5,11 @@ import {
     Card,
     Code,
     Combobox,
+    Divider,
     Group,
     NumberInput,
     Paper,
+    Scroller,
     Stack,
     Switch,
     Text,
@@ -36,7 +38,8 @@ const sampleValues: PppoeExpiryReminderValues = {
     expiry_date: '30 Nov 2026',
     expiry_time: '14:30',
     amount: 'Ksh 1,500',
-    support_phone: '+254712345678',
+    whatsapp_support: '+254712345678',
+    tel_support: '+254720123456',
 };
 
 export function PppoeExpiryReminderSettings({
@@ -192,9 +195,6 @@ export function PppoeExpiryReminderSettings({
                         When enabled, eligible subscriptions are checked every
                         minute. One reminder per subscription cycle is placed in
                         your WhatsApp queue using your sending protections.
-                        Configure WhatsApp to enable delivery; offline sessions
-                        wait in the queue. Reminders are discarded at expiry or
-                        when the subscription is no longer current.
                     </Alert>
                     <Title order={5}>Reminder Schedule</Title>
                     <Switch
@@ -306,7 +306,10 @@ export function PppoeExpiryReminderSettings({
                         error={scheduleError}
                         disabled={disabled || saving || !loaded}
                     />
-                    <Title order={5}>Reminder Template</Title>
+                    <Divider
+                        label={<Title order={5}>Reminder Template</Title>}
+                        labelPosition='left'
+                    />
                     <Textarea
                         label='Reminder message'
                         placeholder='Hello {{customer_name}}, your {{account_label}} connection at {{location}} ({{username}}) expires on {{expiry_date}} at {{expiry_time}}.'
@@ -327,15 +330,28 @@ export function PppoeExpiryReminderSettings({
                         <Text size='sm' fw={500}>
                             Supported placeholders
                         </Text>
-                        <Group gap='xs'>
-                            {pppoeExpiryReminderPlaceholders.map(
-                                (placeholder) => (
-                                    <Code
-                                        key={placeholder}
-                                    >{`{{${placeholder}}}`}</Code>
-                                ),
-                            )}
-                        </Group>
+                        <Scroller
+                            startControlProps={{
+                                'aria-label': 'Scroll placeholders left',
+                            }}
+                            endControlProps={{
+                                'aria-label': 'Scroll placeholders right',
+                            }}
+                        >
+                            <Group gap='xs' wrap='nowrap'>
+                                {pppoeExpiryReminderPlaceholders.map(
+                                    (placeholder) => (
+                                        <Code
+                                            key={placeholder}
+                                            style={{
+                                                flexShrink: 0,
+                                                whiteSpace: 'nowrap',
+                                            }}
+                                        >{`{{${placeholder}}}`}</Code>
+                                    ),
+                                )}
+                            </Group>
+                        </Scroller>
                     </Stack>
                     <Stack gap={6}>
                         <Text size='sm' fw={500}>
@@ -352,7 +368,16 @@ export function PppoeExpiryReminderSettings({
                                 {parsed.success
                                     ? renderPppoeExpiryReminderTemplate(
                                           parsed.data,
-                                          sampleValues,
+                                          {
+                                              ...sampleValues,
+                                              whatsapp_support:
+                                                  settings.contacts
+                                                      .adminWhatsapp ||
+                                                  'your service provider',
+                                              tel_support:
+                                                  settings.contacts.adminTel ||
+                                                  'your service provider',
+                                          },
                                       )
                                     : 'Fix the reminder message to see a preview.'}
                             </Text>

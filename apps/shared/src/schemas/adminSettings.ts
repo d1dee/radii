@@ -172,7 +172,8 @@ export const pppoeExpiryReminderPlaceholders = [
     'expiry_date',
     'expiry_time',
     'amount',
-    'support_phone',
+    'whatsapp_support',
+    'tel_support',
 ] as const;
 
 export type PppoeExpiryReminderValues = Record<
@@ -181,7 +182,7 @@ export type PppoeExpiryReminderValues = Record<
 >;
 
 export const defaultPppoeExpiryReminderTemplate =
-    'Hello {{customer_name}}, your {{package_name}} subscription for {{username}} expires on {{expiry_date}} at {{expiry_time}}. Please renew for {{amount}} to stay connected. For assistance, contact {{support_phone}}.';
+    'Hello {{customer_name}}, your {{package_name}} subscription for {{username}} expires on {{expiry_date}} at {{expiry_time}}. Please renew for {{amount}} to stay connected. For assistance, contact {{tel_support}}.';
 
 export const pppoeExpiryReminderTemplateSchema = z
     .string()
