@@ -23,12 +23,12 @@ import {
     Button,
     Card,
     Center,
+    Container,
     Group,
     Loader,
     Paper,
     SegmentedControl,
     Select,
-    SimpleGrid,
     Stack,
     Text,
     Title,
@@ -112,12 +112,10 @@ function buildLayout(packages: PackageRow[]): LayoutCategory[] {
 function SortableCategory({
     name,
     active,
-    count,
     onSelect,
 }: {
     name: string;
     active: boolean;
-    count: number;
     onSelect: () => void;
 }) {
     const {
@@ -135,17 +133,20 @@ function SortableCategory({
             ref={setNodeRef}
             variant={active ? 'filled' : 'light'}
             leftSection={<MdDragIndicator />}
-            rightSection={
-                <Badge size='xs' variant={active ? 'white' : 'light'}>
-                    {count}
-                </Badge>
-            }
+            w='max-content'
+            miw={{
+                base: 'calc((100% - var(--mantine-spacing-md)) / 2)',
+                xs: 'calc((100% - 2 * var(--mantine-spacing-md)) / 3)',
+                sm: 'calc((100% - 3 * var(--mantine-spacing-md)) / 4)',
+                md: 'calc((100% - 4 * var(--mantine-spacing-md)) / 5)',
+            }}
             onClick={onSelect}
             style={{
                 transform: CSS.Transform.toString(transform),
                 transition,
                 opacity: isDragging ? 0.55 : 1,
                 touchAction: 'none',
+                flexShrink: 0,
                 outline: isOver && !isDragging
                     ? '2px solid var(--mantine-primary-color-filled)'
                     : undefined,
@@ -176,6 +177,7 @@ function SortablePackageCard({ pkg }: { pkg: PackageRow }) {
             shadow='sm'
             radius='lg'
             withBorder
+            padding='md'
             style={{
                 transform: CSS.Transform.toString(transform),
                 transition,
@@ -189,7 +191,7 @@ function SortablePackageCard({ pkg }: { pkg: PackageRow }) {
             }}
         >
             <Stack gap='md'>
-                <Group justify='space-between' align='flex-start' wrap='nowrap'>
+                <Group justify='space-between' align='flex-start'>
                     <Stack gap='xs' miw={0}>
                         <Group gap='xs' wrap='nowrap' miw={0}>
                             <ActionIcon
@@ -202,7 +204,7 @@ function SortablePackageCard({ pkg }: { pkg: PackageRow }) {
                             >
                                 <MdDragIndicator />
                             </ActionIcon>
-                            <Text c='dimmed' truncate miw={0} title={upperFirstCase(pkg.title)}>
+                            <Text c='dimmed' style={{ overflowWrap: 'anywhere' }}>
                                 {upperFirstCase(pkg.title)}
                             </Text>
                         </Group>
@@ -210,11 +212,9 @@ function SortablePackageCard({ pkg }: { pkg: PackageRow }) {
                             {formatPackageRate(pkg.downloadRate)}
                         </Text>
                     </Stack>
-                    <Stack gap='xs' align='flex-end' style={{ flexShrink: 0 }}>
+                    <Stack gap='xs' align='flex-end'>
                         <Text size='sm' c='dimmed'>
-                            {pkg.noExpiry
-                                ? 'No Expiry'
-                                : formatSeconds(pkg.sessionLength * 60)}
+                            {formatSeconds(pkg.sessionLength * 60, pkg.noExpiry)}
                         </Text>
                         <Text size='xl' fw={700}>
                             {formatPackagePrice(pkg.price)}
@@ -280,6 +280,11 @@ export default function PackagePortalPage() {
             const nextLayout = buildLayout(packagesResult.data);
             setLayout(nextLayout);
             setNasDevices(nasResult.data);
+            setNasDeviceId((current) =>
+                nasResult.data.some((device) => device.id === current)
+                    ? current
+                    : nasResult.data[0]?.id ?? null,
+            );
             setSelectedCategory(nextLayout[0]?.name ?? '');
             setDirty(false);
         });
@@ -291,14 +296,12 @@ export default function PackagePortalPage() {
     const canvasLayout = layout
         .map((category) => ({
             ...category,
-            packages:
-                nasDeviceId === null
-                    ? category.packages
-                    : category.packages.filter(
-                          (pkg) =>
-                              pkg.isActive &&
-                              pkg.nasDeviceIds.includes(nasDeviceId),
-                      ),
+            packages: category.packages.filter(
+                (pkg) =>
+                    nasDeviceId !== null &&
+                    pkg.isActive &&
+                    pkg.nasDeviceIds.includes(nasDeviceId),
+            ),
         }))
         .filter((category) => category.packages.length > 0);
     const activeCategory =
@@ -478,17 +481,20 @@ export default function PackagePortalPage() {
                 />
                 <Select
                     label='Preview NAS'
-                    description='Clear to arrange every package'
-                    placeholder='All packages'
+                    description='Only packages linked to this NAS are shown'
+                    placeholder='Select a NAS device'
                     value={nasDeviceId}
-                    onChange={setNasDeviceId}
+                    onChange={(value) => {
+                        if (value !== null) setNasDeviceId(value);
+                    }}
                     data={nasDevices.map((device) => ({
                         value: device.id,
                         label: device.name,
                     }))}
                     searchable
                     filter={fuseOptionsFilter}
-                    clearable
+                    allowDeselect={false}
+                    disabled={loading || nasDevices.length === 0}
                     nothingFoundMessage='No NAS devices found'
                     w={{ base: '100%', sm: 280 }}
                 />
@@ -502,6 +508,10 @@ export default function PackagePortalPage() {
                 <Alert color='red' title='Could not load portal editor'>
                     {error}
                 </Alert>
+            ) : nasDevices.length === 0 ? (
+                <Alert color='blue' title='No NAS devices available'>
+                    Add a NAS device before previewing this portal.
+                </Alert>
             ) : layout.length === 0 ? (
                 <Alert color='blue' title={`No ${type} packages`}>
                     Add packages before arranging this portal.
@@ -512,79 +522,71 @@ export default function PackagePortalPage() {
                     collisionDetection={closestCenter}
                     onDragEnd={handleDragEnd}
                 >
-                    <Paper shadow='xl' radius='lg' p='lg' withBorder>
-                        <Stack gap='md'>
-                            <Group justify='space-between'>
-                                <div>
+                    <Container size='sm' w='100%'>
+                        <Paper shadow='xl' radius='lg' p='lg' withBorder>
+                            <Stack gap='md' mt='md'>
+                                <Group justify='space-between'>
                                     <Text size='lg' fw={600}>
                                         Available Packages
                                     </Text>
-                                    <Text size='sm' c='dimmed'>
-                                        Drag tabs to reorder categories. Drag a
-                                        card within the list or onto another tab.
-                                    </Text>
-                                </div>
-                                {dirty ? (
-                                    <Badge color='orange'>Unsaved changes</Badge>
-                                ) : null}
-                            </Group>
+                                    {dirty ? (
+                                        <Badge color='orange'>Unsaved changes</Badge>
+                                    ) : null}
+                                </Group>
 
-                            {canvasLayout.length === 0 ? (
-                                <Alert color='blue' title='No packages available'>
-                                    No {type} packages are linked to this NAS.
-                                </Alert>
-                            ) : (
-                                <>
-                                    <SortableContext
-                                        items={canvasLayout.map((category) =>
-                                            categoryId(category.name),
-                                        )}
-                                        strategy={rectSortingStrategy}
-                                    >
-                                        <SimpleGrid
-                                            cols={{ base: 2, xs: 3, md: 5 }}
-                                            spacing='md'
+                                {canvasLayout.length === 0 ? (
+                                    <Alert color='blue' title='No packages available'>
+                                        No {type} packages are linked to this NAS.
+                                    </Alert>
+                                ) : (
+                                    <>
+                                        <SortableContext
+                                            items={canvasLayout.map((category) =>
+                                                categoryId(category.name),
+                                            )}
+                                            strategy={rectSortingStrategy}
                                         >
-                                            {canvasLayout.map((category) => (
-                                                <SortableCategory
-                                                    key={category.name}
-                                                    name={category.name}
-                                                    count={category.packages.length}
-                                                    active={
-                                                        category.name ===
-                                                        activeCategory?.name
-                                                    }
-                                                    onSelect={() =>
-                                                        setSelectedCategory(
-                                                            category.name,
-                                                        )
-                                                    }
-                                                />
-                                            ))}
-                                        </SimpleGrid>
-                                    </SortableContext>
+                                            <Group gap='md'>
+                                                {canvasLayout.map((category) => (
+                                                    <SortableCategory
+                                                        key={category.name}
+                                                        name={category.name}
+                                                        active={
+                                                            category.name ===
+                                                            activeCategory?.name
+                                                        }
+                                                        onSelect={() =>
+                                                            setSelectedCategory(
+                                                                category.name,
+                                                            )
+                                                        }
+                                                    />
+                                                ))}
+                                            </Group>
+                                        </SortableContext>
 
-                                    <SortableContext
-                                        items={
-                                            activeCategory?.packages.map((pkg) =>
-                                                packageId(pkg.id),
-                                            ) ?? []
-                                        }
-                                        strategy={verticalListSortingStrategy}
-                                    >
-                                        <Stack gap='md'>
-                                            {activeCategory?.packages.map((pkg) => (
-                                                <SortablePackageCard
-                                                    key={pkg.id}
-                                                    pkg={pkg}
-                                                />
-                                            ))}
-                                        </Stack>
-                                    </SortableContext>
-                                </>
-                            )}
-                        </Stack>
-                    </Paper>
+                                        <SortableContext
+                                            items={
+                                                activeCategory?.packages.map((pkg) =>
+                                                    packageId(pkg.id),
+                                                ) ?? []
+                                            }
+                                            strategy={verticalListSortingStrategy}
+                                        >
+                                            <Stack gap='md'>
+                                                {activeCategory?.packages.map((pkg) => (
+                                                    <SortablePackageCard
+                                                        key={pkg.id}
+                                                        pkg={pkg}
+                                                    />
+                                                ))}
+                                            </Stack>
+                                        </SortableContext>
+                                    </>
+                                )}
+                            </Stack>
+                        </Paper>
+                    </Container>
                 </DndContext>
             )}
         </PageLayout>
