@@ -594,6 +594,8 @@ export type AdminCustomerOption = {
     value: string;
     label: string;
     displayName: string;
+    internalName: string | null;
+    location: string | null;
     phoneNumber: string;
     summary: {
         spend30Days: number;

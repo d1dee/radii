@@ -24,12 +24,13 @@ import {
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
-import { PhoneNumberInput } from '@radii/ui';
 import { useEffect, useRef, useState } from 'react';
 import { MdCheck, MdDoneAll, MdMoreVert, MdSchedule } from 'react-icons/md';
 import { Link } from 'react-router-dom';
 
 import { PageLayout } from '@/components/Layout/PageLayout';
+import { CustomerPickerProvider } from '@/components/Packages/customerPicker';
+import { RecipientPhoneInput } from '@/components/RecipientPhoneInput';
 import {
     cancelWhatsAppOutbox,
     controlWhatsAppSession,
@@ -53,6 +54,14 @@ import {
 } from '@/lib/whatsapp';
 
 export default function MessagingPage() {
+    return (
+        <CustomerPickerProvider>
+            <MessagingPageContent />
+        </CustomerPickerProvider>
+    );
+}
+
+function MessagingPageContent() {
     const [session, setSession] = useState<WhatsAppSession | null>(null);
     const [qr, setQr] = useState<string | null>(null);
     const [error, setError] = useState('');
@@ -465,22 +474,15 @@ export default function MessagingPage() {
                                             },
                                         ]}
                                     />
-                                    <PhoneNumberInput
+                                    <RecipientPhoneInput
                                         label='Recipient phone'
-                                        description='Select the country and enter the recipient phone number.'
-                                        autoComplete='off'
+                                        description='Enter a phone number or search for a customer by name.'
                                         required={
                                             mode === 'single' ||
                                             recipients.length === 0
                                         }
                                         disabled={!!busy}
                                         {...form.getInputProps('phone')}
-                                        onChange={(value) =>
-                                            form.setFieldValue(
-                                                'phone',
-                                                value ?? '',
-                                            )
-                                        }
                                     />
                                     {mode === 'multiple' && (
                                         <>

@@ -467,6 +467,8 @@ export type AdminCustomerOption = {
     value: string;
     label: string;
     displayName: string;
+    internalName: string | null;
+    location: string | null;
     phoneNumber: string;
     summary: AdminUserEligibilitySummary;
 };
@@ -485,7 +487,9 @@ export async function getAdminCustomerOptions(
         select u.id, coalesce(nullif(concat_ws(' · ',
                 coalesce(nullif(trim(tag.name), ''), nullif(trim(u.name), '')),
                 nullif(trim(tag.location), '')), ''), u.username, u.id) as display_name,
-            coalesce(u.username, '') as phone_number
+            coalesce(u.username, '') as phone_number,
+            nullif(trim(tag.name), '') as internal_name,
+            nullif(trim(tag.location), '') as location
         from ${user} u
         left join ${userAdminTag} tag on tag.user_id = u.id and tag.admin_id = ${adminId}
         where nullif(trim(u.username), '') is not null and (
@@ -529,6 +533,7 @@ export async function getAdminCustomerOptions(
         order by ${ranked ? sql`m.spend desc, m.lower_bound desc, m.id` : sql`m.display_name, m.id`}
     `) as unknown as Array<{
         id: string; display_name: string; phone_number: string;
+        internal_name: string | null; location: string | null;
         spend: number; bytes: number | null; services: ('hotspot' | 'pppoe')[];
         lower_bound: number; complete: boolean;
     }>;
@@ -537,6 +542,8 @@ export async function getAdminCustomerOptions(
         label: row.phone_number && row.phone_number !== row.display_name
             ? `${row.display_name} (${row.phone_number})` : row.display_name,
         displayName: row.display_name,
+        internalName: row.internal_name,
+        location: row.location,
         phoneNumber: row.phone_number,
         summary: {
             spend30Days: Number(row.spend),
