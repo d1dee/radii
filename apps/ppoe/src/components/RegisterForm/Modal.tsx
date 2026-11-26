@@ -48,7 +48,7 @@ export function RegisterModal({
                 </Text>
 
                 {mode === 'reset' ? (
-                    <ResetPinForm key='reset' onModeChange={onModeChange} />
+                    <ResetPinForm key='reset' />
                 ) : (
                     <RegisterForm
                         key={mode}
@@ -59,10 +59,10 @@ export function RegisterModal({
                     />
                 )}
 
-                <Divider label='or' />
+                {mode !== 'reset' ? <Divider label='or' /> : null}
 
                 <Button variant='default' onClick={switchMode}>
-                    {mode === 'login' ? 'Register' : 'Login'}
+                    {mode === 'reset' ? 'Back to login' : mode === 'login' ? 'Register' : 'Login'}
                 </Button>
 
                 {mode === 'login' ? (

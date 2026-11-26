@@ -16,11 +16,7 @@ type ResetValues = {
 
 // Forget-PIN flow: request a 6-digit WhatsApp code by phone, then redeem it for a
 // new 4-digit PIN. Three local steps: request -> reset -> done.
-export function ResetPinForm({
-    onModeChange,
-}: {
-    onModeChange: (mode: 'register' | 'login' | 'reset') => void;
-}) {
+export function ResetPinForm() {
     const [step, setStep] = useState<'request' | 'reset' | 'done'>('request');
     const [submitting, setSubmitting] = useState(false);
     const [formError, setFormError] = useState<string | null>(null);
@@ -99,9 +95,6 @@ export function ResetPinForm({
                 <Text size='sm' c='green'>
                     Your PIN was updated. Sign in with your new PIN.
                 </Text>
-                <Button onClick={() => onModeChange('login')}>
-                    Back to login
-                </Button>
             </Stack>
         );
     }
