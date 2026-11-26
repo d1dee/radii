@@ -536,7 +536,8 @@ export function createWahaClient(
                     503,
                     'WhatsApp integration is not configured.',
                 );
-            if (current.status !== 'SCAN_QR_CODE')
+            // Some engines expose a QR before their status leaves STARTING.
+            if (!['STARTING', 'SCAN_QR_CODE'].includes(current.status))
                 throw new WahaError(
                     'WAHA_NOT_READY',
                     409,
@@ -544,7 +545,7 @@ export function createWahaClient(
                 );
             let image: unknown;
             try {
-                image = await request(config, `/api/${name}/auth/qr`);
+                image = await request(config, `/api/${name}/auth/qr?format=image`);
             } catch (error) {
                 // Pairing may complete or expire between the status and QR reads.
                 if (

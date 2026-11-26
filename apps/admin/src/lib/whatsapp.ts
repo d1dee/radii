@@ -5,7 +5,7 @@ export const whatsAppStates: Record<WhatsAppStatus, { label: string; color: stri
     DISABLED: { label: 'Not configured', color: 'gray', description: 'Set your WAHA URL and API key in Settings / Messaging, or explicitly select an available global configuration there.' },
     NOT_CREATED: { label: 'Not connected', color: 'gray', description: 'Add a WhatsApp account to create and start your admin connection.' },
     STOPPED: { label: 'Stopped', color: 'gray', description: 'Start the connection to reconnect your account or get a pairing QR code.' },
-    STARTING: { label: 'Starting', color: 'blue', description: 'WhatsApp is starting. Connection status updates automatically.' },
+    STARTING: { label: 'Starting', color: 'blue', description: 'WhatsApp is starting. If a QR code appears below, scan it to link your account. Connection status updates automatically.' },
     SCAN_QR_CODE: { label: 'Scan QR code', color: 'yellow', description: 'Link your WhatsApp account using the QR code below. The code refreshes automatically.' },
     WORKING: { label: 'Connected', color: 'green', description: 'Your WhatsApp account is connected and ready to send messages.' },
     FAILED: { label: 'Connection failed', color: 'red', description: 'Restart the connection to try again. If it keeps failing, contact the server operator.' },

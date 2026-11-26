@@ -177,10 +177,9 @@ export default function MessagingPage() {
                             : nextSession,
                     );
                     setError('');
-                    if (result.data.status === 'STARTING') delay = 3_000;
                     if (
                         result.data.configured &&
-                        result.data.status === 'SCAN_QR_CODE'
+                        ['STARTING', 'SCAN_QR_CODE'].includes(result.data.status)
                     ) {
                         delay = 5_000;
                         const image = await getWhatsAppQr(controller.signal);
@@ -214,9 +213,13 @@ export default function MessagingPage() {
                         } else {
                             setQr(null);
                             setQrError(
-                                image.success
-                                    ? 'The server returned an invalid QR image.'
-                                    : image.message,
+                                !image.success &&
+                                nextSession.status === 'STARTING' &&
+                                image.data?.code === 'WAHA_NOT_READY'
+                                    ? ''
+                                    : image.success
+                                      ? 'The server returned an invalid QR image.'
+                                      : image.message,
                             );
                         }
                     } else {
@@ -590,7 +593,10 @@ export default function MessagingPage() {
                                         retry automatically in a few seconds.
                                     </Alert>
                                 )}
-                                {session?.status === 'SCAN_QR_CODE' &&
+                                {session &&
+                                    ['STARTING', 'SCAN_QR_CODE'].includes(
+                                        session.status,
+                                    ) &&
                                     !busy &&
                                     !error && (
                                         <>
