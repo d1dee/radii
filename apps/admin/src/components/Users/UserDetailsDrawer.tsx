@@ -49,6 +49,11 @@ import {
 import { useNavigate } from 'react-router-dom';
 
 import { PaymentRefCell } from '@/components/Payments/PaymentRefCell';
+import {
+    BANDWIDTH_UNITS,
+    BandwidthInput,
+    bandwidthKbps,
+} from '@/components/BandwidthInput';
 import { ArchivedPackageBadge } from '@/components/Packages/ArchivedPackageBadge';
 import { CustomerAudienceTags } from './CustomerAudienceTags';
 import { TablePagination } from '@/components/TablePagination';
@@ -198,12 +203,29 @@ export function UserDetailsDrawer({
         activationId: string;
         current: Date;
         currentRemainingSeconds: number;
+        currentDownloadRate: number | null;
+        currentUploadRate: number | null;
     } | null>(null);
     const [expiryValue, setExpiryValue] = useState<Date | null>(null);
     const [remainingTime, setRemainingTime] = useState<number | string>(
         0,
     );
     const [remainingTimeUnit, setRemainingTimeUnit] = useState('60');
+    const [downloadBandwidth, setDownloadBandwidth] = useState<number | string>(0);
+    const [uploadBandwidth, setUploadBandwidth] = useState<number | string>(0);
+    const [downloadBandwidthUnit, setDownloadBandwidthUnit] = useState('mbps');
+    const [uploadBandwidthUnit, setUploadBandwidthUnit] = useState('mbps');
+    const downloadMultiplier = BANDWIDTH_UNITS.find(
+        (unit) => unit.value === downloadBandwidthUnit,
+    )!.multiplier;
+    const uploadMultiplier = BANDWIDTH_UNITS.find(
+        (unit) => unit.value === uploadBandwidthUnit,
+    )!.multiplier;
+    const downloadRate = bandwidthKbps(downloadBandwidth, downloadMultiplier);
+    const uploadRate = bandwidthKbps(uploadBandwidth, uploadMultiplier);
+    const bandwidthAvailable = expiryEdit !== null &&
+        expiryEdit.currentDownloadRate !== null &&
+        expiryEdit.currentUploadRate !== null;
     const [confirmDeactivate, setConfirmDeactivate] = useState<{
         activationId: string;
         packageTitle: string;
@@ -471,6 +493,8 @@ export function UserDetailsDrawer({
             !userId ||
             !expiryEdit ||
             !expiryValue ||
+            busy ||
+            (bandwidthAvailable && (downloadRate === null || uploadRate === null)) ||
             typeof remainingTime !== 'number' ||
             !Number.isFinite(remainingTime) ||
             remainingTime < 0
@@ -481,6 +505,11 @@ export function UserDetailsDrawer({
         const res = await updateActivation(expiryEdit.activationId, {
             expireAt: expiryValue.toISOString(),
             remainingSeconds: Math.round(remainingTime * Number(remainingTimeUnit)),
+            ...(bandwidthAvailable && downloadRate !== null && uploadRate !== null &&
+            (downloadRate !== expiryEdit.currentDownloadRate ||
+            uploadRate !== expiryEdit.currentUploadRate)
+                ? { downloadRate, uploadRate }
+                : {}),
         });
         setBusy(false);
         notifyResult(res, 'Activation limits updated');
@@ -1492,7 +1521,7 @@ export function UserDetailsDrawer({
                                                                         }]
                                                                       : []),
                                                                 {
-                                                                    label: 'Edit expiry and time remaining',
+                                                                    label: 'Edit expiry, time and bandwidth',
                                                                     ariaLabel: 'Edit activation limits',
                                                                     icon: <MdEdit size={16} />,
                                                                     onClick: () => {
@@ -1507,6 +1536,8 @@ export function UserDetailsDrawer({
                                                                                 currentRemainingSeconds:
                                                                                     a.remainingSeconds ??
                                                                                     0,
+                                                                                currentDownloadRate: a.bandwidth?.downloadRate ?? null,
+                                                                                currentUploadRate: a.bandwidth?.uploadRate ?? null,
                                                                             },
                                                                         );
                                                                         setExpiryValue(
@@ -1514,6 +1545,10 @@ export function UserDetailsDrawer({
                                                                                 a.expireAt,
                                                                             ),
                                                                         );
+                                                                        setDownloadBandwidth(a.bandwidth ? a.bandwidth.downloadRate / 1_000 : '');
+                                                                        setUploadBandwidth(a.bandwidth ? a.bandwidth.uploadRate / 1_000 : '');
+                                                                        setDownloadBandwidthUnit('mbps');
+                                                                        setUploadBandwidthUnit('mbps');
                                                                         const unit =
                                                                             bestRemainingTimeUnit(
                                                                                 a.remainingSeconds ??
@@ -2374,10 +2409,66 @@ export function UserDetailsDrawer({
                             />
                         </Group>
                     </Input.Wrapper>
+                    <Divider
+                        label={<Title order={5}>Bandwidth</Title>}
+                        labelPosition='left'
+                    />
+                    <Text size='sm' c='dimmed'>
+                        Sets the normal speeds for this activation, including
+                        future connections. Package FUP rules still apply.
+                        Session-specific bandwidth overrides take priority.
+                    </Text>
+                    {!bandwidthAvailable ? (
+                        <Text size='sm' c='orange'>
+                            Bandwidth settings are unavailable in this API
+                            response. Update the API, apply database migrations,
+                            then reopen this modal. Expiry and time can still be
+                            saved without changing bandwidth.
+                        </Text>
+                    ) : null}
+                    <BandwidthInput
+                        label='Download bandwidth'
+                        value={downloadBandwidth}
+                        unit={downloadBandwidthUnit}
+                        disabled={busy || !bandwidthAvailable}
+                        onChange={setDownloadBandwidth}
+                        onUnitChange={(next) => {
+                            if (typeof downloadBandwidth === 'number') {
+                                setDownloadBandwidth(
+                                    downloadBandwidth * downloadMultiplier /
+                                    BANDWIDTH_UNITS.find((unit) => unit.value === next)!.multiplier,
+                                );
+                            }
+                            setDownloadBandwidthUnit(next);
+                        }}
+                    />
+                    <BandwidthInput
+                        label='Upload bandwidth'
+                        value={uploadBandwidth}
+                        unit={uploadBandwidthUnit}
+                        disabled={busy || !bandwidthAvailable}
+                        onChange={setUploadBandwidth}
+                        onUnitChange={(next) => {
+                            if (typeof uploadBandwidth === 'number') {
+                                setUploadBandwidth(
+                                    uploadBandwidth * uploadMultiplier /
+                                    BANDWIDTH_UNITS.find((unit) => unit.value === next)!.multiplier,
+                                );
+                            }
+                            setUploadBandwidthUnit(next);
+                        }}
+                    />
+                    {bandwidthAvailable && (downloadRate === null || uploadRate === null) ? (
+                        <Text size='xs' c='dimmed'>
+                            Enter both rates between 0 and 2,147,483,647 Kbps.
+                            Positive rates must be at least 1 Kbps.
+                        </Text>
+                    ) : null}
                     <Button
                         onClick={() => void submitExpiry()}
                         disabled={
                             !expiryValue ||
+                            (bandwidthAvailable && (downloadRate === null || uploadRate === null)) ||
                             typeof remainingTime !== 'number' ||
                             !Number.isFinite(remainingTime) ||
                             remainingTime < 0

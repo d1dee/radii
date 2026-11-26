@@ -34,10 +34,12 @@ import {
     MdEdit,
     MdFlag,
     MdSearch,
+    MdSpeed,
 } from 'react-icons/md';
 
 import { PageLayout } from '@/components/Layout/PageLayout';
 import { PageTableScrollContainer } from '@/components/PageTableScrollContainer';
+import { SessionAdjustmentControls } from '@/components/Sessions/SessionAdjustmentControls';
 import {
     SortableTableHeader,
     type SortDirection,
@@ -49,6 +51,8 @@ import {
     addUserFlag,
     banUser,
     getAdminUsers,
+    getAdminSession,
+    getUserActivations,
     getAllNasDevices,
     getPppoeAccount,
     migratePppoeAccountNas,
@@ -56,6 +60,8 @@ import {
     setUserTag,
     unbanUser,
     type AdminUserList,
+    type AdminSessionDetail,
+    type SessionInfo,
     type AdminUserRow,
     type AdminUserSortKey,
     type NasDeviceRow,
@@ -178,6 +184,70 @@ export default function UsersPage() {
     const [flagReason, setFlagReason] = useState('');
     const [flagNote, setFlagNote] = useState('');
     const [banReason, setBanReason] = useState('');
+    const [bandwidthUser, setBandwidthUser] = useState<AdminUserRow | null>(null);
+    const [bandwidthSessions, setBandwidthSessions] = useState<SessionInfo[]>([]);
+    const [bandwidthSessionId, setBandwidthSessionId] = useState<string | null>(
+        null,
+    );
+    const [bandwidthDetail, setBandwidthDetail] =
+        useState<AdminSessionDetail | null>(null);
+    const [bandwidthError, setBandwidthError] = useState<string | null>(null);
+    const [bandwidthLoading, setBandwidthLoading] = useState(false);
+    const [bandwidthRevision, setBandwidthRevision] = useState(0);
+
+    useEffect(() => {
+        if (!bandwidthUser) return;
+        let ignore = false;
+        setBandwidthLoading(true);
+        setBandwidthSessions([]);
+        setBandwidthSessionId(null);
+        setBandwidthDetail(null);
+        setBandwidthError(null);
+        void getUserActivations(bandwidthUser.id, { perPage: 'all' }).then(
+            (result) => {
+                if (ignore) return;
+                setBandwidthLoading(false);
+                if (!result.success || !result.data) {
+                    setBandwidthError(
+                        result.success
+                            ? 'Failed to load live sessions'
+                            : result.message,
+                    );
+                    return;
+                }
+                const sessions = result.data.activations.flatMap(
+                    (activation) => activation.liveSessions,
+                );
+                setBandwidthSessions(sessions);
+                setBandwidthSessionId(sessions[0]?.radacctId ?? null);
+            },
+        );
+        return () => {
+            ignore = true;
+        };
+    }, [bandwidthUser]);
+
+    useEffect(() => {
+        if (!bandwidthUser || !bandwidthSessionId) return;
+        let ignore = false;
+        setBandwidthDetail(null);
+        setBandwidthError(null);
+        void getAdminSession(bandwidthSessionId).then((result) => {
+            if (ignore) return;
+            if (!result.success || !result.data) {
+                setBandwidthError(
+                    result.success
+                        ? 'Failed to load session details'
+                        : result.message,
+                );
+                return;
+            }
+            setBandwidthDetail(result.data);
+        });
+        return () => {
+            ignore = true;
+        };
+    }, [bandwidthUser, bandwidthSessionId, bandwidthRevision]);
 
     useEffect(() => {
         void (async () => {
@@ -808,6 +878,13 @@ export default function UsersPage() {
                                                     gap={4}
                                                     actions={[
                                                         {
+                                                            label: 'Adjust bandwidth / session',
+                                                            ariaLabel: `Adjust bandwidth for ${u.tag?.name || u.name}`,
+                                                            icon: <MdSpeed size={16} />,
+                                                            disabled: !u.online,
+                                                            onClick: () => setBandwidthUser(u),
+                                                        },
+                                                        {
                                                             label: 'Edit name / location',
                                                             ariaLabel: `Edit ${u.tag?.name || u.name}`,
                                                             icon: (
@@ -902,6 +979,53 @@ export default function UsersPage() {
                 userId={detailsId}
                 onClose={() => setDetailsId(null)}
             />
+
+            <Modal
+                opened={bandwidthUser !== null}
+                onClose={() => setBandwidthUser(null)}
+                title={`Adjust session: ${bandwidthUser?.tag?.name || bandwidthUser?.name || ''}`}
+                centered
+            >
+                <Stack>
+                    {bandwidthSessions.length > 1 ? (
+                        <Select
+                            label='Live session'
+                            description='Choose the connection to adjust. Other sessions are unchanged.'
+                            data={bandwidthSessions.map((session) => ({
+                                value: session.radacctId,
+                                label: `${session.username} · ${session.framedIpAddress || session.callingStationId || session.acctSessionId} · ${session.nasIpAddress}`,
+                            }))}
+                            value={bandwidthSessionId}
+                            onChange={setBandwidthSessionId}
+                            allowDeselect={false}
+                        />
+                    ) : null}
+                    {bandwidthError ? (
+                        <Text c='red'>{bandwidthError}</Text>
+                    ) : bandwidthLoading ? (
+                        <Center py='xl'>
+                            <Loader />
+                        </Center>
+                    ) : !bandwidthSessionId ? (
+                        <Text size='sm' c='dimmed'>
+                            This customer has no live sessions to adjust.
+                        </Text>
+                    ) : bandwidthDetail?.session.radacctId === bandwidthSessionId ? (
+                        <SessionAdjustmentControls
+                            key={bandwidthDetail.session.radacctId}
+                            detail={bandwidthDetail}
+                            onAdjusted={() => {
+                                setBandwidthRevision((revision) => revision + 1);
+                                void load(page, true);
+                            }}
+                        />
+                    ) : (
+                        <Center py='xl'>
+                            <Loader />
+                        </Center>
+                    )}
+                </Stack>
+            </Modal>
 
             <Modal
                 opened={provisionOpened}

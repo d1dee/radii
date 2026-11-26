@@ -529,7 +529,7 @@ export default function SessionsPage() {
                                                 gap={4}
                                                 actions={[
                                                     {
-                                                        label: 'Adjust session',
+                                                        label: 'Adjust time / bandwidth',
                                                         ariaLabel: 'Edit session',
                                                         icon: <MdEdit size={16} />,
                                                         onClick: () =>
@@ -625,7 +625,7 @@ export default function SessionsPage() {
             <Modal
                 opened={editSession !== null}
                 onClose={() => setEditSession(null)}
-                title='Adjust session'
+                title='Adjust session time / bandwidth'
                 centered
             >
                 {editError ? (

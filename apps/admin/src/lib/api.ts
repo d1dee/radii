@@ -1002,6 +1002,11 @@ export function createAdminUserActivation(
 
 // Mirrors the API's ActivationStatus (apps/api/src/lib/radius/client.ts).
 export type AdminActivationRow = {
+    bandwidth?: {
+        uploadRate: number;
+        downloadRate: number;
+        overridden: boolean;
+    };
     activationId: string;
     userId: string;
     username: string;
@@ -1364,7 +1369,12 @@ export function deactivateActivation(id: string) {
 
 export function updateActivation(
     id: string,
-    body: { expireAt: string; remainingSeconds: number },
+    body: {
+        expireAt: string;
+        remainingSeconds: number;
+        uploadRate?: number;
+        downloadRate?: number;
+    },
 ) {
     return request<{ ok: boolean; message: string }>(
         `/admin/activations/${id}`,
@@ -1417,6 +1427,11 @@ export function getRadiusSessions(query: ListRadiusSessionsQuery = {}) {
 
 export type AdminSessionDetail = {
     adjustments: {
+        bandwidth?: {
+            uploadRate: number;
+            downloadRate: number;
+            overridden: boolean;
+        };
         remainingSeconds: number | null;
         timeBank: boolean;
         bonusRemainingSeconds: number;
@@ -1468,6 +1483,7 @@ export type AdminSessionDetail = {
                 | 'limits_adjusted'
                 | 'session_timeout_adjusted'
                 | 'session_fup_activated'
+                | 'session_bandwidth_adjusted'
                 | 'session_bonus_added';
             actor: {
                 type: 'admin' | 'customer' | 'system';
@@ -1564,6 +1580,17 @@ export function activateSessionFup(radacctId: string) {
         `/admin/radius/sessions/${radacctId}/fup`,
         undefined,
         { method: 'POST' },
+    );
+}
+
+export function editSessionBandwidth(
+    radacctId: string,
+    rates: { uploadRate: number; downloadRate: number },
+) {
+    return request<{ ok: boolean; message: string }>(
+        `/admin/radius/sessions/${radacctId}/bandwidth`,
+        rates,
+        { method: 'PUT' },
     );
 }
 
