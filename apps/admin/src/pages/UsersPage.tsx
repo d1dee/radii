@@ -875,7 +875,6 @@ export default function UsersPage() {
                                         <Table.Td className='admin-table-actions'>
                                             {!u.pendingClaim ? (
                                                 <TableRowActions
-                                                    gap={4}
                                                     actions={[
                                                         {
                                                             label: 'Adjust bandwidth / session',

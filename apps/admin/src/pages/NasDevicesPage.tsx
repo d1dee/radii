@@ -609,7 +609,6 @@ export default function NasDevicesPage() {
                                     </Table.Td>
                                     <Table.Td className='admin-table-actions'>
                                         <TableRowActions
-                                            gap='xs'
                                             actions={[
                                                 {
                                                     label: 'Setup script',

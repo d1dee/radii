@@ -546,7 +546,6 @@ export default function PackagesPage() {
                                         </Table.Td>
                                         <Table.Td className='admin-table-actions'>
                                             <TableRowActions
-                                                gap='xs'
                                                 actions={
                                                     pkg.archivedAt
                                                         ? [

@@ -1494,7 +1494,6 @@ export function UserDetailsDrawer({
                                                     </Table.Td>
                                                     <Table.Td className='admin-table-actions'>
                                                         <TableRowActions
-                                                            gap={4}
                                                             actions={[
                                                                 ...(a.deactivated
                                                                     ? [{

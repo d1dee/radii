@@ -524,32 +524,27 @@ export default function SessionsPage() {
                                         </Text>
                                     </Table.Td>
                                     <Table.Td className='admin-table-actions'>
-                                        {s.live ? (
-                                            <TableRowActions
-                                                gap={4}
-                                                actions={[
-                                                    {
-                                                        label: 'Adjust time / bandwidth',
-                                                        ariaLabel: 'Edit session',
-                                                        icon: <MdEdit size={16} />,
-                                                        onClick: () =>
-                                                            setEditSession(s),
-                                                    },
-                                                    {
-                                                        label: 'Disconnect',
-                                                        ariaLabel: 'Disconnect session',
-                                                        icon: <MdDelete size={16} />,
-                                                        color: 'red',
-                                                        onClick: () =>
-                                                            setConfirmDisconnect(s),
-                                                    },
-                                                ]}
-                                            />
-                                        ) : (
-                                            <Text ta='right' c='dimmed'>
-                                                —
-                                            </Text>
-                                        )}
+                                        <TableRowActions
+                                            actions={[
+                                                {
+                                                    label: 'Adjust time / bandwidth',
+                                                    ariaLabel: 'Edit session',
+                                                    icon: <MdEdit size={16} />,
+                                                    disabled: !s.live,
+                                                    onClick: () =>
+                                                        setEditSession(s),
+                                                },
+                                                {
+                                                    label: 'Disconnect',
+                                                    ariaLabel: 'Disconnect session',
+                                                    icon: <MdDelete size={16} />,
+                                                    color: 'red',
+                                                    disabled: !s.live,
+                                                    onClick: () =>
+                                                        setConfirmDisconnect(s),
+                                                },
+                                            ]}
+                                        />
                                     </Table.Td>
                                 </Table.Tr>
                             ))}
