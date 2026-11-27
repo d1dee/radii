@@ -16,7 +16,10 @@ import {
     useMemo,
     useState,
 } from 'react';
-import { LoadingDialog } from './components/LoadingDialog.tsx';
+import {
+    LoadingDialog,
+    ResourceLoader,
+} from './components/LoadingDialog.tsx';
 import { Footer } from './components/Footer.tsx';
 import { LOGIN_REQUEST_KEY } from './lib/api.ts';
 import { CurrentPackage } from './components/Packages/CurrentPackage.tsx';
@@ -221,8 +224,8 @@ export default function App() {
                                 />
                                 {havingIssues ? (
                                     <Suspense fallback={
-                                        <Alert title='Having issues?' mih={180} role='status'>
-                                            Loading payment help...
+                                        <Alert title='Having issues?' mih={180}>
+                                            <ResourceLoader label='Loading payment help...' />
                                         </Alert>
                                     }>
                                         <HavingIssues adminContacts={adminContacts} />

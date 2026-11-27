@@ -27,6 +27,7 @@ import {
 import { MdChevronLeft, MdChevronRight, MdRefresh } from 'react-icons/md';
 
 import { PageLayout } from '@/components/Layout/PageLayout';
+import { LoadingContent } from '@/components/Layout/LoadingContent';
 import { PageTableScrollContainer } from '@/components/PageTableScrollContainer';
 import { TablePagination } from '@/components/TablePagination';
 import {
@@ -76,14 +77,7 @@ const ThroughputChart = lazy(() =>
 );
 
 function ChartFallback({ height = 280 }: { height?: number }) {
-    return (
-        <Skeleton
-            height={height}
-            radius='md'
-            role='status'
-            aria-label='Loading chart'
-        />
-    );
+    return <LoadingContent height={height} label='Loading chart' />;
 }
 
 const rangePresets = [

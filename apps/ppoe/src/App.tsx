@@ -17,7 +17,10 @@ import {
     useState,
 } from 'react';
 import { AiOutlineExclamationCircle } from 'react-icons/ai';
-import { LoadingDialog } from './components/LoadingDialog.tsx';
+import {
+    LoadingDialog,
+    ResourceLoader,
+} from './components/LoadingDialog.tsx';
 import { Footer } from './components/Footer.tsx';
 import { CurrentPackage } from './components/Packages/CurrentPackage.tsx';
 import { PackagePricing } from './components/Packages/PackagePricing.tsx';
@@ -261,8 +264,8 @@ export default function App() {
                                             network.
                                         </Alert>
                                         <Suspense fallback={
-                                            <Alert title='Sign in' mih={280} role='status'>
-                                                Loading sign-in form...
+                                            <Alert title='Sign in' mih={280}>
+                                                <ResourceLoader label='Loading sign-in form...' />
                                             </Alert>
                                         }>
                                             <LoginCard />
@@ -277,8 +280,8 @@ export default function App() {
                                     <>
                                         {havingIssues ? (
                                             <Suspense fallback={
-                                                <Alert title='Having issues?' mih={180} role='status'>
-                                                    Loading payment help...
+                                                <Alert title='Having issues?' mih={180}>
+                                                    <ResourceLoader label='Loading payment help...' />
                                                 </Alert>
                                             }>
                                                 <HavingIssues adminContacts={adminContacts} />
@@ -287,8 +290,8 @@ export default function App() {
                                             <>
                                                 {data?.session ? (
                                                     <Suspense fallback={
-                                                        <Alert title='Service account' mih={280} role='status'>
-                                                            Loading your connection and package details...
+                                                        <Alert title='Service account' mih={280}>
+                                                            <ResourceLoader label='Loading your connection and package details...' />
                                                         </Alert>
                                                     }>
                                                         <PppoeAccountCard />
