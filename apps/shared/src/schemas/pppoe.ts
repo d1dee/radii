@@ -46,6 +46,13 @@ export type PppoeClient = {
     online: boolean;
     lastUsedAt: string | null;
     availableOnPortal: boolean;
+    scheduledActivations: {
+        activationId: string;
+        packageTitle: string;
+        packageCategory: string;
+        activatedAt: string;
+        expireAt: string;
+    }[];
     activeActivation: {
         activationId: string;
         packageTitle: string;

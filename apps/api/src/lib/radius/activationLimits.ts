@@ -62,6 +62,39 @@ export function calculatePppoeActivationWindow({
     };
 }
 
+// Reorder only future purchases. Existing active windows retain immediate-mode
+// behavior, while every queued purchase keeps its stored (not catalog) duration.
+export function startPppoeQueueNow(
+    activations: { id: string; activatedAt: Date; expireAt: Date }[],
+    activationId: string,
+    now: Date,
+): { id: string; activatedAt: Date; expireAt: Date }[] | null {
+    const selected = activations.find((row) => row.id === activationId);
+    if (!selected || selected.activatedAt.getTime() <= now.getTime()) return null;
+    const queued = activations
+        .filter((row) => row.activatedAt.getTime() > now.getTime())
+        .sort((a, b) => a.activatedAt.getTime() - b.activatedAt.getTime() || a.id.localeCompare(b.id));
+    if (queued.some((row) => !Number.isFinite(row.expireAt.getTime() - row.activatedAt.getTime()) || row.expireAt.getTime() <= row.activatedAt.getTime())) {
+        return null;
+    }
+    const started = {
+        id: selected.id,
+        activatedAt: now,
+        expireAt: new Date(now.getTime() + selected.expireAt.getTime() - selected.activatedAt.getTime()),
+    };
+    let tail = Math.max(started.expireAt.getTime(), ...activations
+        .filter((row) => row.activatedAt.getTime() <= now.getTime())
+        .map((row) => row.expireAt.getTime()));
+    const updates = [started];
+    for (const row of queued) {
+        if (row.id === selected.id) continue;
+        const expireAt = new Date(tail + row.expireAt.getTime() - row.activatedAt.getTime());
+        updates.push({ id: row.id, activatedAt: new Date(tail), expireAt });
+        tail = expireAt.getTime();
+    }
+    return updates;
+}
+
 export function calculateActivationTime({
     activatedAt,
     expireAt,

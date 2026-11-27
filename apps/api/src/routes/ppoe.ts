@@ -215,6 +215,16 @@ app.get('/clients', requireAuth, async (c) => {
                 lastUsedAt: client.lastUsedAt?.toISOString() ?? null,
                 availableOnPortal:
                     Boolean(nasDeviceId) && client.nasDeviceId === nasDeviceId,
+                scheduledActivations: client.activations
+                    .filter((activation) => activation.scheduled && !activation.deactivated && !activation.expired)
+                    .sort((a, b) => a.activatedAt.getTime() - b.activatedAt.getTime())
+                    .map((activation) => ({
+                        activationId: activation.activationId,
+                        packageTitle: activation.packageTitle,
+                        packageCategory: activation.packageCategory,
+                        activatedAt: activation.activatedAt.toISOString(),
+                        expireAt: activation.expireAt.toISOString(),
+                    })),
                 activeActivation: activeActivation
                     ? {
                           activationId: activeActivation.activationId,
@@ -232,6 +242,30 @@ app.get('/clients', requireAuth, async (c) => {
         success: true,
         data,
     });
+});
+
+app.post('/clients/:id/activations/:activationId/activate', requireAuth, async (c) => {
+    const accountId = c.req.param('id');
+    const activationId = c.req.param('activationId');
+    const nasDeviceId = c.req.query('nas');
+    if (!accountId || !activationId || !UUID_RE.test(accountId) || !UUID_RE.test(activationId) || !nasDeviceId || !UUID_RE.test(nasDeviceId)) {
+        return jsonError(c, 404, 'Unknown scheduled package');
+    }
+    const tenantAdminId = await getAdminIdForNasDevice(nasDeviceId);
+    if (!tenantAdminId) return jsonError(c, 404, 'Unknown scheduled package');
+    const result = await radiusClient.activateScheduledPppoePackage({
+        accountId,
+        activationId,
+        userId: c.get('user')!.id,
+        tenantAdminId,
+        nasDeviceId,
+    });
+    if ('error' in result) {
+        return result.error === 'not_found'
+            ? jsonError(c, 404, 'Unknown scheduled package')
+            : jsonError(c, 409, 'This package is no longer scheduled. Refresh your service account.');
+    }
+    return c.json({ success: true, data: result });
 });
 
 // Full configuration for one dialer: credentials + service defaults, ready to

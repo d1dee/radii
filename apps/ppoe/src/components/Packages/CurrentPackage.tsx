@@ -1,5 +1,6 @@
 import {
     refreshPppoeQuota,
+    refreshPppoeAccounts,
     usePppoeAccounts,
     usePppoeQuota,
 } from '@lib/store.ts';
@@ -14,12 +15,14 @@ import {
     Text,
 } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
+import { notifications } from '@mantine/notifications';
 import humanFormat from 'human-format';
-import { lazy, Suspense, useContext, useState } from 'react';
+import { lazy, Suspense, useContext, useEffect, useState } from 'react';
 import { AiOutlineInfoCircle } from 'react-icons/ai';
 import { ModalActionsContext } from '../../App.tsx';
 import { useSession } from '../../lib/auth.ts';
 import { dayjs } from '../../lib/dayjs.ts';
+import { activateScheduledPackage } from '../../lib/api.ts';
 import classes from '../Credentials/PppoeAccountCard.module.css';
 import { LoadingDialog } from '../LoadingDialog.tsx';
 import { dataScale, formatPackagePrice } from './PackagePricing.tsx';
@@ -39,10 +42,53 @@ export function CurrentPackage() {
     );
     const [isOpen, { open, close }] = useDisclosure();
     const [requested, setRequested] = useState(false);
+    const [activating, setActivating] = useState<string | null>(null);
+    const [confirmActivationId, setConfirmActivationId] = useState<string | null>(null);
     const selected = clients.find(
         (client) => client.accountId === selectedAccountId,
     );
-    const thisDevice = quota.find((value) => value.online) || quota[0];
+    const thisDevice = quota.find((value) => value.id === selected?.activeActivation?.activationId) || quota[0];
+    const nextStart = selected?.scheduledActivations[0]?.activatedAt;
+    useEffect(() => {
+        if (!nextStart) return;
+        let timer: number;
+        const scheduleRefresh = () => {
+            const delay = new Date(nextStart).getTime() - Date.now();
+            timer = window.setTimeout(() => {
+                if (delay > 2_147_483_000) {
+                    scheduleRefresh();
+                } else {
+                    void refreshPppoeAccounts();
+                    void refreshPppoeQuota(selectedAccountId);
+                }
+            }, Math.min(2_147_483_000, Math.max(0, delay) + 250));
+        };
+        scheduleRefresh();
+        return () => window.clearTimeout(timer);
+    }, [nextStart, selectedAccountId]);
+
+    const activateNow = async (activationId: string) => {
+        if (!selected?.nasDeviceId || activating) return;
+        setActivating(activationId);
+        try {
+            const result = await activateScheduledPackage(selected.accountId, activationId, selected.nasDeviceId);
+            notifications.show({
+                color: result.success ? 'green' : 'red',
+                title: result.success ? 'Package activated' : 'Could not activate package',
+                message: result.success
+                    ? result.data?.reconnectPending
+                        ? 'Your countdown has started. Reconnect your router to use the new package.'
+                        : 'Your countdown has started. Your router will reconnect with the new package.'
+                    : result.message,
+            });
+            await Promise.all([refreshPppoeAccounts(), refreshPppoeQuota(selected.accountId)]);
+        } catch {
+            notifications.show({ color: 'red', title: 'Could not refresh package', message: 'Refresh your service account to check whether activation completed before trying again.' });
+        } finally {
+            setActivating(null);
+            setConfirmActivationId(null);
+        }
+    };
     const activePackage = thisDevice?.packageTitle
         ? thisDevice
         : selected?.activeActivation;
@@ -262,6 +308,39 @@ export function CurrentPackage() {
                                   )
                                 : 'Not used yet'}
                         </Text>
+                    </Stack>
+                ) : null}
+                {selected?.scheduledActivations.length ? (
+                    <Stack gap='sm' mt='sm' aria-label='Scheduled packages'>
+                        <Text fw={600}>Scheduled packages</Text>
+                        <Text size='sm' c='dimmed'>
+                            These packages have not started. Activate one now to start its countdown immediately.
+                            Any current package keeps its existing expiry; other scheduled packages will follow without overlapping.
+                        </Text>
+                        {selected.scheduledActivations.map((activation) => (
+                            <Paper key={activation.activationId} withBorder p='sm' radius='md'>
+                                <Stack gap='xs'>
+                                    <Text fw={600} size='sm'>
+                                        {activation.packageCategory ? `${activation.packageCategory} · ` : ''}{activation.packageTitle}
+                                    </Text>
+                                    <Text size='xs' c='dimmed'>
+                                        Starts {dayjs(activation.activatedAt).format('DD MMM YYYY HH:mm:ss')}
+                                        {' · '}Expires {dayjs(activation.expireAt).format('DD MMM YYYY HH:mm:ss')}
+                                    </Text>
+                                    {confirmActivationId === activation.activationId ? (
+                                        <Stack gap='xs'>
+                                            <Text size='sm'>Start this package now instead of waiting? Its full purchased duration starts now, even if your current package still has time left.</Text>
+                                            <Group gap='xs'>
+                                                <Button size='xs' color='grape' loading={activating === activation.activationId} disabled={selected.status !== 'active' || !selected.availableOnPortal} onClick={() => void activateNow(activation.activationId)}>Confirm activation</Button>
+                                                <Button size='xs' variant='subtle' disabled={activating !== null} onClick={() => setConfirmActivationId(null)}>Cancel</Button>
+                                            </Group>
+                                        </Stack>
+                                    ) : (
+                                        <Button size='xs' variant='light' color='grape' style={{ alignSelf: 'flex-start' }} disabled={activating !== null || selected.status !== 'active' || !selected.availableOnPortal} onClick={() => setConfirmActivationId(activation.activationId)}>Activate now</Button>
+                                    )}
+                                </Stack>
+                            </Paper>
+                        ))}
                     </Stack>
                 ) : null}
             </Stack>

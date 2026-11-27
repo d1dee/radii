@@ -100,6 +100,7 @@ import {
     allowanceForRemainingTime,
     calculateActivationTime,
     calculatePppoeActivationWindow,
+    startPppoeQueueNow,
 } from './activationLimits';
 import {
     effectiveFairUsageThrottled,
@@ -128,7 +129,7 @@ function activeActivationCondition() {
     return and(
         isNull(activatedPackages.deactivatedAt),
         lte(activatedPackages.activatedAt, now),
-        gte(activatedPackages.expireAt, now),
+        gt(activatedPackages.expireAt, now),
     );
 }
 
@@ -997,6 +998,81 @@ export class RadiusClient {
         }
     }
 
+    async activateScheduledPppoePackage(input: {
+        accountId: string;
+        activationId: string;
+        userId: string;
+        tenantAdminId: string;
+        nasDeviceId: string;
+    }) {
+        const result = await db.transaction(async (tx) => {
+            // Same account lock as purchases: checking the start time and
+            // reflowing the queue must be atomic with new queue insertions.
+            const [account] = await tx.select().from(pppoeServiceAccounts).where(and(
+                eq(pppoeServiceAccounts.id, input.accountId),
+                eq(pppoeServiceAccounts.customerUserId, input.userId),
+                eq(pppoeServiceAccounts.tenantAdminId, input.tenantAdminId),
+                eq(pppoeServiceAccounts.nasDeviceId, input.nasDeviceId),
+                eq(pppoeServiceAccounts.status, 'active'),
+            )).for('update');
+            if (!account) return { error: 'not_found' } as const;
+            const rows = await tx.select({ activation: activatedPackages, pkg: packages })
+                .from(activatedPackages)
+                .innerJoin(packages, eq(activatedPackages.packageId, packages.id))
+                .innerJoin(packagePayments, eq(activatedPackages.packagePaymentId, packagePayments.id))
+                .where(and(
+                    eq(activatedPackages.pppoeServiceAccountId, account.id),
+                    eq(activatedPackages.userId, input.userId),
+                    eq(packagePayments.tenantAdminId, input.tenantAdminId),
+                    eq(packagePayments.userId, input.userId),
+                    eq(packagePayments.pppoeServiceAccountId, account.id),
+                    eq(packagePayments.status, 'paid'),
+                    eq(packages.type, 'pppoe'),
+                    isNull(activatedPackages.deactivatedAt),
+                )).for('update', { of: activatedPackages });
+            const selected = rows.find((row) => row.activation.id === input.activationId);
+            if (!selected) return { error: 'not_found' } as const;
+            const updates = startPppoeQueueNow(rows.map((row) => row.activation), input.activationId, new Date());
+            if (!updates) return { error: 'not_scheduled' } as const;
+            for (const update of updates) {
+                const previous = rows.find((row) => row.activation.id === update.id)!.activation;
+                await tx.update(activatedPackages).set({ activatedAt: update.activatedAt, expireAt: update.expireAt })
+                    .where(eq(activatedPackages.id, update.id));
+                await tx.insert(activationEvents).values({
+                    activationId: update.id,
+                    eventType: 'limits_adjusted',
+                    actorType: 'customer',
+                    actorId: input.userId,
+                    source: update.id === input.activationId ? 'portal_activate_now' : 'portal_queue_rescheduled',
+                    metadata: {
+                        previousActivatedAt: previous.activatedAt.toISOString(),
+                        previousExpireAt: previous.expireAt.toISOString(),
+                        activatedAt: update.activatedAt.toISOString(),
+                        expireAt: update.expireAt.toISOString(),
+                    },
+                });
+            }
+            return { account, pkg: selected.pkg, activation: { ...selected.activation, ...updates[0]! } };
+        });
+        if ('error' in result) return result;
+        // REST selects the newly-started window on the next authentication.
+        // Reconnect all sessions, including those still carrying the old Class.
+        let reconnectPending = false;
+        try {
+            await this.applyPppoeAuthorization(result.activation, result.pkg);
+            await this.disconnectLivePppoeSessions(result.account.username, result.account.tenantAdminId, false, true);
+        } catch (error) {
+            reconnectPending = true;
+            logger.error('Scheduled PPPoE package started but reconnect failed', { activationId: input.activationId, error });
+        }
+        return {
+            activationId: result.activation.id,
+            activatedAt: result.activation.activatedAt.toISOString(),
+            expireAt: result.activation.expireAt.toISOString(),
+            reconnectPending,
+        };
+    }
+
     // Credentials of the user's most recent active (non-expired) activation
     // attributed to the current NAS admin,
     // used by the portal login-complete flow to send a returning customer back
@@ -1260,10 +1336,23 @@ export class RadiusClient {
                     and(
                         eq(activatedPackages.pppoeServiceAccountId, account.id),
                         eq(packages.type, 'pppoe'),
+                        // Keep recent history, but never truncate a current
+                        // subscription or an arbitrarily long paid queue.
+                        or(
+                            and(
+                                isNull(activatedPackages.deactivatedAt),
+                                gt(activatedPackages.expireAt, new Date()),
+                            ),
+                            inArray(activatedPackages.id, db
+                                .select({ id: activatedPackages.id })
+                                .from(activatedPackages)
+                                .where(eq(activatedPackages.pppoeServiceAccountId, account.id))
+                                .orderBy(desc(activatedPackages.activatedAt))
+                                .limit(20)),
+                        ),
                     ),
                 )
-                .orderBy(desc(activatedPackages.activatedAt))
-                .limit(20);
+                .orderBy(desc(activatedPackages.activatedAt), asc(activatedPackages.id));
             const activations: ActivationStatus[] = [];
             for (const row of rows) {
                 const status = await this.activationStatusFromRows(
@@ -1408,6 +1497,8 @@ export class RadiusClient {
                 ) {
                     await this.closeSessionRecord(session);
                     disconnected += 1;
+                } else if (reportFailures) {
+                    failures.push('NAS did not acknowledge the disconnect request');
                 }
             } catch (err) {
                 failures.push(err instanceof Error ? err.message : String(err));

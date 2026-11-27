@@ -107,6 +107,19 @@ export function getStatus(accountId: string) {
     );
 }
 
+export function activateScheduledPackage(accountId: string, activationId: string, nasDeviceId: string) {
+    return request<{
+        activationId: string;
+        activatedAt: string;
+        expireAt: string;
+        reconnectPending: boolean;
+    }>(
+        withNas(`/clients/${encodeURIComponent(accountId)}/activations/${encodeURIComponent(activationId)}/activate`, nasDeviceId),
+        {},
+        { method: 'POST' },
+    );
+}
+
 export function createOrder(body: {
     packageId: string;
     expectedAmount: number;
