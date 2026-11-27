@@ -1,18 +1,6 @@
-import {
-    Badge,
-    Button,
-    Card,
-    createTheme,
-    type CSSVariablesResolver,
-    Drawer,
-    Modal,
-    NavLink,
-    Paper,
-    Table,
-    TableScrollContainer,
-} from '@mantine/core';
-import { DatePickerInput, DateTimePicker } from '@mantine/dates';
-import { typography } from '@radii/ui';
+import { createTheme, type CSSVariablesResolver } from '@mantine/core';
+import type { DatePickerInputProps, DateTimePickerProps } from '@mantine/dates';
+import { typography } from '@radii/ui/typography';
 
 export const adminCssVariables: CSSVariablesResolver = () => ({
     variables: {},
@@ -48,22 +36,27 @@ export const adminTheme = createTheme({
         },
     },
     components: {
-        DatePickerInput: DatePickerInput.extend({
-            defaultProps: { highlightToday: true },
-        }),
-        DateTimePicker: DateTimePicker.extend({
-            defaultProps: { highlightToday: true },
-        }),
-        Badge: Badge.extend({
+        // Theme configuration must not import widgets into the startup graph.
+        DatePickerInput: {
+            defaultProps: {
+                highlightToday: true,
+            } satisfies Partial<DatePickerInputProps>,
+        },
+        DateTimePicker: {
+            defaultProps: {
+                highlightToday: true,
+            } satisfies Partial<DateTimePickerProps>,
+        },
+        Badge: {
             defaultProps: { radius: 'sm', tt: 'none', fw: 600 },
-        }),
-        Button: Button.extend({ defaultProps: { fw: 600 } }),
-        Card: Card.extend({ defaultProps: { radius: 'md', shadow: 'sm' } }),
-        Paper: Paper.extend({ defaultProps: { radius: 'md' } }),
-        NavLink: NavLink.extend({
+        },
+        Button: { defaultProps: { fw: 600 } },
+        Card: { defaultProps: { radius: 'md', shadow: 'sm' } },
+        Paper: { defaultProps: { radius: 'md' } },
+        NavLink: {
             defaultProps: { className: 'admin-nav-link' },
-        }),
-        Drawer: Drawer.extend({
+        },
+        Drawer: {
             defaultProps: {
                 classNames: {
                     title: 'admin-dialog-title',
@@ -75,15 +68,15 @@ export const adminTheme = createTheme({
                     iconSize: 24,
                 },
             },
-        }),
-        Modal: Modal.extend({
+        },
+        Modal: {
             defaultProps: {
                 size: 'lg',
                 classNames: { title: 'admin-dialog-title' },
                 closeButtonProps: { 'aria-label': 'Close dialog' },
             },
-        }),
-        Table: Table.extend({
+        },
+        Table: {
             defaultProps: {
                 tabularNums: true,
                 verticalSpacing: 'sm',
@@ -93,8 +86,8 @@ export const adminTheme = createTheme({
                     td: 'admin-table-cell',
                 },
             },
-        }),
-        TableScrollContainer: TableScrollContainer.extend({
+        },
+        TableScrollContainer: {
             defaultProps: {
                 type: 'native',
                 tabIndex: 0,
@@ -102,6 +95,6 @@ export const adminTheme = createTheme({
                 'aria-label': 'Scrollable table',
                 className: 'admin-table-scroll',
             },
-        }),
+        },
     },
 });

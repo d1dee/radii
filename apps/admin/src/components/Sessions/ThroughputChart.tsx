@@ -1,3 +1,5 @@
+import '@mantine/charts/styles.css';
+
 import {
     getNasThroughput,
     getThroughputObservations,

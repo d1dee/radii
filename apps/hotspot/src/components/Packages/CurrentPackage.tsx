@@ -16,14 +16,20 @@ import { currentLoginRequestId } from '@lib/api.ts';
 import { refreshHotspotQuota, useHotspotQuota } from '@lib/store.ts';
 import { useDisclosure } from '@mantine/hooks';
 import humanFormat from 'human-format';
+import { lazy, Suspense, useState } from 'react';
 import { ConnectedDevice } from './ConnectedDevices.tsx';
-import { ConnectedDevicesModal } from './ConnectedDevicesModal.tsx';
+import { LoadingDialog } from '../LoadingDialog.tsx';
 import { dataScale, formatPackagePrice } from './functions.ts';
+
+const ConnectedDevicesModal = lazy(() =>
+    import('./ConnectedDevicesModal.tsx').then((m) => ({ default: m.ConnectedDevicesModal })),
+);
 
 export function CurrentPackage() {
     const loginRequestId = currentLoginRequestId();
     const { quota, error, loading } = useHotspotQuota(loginRequestId);
     const [isOpen, { open, close }] = useDisclosure();
+    const [requested, setRequested] = useState(false);
 
     // Pick the highest if no token belongs to this devices
     const thisDevice = quota.find((v) => v.thisDevice && v.online) || quota[0];
@@ -209,12 +215,24 @@ export function CurrentPackage() {
                         </Grid>
 
                         <Box>
-                            <ConnectedDevice quota={quota} onOpen={open} />
+                            <ConnectedDevice
+                                quota={quota}
+                                onOpen={() => {
+                                    setRequested(true);
+                                    open();
+                                }}
+                            />
                         </Box>
                     </Stack>
                 </Stack>
             </Paper>
-            <ConnectedDevicesModal onClose={close} isOpen={isOpen} />
+            {requested ? (
+                <Suspense fallback={
+                    <LoadingDialog title='Connected devices' opened={isOpen} onClose={close} />
+                }>
+                    <ConnectedDevicesModal onClose={close} isOpen={isOpen} />
+                </Suspense>
+            ) : null}
         </>
     );
 }

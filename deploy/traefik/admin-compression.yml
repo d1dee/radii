@@ -1,0 +1,11 @@
+# Install in the Traefik file provider's dynamic configuration directory.
+# Append radii-admin-compress@file to the existing admin HTTPS router's middlewares.
+http:
+    middlewares:
+        radii-admin-compress:
+            compress:
+                includedContentTypes:
+                    - text/javascript
+                    - application/javascript
+                    - text/css
+                minResponseBodyBytes: 1024

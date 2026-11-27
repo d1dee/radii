@@ -11,7 +11,7 @@ import {
 } from '@mantine/core';
 import { schemaResolver, useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
-import { adminResetPasswordSchema } from '@shared/index';
+import { adminResetPasswordSchema } from '@shared/schemas/adminAuth';
 import { useState } from 'react';
 import { Link, Navigate, useNavigate } from 'react-router-dom';
 

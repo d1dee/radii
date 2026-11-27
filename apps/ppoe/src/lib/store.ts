@@ -5,7 +5,7 @@ import type {
     PppoeServiceConfig,
     Quota,
 } from '@radii/shared';
-import { ApiErrorType, defaultAdminSettings } from '@radii/shared';
+import { ApiErrorType } from '@radii/shared/src/consts/errors';
 import { useEffect, useSyncExternalStore } from 'react';
 import {
     currentNasDeviceId,
@@ -48,7 +48,7 @@ let portalSnapshot: PortalSnapshot = {
     packages: undefined,
     packagesError: null,
     packagesLoading: true,
-    contacts: defaultAdminSettings.contacts,
+    contacts: { adminTel: '', adminWhatsapp: '' },
     contactsError: null,
 };
 let scopeSnapshot: ScopeSnapshot = {
@@ -72,6 +72,7 @@ let publicFlight: Promise<void> | null = null;
 let clientUserId: string | null | undefined;
 let clientFlight: Promise<void> | null = null;
 let accountFlight: Promise<void> | null = null;
+let configFlight: Promise<void> | null = null;
 let quotaFlight: Promise<void> | null = null;
 let quotaFlightAccountId: string | null = null;
 
@@ -193,7 +194,7 @@ export function loadPppoePortal(
             ...(scopeChanged
                 ? {
                       packages: undefined,
-                      contacts: defaultAdminSettings.contacts,
+                      contacts: { adminTel: '', adminWhatsapp: '' },
                       packagesError: null,
                       contactsError: null,
                   }
@@ -201,12 +202,24 @@ export function loadPppoePortal(
             packagesLoading:
                 scopeChanged || portalSnapshot.packages === undefined,
         });
-        const flight = (async () => {
+        // Support contacts must not hold up the package list.
+        const contactsFlight = getContacts(nasDeviceId)
+            .then((contacts) => {
+                if (publicScope !== scope) return;
+                publishPortal({
+                    contacts: contacts.success && contacts.data
+                        ? contacts.data : portalSnapshot.contacts,
+                    contactsError: contacts.success ? null : contacts.message,
+                });
+            })
+            .catch(() => {
+                if (publicScope === scope) {
+                    publishPortal({ contactsError: 'Could not load support contacts.' });
+                }
+            });
+        const packagesFlight = (async () => {
             try {
-                const [contacts, packages] = await Promise.all([
-                    getContacts(nasDeviceId),
-                    getPackages(nasDeviceId),
-                ]);
+                const packages = await getPackages(nasDeviceId);
                 if (publicScope !== scope) return;
                 // The scoped NAS does not exist (deleted by the admin, or an
                 // id left behind in storage): drop it instead of showing an
@@ -226,11 +239,6 @@ export function loadPppoePortal(
                     return;
                 }
                 publishPortal({
-                    contacts:
-                        contacts.success && contacts.data
-                            ? contacts.data
-                            : portalSnapshot.contacts,
-                    contactsError: contacts.success ? null : contacts.message,
                     packages: packages.success
                         ? packages.data
                         : portalSnapshot.packages,
@@ -247,11 +255,12 @@ export function loadPppoePortal(
                     publishPortal({
                         packagesError:
                             'Could not load PPPoE packages. Try again.',
-                        contactsError: 'Could not load support contacts.',
+                        packagesLoading: false,
                     });
                 }
             }
         })();
+        const flight = Promise.all([contactsFlight, packagesFlight]).then(() => {});
         publicFlight = flight;
         const finish = () => {
             if (publicFlight === flight) {
@@ -270,6 +279,7 @@ export function loadPppoePortal(
         });
         if (userChanged) {
             accountFlight = null;
+            configFlight = null;
             quotaFlight = null;
             quotaFlightAccountId = null;
             publishAccount({
@@ -331,16 +341,34 @@ export function refreshPppoeAccounts() {
     if (!userId) return Promise.resolve();
     // Loading belongs to the initial customer snapshot, not background requests.
     // A previously resolved empty account list must also remain visible.
-    const configRequest = accountSnapshot.config ? null : getServiceConfig();
-    const flight = Promise.all([getClients(), configRequest])
-        .then(([clients, config]) => {
-            if (accountFlight !== flight) return;
-            if (config && !config.success) {
-                storeLogger.warning('Could not load the PPPoE service config.', {
+    // Router setup is optional; account/NAS resolution cannot wait for it.
+    if (!accountSnapshot.config && !configFlight) {
+        const flight = getServiceConfig()
+            .then((config) => {
+                if (configFlight !== flight) return;
+                if (config.success && config.data) {
+                    publishAccount({ config: config.data });
+                } else if (!config.success) {
+                    storeLogger.warning('Could not load the PPPoE service config.', {
+                        operation: 'load-service-config',
+                        errorType: config.type,
+                    });
+                }
+            })
+            .catch((error: unknown) => {
+                storeLogger.warning('Unexpected service config load failure.', {
                     operation: 'load-service-config',
-                    errorType: config.type,
+                    errorName: error instanceof Error ? error.name : 'UnknownError',
                 });
-            }
+            })
+            .finally(() => {
+                if (configFlight === flight) configFlight = null;
+            });
+        configFlight = flight;
+    }
+    const flight = getClients()
+        .then((clients) => {
+            if (accountFlight !== flight) return;
             const nextClients = clients.success
                 ? [...(clients.data ?? [])].sort(
                       (a, b) =>
@@ -397,10 +425,6 @@ export function refreshPppoeAccounts() {
             publishAccount({
                 clients: nextClients,
                 selectedAccountId,
-                config:
-                    config?.success && config.data
-                        ? config.data
-                        : accountSnapshot.config,
                 loading: false,
                 error: clients.success ? null : clients.message,
             });

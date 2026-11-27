@@ -12,12 +12,12 @@ import {
     type ReactNode,
 } from 'react';
 import {
-    ApiErrorType,
-    defaultAdminSettings,
     type AdminSettings,
     type AdminSettingsInput,
     type ApiEnvelope,
 } from '@shared/index';
+import { ApiErrorType } from '@shared/consts/errors';
+import { defaultAdminSettings } from '@shared/schemas/adminSettings';
 
 import { getAdminSettings, updateAdminSettings } from '@/lib/api';
 import { warnBackgroundFailure } from '@/lib/clientError';

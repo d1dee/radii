@@ -26,9 +26,15 @@
       } catch (error) {}
     </script>
     <title>hotspot</title>
+    <style>
+      html { background: #fff; color: #242424; }
+      html[data-mantine-color-scheme='dark'] { background: #242424; color: #c9c9c9; }
+      .portal-startup { box-sizing: border-box; max-width: 36rem; margin: 1rem auto; padding: 1.5rem; border: 1px solid #8885; border-radius: 1rem; font: 1rem/1.5 system-ui, sans-serif; min-height: 12rem; }
+      .portal-startup h1 { margin: 0 0 1rem; font-size: 1.25rem; }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root"><main class="portal-startup" aria-busy="true"><h1>Hotspot portal</h1><p role="status">Loading your account and available packages...</p><noscript>Enable JavaScript to sign in and manage your connection.</noscript></main></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

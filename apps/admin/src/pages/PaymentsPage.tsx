@@ -1,3 +1,5 @@
+import '@mantine/dates/styles.css';
+
 import {
     ActionIcon,
     Badge,

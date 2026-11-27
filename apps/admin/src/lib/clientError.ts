@@ -1,4 +1,4 @@
-import { ApiErrorType, type ApiEnvelope } from '@shared/index';
+import { ApiErrorType, type ApiEnvelope } from '@shared/consts/errors';
 
 import { adminLogger } from '@/lib/logging';
 

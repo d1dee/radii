@@ -1,27 +1,20 @@
 import '@mantine/core/styles.css';
 import '@mantine/notifications/styles.css';
-import '@mantine/dates/styles.css';
-import '@mantine/charts/styles.css';
 import '@radii/ui/fonts.css';
 import './admin.css';
 
-import { Center, Loader, MantineProvider } from '@mantine/core';
+import { MantineProvider } from '@mantine/core';
 import { Notifications } from '@mantine/notifications';
-import { lazy, Suspense, type ReactNode } from 'react';
+import { lazy, Suspense } from 'react';
 import {
     createBrowserRouter,
     createRoutesFromElements,
-    Outlet,
     Route,
     RouterProvider,
-    useLocation,
 } from 'react-router-dom';
 
 import { RequireAdmin } from '@/components/Auth/RequireAdmin';
-import { AppLayout } from '@/components/Layout/AppLayout';
-import { useSession } from '@/lib/auth';
-import { SettingsProvider } from '@/lib/settings';
-import { TableStateProvider } from '@/lib/tableState';
+import { LoadingContent } from '@/components/Layout/LoadingContent';
 import { adminCssVariables, adminTheme } from './theme';
 
 const DashboardPage = lazy(() => import('@/pages/DashboardPage'));
@@ -42,17 +35,9 @@ const ForgotPasswordPage = lazy(
 const LoginPage = lazy(() => import('@/pages/auth/LoginPage'));
 const RegisterPage = lazy(() => import('@/pages/auth/RegisterPage'));
 const VerifyEmailPage = lazy(() => import('@/pages/auth/VerifyEmailPage'));
-
-function AuthenticatedTableState({ children }: { children: ReactNode }) {
-    const { data: session } = useSession();
-    const { pathname } = useLocation();
-    const branch = pathname.split('/')[1] ?? '';
-    return (
-        <TableStateProvider key={`${session?.user.id}:${session?.session.id}:${branch}`}>
-            {children}
-        </TableStateProvider>
-    );
-}
+const AuthenticatedLayout = lazy(
+    () => import('@/components/Layout/AuthenticatedLayout'),
+);
 
 const router = createBrowserRouter(
     createRoutesFromElements(
@@ -66,13 +51,9 @@ const router = createBrowserRouter(
                 path='/'
                 element={
                     <RequireAdmin>
-                        <SettingsProvider>
-                            <AppLayout>
-                                <AuthenticatedTableState>
-                                    <Outlet />
-                                </AuthenticatedTableState>
-                            </AppLayout>
-                        </SettingsProvider>
+                        <Suspense fallback={<LoadingContent fullPage />}>
+                            <AuthenticatedLayout />
+                        </Suspense>
                     </RequireAdmin>
                 }
             >
@@ -107,13 +88,7 @@ export default function App() {
             defaultColorScheme='auto'
         >
             <Notifications />
-            <Suspense
-                fallback={
-                    <Center mih='100vh'>
-                        <Loader />
-                    </Center>
-                }
-            >
+            <Suspense fallback={<LoadingContent fullPage />}>
                 <RouterProvider router={router} />
             </Suspense>
         </MantineProvider>

@@ -1,3 +1,5 @@
+import '@mantine/charts/styles.css';
+
 import { BarChart } from '@mantine/charts';
 import { Card, Group, Text } from '@mantine/core';
 

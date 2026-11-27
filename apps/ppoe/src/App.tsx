@@ -6,26 +6,22 @@ import { Alert, Container, MantineProvider, Stack } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import { Notifications } from '@mantine/notifications';
 import type { Package } from '@radii/shared';
-import { typography } from '@radii/ui';
+import { typography } from '@radii/ui/typography';
 import {
     createContext,
+    lazy,
+    Suspense,
     useCallback,
     useEffect,
     useMemo,
     useState,
 } from 'react';
 import { AiOutlineExclamationCircle } from 'react-icons/ai';
-import { PaymentFlow } from './components/Buy/PaymentFlow.tsx';
-import { PppoeAccountCard } from './components/Credentials/PppoeAccountCard.tsx';
+import { LoadingDialog } from './components/LoadingDialog.tsx';
 import { Footer } from './components/Footer.tsx';
 import { CurrentPackage } from './components/Packages/CurrentPackage.tsx';
-import { HavingIssues } from './components/Packages/HavingIssues.tsx';
 import { PackagePricing } from './components/Packages/PackagePricing.tsx';
-import {
-    RegisterModal,
-    type AuthMode,
-} from './components/RegisterForm/Modal.tsx';
-import { LoginCard } from './components/UserAccounts/LoginCard.tsx';
+import type { AuthMode } from './components/RegisterForm/Modal.tsx';
 import { UserAccount } from './components/UserAccounts/UserAccount.tsx';
 import { type Client } from './lib/api.ts';
 import { useSession } from './lib/auth.ts';
@@ -36,6 +32,22 @@ import {
     usePppoeAccounts,
     usePppoePortal,
 } from './lib/store.ts';
+
+const PaymentFlow = lazy(() =>
+    import('./components/Buy/PaymentFlow.tsx').then((m) => ({ default: m.PaymentFlow })),
+);
+const RegisterModal = lazy(() =>
+    import('./components/RegisterForm/Modal.tsx').then((m) => ({ default: m.RegisterModal })),
+);
+const HavingIssues = lazy(() =>
+    import('./components/Packages/HavingIssues.tsx').then((m) => ({ default: m.HavingIssues })),
+);
+const PppoeAccountCard = lazy(() =>
+    import('./components/Credentials/PppoeAccountCard.tsx').then((m) => ({ default: m.PppoeAccountCard })),
+);
+const LoginCard = lazy(() =>
+    import('./components/UserAccounts/LoginCard.tsx').then((m) => ({ default: m.LoginCard })),
+);
 
 // Operators may link the portal to one NAS with ?nas=<nasDeviceId>;
 // lib/api.ts persists the id so package listings stay scoped. Clean the URL.
@@ -159,6 +171,7 @@ export default function App() {
     const [authOpened, { open: openAuth, close: closeAuth }] =
         useDisclosure(false);
     const [authMode, setAuthMode] = useState<AuthMode>('register');
+    const [authRequested, setAuthRequested] = useState(false);
     const [authPackageId, setAuthPackageId] = useState('');
     const [authPrice, setAuthPrice] = useState('');
 
@@ -172,6 +185,7 @@ export default function App() {
     );
     const openRegister = useCallback(
         (packageId = '', price = '') => {
+            setAuthRequested(true);
             setAuthPackageId(packageId);
             setAuthPrice(price);
             setAuthMode('register');
@@ -181,6 +195,7 @@ export default function App() {
     );
     const openLogin = useCallback(
         (packageId = '', price = '') => {
+            setAuthRequested(true);
             setAuthPackageId(packageId);
             setAuthPrice(price);
             setAuthMode('login');
@@ -189,6 +204,7 @@ export default function App() {
         [openAuth],
     );
     const openForgotPin = useCallback(() => {
+        setAuthRequested(true);
         setAuthPackageId('');
         setAuthPrice('');
         setAuthMode('reset');
@@ -244,7 +260,13 @@ export default function App() {
                                             see the packages available for your
                                             network.
                                         </Alert>
-                                        <LoginCard />
+                                        <Suspense fallback={
+                                            <Alert title='Sign in' mih={280} role='status'>
+                                                Loading sign-in form...
+                                            </Alert>
+                                        }>
+                                            <LoginCard />
+                                        </Suspense>
                                     </>
                                 ) : null}
                                 {nasDeviceId ? (
@@ -254,13 +276,23 @@ export default function App() {
                                     // accounts (account switcher / ?nas= link).
                                     <>
                                         {havingIssues ? (
-                                            <HavingIssues
-                                                adminContacts={adminContacts}
-                                            />
+                                            <Suspense fallback={
+                                                <Alert title='Having issues?' mih={180} role='status'>
+                                                    Loading payment help...
+                                                </Alert>
+                                            }>
+                                                <HavingIssues adminContacts={adminContacts} />
+                                            </Suspense>
                                         ) : (
                                             <>
                                                 {data?.session ? (
-                                                    <PppoeAccountCard />
+                                                    <Suspense fallback={
+                                                        <Alert title='Service account' mih={280} role='status'>
+                                                            Loading your connection and package details...
+                                                        </Alert>
+                                                    }>
+                                                        <PppoeAccountCard />
+                                                    </Suspense>
                                                 ) : (
                                                     <CurrentPackage />
                                                 )}
@@ -284,22 +316,38 @@ export default function App() {
                             </Stack>
                             <Footer />
                             {/* The payment state is local; checkout pricing follows current offers. */}
-                            <PaymentFlow
-                                key={buyKey}
-                                opened={buyOpened}
-                                onClose={closeBuy}
-                                seed={checkoutSeed}
-                                loading={checkoutLoading}
-                                serviceAccountId={purchaseAccountId}
-                            />
-                            <RegisterModal
-                                opened={authOpened}
-                                onClose={closeAuth}
-                                mode={authMode}
-                                onModeChange={setAuthMode}
-                                packageId={authPackageId}
-                                price={authPrice}
-                            />
+                            {buyKey > 0 ? (
+                                <Suspense fallback={
+                                    <LoadingDialog title='Payment' opened={buyOpened} onClose={closeBuy} />
+                                }>
+                                    <PaymentFlow
+                                        key={buyKey}
+                                        opened={buyOpened}
+                                        onClose={closeBuy}
+                                        seed={checkoutSeed}
+                                        loading={checkoutLoading}
+                                        serviceAccountId={purchaseAccountId}
+                                    />
+                                </Suspense>
+                            ) : null}
+                            {authRequested ? (
+                                <Suspense fallback={
+                                    <LoadingDialog
+                                        opened={authOpened}
+                                        title={authMode === 'reset' ? 'Reset your PIN' : authMode === 'login' ? 'Welcom back!' : 'Welcome!'}
+                                        onClose={closeAuth}
+                                    />
+                                }>
+                                    <RegisterModal
+                                        opened={authOpened}
+                                        onClose={closeAuth}
+                                        mode={authMode}
+                                        onModeChange={setAuthMode}
+                                        packageId={authPackageId}
+                                        price={authPrice}
+                                    />
+                                </Suspense>
+                            ) : null}
                         </Stack>
                     </ClientContext.Provider>
                 </ModalActionsContext.Provider>

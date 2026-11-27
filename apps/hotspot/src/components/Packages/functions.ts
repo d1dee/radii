@@ -1,5 +1,5 @@
 import humanFormat from 'human-format';
-export { formatDuration as timeRemaining } from '@radii/shared';
+export { formatDuration as timeRemaining } from '@radii/shared/src/utils/duration';
 
 export const dataScale = new humanFormat.Scale({
     Kbps: 1,

@@ -10,7 +10,7 @@ import {
 } from '@mantine/core';
 import { schemaResolver, useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
-import { adminLoginSchema } from '@shared/index';
+import { adminLoginSchema } from '@shared/schemas/adminAuth';
 import { useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 

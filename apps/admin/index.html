@@ -1,12 +1,44 @@
+<!doctype html>
 <html lang="en" style="overflow: hidden">
     <head>
         <meta charset="UTF-8" />
         <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <title>Admin</title>
+        <script>
+            (() => {
+                let scheme;
+                try {
+                    scheme = localStorage.getItem('mantine-color-scheme-value');
+                } catch {}
+                const dark = scheme === 'dark' ||
+                    (scheme !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
+                document.documentElement.dataset.mantineColorScheme = dark ? 'dark' : 'light';
+            })();
+        </script>
+        <style>
+            :root { color-scheme: light; background: #f5f7fa; }
+            :root[data-mantine-color-scheme='dark'] { color-scheme: dark; background: #1a1b1e; }
+            body { margin: 0; }
+            .admin-loading {
+                display: grid;
+                place-items: center;
+                min-height: 12rem;
+                color: #596579;
+                font: 400 0.875rem/1.5 system-ui, sans-serif;
+            }
+            [data-mantine-color-scheme='dark'] .admin-loading { color: #909296; }
+            .admin-loading-full { min-height: 100dvh; }
+        </style>
     </head>
     <body style="overflow: hidden">
-        <div id="root"></div>
+        <div id="root">
+            <div class="admin-loading admin-loading-full" role="status">Loading admin console...</div>
+        </div>
+        <noscript>
+            <style>.admin-loading { display: none; }</style>
+            <p>JavaScript is required to use the admin console.</p>
+        </noscript>
         <script type="module" src="/src/main.tsx"></script>
     </body>
 </html>

@@ -9,7 +9,8 @@ import {
     Stack,
     Text,
 } from '@mantine/core';
-import { formatDuration, upperFirstCase } from '@radii/shared';
+import { formatDuration } from '@radii/shared/src/utils/duration';
+import { upperFirstCase } from '@radii/shared/src/utils/id';
 
 import humanFormat from 'human-format';
 import { useContext, useState } from 'react';

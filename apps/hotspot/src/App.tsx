@@ -6,28 +6,36 @@ import { Alert, Button, Container, MantineProvider, Stack } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks';
 import { Notifications } from '@mantine/notifications';
 import type { Package } from '@radii/shared';
-import { typography } from '@radii/ui';
+import { typography } from '@radii/ui/typography';
 import {
     createContext,
+    lazy,
+    Suspense,
     useCallback,
     useEffect,
     useMemo,
     useState,
 } from 'react';
-import { PaymentFlow } from './components/Buy/PaymentFlow.tsx';
+import { LoadingDialog } from './components/LoadingDialog.tsx';
 import { Footer } from './components/Footer.tsx';
 import { LOGIN_REQUEST_KEY } from './lib/api.ts';
 import { CurrentPackage } from './components/Packages/CurrentPackage.tsx';
-import { HavingIssues } from './components/Packages/HavingIssues.tsx';
 import { PackagePricing } from './components/Packages/PackagePricing.tsx';
-import {
-    RegisterModal,
-    type AuthMode,
-} from './components/RegisterForm/Modal.tsx';
+import type { AuthMode } from './components/RegisterForm/Modal.tsx';
 import { UserAccount } from './components/UserAccounts/UserAccount.tsx';
 import type { Client } from './lib/api.ts';
 import { useSession } from './lib/auth.ts';
 import { loadHotspotPortal, useHotspotPortal } from './lib/store.ts';
+
+const PaymentFlow = lazy(() =>
+    import('./components/Buy/PaymentFlow.tsx').then((m) => ({ default: m.PaymentFlow })),
+);
+const RegisterModal = lazy(() =>
+    import('./components/RegisterForm/Modal.tsx').then((m) => ({ default: m.RegisterModal })),
+);
+const HavingIssues = lazy(() =>
+    import('./components/Packages/HavingIssues.tsx').then((m) => ({ default: m.HavingIssues })),
+);
 
 // The NAS hotspot login page hands the client browser to the portal with a
 // `login_request` id (see POST /api/hotspot/login-request). Persist the id
@@ -128,6 +136,7 @@ export default function App() {
     const [authOpened, { open: openAuth, close: closeAuth }] =
         useDisclosure(false);
     const [authMode, setAuthMode] = useState<AuthMode>('register');
+    const [authRequested, setAuthRequested] = useState(false);
     const [authPackageId, setAuthPackageId] = useState('');
     const [authPrice, setAuthPrice] = useState('');
 
@@ -141,6 +150,7 @@ export default function App() {
     );
     const openRegister = useCallback(
         (packageId = '', price = '') => {
+            setAuthRequested(true);
             setAuthPackageId(packageId);
             setAuthPrice(price);
             setAuthMode('register');
@@ -150,6 +160,7 @@ export default function App() {
     );
     const openLogin = useCallback(
         (packageId = '', price = '') => {
+            setAuthRequested(true);
             setAuthPackageId(packageId);
             setAuthPrice(price);
             setAuthMode('login');
@@ -209,9 +220,13 @@ export default function App() {
                                     ]}
                                 />
                                 {havingIssues ? (
-                                    <HavingIssues
-                                        adminContacts={adminContacts}
-                                    />
+                                    <Suspense fallback={
+                                        <Alert title='Having issues?' mih={180} role='status'>
+                                            Loading payment help...
+                                        </Alert>
+                                    }>
+                                        <HavingIssues adminContacts={adminContacts} />
+                                    </Suspense>
                                 ) : (
                                     <CurrentPackage />
                                 )}
@@ -234,20 +249,36 @@ export default function App() {
                       own their state locally, so background polling cannot
                       mutate data shown inside them.
                     */}
-                            <PaymentFlow
-                                key={buyKey}
-                                opened={buyOpened}
-                                onClose={closeBuy}
-                                seed={buySeed}
-                            />
-                            <RegisterModal
-                                opened={authOpened}
-                                onClose={closeAuth}
-                                mode={authMode}
-                                onModeChange={setAuthMode}
-                                packageId={authPackageId}
-                                price={authPrice}
-                            />
+                            {buyKey > 0 ? (
+                                <Suspense fallback={
+                                    <LoadingDialog title='Payment' opened={buyOpened} onClose={closeBuy} />
+                                }>
+                                    <PaymentFlow
+                                        key={buyKey}
+                                        opened={buyOpened}
+                                        onClose={closeBuy}
+                                        seed={buySeed}
+                                    />
+                                </Suspense>
+                            ) : null}
+                            {authRequested ? (
+                                <Suspense fallback={
+                                    <LoadingDialog
+                                        opened={authOpened}
+                                        title={authMode === 'reset' ? 'Reset your PIN' : authMode === 'login' ? 'Welcom back!' : 'Welcome!'}
+                                        onClose={closeAuth}
+                                    />
+                                }>
+                                    <RegisterModal
+                                        opened={authOpened}
+                                        onClose={closeAuth}
+                                        mode={authMode}
+                                        onModeChange={setAuthMode}
+                                        packageId={authPackageId}
+                                        price={authPrice}
+                                    />
+                                </Suspense>
+                            ) : null}
                         </Stack>
                     </ClientContext.Provider>
                 </ModalActionsContext.Provider>

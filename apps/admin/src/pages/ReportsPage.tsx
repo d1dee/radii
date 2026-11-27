@@ -1,3 +1,6 @@
+import '@mantine/charts/styles.css';
+import '@mantine/dates/styles.css';
+
 import { AreaChart, DonutChart } from '@mantine/charts';
 import {
     Badge,

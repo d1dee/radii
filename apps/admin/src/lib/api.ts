@@ -1,5 +1,4 @@
 import {
-    ApiErrorType,
     type AdminSettings,
     type AdminSettingsInput,
     type ApiEnvelope,
@@ -10,6 +9,7 @@ import {
     type PackageAudienceConditions,
     type PackageEligibility,
 } from '@shared/index';
+import { ApiErrorType } from '@shared/consts/errors';
 
 import { getErrorDiagnostic } from '@/lib/clientError';
 import { adminLogger } from '@/lib/logging';

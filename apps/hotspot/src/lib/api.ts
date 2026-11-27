@@ -6,7 +6,7 @@ import type {
     PaymentReceiptClaimResult,
     Quota,
 } from '@radii/shared';
-import { ApiErrorType } from '@radii/shared';
+import { ApiErrorType } from '@radii/shared/src/consts/errors';
 import { apiLogger } from './logging.ts';
 
 export type Client = {

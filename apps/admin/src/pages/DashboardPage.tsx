@@ -1,4 +1,3 @@
-import { AreaChart, DonutChart } from '@mantine/charts';
 import {
     ActionIcon,
     Badge,
@@ -17,6 +16,8 @@ import {
     Tooltip,
 } from '@mantine/core';
 import {
+    lazy,
+    Suspense,
     useCallback,
     useEffect,
     useRef,
@@ -27,9 +28,6 @@ import { MdChevronLeft, MdChevronRight, MdRefresh } from 'react-icons/md';
 
 import { PageLayout } from '@/components/Layout/PageLayout';
 import { PageTableScrollContainer } from '@/components/PageTableScrollContainer';
-import { RevenueCharts } from '@/components/RevenueCharts';
-import { RevenueTimelineChart } from '@/components/RevenueTimelineChart';
-import { ThroughputChart } from '@/components/Sessions/ThroughputChart';
 import { TablePagination } from '@/components/TablePagination';
 import {
     getAdminReports,
@@ -50,6 +48,43 @@ import {
 import { tableRowNumber, useTablePageSize } from '@/lib/pagination';
 import { useAdminSettings } from '@/lib/settings';
 import { useRememberedState } from '@/lib/tableState';
+
+const AreaChart = lazy(() =>
+    import('@/components/DashboardCharts').then((charts) => ({
+        default: charts.AreaChart,
+    })),
+);
+const DonutChart = lazy(() =>
+    import('@/components/DashboardCharts').then((charts) => ({
+        default: charts.DonutChart,
+    })),
+);
+const RevenueCharts = lazy(() =>
+    import('@/components/DashboardCharts').then((charts) => ({
+        default: charts.RevenueCharts,
+    })),
+);
+const RevenueTimelineChart = lazy(() =>
+    import('@/components/DashboardCharts').then((charts) => ({
+        default: charts.RevenueTimelineChart,
+    })),
+);
+const ThroughputChart = lazy(() =>
+    import('@/components/DashboardCharts').then((charts) => ({
+        default: charts.ThroughputChart,
+    })),
+);
+
+function ChartFallback({ height = 280 }: { height?: number }) {
+    return (
+        <Skeleton
+            height={height}
+            radius='md'
+            role='status'
+            aria-label='Loading chart'
+        />
+    );
+}
 
 const rangePresets = [
     { label: 'Today', days: 0 },
@@ -119,7 +154,9 @@ function NasThroughputCard({ from, to }: { from: Date; to: Date }) {
                 if (!result.success || !result.data)
                     throw new Error('Unavailable');
                 setDevices(
-                    [...result.data].sort((a, b) => a.name.localeCompare(b.name)),
+                    [...result.data].sort((a, b) =>
+                        a.name.localeCompare(b.name),
+                    ),
                 );
                 setNasIndex(0);
             } catch {
@@ -167,57 +204,63 @@ function NasThroughputCard({ from, to }: { from: Date; to: Date }) {
     }
 
     return (
-        <ThroughputChart
-            key={device.id}
-            kind='nas'
-            id={device.id}
-            dateRange={{ from: from.toISOString(), to: to.toISOString() }}
-            header={
-                <Group justify='space-between' wrap='nowrap'>
-                    <Stack gap={2} style={{ minWidth: 0 }}>
-                        <Text fw={600}>NAS Average Thoughput</Text>
-                        <Text
-                            fw={600}
-                            style={{ overflowWrap: 'anywhere' }}
-                            aria-live='polite'
-                        >
-                            {device.name}
-                        </Text>
-                    </Stack>
-                    <Group gap='xs' wrap='nowrap'>
-                        <ActionIcon
-                            variant='subtle'
-                            aria-label='Previous NAS'
-                            disabled={deviceCount < 2}
-                            onClick={() =>
-                                setNasIndex((index) =>
-                                    (index - 1 + deviceCount) % deviceCount,
-                                )
-                            }
-                        >
-                            <MdChevronLeft size={22} />
-                        </ActionIcon>
-                        <Text
-                            size='xs'
-                            c='dimmed'
-                            style={{ whiteSpace: 'nowrap' }}
-                        >
-                            {nasIndex + 1} / {deviceCount}
-                        </Text>
-                        <ActionIcon
-                            variant='subtle'
-                            aria-label='Next NAS'
-                            disabled={deviceCount < 2}
-                            onClick={() =>
-                                setNasIndex((index) => (index + 1) % deviceCount)
-                            }
-                        >
-                            <MdChevronRight size={22} />
-                        </ActionIcon>
+        <Suspense fallback={<ChartFallback />}>
+            <ThroughputChart
+                key={device.id}
+                kind='nas'
+                id={device.id}
+                dateRange={{ from: from.toISOString(), to: to.toISOString() }}
+                header={
+                    <Group justify='space-between' wrap='nowrap'>
+                        <Stack gap={2} style={{ minWidth: 0 }}>
+                            <Text fw={600}>NAS Average Thoughput</Text>
+                            <Text
+                                fw={600}
+                                style={{ overflowWrap: 'anywhere' }}
+                                aria-live='polite'
+                            >
+                                {device.name}
+                            </Text>
+                        </Stack>
+                        <Group gap='xs' wrap='nowrap'>
+                            <ActionIcon
+                                variant='subtle'
+                                aria-label='Previous NAS'
+                                disabled={deviceCount < 2}
+                                onClick={() =>
+                                    setNasIndex(
+                                        (index) =>
+                                            (index - 1 + deviceCount) %
+                                            deviceCount,
+                                    )
+                                }
+                            >
+                                <MdChevronLeft size={22} />
+                            </ActionIcon>
+                            <Text
+                                size='xs'
+                                c='dimmed'
+                                style={{ whiteSpace: 'nowrap' }}
+                            >
+                                {nasIndex + 1} / {deviceCount}
+                            </Text>
+                            <ActionIcon
+                                variant='subtle'
+                                aria-label='Next NAS'
+                                disabled={deviceCount < 2}
+                                onClick={() =>
+                                    setNasIndex(
+                                        (index) => (index + 1) % deviceCount,
+                                    )
+                                }
+                            >
+                                <MdChevronRight size={22} />
+                            </ActionIcon>
+                        </Group>
                     </Group>
-                </Group>
-            }
-        />
+                }
+            />
+        </Suspense>
     );
 }
 
@@ -228,7 +271,8 @@ export default function DashboardPage() {
     const [error, setError] = useState<string | null>(null);
     const [usage, setUsage] = useState<NetworkUsage | null>(null);
     const [rememberedPreset, setPreset] = useRememberedState<string | null>(
-        'dashboard.preset', null,
+        'dashboard.preset',
+        null,
     );
     const preset = rememberedPreset ?? '30d';
     const [from, setFrom] = useState<Date>(() => presetRange(30).from);
@@ -258,7 +302,10 @@ export default function DashboardPage() {
                         heavyUsersPerPage: 10,
                     },
                 ),
-                getRadiusSummary(rangeFrom.toISOString(), rangeTo.toISOString()),
+                getRadiusSummary(
+                    rangeFrom.toISOString(),
+                    rangeTo.toISOString(),
+                ),
             ]);
             if (requestId !== reportsRequest.current) return;
             setLoading(false);
@@ -299,8 +346,9 @@ export default function DashboardPage() {
     useEffect(() => {
         if (!loaded || initialLoadDone.current) return;
         initialLoadDone.current = true;
-        const days = rangePresets.find((p) => p.label === rememberedPreset)?.days
-            ?? settings.dashboard.defaultRangeDays;
+        const days =
+            rangePresets.find((p) => p.label === rememberedPreset)?.days ??
+            settings.dashboard.defaultRangeDays;
         setPreset(rangePresets.find((p) => p.days === days)?.label ?? '30d');
         const range = presetRange(days);
         setFrom(range.from);
@@ -480,11 +528,15 @@ export default function DashboardPage() {
                                             inherit
                                             c='green'
                                         >
-                                            {usage.pppoeAccounts.withActivity} active
+                                            {usage.pppoeAccounts.withActivity}{' '}
+                                            active
                                         </Text>
                                         {' / '}
                                         <Text component='span' inherit c='red'>
-                                            {usage.pppoeAccounts.withoutActivity}{' '}
+                                            {
+                                                usage.pppoeAccounts
+                                                    .withoutActivity
+                                            }{' '}
                                             inactive
                                         </Text>
                                     </>
@@ -494,9 +546,7 @@ export default function DashboardPage() {
                             <StatCard
                                 label='Average throughput in range'
                                 color='cyan'
-                                value={formatSpeed(
-                                    usage.averageThroughputBps,
-                                )}
+                                value={formatSpeed(usage.averageThroughputBps)}
                                 sub='Recorded data divided by elapsed time in the selected range'
                             />
                             <StatCard
@@ -525,11 +575,17 @@ export default function DashboardPage() {
             ) : !reports ? null : (
                 <>
                     <Stack gap='md' miw={0}>
-                        <RevenueTimelineChart
-                            timeline={reports.revenueTimeline}
-                            hasPaidPurchases={reports.packageRevenue.length > 0}
-                        />
-                        <RevenueCharts packages={reports.packageRevenue} />
+                        <Suspense fallback={<ChartFallback />}>
+                            <RevenueTimelineChart
+                                timeline={reports.revenueTimeline}
+                                hasPaidPurchases={
+                                    reports.packageRevenue.length > 0
+                                }
+                            />
+                        </Suspense>
+                        <Suspense fallback={<ChartFallback />}>
+                            <RevenueCharts packages={reports.packageRevenue} />
+                        </Suspense>
                     </Stack>
                     <Grid>
                         <Grid.Col span={{ base: 12, lg: 8 }}>
@@ -542,26 +598,30 @@ export default function DashboardPage() {
                                         No payments in this range.
                                     </Text>
                                 ) : (
-                                    <AreaChart
-                                        h={280}
-                                        data={reports.daily.map((entry) => ({
-                                            ...entry,
-                                            day: dayjs(entry.day).format(
-                                                'DD MMM YYYY',
-                                            ),
-                                        }))}
-                                        dataKey='day'
-                                        series={[
-                                            {
-                                                name: 'revenue',
-                                                color: 'teal.6',
-                                                label: 'Revenue',
-                                            },
-                                        ]}
-                                        curveType='monotone'
-                                        withDots={false}
-                                        yAxisProps={{ width: 60 }}
-                                    />
+                                    <Suspense fallback={<ChartFallback />}>
+                                        <AreaChart
+                                            h={280}
+                                            data={reports.daily.map(
+                                                (entry) => ({
+                                                    ...entry,
+                                                    day: dayjs(
+                                                        entry.day,
+                                                    ).format('DD MMM YYYY'),
+                                                }),
+                                            )}
+                                            dataKey='day'
+                                            series={[
+                                                {
+                                                    name: 'revenue',
+                                                    color: 'teal.6',
+                                                    label: 'Revenue',
+                                                },
+                                            ]}
+                                            curveType='monotone'
+                                            withDots={false}
+                                            yAxisProps={{ width: 60 }}
+                                        />
+                                    </Suspense>
                                 )}
                             </Card>
                         </Grid.Col>
@@ -576,18 +636,25 @@ export default function DashboardPage() {
                                     </Text>
                                 ) : (
                                     <Center>
-                                        <DonutChart
-                                            data={statusBreakdown}
-                                            size={220}
-                                            thickness={24}
-                                            withLabelsLine={false}
-                                            chartLabel={String(
-                                                statusBreakdown.reduce(
-                                                    (sum, s) => sum + s.value,
-                                                    0,
-                                                ),
-                                            )}
-                                        />
+                                        <Suspense
+                                            fallback={
+                                                <ChartFallback height={220} />
+                                            }
+                                        >
+                                            <DonutChart
+                                                data={statusBreakdown}
+                                                size={220}
+                                                thickness={24}
+                                                withLabelsLine={false}
+                                                chartLabel={String(
+                                                    statusBreakdown.reduce(
+                                                        (sum, s) =>
+                                                            sum + s.value,
+                                                        0,
+                                                    ),
+                                                )}
+                                            />
+                                        </Suspense>
                                     </Center>
                                 )}
                                 <Group justify='center' gap='md' mt='sm'>

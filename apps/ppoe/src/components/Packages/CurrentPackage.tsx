@@ -15,15 +15,19 @@ import {
 } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import humanFormat from 'human-format';
-import { useContext } from 'react';
+import { lazy, Suspense, useContext, useState } from 'react';
 import { AiOutlineInfoCircle } from 'react-icons/ai';
 import { ModalActionsContext } from '../../App.tsx';
 import { useSession } from '../../lib/auth.ts';
 import { dayjs } from '../../lib/dayjs.ts';
 import classes from '../Credentials/PppoeAccountCard.module.css';
-import { ConnectedDevicesModal } from './ConnectedDevicesModal.tsx';
+import { LoadingDialog } from '../LoadingDialog.tsx';
 import { dataScale, formatPackagePrice } from './PackagePricing.tsx';
 import { timeRemaining } from './functions.ts';
+
+const ConnectedDevicesModal = lazy(() =>
+    import('./ConnectedDevicesModal.tsx').then((m) => ({ default: m.ConnectedDevicesModal })),
+);
 
 export function CurrentPackage() {
     const { openLogin } = useContext(ModalActionsContext);
@@ -34,6 +38,7 @@ export function CurrentPackage() {
         Boolean(data?.session),
     );
     const [isOpen, { open, close }] = useDisclosure();
+    const [requested, setRequested] = useState(false);
     const selected = clients.find(
         (client) => client.accountId === selectedAccountId,
     );
@@ -214,7 +219,10 @@ export function CurrentPackage() {
                                 size='xs'
                                 variant='light'
                                 color='grape'
-                                onClick={open}
+                                onClick={() => {
+                                    setRequested(true);
+                                    open();
+                                }}
                             >
                                 Manage sessions
                             </Button>
@@ -257,11 +265,17 @@ export function CurrentPackage() {
                     </Stack>
                 ) : null}
             </Stack>
-            <ConnectedDevicesModal
-                accountId={selectedAccountId}
-                onClose={close}
-                isOpen={isOpen}
-            />
+            {requested ? (
+                <Suspense fallback={
+                    <LoadingDialog title='Connected sessions' opened={isOpen} onClose={close} />
+                }>
+                    <ConnectedDevicesModal
+                        accountId={selectedAccountId}
+                        onClose={close}
+                        isOpen={isOpen}
+                    />
+                </Suspense>
+            ) : null}
         </Box>
     );
 }

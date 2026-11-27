@@ -1,5 +1,4 @@
 import type { AdminContactsSettings, Packages, Quota } from '@radii/shared';
-import { defaultAdminSettings } from '@radii/shared';
 import { useEffect, useSyncExternalStore } from 'react';
 import {
     getClientData,
@@ -78,7 +77,7 @@ let portalSnapshot: PortalSnapshot = {
     packages: undefined,
     packagesError: initialUnknownLoginRequest ? UNKNOWN_LOGIN_REQUEST : null,
     packagesLoading: !initialUnknownLoginRequest,
-    contacts: defaultAdminSettings.contacts,
+    contacts: { adminTel: '', adminWhatsapp: '' },
     contactsError: null,
 };
 let quotaSnapshot: QuotaSnapshot = { quota: [], loading: true, error: null };
@@ -134,7 +133,7 @@ export function loadHotspotPortal(
             ...(scopeChanged
                 ? {
                       packages: undefined,
-                      contacts: defaultAdminSettings.contacts,
+                      contacts: { adminTel: '', adminWhatsapp: '' },
                       packagesError: cachedUnknown ? UNKNOWN_LOGIN_REQUEST : null,
                       contactsError: null,
                   }
@@ -143,12 +142,24 @@ export function loadHotspotPortal(
                 !cachedUnknown &&
                 (scopeChanged || portalSnapshot.packages === undefined),
         });
-        const flight = (async () => {
+        // Support contacts must not hold up the package list.
+        const contactsFlight = getContacts(loginRequestId)
+            .then((contacts) => {
+                if (publicScope !== scope) return;
+                publishPortal({
+                    contacts: contacts.success && contacts.data
+                        ? contacts.data : portalSnapshot.contacts,
+                    contactsError: contacts.success ? null : contacts.message,
+                });
+            })
+            .catch(() => {
+                if (publicScope === scope) {
+                    publishPortal({ contactsError: 'Could not load support contacts.' });
+                }
+            });
+        const packagesFlight = (async () => {
             try {
-                const [contacts, packages] = await Promise.all([
-                    getContacts(loginRequestId),
-                    loginRequestId ? getPackages(loginRequestId) : null,
-                ]);
+                const packages = loginRequestId ? await getPackages(loginRequestId) : null;
                 if (publicScope !== scope) return;
                 if (packages?.success) {
                     cacheUnknownLoginRequest(loginRequestId, false);
@@ -156,11 +167,6 @@ export function loadHotspotPortal(
                     cacheUnknownLoginRequest(loginRequestId, true);
                 }
                 publishPortal({
-                    contacts:
-                        contacts.success && contacts.data
-                            ? contacts.data
-                            : portalSnapshot.contacts,
-                    contactsError: contacts.success ? null : contacts.message,
                     packages: packages?.success
                         ? (packages.data ?? [])
                         : portalSnapshot.packages,
@@ -177,11 +183,12 @@ export function loadHotspotPortal(
                 if (publicScope === scope) {
                     publishPortal({
                         packagesError: 'Could not load hotspot packages. Try again.',
-                        contactsError: 'Could not load support contacts.',
+                        packagesLoading: false,
                     });
                 }
             }
         })();
+        const flight = Promise.all([contactsFlight, packagesFlight]).then(() => {});
         publicFlight = flight;
         const finish = () => {
             if (publicFlight === flight) {
