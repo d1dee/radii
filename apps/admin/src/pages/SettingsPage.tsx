@@ -6,6 +6,8 @@ import {
     Card,
     Center,
     Checkbox,
+    Code,
+    Combobox,
     Container,
     Divider,
     Fieldset,
@@ -14,18 +16,31 @@ import {
     Loader,
     Modal,
     NumberInput,
+    Paper,
     PasswordInput,
+    Scroller,
     SegmentedControl,
     Select,
     Stack,
     Switch,
     Text,
     TextInput,
+    Textarea,
     Title,
+    UnstyledButton,
+    useCombobox,
 } from '@mantine/core';
 import { createFormContext, schemaResolver, useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
-import { adminSettingsSchema, type AdminSettings } from '@shared/index';
+import {
+    adminSettingsSchema,
+    defaultPppoeExpiryReminderTemplate,
+    pppoeExpiryReminderPlaceholders,
+    pppoeExpiryReminderTemplateSchema,
+    renderPppoeExpiryReminderTemplate,
+    type AdminSettings,
+    type PppoeExpiryReminderValues,
+} from '@shared/index';
 import {
     createContext,
     useCallback,
@@ -42,7 +57,6 @@ import {
 } from 'react-router-dom';
 
 import { PageLayout } from '@/components/Layout/PageLayout';
-import { PppoeExpiryReminderSettings } from '@/components/PppoeExpiryReminderSettings';
 import {
     getWhatsAppConfig,
     updateWhatsAppConfig,
@@ -70,7 +84,7 @@ function useSettingsDraft(category: string, dirty: boolean, saving: boolean) {
 
 const sections = {
     general: [AppearanceSection, DashboardSection, ContactsSection],
-    packages: [PackagesSection, PppoeSection],
+    packages: [PackagesSection, PppoeSection, PppoeExpiryReminderSection],
     payments: [MpesaSection],
 };
 
@@ -79,7 +93,10 @@ type PreferenceCategory = Exclude<
     { id: 'messaging' }
 >;
 type CategoryId = PreferenceCategory['id'];
-type CategoryFormValues = Omit<AdminSettings, 'dashboard' | 'packages'> & {
+type CategoryFormValues = Omit<
+    AdminSettings,
+    'dashboard' | 'packages' | 'messaging'
+> & {
     dashboard: {
         usageRefreshSeconds: number | '';
         defaultRangeDays: string;
@@ -88,6 +105,18 @@ type CategoryFormValues = Omit<AdminSettings, 'dashboard' | 'packages'> & {
     packages: {
         noExpiryValidityMonths: number | '';
         pppoeConnectionFeeAmount: number | '';
+    };
+    messaging: Omit<
+        AdminSettings['messaging'],
+        'pppoeExpiryReminderSchedule'
+    > & {
+        pppoeExpiryReminderSchedule: Omit<
+            AdminSettings['messaging']['pppoeExpiryReminderSchedule'],
+            'leadTimeHours' | 'remainingPercentage'
+        > & {
+            leadTimeDays: number | string;
+            remainingPercentage: number | string;
+        };
     };
 };
 
@@ -117,6 +146,21 @@ function settingsFormValues(settings: AdminSettings): CategoryFormValues {
             ...settings.packages,
             noExpiryValidityMonths:
                 settings.packages.noExpiryValidityMonths ?? '',
+        },
+        messaging: {
+            ...settings.messaging,
+            pppoeExpiryReminderSchedule: {
+                enabled:
+                    settings.messaging.pppoeExpiryReminderSchedule.enabled,
+                timingMode:
+                    settings.messaging.pppoeExpiryReminderSchedule.timingMode,
+                remainingPercentage:
+                    settings.messaging.pppoeExpiryReminderSchedule
+                        .remainingPercentage,
+                leadTimeDays:
+                    settings.messaging.pppoeExpiryReminderSchedule
+                        .leadTimeHours / 24,
+            },
         },
     };
 }
@@ -160,6 +204,29 @@ function categorySettings(values: CategoryFormValues, category: CategoryId) {
                             : values.packages.pppoeConnectionFeeAmount,
                 },
                 pppoe: values.pppoe,
+                messaging: {
+                    pppoeExpiryReminderTemplate:
+                        values.messaging.pppoeExpiryReminderTemplate,
+                    pppoeExpiryReminderSchedule: {
+                        enabled:
+                            values.messaging.pppoeExpiryReminderSchedule
+                                .enabled,
+                        timingMode:
+                            values.messaging.pppoeExpiryReminderSchedule
+                                .timingMode,
+                        remainingPercentage:
+                            values.messaging.pppoeExpiryReminderSchedule
+                                .remainingPercentage,
+                        leadTimeHours:
+                            typeof values.messaging
+                                .pppoeExpiryReminderSchedule.leadTimeDays ===
+                            'number'
+                                ? values.messaging.pppoeExpiryReminderSchedule
+                                      .leadTimeDays * 24
+                                : values.messaging.pppoeExpiryReminderSchedule
+                                      .leadTimeDays,
+                    },
+                },
             };
         case 'payments':
             return {
@@ -181,7 +248,11 @@ const categorySchemas = {
         dashboard: true,
         contacts: true,
     }),
-    packages: adminSettingsSchema.pick({ packages: true, pppoe: true }),
+    packages: adminSettingsSchema.pick({
+        packages: true,
+        pppoe: true,
+        messaging: true,
+    }),
     payments: adminSettingsSchema.pick({ mpesa: true }),
 };
 
@@ -665,27 +736,6 @@ function WhatsAppSettingsForm() {
     );
 }
 
-function PackagesSettingsForms({ category }: { category: PreferenceCategory }) {
-    const isSaving = useContext(SettingsSavingContext);
-    const setDraft = useContext(SettingsDraftContext);
-    const onReminderDraftChange = useCallback(
-        (dirty: boolean, saving: boolean) => {
-            setDraft('packages-reminders', dirty, saving);
-        },
-        [setDraft],
-    );
-
-    return (
-        <Stack gap='lg'>
-            <CategoryForm category={category} />
-            <PppoeExpiryReminderSettings
-                disabled={isSaving}
-                onDraftChange={onReminderDraftChange}
-            />
-        </Stack>
-    );
-}
-
 function isSettingsPath(pathname: string) {
     return pathname === '/settings' || pathname.startsWith('/settings/');
 }
@@ -838,10 +888,6 @@ export default function SettingsPage() {
                                 >
                                     {item.id === 'messaging' ? (
                                         <WhatsAppSettingsForm />
-                                    ) : item.id === 'packages' ? (
-                                        <PackagesSettingsForms
-                                            category={item}
-                                        />
                                     ) : (
                                         <CategoryForm category={item} />
                                     )}
@@ -1193,6 +1239,257 @@ function PppoeSection() {
                         credential and use it to connect to your network.
                     </Text>
                 </Alert>
+            </Stack>
+        </>
+    );
+}
+
+const pppoeReminderSampleValues: PppoeExpiryReminderValues = {
+    customer_name: 'Alex Maina',
+    username: 'PPP-235343455',
+    account_label: 'Home connection',
+    location: 'Westlands, Nairobi',
+    package_name: 'Home 10 Mbps',
+    expiry_date: '30 Nov 2026',
+    expiry_time: '14:30',
+    amount: 'Ksh 1,500',
+    whatsapp_support: '+254712345678',
+    tel_support: '+254720123456',
+};
+
+function PppoeExpiryReminderSection() {
+    const form = useCategoryForm();
+    const isSaving = useContext(SettingsSavingContext);
+    const schedule = form.values.messaging.pppoeExpiryReminderSchedule;
+    const template = form.values.messaging.pppoeExpiryReminderTemplate;
+    const unitCombobox = useCombobox({
+        onDropdownClose: () => unitCombobox.resetSelectedOption(),
+        onDropdownOpen: () => unitCombobox.selectActiveOption(),
+    });
+    const leadTimeError =
+        form.errors[
+            'messaging.pppoeExpiryReminderSchedule.leadTimeHours'
+        ];
+    const scheduleError = leadTimeError
+        ? 'Enter up to 30 days in whole-hour increments (for example, 0.5 days = 12 hours).'
+        : form.errors[
+              'messaging.pppoeExpiryReminderSchedule.remainingPercentage'
+          ];
+    const parsedTemplate =
+        pppoeExpiryReminderTemplateSchema.safeParse(template);
+
+    return (
+        <>
+            <SectionHeader
+                title='PPPoE Expiry Reminders'
+                description='Schedule automatic WhatsApp reminders and customize the customer message.'
+            />
+            <Stack gap='md'>
+                <Switch
+                    label='Enable expiry reminders'
+                    description='Automatically queue reminders for your active, expiring PPPoE subscriptions.'
+                    {...form.getInputProps(
+                        'messaging.pppoeExpiryReminderSchedule.enabled',
+                        { type: 'checkbox' },
+                    )}
+                />
+                <NumberInput
+                    label='Reminder timing'
+                    description={
+                        schedule.timingMode === 'percentage'
+                            ? 'Remind when 1-99% of the saved activation-to-expiry period remains. For example, 10% of 30 days is 3 days before expiry.'
+                            : 'Days before expiry, up to 30 days, in whole-hour increments. For example, 0.5 days is 12 hours.'
+                    }
+                    value={
+                        schedule.timingMode === 'percentage'
+                            ? schedule.remainingPercentage
+                            : schedule.leadTimeDays
+                    }
+                    onChange={(value) =>
+                        form.setFieldValue(
+                            schedule.timingMode === 'percentage'
+                                ? 'messaging.pppoeExpiryReminderSchedule.remainingPercentage'
+                                : 'messaging.pppoeExpiryReminderSchedule.leadTimeDays',
+                            value,
+                        )
+                    }
+                    min={
+                        schedule.timingMode === 'percentage' ? 1 : 1 / 24
+                    }
+                    max={schedule.timingMode === 'percentage' ? 99 : 30}
+                    allowDecimal={schedule.timingMode !== 'percentage'}
+                    allowNegative={false}
+                    clampBehavior='none'
+                    hideControls
+                    rightSectionWidth={90}
+                    rightSectionPointerEvents='all'
+                    styles={{
+                        section: {
+                            borderInlineStart:
+                                '1px solid var(--mantine-color-default-border)',
+                        },
+                    }}
+                    rightSection={
+                        <Combobox
+                            store={unitCombobox}
+                            width={110}
+                            position='bottom-end'
+                            withArrow
+                            shadow='md'
+                            onOptionSubmit={(value) => {
+                                if (
+                                    value === 'hours' ||
+                                    value === 'percentage'
+                                ) {
+                                    form.setFieldValue(
+                                        'messaging.pppoeExpiryReminderSchedule.timingMode',
+                                        value,
+                                    );
+                                }
+                                unitCombobox.closeDropdown();
+                            }}
+                        >
+                            <Combobox.Target
+                                targetType='button'
+                                withAriaAttributes={false}
+                            >
+                                <UnstyledButton
+                                    type='button'
+                                    aria-label='Reminder timing unit'
+                                    aria-expanded={unitCombobox.dropdownOpened}
+                                    aria-haspopup='listbox'
+                                    onClick={() =>
+                                        unitCombobox.toggleDropdown()
+                                    }
+                                    disabled={isSaving}
+                                    w='100%'
+                                    h='100%'
+                                >
+                                    <Group
+                                        gap='xs'
+                                        justify='center'
+                                        wrap='nowrap'
+                                    >
+                                        <Text component='span' size='sm'>
+                                            {schedule.timingMode === 'percentage'
+                                                ? '%'
+                                                : 'days'}
+                                        </Text>
+                                        <Combobox.Chevron />
+                                    </Group>
+                                </UnstyledButton>
+                            </Combobox.Target>
+                            <Combobox.Dropdown>
+                                <Combobox.Options>
+                                    <Combobox.Option
+                                        value='percentage'
+                                        active={
+                                            schedule.timingMode === 'percentage'
+                                        }
+                                    >
+                                        %
+                                    </Combobox.Option>
+                                    <Combobox.Option
+                                        value='hours'
+                                        active={schedule.timingMode === 'hours'}
+                                    >
+                                        days
+                                    </Combobox.Option>
+                                </Combobox.Options>
+                            </Combobox.Dropdown>
+                        </Combobox>
+                    }
+                    error={scheduleError}
+                    disabled={isSaving}
+                />
+                <Textarea
+                    label='Reminder message'
+                    placeholder='Hello {{customer_name}}, your {{account_label}} connection at {{location}} ({{username}}) expires on {{expiry_date}} at {{expiry_time}}.'
+                    description='Use the placeholders below to personalize the message. Maximum 4096 characters.'
+                    pb='xs'
+                    autosize
+                    minRows={5}
+                    maxRows={12}
+                    maxLength={4096}
+                    {...form.getInputProps(
+                        'messaging.pppoeExpiryReminderTemplate',
+                    )}
+                />
+                <Stack gap={6}>
+                    <Text size='sm' fw={500}>
+                        Supported placeholders
+                    </Text>
+                    <Scroller
+                        startControlProps={{
+                            'aria-label': 'Scroll placeholders left',
+                        }}
+                        endControlProps={{
+                            'aria-label': 'Scroll placeholders right',
+                        }}
+                    >
+                        <Group gap='xs' wrap='nowrap'>
+                            {pppoeExpiryReminderPlaceholders.map(
+                                (placeholder) => (
+                                    <Code
+                                        key={placeholder}
+                                        style={{
+                                            flexShrink: 0,
+                                            whiteSpace: 'nowrap',
+                                        }}
+                                    >{`{{${placeholder}}}`}</Code>
+                                ),
+                            )}
+                        </Group>
+                    </Scroller>
+                </Stack>
+                <Stack gap={6}>
+                    <Text size='sm' fw={500}>
+                        Preview with sample customer details
+                    </Text>
+                    <Paper withBorder p='md' radius='sm'>
+                        <Text
+                            size='sm'
+                            style={{
+                                whiteSpace: 'pre-wrap',
+                                overflowWrap: 'anywhere',
+                            }}
+                        >
+                            {parsedTemplate.success
+                                ? renderPppoeExpiryReminderTemplate(
+                                      parsedTemplate.data,
+                                      {
+                                          ...pppoeReminderSampleValues,
+                                          whatsapp_support:
+                                              form.values.contacts
+                                                  .adminWhatsapp ||
+                                              'your service provider',
+                                          tel_support:
+                                              form.values.contacts.adminTel ||
+                                              'your service provider',
+                                      },
+                                  )
+                                : 'Fix the reminder message to see a preview.'}
+                        </Text>
+                    </Paper>
+                </Stack>
+                <Group justify='flex-start'>
+                    <Button
+                        type='button'
+                        variant='default'
+                        onClick={() =>
+                            form.setFieldValue(
+                                'messaging.pppoeExpiryReminderTemplate',
+                                defaultPppoeExpiryReminderTemplate,
+                            )
+                        }
+                        disabled={
+                            isSaving ||
+                            template === defaultPppoeExpiryReminderTemplate
+                        }
+                    >
+                        Use default template
+                    </Button>
+                </Group>
             </Stack>
         </>
     );
