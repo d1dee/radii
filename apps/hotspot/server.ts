@@ -24,6 +24,8 @@ configureSync({
 const logger = getLogger(['radii', 'hotspot', 'server']);
 const PORT = parseInt(Bun.env.SERVER_PORT || '0');
 const SERVER_ADDRESS = Bun.env.SERVER_ADDRESS;
+const IMMUTABLE_ASSET_CACHE = 'public, max-age=31536000, immutable';
+const REVALIDATE_CACHE = 'no-cache';
 
 if (!SERVER_ADDRESS) {
     logger.fatal('SERVER_ADDRESS is not configured');
@@ -54,11 +56,19 @@ const server = Bun.serve({
         let file = Bun.file(path);
 
         if (await file.exists()) {
-            return new Response(file);
+            return new Response(file, {
+                headers: {
+                    'Cache-Control': url.pathname.startsWith('/assets/')
+                        ? IMMUTABLE_ASSET_CACHE
+                        : REVALIDATE_CACHE,
+                },
+            });
         }
 
         // SPA fallback
-        return new Response(Bun.file('dist/index.html'));
+        return new Response(Bun.file('dist/index.html'), {
+            headers: { 'Cache-Control': REVALIDATE_CACHE },
+        });
     },
 });
 
