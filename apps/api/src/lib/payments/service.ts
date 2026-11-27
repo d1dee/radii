@@ -1379,7 +1379,7 @@ export class PaymentService {
             .where(eq(activatedPackages.packagePaymentId, paymentId)).limit(1);
         if (!row) return null;
         const { activation, pkg } = row;
-        let active = activation.deactivatedAt === null && activation.expireAt.getTime() > Date.now() &&
+        let active = activation.deactivatedAt === null && activation.activatedAt.getTime() <= Date.now() && activation.expireAt.getTime() > Date.now() &&
             (pkg.type !== 'pppoe' || row.accountStatus === 'active');
         if (active && (pkg.noExpiry || activation.timeAllowanceSeconds !== null)) {
             const usage = await radiusClient.getBankUsage(activation.id);

@@ -574,7 +574,7 @@ export async function getPackageAnalytics(
     const [activationStats] = await db
         .select({
             total: count(activatedPackages.id),
-            active: sql<number>`count(*) filter (where ${activatedPackages.expireAt} > now() and ${activatedPackages.deactivatedAt} is null)`,
+            active: sql<number>`count(*) filter (where ${activatedPackages.activatedAt} <= now() and ${activatedPackages.expireAt} > now() and ${activatedPackages.deactivatedAt} is null)`,
         })
         .from(activatedPackages)
         .innerJoin(
@@ -702,7 +702,7 @@ export async function getNasDeviceAnalytics(
     const [activationStats] = await db
         .select({
             total: count(activatedPackages.id),
-            active: sql<number>`count(*) filter (where ${activatedPackages.expireAt} > now() and ${activatedPackages.deactivatedAt} is null)`,
+            active: sql<number>`count(*) filter (where ${activatedPackages.activatedAt} <= now() and ${activatedPackages.expireAt} > now() and ${activatedPackages.deactivatedAt} is null)`,
         })
         .from(activatedPackages)
         .innerJoin(

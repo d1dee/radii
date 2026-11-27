@@ -157,7 +157,20 @@ export const adminPackagesSettingsSchema = z.object({
     pppoeConnectionFeeAmount: z.number().int().min(0).max(99999999).default(0),
 });
 
+export const pppoeRenewalActivationModeSchema = z.enum([
+    'after_previous_expires',
+    'immediate',
+]);
+export type PppoeRenewalActivationMode = z.infer<
+    typeof pppoeRenewalActivationModeSchema
+>;
+
 export const adminPppoeSettingsSchema = z.object({
+    // Preserve already-paid subscription time by default. Immediate mode is
+    // available for operators that intentionally want renewals to overlap.
+    renewalActivationMode: pppoeRenewalActivationModeSchema.default(
+        'after_previous_expires',
+    ),
     // Customer portal password self-service is opt-in because PPPoE
     // credentials grant direct network access.
     showPasswordsInPortal: z.boolean().default(false),

@@ -1158,10 +1158,27 @@ function PppoeSection() {
     return (
         <>
             <SectionHeader
-                title='PPPoE Customer Self-Service'
-                description='Control whether customers can access their PPPoE passwords in the portal.'
+                title='PPPoE Settings'
+                description='Control package renewal timing and customer password access.'
             />
             <Stack gap='md'>
+                <Select
+                    label='Renewal activation'
+                    description='Choose when a newly paid PPPoE package begins.'
+                    data={[
+                        {
+                            value: 'after_previous_expires',
+                            label: 'After previous package expires',
+                        },
+                        {
+                            value: 'immediate',
+                            label: 'Immediately',
+                        },
+                    ]}
+                    allowDeselect={false}
+                    {...form.getInputProps('renewalActivationMode')}
+                />
+
                 <Switch
                     label='Show PPPoE passwords to customers'
                     description='When enabled, customers can reveal, copy, and rotate their PPPoE password. Passwords remain hidden by default.'

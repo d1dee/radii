@@ -1,6 +1,7 @@
 import { Button, Stack, Text } from '@mantine/core';
 import { useEffect } from 'react';
 import type { OrderResult } from '../../lib/api.ts';
+import { dayjs } from '../../lib/dayjs.ts';
 import { refreshPppoeAccounts, usePppoeAccounts } from '../../lib/store.ts';
 
 import { IoMdDoneAll } from 'react-icons/io';
@@ -17,7 +18,9 @@ export function PaymentSuccess({
     const activation = paymentData?.activation ?? null;
     const isFree = paymentData?.amount === 0;
     const successMessage = isFree
-        ? 'Your free package was activated successfully.'
+        ? activation?.scheduled
+            ? 'Your free package was added to the renewal queue.'
+            : 'Your free package was activated successfully.'
         : `Payment of Kes: ${paymentData?.amount} was Successful.`;
 
     useEffect(() => {
@@ -31,6 +34,16 @@ export function PaymentSuccess({
                 <Text size='lg' fw={600} c='green' ta='center'>
                     {successMessage}
                 </Text>
+
+                {activation.scheduled ? (
+                    <Text size='sm' ta='center'>
+                        This package will activate on{' '}
+                        {dayjs(activation.activatedAt).format(
+                            'DD MMM YYYY HH:mm:ss',
+                        )}{' '}
+                        after your previous package expires.
+                    </Text>
+                ) : null}
 
                 <CredentialsCard
                     username={activation.username}

@@ -99,6 +99,7 @@ import {
     activationIsAvailable,
     allowanceForRemainingTime,
     calculateActivationTime,
+    calculatePppoeActivationWindow,
 } from './activationLimits';
 import {
     effectiveFairUsageThrottled,
@@ -126,6 +127,7 @@ function activeActivationCondition() {
     const now = new Date();
     return and(
         isNull(activatedPackages.deactivatedAt),
+        lte(activatedPackages.activatedAt, now),
         gte(activatedPackages.expireAt, now),
     );
 }
@@ -480,6 +482,7 @@ export interface ActivationStatus {
     paymentId: string;
     activatedAt: Date;
     expireAt: Date;
+    scheduled: boolean;
     expired: boolean;
     deactivated: boolean;
     deactivatedAt: Date | null;
@@ -566,6 +569,7 @@ function activationUsername(activationId: string): string {
 
 function activationStatusIsAvailable(status: ActivationStatus): boolean {
     return activationIsAvailable({
+        activatedAt: status.activatedAt,
         deactivatedAt: status.deactivatedAt,
         expireAt: status.expireAt,
         remainingSeconds: status.remainingSeconds ?? 0,
@@ -911,21 +915,20 @@ export class RadiusClient {
         // Generate credentials only on the very first PPPoE purchase.
         const password = initialPassword ?? await this.ensurePppoePassword(username);
 
-        await this.applyPppoeAuthorization(activation, pkg);
-        // Captured sessions must reconnect to leave the expired profile, but
-        // disconnecting inline tears down the customer's network before the
-        // payment-status response reaches the portal. Give the successful
-        // response time to reach the browser, then trigger the required
-        // idempotent reconnect in the background.
-        setTimeout(() => {
-            void this.disconnectLivePppoeSessions(
-                username,
-                account.tenantAdminId,
-                hadActiveActivation,
-            ).catch((err) =>
-                logger.error('Delayed PPPoE reconnect failed', { error: err }),
-            );
-        }, 1_500);
+        if (activation.activatedAt.getTime() <= Date.now()) {
+            await this.applyPppoeAuthorization(activation, pkg);
+            // Captured sessions must reconnect to leave the expired profile,
+            // but a queued renewal must not interrupt the current package.
+            setTimeout(() => {
+                void this.disconnectLivePppoeSessions(
+                    username,
+                    account.tenantAdminId,
+                    hadActiveActivation,
+                ).catch((err) =>
+                    logger.error('Delayed PPPoE reconnect failed', { error: err }),
+                );
+            }, 1_500);
+        }
         return {
             activationId: activation.id,
             username,
@@ -4169,10 +4172,6 @@ export class RadiusClient {
         pkg: typeof packages.$inferSelect,
         account: typeof pppoeServiceAccounts.$inferSelect,
     ) {
-        // PPPoE activations are always calendar-based (no noExpiry): the
-        // session length is the validity window from activation.
-        const expireAt = dayjs().add(pkg.sessionLength, 'minutes');
-
         const activationId = randomUUID();
         const username = account.username;
 
@@ -4181,9 +4180,41 @@ export class RadiusClient {
         const result = await db.transaction(async (tx) => {
             await tx.select({ id: packagePayments.id }).from(packagePayments)
                 .where(eq(packagePayments.id, payment.id)).for('update');
+            // Serialize the queue tail for this stable dialer account. Locking
+            // only each payment would allow concurrent renewals to overlap.
+            await tx.select({ id: pppoeServiceAccounts.id })
+                .from(pppoeServiceAccounts)
+                .where(eq(pppoeServiceAccounts.id, account.id))
+                .for('update');
             const [existing] = await tx.select().from(activatedPackages)
                 .where(eq(activatedPackages.packagePaymentId, payment.id)).limit(1);
             if (existing) return { activation: existing, created: false };
+            const settings = await getAdminSettings(account.tenantAdminId, tx);
+            const now = new Date();
+            const [queue] =
+                settings.pppoe.renewalActivationMode ===
+                'after_previous_expires'
+                    ? await tx
+                          .select({
+                              tail: sql<Date | null>`max(${activatedPackages.expireAt})`,
+                          })
+                          .from(activatedPackages)
+                          .where(
+                              and(
+                                  eq(
+                                      activatedPackages.pppoeServiceAccountId,
+                                      account.id,
+                                  ),
+                                  isNull(activatedPackages.deactivatedAt),
+                              ),
+                          )
+                    : [{ tail: null }];
+            const window = calculatePppoeActivationWindow({
+                mode: settings.pppoe.renewalActivationMode,
+                now,
+                queueTailExpiresAt: queue?.tail ?? null,
+                durationMinutes: pkg.sessionLength,
+            });
             // PPP expiry/rates come from REST. Remove legacy SQL blockers
             // atomically with first history insertion, before later CoA work.
             await tx.delete(radcheck).where(and(eq(radcheck.username, username), eq(radcheck.attribute, 'Expiration')));
@@ -4209,8 +4240,8 @@ export class RadiusClient {
                     userId: payment.userId,
                     packageId: pkg.id,
                     pppoeServiceAccountId: account.id,
-                    activatedAt: new Date(),
-                    expireAt: expireAt.toDate(),
+                    activatedAt: window.activatedAt,
+                    expireAt: window.expireAt,
                 })
                 .returning();
             await tx.insert(activationEvents).values({
@@ -4223,6 +4254,8 @@ export class RadiusClient {
                     paymentId: payment.id,
                     packageId: pkg.id,
                     packageType: pkg.type,
+                    activationMode: settings.pppoe.renewalActivationMode,
+                    activatedAt: row!.activatedAt.toISOString(),
                     expireAt: row!.expireAt.toISOString(),
                     timeAllowanceSeconds: pkg.noExpiry
                         ? pkg.sessionLength * 60
@@ -4986,6 +5019,7 @@ export class RadiusClient {
             paymentId: activation.packagePaymentId,
             activatedAt: activation.activatedAt,
             expireAt,
+            scheduled: activation.activatedAt.getTime() > Date.now(),
             expired: expireAt.getTime() < Date.now() || remainingSeconds <= 0,
             deactivated: activation.deactivatedAt !== null,
             deactivatedAt: activation.deactivatedAt,

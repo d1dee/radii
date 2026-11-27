@@ -17,11 +17,13 @@ export function allowanceForRemainingTime(
 }
 
 export function activationIsAvailable({
+    activatedAt,
     deactivatedAt,
     expireAt,
     remainingSeconds,
     now,
 }: {
+    activatedAt: Date;
     deactivatedAt: Date | null;
     expireAt: Date;
     remainingSeconds: number;
@@ -29,9 +31,35 @@ export function activationIsAvailable({
 }): boolean {
     return (
         deactivatedAt === null &&
+        activatedAt.getTime() <= now.getTime() &&
         expireAt.getTime() > now.getTime() &&
         remainingSeconds > 0
     );
+}
+
+export function calculatePppoeActivationWindow({
+    mode,
+    now,
+    queueTailExpiresAt,
+    durationMinutes,
+}: {
+    mode: 'after_previous_expires' | 'immediate';
+    now: Date;
+    queueTailExpiresAt: Date | null;
+    durationMinutes: number;
+}): { activatedAt: Date; expireAt: Date } {
+    const activatedAt =
+        mode === 'after_previous_expires' &&
+        queueTailExpiresAt &&
+        queueTailExpiresAt.getTime() > now.getTime()
+            ? queueTailExpiresAt
+            : now;
+    return {
+        activatedAt,
+        expireAt: new Date(
+            activatedAt.getTime() + durationMinutes * 60 * 1000,
+        ),
+    };
 }
 
 export function calculateActivationTime({

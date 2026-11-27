@@ -5,13 +5,19 @@
 // logins via RADIUS). The deliverable of a purchase is therefore the dialer
 // credentials plus the client configuration needed to set up the PPPoE dialer.
 
-// Credentials issued for one activation; the equivalent of hotspot's
-// ActivationRedirect minus the servlet link.
+// Credentials for the customer's stable dialer account; the equivalent of
+// hotspot's ActivationRedirect minus the servlet link.
 export type PppoeActivation = {
     activationId: string;
     username: string;
     password: string | null;
     passwordVisible: boolean;
+};
+
+export type PppoePurchaseActivation = PppoeActivation & {
+    activatedAt: string;
+    expireAt: string;
+    scheduled: boolean;
 };
 
 // Service-level dialer defaults the portal shows to every customer (the NAS
@@ -68,7 +74,7 @@ export type PppoeOrderResult = {
     message?: string;
     amount: number;
     packageId: string;
-    // Present once the payment is paid and its package was activated on the
-    // RADIUS side — the portal displays these dialer credentials.
-    activation?: PppoeActivation | null;
+    // Present once a paid purchase is provisioned. A sequential renewal can be
+    // scheduled for later while still returning the stable dialer credentials.
+    activation?: PppoePurchaseActivation | null;
 };

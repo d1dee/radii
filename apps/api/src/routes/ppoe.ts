@@ -10,7 +10,7 @@ import {
     defaultAdminSettings,
     paymentTransactionCodeSchema,
     zPhoneNumber,
-    type PppoeActivation,
+    type PppoePurchaseActivation,
 } from '@radii/shared';
 import { and, desc, eq } from 'drizzle-orm';
 import { Hono } from 'hono';
@@ -196,7 +196,10 @@ app.get('/clients', requireAuth, async (c) => {
         clients.map(async (client) => {
             const passwordVisible = await passwordVisibleFor(client.tenantId);
             const activeActivation = client.activations.find(
-                (activation) => !activation.expired && !activation.deactivated,
+                (activation) =>
+                    !activation.scheduled &&
+                    !activation.expired &&
+                    !activation.deactivated,
             );
             return {
                 accountId: client.accountId,
@@ -245,7 +248,10 @@ app.get('/clients/:id/config', requireAuth, async (c) => {
     );
     if (!client) return jsonError(c, 404, 'Unknown PPPoE client');
     const activeActivation = client.activations.find(
-        (activation) => !activation.expired && !activation.deactivated,
+        (activation) =>
+            !activation.scheduled &&
+            !activation.expired &&
+            !activation.deactivated,
     );
     const passwordVisible = (await getAdminSettings(client.tenantId)).pppoe
         .showPasswordsInPortal;
@@ -608,19 +614,31 @@ app.get('/payment/:id', requireAuth, async (c) => {
 async function pppoeActivationForPayment(
     paymentId: string,
     tenantAdminId: string,
-): Promise<PppoeActivation | null> {
+): Promise<PppoePurchaseActivation | null> {
     try {
         const [provisioned, settings] = await Promise.all([
             radiusClient.ensureProvisioned(paymentId),
             getAdminSettings(tenantAdminId),
         ]);
         if (!provisioned) return null;
+        const [activation] = await db
+            .select({
+                activatedAt: activatedPackages.activatedAt,
+                expireAt: activatedPackages.expireAt,
+            })
+            .from(activatedPackages)
+            .where(eq(activatedPackages.id, provisioned.activationId))
+            .limit(1);
+        if (!activation) return null;
         const passwordVisible = settings.pppoe.showPasswordsInPortal;
         return {
             activationId: provisioned.activationId,
             username: provisioned.username,
             password: passwordVisible ? provisioned.password : null,
             passwordVisible,
+            activatedAt: activation.activatedAt.toISOString(),
+            expireAt: activation.expireAt.toISOString(),
+            scheduled: activation.activatedAt.getTime() > Date.now(),
         };
     } catch (err) {
         logger.error('PPPoE payment activation failed', {

@@ -627,10 +627,11 @@ async function userAggregates(userIds: string[], adminId: string) {
         .select({
             userId: activatedPackages.userId,
             total: count(activatedPackages.id),
-            active: sql<number>`count(*) filter (where ${activatedPackages.expireAt} > now() and ${activatedPackages.deactivatedAt} is null)`,
+            active: sql<number>`count(*) filter (where ${activatedPackages.activatedAt} <= now() and ${activatedPackages.expireAt} > now() and ${activatedPackages.deactivatedAt} is null)`,
             hotspot: sql<number>`count(*) filter (where ${packages.type} = 'hotspot')`,
             pppoe: sql<number>`count(*) filter (where ${packages.type} = 'pppoe')`,
-            underFup: sql<number>`count(*) filter (where ${activatedPackages.expireAt} > now()
+            underFup: sql<number>`count(*) filter (where ${activatedPackages.activatedAt} <= now()
+                and ${activatedPackages.expireAt} > now()
                 and ${activatedPackages.deactivatedAt} is null
                 and ${packages.fairUsageLimit} > 0 and exists (
                 select 1 from ${radacct} fup_session
