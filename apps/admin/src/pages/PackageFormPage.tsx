@@ -195,13 +195,13 @@ function MeasurementInput({
 }
 
 // Session length is entered in a human-friendly unit and stored as minutes.
-// A month is normalized to 30 days (43200 minutes).
+// A month is normalized to 30.5 days (43920 minutes).
 const LENGTH_UNITS = [
     { value: 'minutes', label: 'Minutes', minutes: 1 },
     { value: 'hours', label: 'Hours', minutes: 60 },
     { value: 'days', label: 'Days', minutes: 1440 },
     { value: 'weeks', label: 'Weeks', minutes: 10080 },
-    { value: 'months', label: 'Months', minutes: 43200 },
+    { value: 'months', label: 'Months', minutes: 43920 },
 ] as const;
 
 type LengthUnit = (typeof LENGTH_UNITS)[number]['value'];
