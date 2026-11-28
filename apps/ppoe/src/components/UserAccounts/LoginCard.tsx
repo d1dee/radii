@@ -112,9 +112,11 @@ export function LoginCard() {
                             error={!!form.errors.pin}
                             length={4}
                             type='number'
+                            inputType='tel'
                             inputMode='numeric'
                             placeholder='•'
                             getInputProps={() => ({
+                                pattern: '[0-9]*',
                                 autoComplete: 'current-password',
                             })}
                         />

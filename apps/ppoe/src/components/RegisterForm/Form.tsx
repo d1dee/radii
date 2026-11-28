@@ -118,9 +118,11 @@ export function RegisterForm({
                         error={!!form.errors.pin}
                         length={4}
                         type='number'
+                        inputType='tel'
                         inputMode='numeric'
                         placeholder='•'
                         getInputProps={() => ({
+                            pattern: '[0-9]*',
                             autoComplete:
                                 mode === 'register'
                                     ? 'new-password'
@@ -144,9 +146,11 @@ export function RegisterForm({
                                 error={!!form.errors.verifyPin}
                                 length={4}
                                 type='number'
+                                inputType='tel'
                                 inputMode='numeric'
                                 placeholder='•'
                                 getInputProps={() => ({
+                                    pattern: '[0-9]*',
                                     autoComplete: 'new-password',
                                 })}
                             />

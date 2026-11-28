@@ -147,10 +147,12 @@ export function ResetPinForm({ onBackToLogin }: { onBackToLogin: () => void }) {
                             error={!!resetForm.errors.otp}
                             length={6}
                             type='number'
+                            inputType='tel'
                             inputMode='numeric'
                             oneTimeCode
                             ariaLabel='6-digit reset code'
                             getInputProps={() => ({
+                                pattern: '[0-9]*',
                                 autoComplete: 'one-time-code',
                             })}
                         />
@@ -169,9 +171,11 @@ export function ResetPinForm({ onBackToLogin }: { onBackToLogin: () => void }) {
                             error={!!resetForm.errors.pin}
                             length={4}
                             type='number'
+                            inputType='tel'
                             inputMode='numeric'
                             placeholder='•'
                             getInputProps={() => ({
+                                pattern: '[0-9]*',
                                 autoComplete: 'new-password',
                             })}
                         />
@@ -190,9 +194,11 @@ export function ResetPinForm({ onBackToLogin }: { onBackToLogin: () => void }) {
                             error={!!resetForm.errors.verifyPin}
                             length={4}
                             type='number'
+                            inputType='tel'
                             inputMode='numeric'
                             placeholder='•'
                             getInputProps={() => ({
+                                pattern: '[0-9]*',
                                 autoComplete: 'new-password',
                             })}
                         />
